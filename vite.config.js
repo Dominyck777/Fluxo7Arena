@@ -88,7 +88,7 @@ async function getConfig() {
     for (let i = 0; i < args.length; i++) {
       const arg = args[i];
       if (arg instanceof Error) {
-        errorString = arg.stack || \`\${arg.name}: \${arg.message}\`;
+        errorString = arg.stack || (String(arg && arg.name) + ': ' + String(arg && arg.message));
         break;
       }
     }
@@ -128,19 +128,53 @@ async function getConfig() {
             const responseClone = response.clone();
             const errorFromRes = await responseClone.text();
             const requestUrl = response.url;
-            console.error(\`Fetch error from \${requestUrl}: \${errorFromRes}\`);
+            console.error('Fetch error from ' + requestUrl + ': ' + errorFromRes);
         }
   
         return response;
       })
       .catch(error => {
-        if (!url.match(/\.html?$/i)) {
+        if (!url.match(/\\.html?$/i)) {
           console.error(error);
         }
   
         throw error;
       });
   };
+  `;
+
+  const configConsoleFilter = `
+  (function(){
+    const patterns = [
+      'Download the React DevTools',
+      'React Router Future Flag Warning',
+      'Using UNSAFE_componentWillMount in strict mode is not recommended',
+      'Each child in a list should have a unique "key" prop',
+      '[AuthDebug]',
+      '[AuthContext]'
+    ];
+
+    function shouldSuppress(args) {
+      try {
+        const text = args.map(a => {
+          if (typeof a === 'string') return a;
+          if (a && typeof a.message === 'string') return a.message;
+          try { return JSON.stringify(a); } catch { return String(a); }
+        }).join(' ');
+        return patterns.some(p => text.includes(p));
+      } catch { return false; }
+    }
+
+    const _log = console.log.bind(console);
+    const _info = console.info.bind(console);
+    const _warn = console.warn.bind(console);
+    const _error = console.error.bind(console);
+
+    console.log = (...args) => { if (!shouldSuppress(args)) _log(...args); };
+    console.info = (...args) => { if (!shouldSuppress(args)) _info(...args); };
+    console.warn = (...args) => { if (!shouldSuppress(args)) _warn(...args); };
+    console.error = (...args) => { if (!shouldSuppress(args)) _error(...args); };
+  })();
   `;
 
   const addTransformIndexHtml = {
@@ -171,6 +205,12 @@ async function getConfig() {
             tag: 'script',
             attrs: { type: 'module' },
             children: configWindowFetchMonkeyPatch,
+            injectTo: 'head',
+          },
+          {
+            tag: 'script',
+            attrs: { type: 'module' },
+            children: configConsoleFilter,
             injectTo: 'head',
           },
         ],

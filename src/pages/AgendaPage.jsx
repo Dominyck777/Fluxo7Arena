@@ -729,7 +729,7 @@ function AgendaPage() {
             try {
               const { data, error } = await supabase
                 .from('agendamento_participantes')
-                .select(`cliente_id, valor_cota, status_pagamento, cliente:cliente_id ( nome )`)
+                .select(`cliente_id, valor_cota, status_pagamento, cliente:clientes!agendamento_participantes_cliente_id_fkey ( nome )`)
                 .eq('codigo_empresa', userProfile.codigo_empresa)
                 .eq('agendamento_id', editingBooking.id);
               if (!error && Array.isArray(data)) {
@@ -957,6 +957,8 @@ function AgendaPage() {
         for (const c of (form.selectedClients || [])) {
           const row = map.get(c.id) || { cliente_id: c.id, nome: c.nome, status_pagamento: 'Pendente', valor_cota: '' };
           row.valor_cota = masked;
+          const amount = parseBRL(masked);
+          row.status_pagamento = (Number.isFinite(amount) && amount > 0) ? 'Pago' : 'Pendente';
           map.set(c.id, row);
         }
         return Array.from(map.values());
@@ -964,7 +966,7 @@ function AgendaPage() {
     }, [form.selectedClients, paymentTotal, setParticipantsForm]);
 
     const zeroAllValues = useCallback(() => {
-      setParticipantsForm(prev => prev.map(p => ({ ...p, valor_cota: '' })));
+      setParticipantsForm(prev => prev.map(p => ({ ...p, valor_cota: '', status_pagamento: 'Pendente' })));
     }, [setParticipantsForm]);
 
     // (removido: adjustValue e controles avançados de edição por participante)
@@ -1001,7 +1003,7 @@ function AgendaPage() {
             <div className="space-y-4">
               {/* Clientes */}
               <div>
-                <Label>Clientes</Label>
+                <Label className="font-bold">Clientes</Label>
                 <div className="flex gap-2 mt-1">
                   <Popover open={isCustomerPickerOpen} onOpenChange={setIsCustomerPickerOpen}>
                     <PopoverTrigger asChild>
@@ -1075,7 +1077,7 @@ function AgendaPage() {
 
               {/* Quadra */}
               <div>
-                <Label>Quadra</Label>
+                <Label className="font-bold">Quadra</Label>
                 <Select value={form.court} onValueChange={(v) => setForm((f) => ({ ...f, court: v }))}>
                   <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
                   <SelectContent>
@@ -1088,7 +1090,7 @@ function AgendaPage() {
 
               {/* Modalidade */}
               <div>
-                <Label>Modalidade</Label>
+                <Label className="font-bold">Modalidade</Label>
                 <Select value={form.modality} onValueChange={(v) => setForm((f) => ({ ...f, modality: v }))}>
                   <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
                   <SelectContent>
@@ -1104,7 +1106,7 @@ function AgendaPage() {
             <div className="space-y-4">
               {/* Status */}
               <div>
-                <Label>Status</Label>
+                <Label className="font-bold">Status</Label>
                 <Select value={form.status} onValueChange={(v) => setForm((f) => ({ ...f, status: v }))}>
                   <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
                   <SelectContent>
@@ -1117,7 +1119,7 @@ function AgendaPage() {
 
               {/* Horário */}
               <div>
-                <Label>Horário</Label>
+                <Label className="font-bold">Horário</Label>
                 <div className="flex items-center gap-2 mt-1">
                   <Select value={String(form.startMinutes)} onValueChange={(v) => setForm((f) => ({ ...f, startMinutes: Number(v) }))}>
                     <SelectTrigger className="w-32" aria-label="Hora início"><SelectValue /></SelectTrigger>
@@ -1164,12 +1166,12 @@ function AgendaPage() {
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="text-xs text-text-muted mt-1">Duração: {durationLabel}</div>
+                <div className="mt-1 inline-block text-xs font-semibold text-text-secondary bg-white/5 border border-white/10 rounded px-2 py-0.5">Duração: {durationLabel}</div>
               </div>
             </div>
           </div>
 
-          <DialogFooter>
+          <DialogFooter className="w-full flex items-center -mx-6">
             {editingBooking && (
               <Button
                 type="button"
@@ -1180,90 +1182,126 @@ function AgendaPage() {
                 <DollarSign className="w-4 h-4 mr-2 opacity-90" /> Pagamentos
               </Button>
             )}
-            <Button type="button" variant="ghost" onClick={() => setIsModalOpen(false)}>Cancelar</Button>
-            <Button
-              type="button"
-              onClick={async () => {
-                try {
-                  const court = courtsMap[form.court];
-                  if (!court) { toast({ title: 'Selecione uma quadra', variant: 'destructive' }); return; }
-                  const s = form.startMinutes, e = form.endMinutes;
-                  if (!(Number.isFinite(s) && Number.isFinite(e) && e > s)) { toast({ title: 'Horário inválido', variant: 'destructive' }); return; }
-                  // Evitar sobreposição
-                  if (!isRangeFree(s, e)) { toast({ title: 'Conflito de horário', description: 'O horário selecionado está ocupado.', variant: 'destructive' }); return; }
+            <div className="ml-auto flex gap-2 pr-6">
+              <Button type="button" variant="ghost" className="border border-white/10" onClick={() => setIsModalOpen(false)}>Cancelar</Button>
+              <Button
+                type="button"
+                onClick={async () => {
+                  try {
+                    console.group('[AgendamentoSave] Start');
+                    const court = courtsMap[form.court];
+                    if (!court) { toast({ title: 'Selecione uma quadra', variant: 'destructive' }); return; }
+                    const s = form.startMinutes, e = form.endMinutes;
+                    if (!(Number.isFinite(s) && Number.isFinite(e) && e > s)) { toast({ title: 'Horário inválido', variant: 'destructive' }); return; }
+                    // Evitar sobreposição
+                    if (!isRangeFree(s, e)) { toast({ title: 'Conflito de horário', description: 'O horário selecionado está ocupado.', variant: 'destructive' }); return; }
 
-                  const buildDate = (base, minutes) => new Date(
-                    base.getFullYear(), base.getMonth(), base.getDate(), Math.floor(minutes / 60), minutes % 60, 0, 0
-                  );
-                  const inicio = buildDate(form.date, s);
-                  const fim = buildDate(form.date, e);
-                  const primaryClient = (form.selectedClients || [])[0];
-                  const clientesArr = (form.selectedClients || []).map(getCustomerName).filter(Boolean);
+                    const buildDate = (base, minutes) => new Date(
+                      base.getFullYear(), base.getMonth(), base.getDate(), Math.floor(minutes / 60), minutes % 60, 0, 0
+                    );
+                    const inicio = buildDate(form.date, s);
+                    const fim = buildDate(form.date, e);
+                    const primaryClient = (form.selectedClients || [])[0];
+                    const clientesArr = (form.selectedClients || []).map(getCustomerName).filter(Boolean);
+                    console.log('[AgendamentoSave] Selected clients on save', form.selectedClients);
 
-                  if (editingBooking?.id) {
-                    const { error } = await supabase
-                      .from('agendamentos')
-                      .update({
-                        quadra_id: court.id,
-                        cliente_id: primaryClient?.id ?? null,
-                        clientes: clientesArr,
-                        inicio: inicio.toISOString(),
-                        fim: fim.toISOString(),
-                        modalidade: form.modality,
+                    if (editingBooking?.id) {
+                      const { error } = await supabase
+                        .from('agendamentos')
+                        .update({
+                          quadra_id: court.id,
+                          cliente_id: primaryClient?.id ?? null,
+                          clientes: clientesArr,
+                          inicio: inicio.toISOString(),
+                          fim: fim.toISOString(),
+                          modalidade: form.modality,
+                          status: form.status,
+                        })
+                        .eq('codigo_empresa', userProfile.codigo_empresa)
+                        .eq('id', editingBooking.id);
+                      if (error) throw error;
+                      // Atualiza estado local
+                      setBookings((prev) => prev.map((b) => b.id === editingBooking.id ? ({
+                        ...b,
+                        court: form.court,
+                        customer: primaryClient?.nome || b.customer,
+                        start: inicio,
+                        end: fim,
+                        modality: form.modality,
                         status: form.status,
-                      })
-                      .eq('codigo_empresa', userProfile.codigo_empresa)
-                      .eq('id', editingBooking.id);
-                    if (error) throw error;
-                    // Atualiza estado local
-                    setBookings((prev) => prev.map((b) => b.id === editingBooking.id ? ({
-                      ...b,
-                      court: form.court,
-                      customer: primaryClient?.nome || b.customer,
-                      start: inicio,
-                      end: fim,
-                      modality: form.modality,
-                      status: form.status,
-                    }) : b));
-                    toast({ title: 'Agendamento atualizado' });
-                  } else {
-                    const { data, error } = await supabase
-                      .from('agendamentos')
-                      .insert({
-                        codigo_empresa: userProfile.codigo_empresa,
-                        quadra_id: court.id,
-                        cliente_id: primaryClient?.id ?? null,
-                        clientes: clientesArr,
-                        inicio: inicio.toISOString(),
-                        fim: fim.toISOString(),
-                        modalidade: form.modality,
+                      }) : b));
+                      toast({ title: 'Agendamento atualizado' });
+                    } else {
+                      const { data, error } = await supabase
+                        .from('agendamentos')
+                        .insert({
+                          codigo_empresa: userProfile.codigo_empresa,
+                          quadra_id: court.id,
+                          cliente_id: primaryClient?.id ?? null,
+                          clientes: clientesArr,
+                          inicio: inicio.toISOString(),
+                          fim: fim.toISOString(),
+                          modalidade: form.modality,
+                          status: form.status,
+                        })
+                        .select('id')
+                        .single();
+                      if (error) throw error;
+                      const newItem = {
+                        id: data.id,
+                        court: form.court,
+                        customer: primaryClient?.nome || clientesArr[0] || '',
+                        start: inicio,
+                        end: fim,
                         status: form.status,
-                      })
-                      .select('id')
-                      .single();
-                    if (error) throw error;
-                    const newItem = {
-                      id: data.id,
-                      court: form.court,
-                      customer: primaryClient?.nome || clientesArr[0] || '',
-                      start: inicio,
-                      end: fim,
-                      status: form.status,
-                      modality: form.modality,
-                    };
-                    setBookings((prev) => [...prev, newItem]);
-                    toast({ title: 'Agendamento criado' });
+                        modality: form.modality,
+                      };
+                      setBookings((prev) => [...prev, newItem]);
+                      toast({ title: 'Agendamento criado' });
+
+                      // Criar participantes imediatamente após criar o agendamento
+                      try {
+                        const rows = (form.selectedClients || []).map((c) => ({
+                          codigo_empresa: userProfile.codigo_empresa,
+                          agendamento_id: data.id,
+                          cliente_id: c.id,
+                          valor_cota: 0,
+                          status_pagamento: 'Pendente',
+                        }));
+                        console.group('[ParticipantsCreate] Start');
+                        console.log('[ParticipantsCreate] Rows to insert', rows);
+                        if (rows.length > 0) {
+                          const { data: inserted, error: perr } = await supabase
+                            .from('agendamento_participantes')
+                            .insert(rows)
+                            .select();
+                          if (perr) {
+                            console.error('[ParticipantsCreate] Insert error', perr);
+                          } else {
+                            console.log('[ParticipantsCreate] Inserted rows', inserted?.length ?? 0, inserted);
+                          }
+                        } else {
+                          console.warn('[ParticipantsCreate] No rows to insert (no selected clients)');
+                        }
+                        console.groupEnd();
+                      } catch (pe) {
+                        // eslint-disable-next-line no-console
+                        console.error('[ParticipantsCreate] Unexpected error', pe);
+                      }
+                    }
+                    setIsModalOpen(false);
+                    console.groupEnd();
+                  } catch (e) {
+                    toast({ title: 'Erro ao salvar', description: 'Tente novamente.', variant: 'destructive' });
+                    // eslint-disable-next-line no-console
+                    console.error(e);
+                    try { console.groupEnd(); } catch {}
                   }
-                  setIsModalOpen(false);
-                } catch (e) {
-                  toast({ title: 'Erro ao salvar', description: 'Tente novamente.', variant: 'destructive' });
-                  // eslint-disable-next-line no-console
-                  console.error(e);
-                }
-              }}
-            >
-              Salvar Agendamento
-            </Button>
+                }}
+              >
+                Salvar Agendamento
+              </Button>
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1278,10 +1316,10 @@ function AgendaPage() {
             </DialogHeader>
             <div className="space-y-4">
               {/* Total e ações essenciais */}
-              <div className="p-3 rounded-md border border-border bg-surface-2">
+              <div className="p-4 rounded-lg border border-border bg-gradient-to-br from-surface-2 to-surface shadow-md">
                 <div className="flex flex-wrap items-end gap-3">
                   <div className="space-y-1">
-                    <Label>Valor total a receber</Label>
+                    <Label className="font-bold">Valor total a receber</Label>
                     <div className="flex items-center gap-2">
                       <Input
                         type="text"
@@ -1292,19 +1330,79 @@ function AgendaPage() {
                         onChange={(e) => setPaymentTotal(maskBRL(e.target.value))}
                         className="max-w-[180px]"
                       />
-                      <Button type="button" variant="secondary" className="bg-emerald-600 hover:bg-emerald-500 text-white" onClick={splitEqually} disabled={!paymentTotal || participantsCount === 0}>Dividir igualmente</Button>
-                      <Button type="button" variant="ghost" onClick={zeroAllValues} disabled={participantsCount === 0}>Zerar valores</Button>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        className="bg-sky-600 hover:bg-sky-500 text-white"
+                        onClick={splitEqually}
+                        disabled={!paymentTotal || participantsCount === 0}
+                      >Dividir igualmente</Button>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        className="bg-blue-600 hover:bg-blue-500 text-white"
+                        onClick={() => {
+                          setParticipantsForm(prev => {
+                            const total = parseBRL(paymentTotal);
+                            const count = (form.selectedClients || []).length;
+                            const per = (Number.isFinite(total) && total > 0 && count > 0) ? Number((total / count).toFixed(2)) : null;
+                            const maskedPer = per != null ? maskBRL(String(per.toFixed(2))) : null;
+                            const map = new Map(prev.map(p => [p.cliente_id, p]));
+                            for (const c of (form.selectedClients || [])) {
+                              const row = map.get(c.id) || { cliente_id: c.id, nome: c.nome, valor_cota: '', status_pagamento: 'Pendente' };
+                              row.status_pagamento = 'Pago';
+                              if (maskedPer) row.valor_cota = maskedPer;
+                              map.set(c.id, row);
+                            }
+                            return Array.from(map.values());
+                          });
+                        }}
+                        disabled={participantsCount === 0}
+                      >Pagar todos</Button>
+                      <Button type="button" variant="ghost" className="border border-white/10" onClick={zeroAllValues} disabled={participantsCount === 0}>Zerar valores</Button>
                     </div>
                   </div>
-                  <div className="ml-auto text-sm text-text-secondary">
-                    <div className="flex flex-wrap gap-3">
-                      <span><strong>{participantsCount}</strong> participantes</span>
-                      <span>Atribuído: <strong>R$ {paymentSummary.totalAssigned.toFixed(2)}</strong></span>
-                      <span>Alvo: <strong>R$ {paymentSummary.totalTarget.toFixed(2)}</strong></span>
-                      <span>Diferença: <strong className={paymentSummary.diff === 0 ? 'text-emerald-500' : (paymentSummary.diff > 0 ? 'text-amber-500' : 'text-rose-500')}>R$ {paymentSummary.diff.toFixed(2)}</strong></span>
-                      <span>Pago: <strong>{paymentSummary.paid}</strong></span>
-                      <span>Pendente: <strong>{paymentSummary.pending}</strong></span>
+                  <div className="ml-auto text-sm">
+                    <div className="flex flex-wrap gap-2">
+                      <span className="inline-flex items-center gap-1 px-2 py-1 rounded bg-white/5 border border-white/10">
+                        <span className="text-text-secondary">Participantes:</span>
+                        <strong>{participantsCount}</strong>
+                      </span>
+                      <span className="inline-flex items-center gap-1 px-2 py-1 rounded bg-white/5 border border-white/10">
+                        <span className="text-text-secondary">Atribuído:</span>
+                        <strong>R$ {paymentSummary.totalAssigned.toFixed(2)}</strong>
+                      </span>
+                      <span className="inline-flex items-center gap-1 px-2 py-1 rounded bg-white/5 border border-white/10">
+                        <span className="text-text-secondary">Alvo:</span>
+                        <strong>R$ {paymentSummary.totalTarget.toFixed(2)}</strong>
+                      </span>
+                      <span className="inline-flex items-center gap-1 px-2 py-1 rounded bg-white/5 border border-white/10">
+                        <span className="text-text-secondary">Diferença:</span>
+                        <strong className={paymentSummary.diff === 0 ? 'text-emerald-500' : (paymentSummary.diff > 0 ? 'text-amber-500' : 'text-rose-500')}>R$ {paymentSummary.diff.toFixed(2)}</strong>
+                      </span>
+                      <span className="inline-flex items-center gap-1 px-2 py-1 rounded bg-white/5 border border-white/10">
+                        <span className="text-text-secondary">Pago:</span>
+                        <strong>{paymentSummary.paid}</strong>
+                      </span>
+                      <span className="inline-flex items-center gap-1 px-2 py-1 rounded bg-white/5 border border-white/10">
+                        <span className="text-text-secondary">Pendente:</span>
+                        <strong>{paymentSummary.pending}</strong>
+                      </span>
                     </div>
+                    {(() => {
+                      const pctRaw = paymentSummary.totalTarget > 0 ? (paymentSummary.totalAssigned / paymentSummary.totalTarget) * 100 : 0;
+                      const bump = pctRaw > 0 ? 5 : 0; // só incrementa visualmente se houver progresso real
+                      const pct = Math.max(0, Math.min(100, pctRaw + bump));
+                      const barColor = paymentSummary.diff === 0 ? 'bg-emerald-500' : (paymentSummary.diff > 0 ? 'bg-amber-500' : 'bg-rose-500');
+                      return (
+                        <div className="mt-2 w-full min-w-[280px]">
+                          <div className="h-2 w-full rounded bg-white/10 overflow-hidden">
+                            <div className={`h-full ${barColor}`} style={{ width: `${pct}%` }} />
+                          </div>
+                          <div className="mt-1 text-sm font-medium text-text-muted">{pct.toFixed(0)}% atribuído</div>
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
               </div>
@@ -1320,31 +1418,14 @@ function AgendaPage() {
                     <div className="col-span-3">Valor</div>
                     <div className="col-span-2 flex items-center justify-between pr-2">
                       <span>Status</span>
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        size="sm"
-                        className="h-6 px-2 text-[10px] font-medium bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-700"
-                        onClick={() => {
-                          setParticipantsForm(prev => {
-                            const map = new Map(prev.map(p => [p.cliente_id, p]));
-                            for (const c of (form.selectedClients || [])) {
-                              const row = map.get(c.id) || { cliente_id: c.id, nome: c.nome, valor_cota: '', status_pagamento: 'Pendente' };
-                              row.status_pagamento = 'Pago';
-                              map.set(c.id, row);
-                            }
-                            return Array.from(map.values());
-                          });
-                        }}
-                      >Pagar todos</Button>
                     </div>
                     <div className="col-span-1 text-right">Ações</div>
                   </div>
-                  <div className="divide-y divide-border max-h-[50vh] overflow-y-auto">
+                  <div className="divide-y divide-border max-h-[50vh] overflow-auto fx-scroll">
                     {(form.selectedClients || []).map((c) => {
                       const pf = participantsForm.find(p => p.cliente_id === c.id) || { cliente_id: c.id, nome: c.nome, valor_cota: '', status_pagamento: 'Pendente' };
                       return (
-                        <div key={c.id} className="grid grid-cols-12 items-center px-3 py-2">
+                        <div key={c.id} className="grid grid-cols-12 items-center px-3 py-2 overflow-x-auto fx-scroll">
                           <div className="col-span-6 truncate text-sm font-medium">{c.nome}</div>
                           <div className="col-span-3 pr-2">
                             <Input
@@ -1355,14 +1436,16 @@ function AgendaPage() {
                               value={maskBRL(pf.valor_cota)}
                               onChange={(e) => {
                                 const masked = maskBRL(e.target.value);
+                                const amount = parseBRL(masked);
+                                const autoStatus = (Number.isFinite(amount) && amount > 0) ? 'Pago' : 'Pendente';
                                 setParticipantsForm(prev => {
                                   const idx = prev.findIndex(p => p.cliente_id === c.id);
                                   if (idx >= 0) {
                                     const clone = [...prev];
-                                    clone[idx] = { ...clone[idx], valor_cota: masked };
+                                    clone[idx] = { ...clone[idx], valor_cota: masked, status_pagamento: autoStatus };
                                     return clone;
                                   }
-                                  return [...prev, { cliente_id: c.id, nome: c.nome, valor_cota: masked, status_pagamento: 'Pendente' }];
+                                  return [...prev, { cliente_id: c.id, nome: c.nome, valor_cota: masked, status_pagamento: autoStatus }];
                                 });
                               }}
                               className="w-24 md:w-28 text-sm"
@@ -1383,7 +1466,7 @@ function AgendaPage() {
                                 });
                               }}
                             >
-                              <SelectTrigger className="h-8 text-sm">
+                              <SelectTrigger className={`h-8 text-sm border ${pf.status_pagamento === 'Pago' ? 'bg-emerald-600/20 text-emerald-400 border-emerald-700/40' : 'bg-amber-600/20 text-amber-400 border-amber-700/40'}`}>
                                 <SelectValue />
                               </SelectTrigger>
                               <SelectContent>
@@ -1422,11 +1505,30 @@ function AgendaPage() {
                     try {
                       const agendamentoId = editingBooking.id;
                       const codigo = userProfile.codigo_empresa;
+                      const t0 = Date.now();
+                      console.group('[ParticipantsSave] Start');
+                      console.log('[ParticipantsSave] Context', { agendamentoId, codigo });
+                      console.log('[ParticipantsSave] Selected clients', form.selectedClients);
+                      console.log('[ParticipantsSave] Participants form', participantsForm);
+
+                      // Verificação: bloqueia se houver pagamentos pendentes
+                      const mapForm = new Map((participantsForm || []).map(p => [p.cliente_id, p]));
+                      const pendingCount = (form.selectedClients || []).reduce((acc, c) => {
+                        const st = (mapForm.get(c.id)?.status_pagamento) || 'Pendente';
+                        return acc + (st !== 'Pago' ? 1 : 0);
+                      }, 0);
+                      if (pendingCount > 0) {
+                        toast({ title: 'Pagamentos pendentes', description: `Existem ${pendingCount} participante(s) com status pendente. Atualize para Pago antes de salvar.`, variant: 'destructive' });
+                        console.warn('[ParticipantsSave] Blocked save due to pending payments', { pendingCount });
+                        console.groupEnd();
+                        return;
+                      }
                       await supabase
                         .from('agendamento_participantes')
                         .delete()
                         .eq('codigo_empresa', codigo)
                         .eq('agendamento_id', agendamentoId);
+                      console.log('[ParticipantsSave] Existing rows deleted for booking');
                       const rows = (form.selectedClients || []).map((c) => {
                         const pf = participantsForm.find(p => p.cliente_id === c.id) || { valor_cota: null, status_pagamento: 'Pendente' };
                         const valor = parseBRL(pf.valor_cota);
@@ -1434,22 +1536,33 @@ function AgendaPage() {
                           codigo_empresa: codigo,
                           agendamento_id: agendamentoId,
                           cliente_id: c.id,
-                          valor_cota: Number.isFinite(valor) ? valor : null,
+                          valor_cota: Number.isFinite(valor) ? valor : 0,
                           status_pagamento: pf.status_pagamento || 'Pendente',
                         };
                       });
+                      console.log('[ParticipantsSave] Rows to insert', rows);
                       if (rows.length > 0) {
-                        const { error } = await supabase
+                        const { data: inserted, error } = await supabase
                           .from('agendamento_participantes')
-                          .insert(rows);
-                        if (error) throw error;
+                          .insert(rows)
+                          .select();
+                        if (error) {
+                          console.error('[ParticipantsSave] Insert error', error);
+                          throw error;
+                        }
+                        console.log('[ParticipantsSave] Inserted rows', inserted?.length ?? 0, inserted);
+                      } else {
+                        console.warn('[ParticipantsSave] No rows to insert (selectedClients is empty)');
                       }
+                      console.log('[ParticipantsSave] Done in', Date.now() - t0, 'ms');
+                      console.groupEnd();
                       toast({ title: 'Pagamentos salvos com sucesso' });
                       setIsPaymentModalOpen(false);
                     } catch (e) {
                       toast({ title: 'Erro ao salvar pagamentos', description: 'Tente novamente.', variant: 'destructive' });
                       // eslint-disable-next-line no-console
                       console.error('Salvar pagamentos:', e);
+                      try { console.groupEnd(); } catch {}
                     }
                   }}
                 >Salvar Pagamentos</Button>
