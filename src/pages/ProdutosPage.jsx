@@ -1248,7 +1248,7 @@ function ProdutosPage() {
         <motion.div variants={pageVariants} initial="hidden" animate="visible" className="h-full flex flex-col">
             <motion.div variants={itemVariants} className="flex items-center justify-between mb-6">
                 <div>
-                    <h1 className="text-3xl font-black text-text-primary tracking-tighter">Gestão de Produtos</h1>
+                    <h1 className="text-3xl font-black text-text-primary tracking-tighter">Controle de Produtos</h1>
                     <p className="text-text-secondary">Controle total sobre seu inventário e estoque.</p>
                 </div>
                 <div className="flex items-center gap-2">
