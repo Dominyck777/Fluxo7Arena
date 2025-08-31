@@ -1357,9 +1357,6 @@ create policy produtos_insert_company on public.produtos
 drop policy if exists produtos_update_company on public.produtos;
 create policy produtos_update_company on public.produtos
   as permissive for update to authenticated
-  using (codigo_empresa = public.get_my_company_code())
-  with check (codigo_empresa = public.get_my_company_code());
-
 drop policy if exists produtos_delete_company on public.produtos;
 create policy produtos_delete_company on public.produtos
   as permissive for delete to authenticated
@@ -1367,3 +1364,62 @@ create policy produtos_delete_company on public.produtos
 
 -- 3) Grants necessários ao PostgREST
 grant select, insert, update, delete on table public.produtos to authenticated;
+
+-- ============================
+-- ATUALIZAÇÕES APLICADAS (v3.6)
+-- Data: 2025-08-31
+-- Motivo: RLS por empresa para public.finalizadoras e public.pagamentos
+-- Observação: Idempotente (DROP IF EXISTS)
+-- ============================
+
+-- 1) FINALIZADORAS
+alter table if exists public.finalizadoras enable row level security;
+
+drop policy if exists finalizadoras_select_company on public.finalizadoras;
+create policy finalizadoras_select_company on public.finalizadoras
+  as permissive for select to authenticated
+  using (codigo_empresa = public.get_my_company_code());
+
+drop policy if exists finalizadoras_insert_company on public.finalizadoras;
+create policy finalizadoras_insert_company on public.finalizadoras
+  as permissive for insert to authenticated
+  with check (codigo_empresa = public.get_my_company_code());
+
+drop policy if exists finalizadoras_update_company on public.finalizadoras;
+create policy finalizadoras_update_company on public.finalizadoras
+  as permissive for update to authenticated
+  using (codigo_empresa = public.get_my_company_code())
+  with check (codigo_empresa = public.get_my_company_code());
+
+drop policy if exists finalizadoras_delete_company on public.finalizadoras;
+create policy finalizadoras_delete_company on public.finalizadoras
+  as permissive for delete to authenticated
+  using (codigo_empresa = public.get_my_company_code());
+
+grant select, insert, update, delete on table public.finalizadoras to authenticated;
+
+-- 2) PAGAMENTOS
+alter table if exists public.pagamentos enable row level security;
+
+drop policy if exists pagamentos_select_company on public.pagamentos;
+create policy pagamentos_select_company on public.pagamentos
+  as permissive for select to authenticated
+  using (codigo_empresa = public.get_my_company_code());
+
+drop policy if exists pagamentos_insert_company on public.pagamentos;
+create policy pagamentos_insert_company on public.pagamentos
+  as permissive for insert to authenticated
+  with check (codigo_empresa = public.get_my_company_code());
+
+drop policy if exists pagamentos_update_company on public.pagamentos;
+create policy pagamentos_update_company on public.pagamentos
+  as permissive for update to authenticated
+  using (codigo_empresa = public.get_my_company_code())
+  with check (codigo_empresa = public.get_my_company_code());
+
+drop policy if exists pagamentos_delete_company on public.pagamentos;
+create policy pagamentos_delete_company on public.pagamentos
+  as permissive for delete to authenticated
+  using (codigo_empresa = public.get_my_company_code());
+
+grant select, insert, update, delete on table public.pagamentos to authenticated;

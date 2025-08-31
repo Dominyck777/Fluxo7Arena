@@ -50,7 +50,7 @@ const NavItem = ({ to, icon: Icon, label, index }) => {
 
 function Sidebar() {
   const location = useLocation();
-  const groupPaths = ['/produtos', '/clientes', '/equipe', '/quadras', '/empresas'];
+  const groupPaths = ['/produtos', '/clientes', '/equipe', '/quadras', '/empresas', '/finalizadoras'];
   const groupActive = useMemo(() => groupPaths.includes(location.pathname), [location.pathname]);
   const [openCadastros, setOpenCadastros] = useState(groupActive);
 
@@ -101,6 +101,14 @@ function Sidebar() {
 
             {openCadastros && (
               <ul className="mt-2 ml-8 space-y-2">
+                <li>
+                  <NavLink
+                    to="/finalizadoras"
+                    className={({ isActive }) => isActive ? 'flex items-center h-[36px] px-3 rounded-sm bg-brand/20 text-text-primary font-medium' : 'flex items-center h-[36px] px-3 rounded-sm text-text-secondary hover:bg-surface-2 hover:text-text-primary transition-colors'}
+                  >
+                    <Banknote className="h-4 w-4 mr-3" /> Finalizadoras
+                  </NavLink>
+                </li>
                 <li>
                   <NavLink
                     to="/quadras"
