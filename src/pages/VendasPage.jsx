@@ -54,6 +54,9 @@ function VendasPage() {
   const [loading, setLoading] = useState(false);
   // Abrir mesa
   const [isOpenTableDialog, setIsOpenTableDialog] = useState(false);
+  // Criar mesa (modal)
+  const [isCreateMesaOpen, setIsCreateMesaOpen] = useState(false);
+  const [novaMesaNumero, setNovaMesaNumero] = useState('');
   const [pendingTable, setPendingTable] = useState(null);
   const [clienteNome, setClienteNome] = useState('');
   // Pagamento
@@ -127,9 +130,9 @@ function VendasPage() {
       }
     };
     load();
-    // refresh periódico para evitar estado obsoleto após inatividade
-    const id = setInterval(load, 15000);
-    return () => clearInterval(id);
+    // Removido refresh automático de 15s para evitar flicker e travamentos.
+    // Caso necessário, utilize o botão de recarregar ou eventos direcionados.
+    return () => {};
   }, []);
 
   const handleNotImplemented = () => {
@@ -231,6 +234,7 @@ function VendasPage() {
         <p>Clique em uma mesa para ver os detalhes da comanda.</p>
       </div>
     );
+
 
 
   const PayDialog = () => {
@@ -418,27 +422,66 @@ function VendasPage() {
             <p className="text-2xl font-bold text-danger tabular-nums">R$ 0,00</p>
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-2">
-          <Button variant="outline" className="justify-start" onClick={() => toast({ title: 'Em desenvolvimento', description: 'Lançar suprimento' })}>
-            <ArrowUpCircle className="h-4 w-4 mr-2 text-success" /> Suprimento
-          </Button>
-          <Button variant="outline" className="justify-start" onClick={() => toast({ title: 'Em desenvolvimento', description: 'Lançar sangria' })}>
-            <ArrowDownCircle className="h-4 w-4 mr-2 text-danger" /> Sangria
-          </Button>
-          <Button variant="outline" className="justify-start col-span-2" onClick={() => toast({ title: 'Em desenvolvimento', description: 'Abrir fechamentos anteriores' })}>
-            <CalendarDays className="h-4 w-4 mr-2" /> Fechamentos Anteriores
-          </Button>
-        </div>
-        <div className="mt-2">
-          <h4 className="text-sm font-bold mb-2">Movimentações do Dia</h4>
-          <div className="text-sm text-text-secondary">Nenhuma movimentação registrada.</div>
-        </div>
         <DialogFooter>
           <Button variant="secondary" onClick={() => setIsCashierDetailsOpen(false)}>Fechar</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
   );
+
+  const CreateMesaDialog = () => {
+    const confirmCreate = async () => {
+      try {
+        setLoading(true);
+        const numero = novaMesaNumero?.trim() ? Number(novaMesaNumero) : undefined;
+        if (numero !== undefined && (Number.isNaN(numero) || numero <= 0)) {
+          toast({ title: 'Número inválido', description: 'Informe um número positivo.', variant: 'warning' });
+          return;
+        }
+        const mesa = await criarMesa({ numero });
+        const newTable = {
+          id: mesa.id,
+          number: mesa.numero,
+          status: 'available',
+          order: [],
+          customer: null,
+          comandaId: null,
+          totalHint: 0,
+        };
+        setTables((prev) => {
+          const exists = prev.some(t => t.id === newTable.id);
+          const next = exists ? prev.map(t => (t.id === newTable.id ? newTable : t)) : [...prev, newTable];
+          return next.slice().sort((a, b) => Number(a.number) - Number(b.number));
+        });
+        setSelectedTable(newTable);
+        toast({ title: 'Mesa criada', description: `Mesa ${mesa.numero} adicionada`, variant: 'success' });
+        setIsCreateMesaOpen(false);
+        setNovaMesaNumero('');
+      } catch (e) {
+        toast({ title: 'Falha ao criar mesa', description: e?.message || 'Tente novamente', variant: 'destructive' });
+      } finally {
+        setLoading(false);
+      }
+    };
+    return (
+      <Dialog open={isCreateMesaOpen} onOpenChange={(open) => { setIsCreateMesaOpen(open); if (!open) setNovaMesaNumero(''); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-2xl font-bold">Nova Mesa</DialogTitle>
+            <DialogDescription>Crie uma nova mesa informando, opcionalmente, o número desejado. Em branco cria a próxima sequência.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <Label htmlFor="nova-mesa-numero">Número da mesa (opcional)</Label>
+            <Input id="nova-mesa-numero" type="number" min="1" placeholder="Ex.: 12" value={novaMesaNumero} onChange={(e) => setNovaMesaNumero(e.target.value)} />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsCreateMesaOpen(false)} disabled={loading}>Cancelar</Button>
+            <Button onClick={confirmCreate} disabled={loading}>{loading ? 'Criando...' : 'Criar Mesa'}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    );
+  };
 
   const addProductToComanda = async (prod) => {
     try {
@@ -724,18 +767,7 @@ function VendasPage() {
             </Button>
             <div className="w-px h-6 bg-border mx-2"></div>
             <Button variant="outline" onClick={() => setIsCounterModeOpen(true)}><Store className="mr-2 h-4 w-4" /> Modo Balcão</Button>
-            <Button onClick={async () => {
-              try {
-                setLoading(true);
-                const mesa = await criarMesa({});
-                toast({ title: 'Mesa criada', description: `Mesa ${mesa.numero} adicionada`, variant: 'success' });
-              } catch (e) {
-                toast({ title: 'Falha ao criar mesa', description: e?.message || 'Tente novamente', variant: 'destructive' });
-              } finally {
-                // força um refresh das mesas para aparecer na grid
-                setLoading(false);
-              }
-            }}><Plus className="mr-2 h-4 w-4" /> Nova Mesa</Button>
+            <Button onClick={() => setIsCreateMesaOpen(true)}><Plus className="mr-2 h-4 w-4" /> Nova Mesa</Button>
           </div>
         </motion.div>
         
@@ -773,6 +805,7 @@ function VendasPage() {
       <CounterModeModal />
       <CashierDetailsDialog />
       <OpenTableDialog />
+      <CreateMesaDialog />
     </>
   );
 }
