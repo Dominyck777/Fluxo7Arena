@@ -5930,6 +5930,136 @@ begin
     execute function public.set_updated_at()$$; exception when others then null; end;
 end$$;
 
+-- ============================
+-- ATUALIZAÇÕES APLICADAS (v3.7)
+-- Data: 2025-08-31
+-- Motivo: Tabelas PDV (mesas, comandas, comanda_itens, caixa_sessoes) e ajustes em pagamentos
+-- Observação: Blocos idempotentes (safe to run multiple times)
+-- ============================
+
+-- 1) MESAS
+do $$
+begin
+  -- criar tabela
+  execute $$create table if not exists public.mesas (
+    id uuid primary key default gen_random_uuid(),
+    codigo_empresa text not null default public.get_my_company_code(),
+    numero integer not null,
+    status text not null default 'available',
+    created_at timestamptz default now()
+  )$$;
+
+  -- índices e unique por empresa
+  begin execute $$create index if not exists idx_mesas_empresa on public.mesas (codigo_empresa)$$; exception when others then null; end;
+  begin execute $$create unique index if not exists ux_mesas_empresa_numero on public.mesas (codigo_empresa, numero)$$; exception when others then null; end;
+end$$;
+
+-- 2) COMANDAS
+do $$
+begin
+  execute $$create table if not exists public.comandas (
+    id uuid primary key default gen_random_uuid(),
+    codigo_empresa text not null default public.get_my_company_code(),
+    mesa_id uuid,
+    status text not null default 'open',
+    aberto_em timestamptz default now(),
+    fechado_em timestamptz
+  )$$;
+
+  -- FK para mesas (se existir)
+  begin
+    if not exists (select 1 from information_schema.constraint_column_usage where constraint_name = 'fk_comandas_mesa') then
+      execute $$alter table public.comandas add constraint fk_comandas_mesa foreign key (mesa_id) references public.mesas(id) on delete set null$$;
+    end if;
+  exception when others then null; end;
+
+  -- índices
+  begin execute $$create index if not exists idx_comandas_empresa on public.comandas (codigo_empresa)$$; exception when others then null; end;
+  begin execute $$create index if not exists idx_comandas_mesa on public.comandas (mesa_id)$$; exception when others then null; end;
+  begin execute $$create index if not exists idx_comandas_status on public.comandas (status)$$; exception when others then null; end;
+end$$;
+
+-- 3) COMANDA_ITENS
+do $$
+begin
+  execute $$create table if not exists public.comanda_itens (
+    id uuid primary key default gen_random_uuid(),
+    codigo_empresa text not null default public.get_my_company_code(),
+    comanda_id uuid not null,
+    produto_id uuid,
+    descricao text,
+    quantidade numeric(12,3) not null default 1,
+    preco_unitario numeric(12,2) not null default 0,
+    desconto numeric(12,2) not null default 0,
+    created_at timestamptz default now()
+  )$$;
+
+  -- FKs
+  begin
+    if not exists (select 1 from information_schema.constraint_column_usage where constraint_name = 'fk_comanda_itens_comanda') then
+      execute $$alter table public.comanda_itens add constraint fk_comanda_itens_comanda foreign key (comanda_id) references public.comandas(id) on delete cascade$$;
+    end if;
+  exception when others then null; end;
+
+  -- Índices
+  begin execute $$create index if not exists idx_comanda_itens_empresa on public.comanda_itens (codigo_empresa)$$; exception when others then null; end;
+  begin execute $$create index if not exists idx_comanda_itens_comanda on public.comanda_itens (comanda_id)$$; exception when others then null; end;
+end$$;
+
+-- 4) CAIXA_SESSOES
+do $$
+begin
+  execute $$create table if not exists public.caixa_sessoes (
+    id uuid primary key default gen_random_uuid(),
+    codigo_empresa text not null default public.get_my_company_code(),
+    status text not null default 'open',
+    aberto_em timestamptz default now(),
+    fechado_em timestamptz,
+    saldo_inicial numeric(12,2) default 0,
+    saldo_final numeric(12,2)
+  )$$;
+
+  -- Índices
+  begin execute $$create index if not exists idx_caixa_sessoes_empresa on public.caixa_sessoes (codigo_empresa)$$; exception when others then null; end;
+  begin execute $$create index if not exists idx_caixa_sessoes_status on public.caixa_sessoes (status)$$; exception when others then null; end;
+end$$;
+
+-- 5) AJUSTES EM PAGAMENTOS (caixa_id, recebido_em)
+do $$
+begin
+  -- adicionar coluna caixa_id e FK
+  begin execute $$alter table public.pagamentos add column if not exists caixa_id uuid$$; exception when others then null; end;
+  begin
+    if not exists (select 1 from information_schema.constraint_column_usage where constraint_name = 'fk_pagamentos_caixa') then
+      execute $$alter table public.pagamentos add constraint fk_pagamentos_caixa foreign key (caixa_id) references public.caixa_sessoes(id) on delete set null$$;
+    end if;
+  exception when others then null; end;
+
+  -- adicionar recebido_em (mantém created_at como histórico)
+  begin execute $$alter table public.pagamentos add column if not exists recebido_em timestamptz default now()$$; exception when others then null; end;
+
+  -- índices auxiliares
+  begin execute $$create index if not exists idx_pagamentos_caixa on public.pagamentos (caixa_id)$$; exception when others then null; end;
+end$$;
+
+-- 6) AJUSTES EM COMANDAS: cliente_id e cliente_nome
+do $$
+begin
+  -- adicionar colunas (nullable) para associação de cliente
+  begin execute $$alter table public.comandas add column if not exists cliente_id uuid$$; exception when others then null; end;
+  begin execute $$alter table public.comandas add column if not exists cliente_nome text$$; exception when others then null; end;
+
+  -- FK opcional para clientes (se existir)
+  begin
+    if not exists (select 1 from information_schema.constraint_column_usage where constraint_name = 'fk_comandas_cliente') then
+      execute $$alter table public.comandas add constraint fk_comandas_cliente foreign key (cliente_id) references public.clientes(id) on delete set null$$;
+    end if;
+  exception when others then null; end;
+
+  -- índices auxiliares
+  begin execute $$create index if not exists idx_comandas_cliente on public.comandas (cliente_id)$$; exception when others then null; end;
+end$$;
+
 -- 2) Backfill opcional: popular categorias a partir de produtos existentes (distintos por empresa)
 insert into public.produto_categorias (codigo_empresa, nome)
 select distinct on (p.codigo_empresa, lower(coalesce(p.categoria,'')))
@@ -6128,3 +6258,79 @@ alter table public.produtos
 create unique index if not exists ux_produtos_empresa_codigo_produto
   on public.produtos (codigo_empresa, codigo_produto) where codigo_produto is not null;
 create index if not exists idx_produtos_categoria on public.produtos (categoria);
+
+-- ============================
+-- ATUALIZAÇÕES APLICADAS (v3.6)
+-- Data: 2025-08-31
+-- Motivo: Finalizadoras (CRUD) e Pagamentos: remoção de 'ordem', padronização por codigo_empresa,
+--         e garantia de NOT NULL em pagamentos.metodo para compatibilidade com o frontend/PDV
+-- Observação: Blocos idempotentes (safe to run multiple times)
+-- ============================
+
+-- 1) FINALIZADORAS
+do $$
+begin
+  -- criar tabela caso não exista (idempotente)
+  execute $$create table if not exists public.finalizadoras (
+    id uuid primary key default gen_random_uuid(),
+    codigo_empresa text not null default public.get_my_company_code(),
+    nome text not null,
+    tipo text,
+    ativo boolean not null default true,
+    created_at timestamptz default now(),
+    updated_at timestamptz default now()
+  )$$;
+
+  -- remover campo legado 'ordem' caso exista
+  begin execute $$alter table public.finalizadoras drop column if exists ordem$$; exception when others then null; end;
+
+  -- garantir índice por empresa e unique (empresa, lower(nome)) para evitar duplicatas por nome
+  begin execute $$create index if not exists idx_finalizadoras_empresa on public.finalizadoras (codigo_empresa)$$; exception when others then null; end;
+  begin execute $$create unique index if not exists ux_finalizadoras_empresa_nome on public.finalizadoras (codigo_empresa, lower(nome))$$; exception when others then null; end;
+
+  -- trigger para updated_at
+  execute $$create or replace function public.finalizadoras_set_updated_at() returns trigger language plpgsql as $$
+  begin
+    new.updated_at := now();
+    return new;
+  end $$;$$;
+  begin execute $$drop trigger if exists zz_finalizadoras_touch on public.finalizadoras$$; exception when others then null; end;
+  begin execute $$create trigger zz_finalizadoras_touch before update on public.finalizadoras for each row execute function public.finalizadoras_set_updated_at()$$; exception when others then null; end;
+end$$;
+
+-- 2) PAGAMENTOS
+do $$
+begin
+  -- criar tabela caso não exista (idempotente). Ajuste os campos conforme o seu schema real
+  execute $$create table if not exists public.pagamentos (
+    id uuid primary key default gen_random_uuid(),
+    comanda_id uuid,
+    finalizadora_id uuid,
+    codigo_empresa text not null default public.get_my_company_code(),
+    metodo text not null,
+    valor numeric(12,2) not null default 0,
+    status text,
+    created_at timestamptz default now()
+  )$$;
+
+  -- garantir coluna metodo NOT NULL (frente envia sempre)
+  begin
+    execute $$alter table public.pagamentos alter column metodo set not null$$;
+  exception when others then null;
+  end;
+
+  -- garantir coluna finalizadora_id e FK (se possível)
+  begin execute $$alter table public.pagamentos add column if not exists finalizadora_id uuid$$; exception when others then null; end;
+  begin
+    if not exists (
+      select 1 from pg_constraint where conname = 'fk_pagamentos_finalizadora'
+    ) then
+      execute $$alter table public.pagamentos add constraint fk_pagamentos_finalizadora foreign key (finalizadora_id) references public.finalizadoras(id) on delete restrict$$;
+    end if;
+  exception when others then null; end;
+
+  -- índices auxiliares
+  begin execute $$create index if not exists idx_pagamentos_empresa on public.pagamentos (codigo_empresa)$$; exception when others then null; end;
+  begin execute $$create index if not exists idx_pagamentos_comanda on public.pagamentos (comanda_id)$$; exception when others then null; end;
+  begin execute $$create index if not exists idx_pagamentos_finalizadora on public.pagamentos (finalizadora_id)$$; exception when others then null; end;
+end$$;

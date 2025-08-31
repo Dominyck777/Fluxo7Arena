@@ -13,6 +13,7 @@ import PlaceholderPage from '@/pages/PlaceholderPage';
 import FinanceiroPage from '@/pages/FinanceiroPage';
 import QuadrasPage from '@/pages/QuadrasPage';
 import EmpresasPage from '@/pages/EmpresasPage';
+import FinalizadorasPage from '@/pages/FinalizadorasPage';
 import ResetPasswordPage from '@/pages/ResetPasswordPage';
 import { Helmet } from 'react-helmet';
 
@@ -41,6 +42,7 @@ function PrivateApp() {
             <Route path="/financeiro" element={<FinanceiroPage />} />
             <Route path="/quadras" element={<QuadrasPage />} />
             <Route path="/empresas" element={<EmpresasPage />} />
+            <Route path="/finalizadoras" element={<FinalizadorasPage />} />
             <Route path="/suporte" element={<PlaceholderPage title="Suporte" />} />
           </Routes>
         </main>
