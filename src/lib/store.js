@@ -12,6 +12,29 @@ function getCachedCompanyCode() {
   }
 }
 
+// Clientes
+export async function listarClientes({ searchTerm = '', limit = 20, codigoEmpresa } = {}) {
+  const codigo = codigoEmpresa || getCachedCompanyCode()
+  let q = supabase
+    .from('clientes')
+    .select('*')
+    .order('nome', { ascending: true })
+    .limit(limit)
+  if (codigo) q = q.eq('codigo_empresa', codigo)
+  const s = (searchTerm || '').trim()
+  if (s) {
+    const isNumeric = /^\d+$/.test(s)
+    if (isNumeric) {
+      q = q.or(`codigo.eq.${s},nome.ilike.%${s}%,email.ilike.%${s}%,telefone.ilike.%${s}%`)
+    } else {
+      q = q.or(`nome.ilike.%${s}%,email.ilike.%${s}%,telefone.ilike.%${s}%`)
+    }
+  }
+  const { data, error } = await q
+  if (error) throw error
+  return data || []
+}
+
 // Lista comandas abertas (open/awaiting-payment)
 export async function listarComandasAbertas({ codigoEmpresa } = {}) {
   const codigo = codigoEmpresa || getCachedCompanyCode()
@@ -47,6 +70,37 @@ export async function listMesas(codigoEmpresa) {
   const { data, error } = await query
   if (error) throw error
   return data || []
+}
+
+// Cria uma nova mesa com o próximo número disponível (ou número específico)
+export async function criarMesa({ numero, codigoEmpresa } = {}) {
+  const codigo = codigoEmpresa || getCachedCompanyCode()
+  let nextNumero = numero
+  if (!nextNumero) {
+    // buscar maior numero existente
+    let q = supabase.from('mesas').select('numero').order('numero', { ascending: false }).limit(1)
+    if (codigo) q = q.eq('codigo_empresa', codigo)
+    const { data: maxRow, error: errMax } = await q
+    if (errMax) throw errMax
+    nextNumero = (maxRow?.[0]?.numero || 0) + 1
+  }
+  const payload = { numero: nextNumero, status: 'available' }
+  if (codigo) payload.codigo_empresa = codigo
+  const { data, error } = await supabase.from('mesas').insert(payload).select('*').single()
+  if (error) throw error
+  return data
+}
+
+// Obtém ou cria uma mesa especial para o Modo Balcão (numero = 0)
+export async function getOrCreateMesaBalcao({ codigoEmpresa } = {}) {
+  const codigo = codigoEmpresa || getCachedCompanyCode()
+  let q = supabase.from('mesas').select('*').eq('numero', 0).limit(1)
+  if (codigo) q = q.eq('codigo_empresa', codigo)
+  const { data: found, error: errFind } = await q
+  if (errFind) throw errFind
+  if (found && found.length > 0) return found[0]
+  // criar se não existir
+  return criarMesa({ numero: 0, codigoEmpresa: codigo })
 }
 
 // Caixa
@@ -87,19 +141,29 @@ export async function fecharCaixa({ saldoFinal = 0, codigoEmpresa } = {}) {
 }
 
 // Comandas
-export async function abrirComandaParaMesa({ mesaId, codigoEmpresa }) {
+export async function abrirComandaParaMesa({ mesaId, codigoEmpresa, clienteId, clienteNome }) {
   const codigo = codigoEmpresa || getCachedCompanyCode()
   if (!mesaId) throw new Error('mesaId é obrigatório')
   // Evitar duplicar se já houver aberta
-  let q = supabase.from('comandas').select('id,status').eq('mesa_id', mesaId).in('status', ['open','awaiting-payment']).limit(1)
+  let q = supabase.from('comandas').select('id,status,cliente_id,cliente_nome').eq('mesa_id', mesaId).in('status', ['open','awaiting-payment']).limit(1)
   if (codigo) q = q.eq('codigo_empresa', codigo)
   const { data: abertas, error: errA } = await q
   if (errA) throw errA
-  if (abertas && abertas.length > 0) return abertas[0]
+  if (abertas && abertas.length > 0) {
+    const atual = abertas[0]
+    // Se já existe e foi informado cliente, opcionalmente atualizar
+    if ((clienteId || clienteNome) && (atual.cliente_id !== clienteId || (clienteNome && atual.cliente_nome !== clienteNome))) {
+      await atualizarClienteDaComanda({ comandaId: atual.id, clienteId, clienteNome, codigoEmpresa: codigo })
+      return { ...atual, cliente_id: clienteId ?? atual.cliente_id, cliente_nome: clienteNome ?? atual.cliente_nome }
+    }
+    return atual
+  }
 
   const payload = { mesa_id: mesaId, status: 'open' }
   if (codigo) payload.codigo_empresa = codigo
-  const { data, error } = await supabase.from('comandas').insert(payload).select('id,status').single()
+  if (clienteId) payload.cliente_id = clienteId
+  if (clienteNome) payload.cliente_nome = clienteNome
+  const { data, error } = await supabase.from('comandas').insert(payload).select('id,status,cliente_id,cliente_nome').single()
   if (error) throw error
   return data
 }
@@ -108,7 +172,7 @@ export async function listarComandaDaMesa({ mesaId, codigoEmpresa }) {
   const codigo = codigoEmpresa || getCachedCompanyCode()
   let q = supabase
     .from('comandas')
-    .select('id,status,aberto_em')
+    .select('id,status,aberto_em,cliente_id,cliente_nome')
     .eq('mesa_id', mesaId)
     .in('status', ['open','awaiting-payment'])
     .order('aberto_em', { ascending: false })
@@ -134,11 +198,34 @@ export async function listarItensDaComanda({ comandaId, codigoEmpresa }) {
 }
 
 // Conveniência: obter ou abrir comanda para mesa
-export async function getOrCreateComandaForMesa({ mesaId, codigoEmpresa }) {
+export async function getOrCreateComandaForMesa({ mesaId, codigoEmpresa, clienteId, clienteNome }) {
   const codigo = codigoEmpresa || getCachedCompanyCode()
   const atual = await listarComandaDaMesa({ mesaId, codigoEmpresa: codigo })
-  if (atual) return atual
-  return abrirComandaParaMesa({ mesaId, codigoEmpresa: codigo })
+  if (atual) {
+    if (clienteId || clienteNome) {
+      if (atual.cliente_id !== clienteId || (clienteNome && atual.cliente_nome !== clienteNome)) {
+        await atualizarClienteDaComanda({ comandaId: atual.id, clienteId, clienteNome, codigoEmpresa: codigo })
+        return { ...atual, cliente_id: clienteId ?? atual.cliente_id, cliente_nome: clienteNome ?? atual.cliente_nome }
+      }
+    }
+    return atual
+  }
+  return abrirComandaParaMesa({ mesaId, codigoEmpresa: codigo, clienteId, clienteNome })
+}
+
+// Atualiza cliente associado à comanda (id do cliente cadastrado e/ou nome livre)
+export async function atualizarClienteDaComanda({ comandaId, clienteId, clienteNome, codigoEmpresa }) {
+  const codigo = codigoEmpresa || getCachedCompanyCode()
+  if (!comandaId) throw new Error('comandaId é obrigatório')
+  const update = {}
+  if (typeof clienteId !== 'undefined') update.cliente_id = clienteId || null
+  if (typeof clienteNome !== 'undefined') update.cliente_nome = clienteNome || null
+  if (Object.keys(update).length === 0) return true
+  let q = supabase.from('comandas').update(update).eq('id', comandaId)
+  if (codigo) q = q.eq('codigo_empresa', codigo)
+  const { error } = await q.select('id').single()
+  if (error) throw error
+  return true
 }
 
 // Itens (depende de tabela 'produtos' existir)

@@ -1357,6 +1357,9 @@ create policy produtos_insert_company on public.produtos
 drop policy if exists produtos_update_company on public.produtos;
 create policy produtos_update_company on public.produtos
   as permissive for update to authenticated
+  using (codigo_empresa = public.get_my_company_code())
+  with check (codigo_empresa = public.get_my_company_code());
+
 drop policy if exists produtos_delete_company on public.produtos;
 create policy produtos_delete_company on public.produtos
   as permissive for delete to authenticated
@@ -1423,3 +1426,140 @@ create policy pagamentos_delete_company on public.pagamentos
   using (codigo_empresa = public.get_my_company_code());
 
 grant select, insert, update, delete on table public.pagamentos to authenticated;
+
+-- ============================
+-- POLÍTICAS RLS (v3.7)
+-- Data: 2025-08-31
+-- Tabelas: mesas, comandas, comanda_itens, caixa_sessoes
+-- Observação: Controle por codigo_empresa via public.get_my_company_code()
+-- ============================
+
+-- 1) MESAS
+alter table if exists public.mesas enable row level security;
+
+drop policy if exists mesas_select_company on public.mesas;
+create policy mesas_select_company on public.mesas
+  as permissive for select to authenticated
+  using (codigo_empresa = public.get_my_company_code());
+
+drop policy if exists mesas_insert_company on public.mesas;
+create policy mesas_insert_company on public.mesas
+  as permissive for insert to authenticated
+  with check (codigo_empresa = public.get_my_company_code());
+
+drop policy if exists mesas_update_company on public.mesas;
+create policy mesas_update_company on public.mesas
+  as permissive for update to authenticated
+  using (codigo_empresa = public.get_my_company_code())
+  with check (codigo_empresa = public.get_my_company_code());
+
+drop policy if exists mesas_delete_company on public.mesas;
+create policy mesas_delete_company on public.mesas
+  as permissive for delete to authenticated
+  using (codigo_empresa = public.get_my_company_code());
+
+grant select, insert, update, delete on table public.mesas to authenticated;
+
+-- 2) COMANDAS
+alter table if exists public.comandas enable row level security;
+
+drop policy if exists comandas_select_company on public.comandas;
+create policy comandas_select_company on public.comandas
+  as permissive for select to authenticated
+  using (codigo_empresa = public.get_my_company_code());
+
+drop policy if exists comandas_insert_company on public.comandas;
+create policy comandas_insert_company on public.comandas
+  as permissive for insert to authenticated
+  with check (codigo_empresa = public.get_my_company_code());
+
+drop policy if exists comandas_update_company on public.comandas;
+create policy comandas_update_company on public.comandas
+  as permissive for update to authenticated
+  using (codigo_empresa = public.get_my_company_code())
+  with check (codigo_empresa = public.get_my_company_code());
+
+drop policy if exists comandas_delete_company on public.comandas;
+create policy comandas_delete_company on public.comandas
+  as permissive for delete to authenticated
+  using (codigo_empresa = public.get_my_company_code());
+
+grant select, insert, update, delete on table public.comandas to authenticated;
+
+-- 3) COMANDA_ITENS
+alter table if exists public.comanda_itens enable row level security;
+
+drop policy if exists comanda_itens_select_company on public.comanda_itens;
+create policy comanda_itens_select_company on public.comanda_itens
+  as permissive for select to authenticated
+  using (codigo_empresa = public.get_my_company_code());
+
+drop policy if exists comanda_itens_insert_company on public.comanda_itens;
+create policy comanda_itens_insert_company on public.comanda_itens
+  as permissive for insert to authenticated
+  with check (codigo_empresa = public.get_my_company_code());
+
+drop policy if exists comanda_itens_update_company on public.comanda_itens;
+create policy comanda_itens_update_company on public.comanda_itens
+  as permissive for update to authenticated
+  using (codigo_empresa = public.get_my_company_code())
+  with check (codigo_empresa = public.get_my_company_code());
+
+drop policy if exists comanda_itens_delete_company on public.comanda_itens;
+create policy comanda_itens_delete_company on public.comanda_itens
+  as permissive for delete to authenticated
+  using (codigo_empresa = public.get_my_company_code());
+
+grant select, insert, update, delete on table public.comanda_itens to authenticated;
+
+-- 4) CAIXA_SESSOES
+alter table if exists public.caixa_sessoes enable row level security;
+
+drop policy if exists caixa_sessoes_select_company on public.caixa_sessoes;
+create policy caixa_sessoes_select_company on public.caixa_sessoes
+  as permissive for select to authenticated
+  using (codigo_empresa = public.get_my_company_code());
+
+drop policy if exists caixa_sessoes_insert_company on public.caixa_sessoes;
+create policy caixa_sessoes_insert_company on public.caixa_sessoes
+  as permissive for insert to authenticated
+  with check (codigo_empresa = public.get_my_company_code());
+
+drop policy if exists caixa_sessoes_update_company on public.caixa_sessoes;
+create policy caixa_sessoes_update_company on public.caixa_sessoes
+  as permissive for update to authenticated
+  using (codigo_empresa = public.get_my_company_code())
+  with check (codigo_empresa = public.get_my_company_code());
+
+drop policy if exists caixa_sessoes_delete_company on public.caixa_sessoes;
+create policy caixa_sessoes_delete_company on public.caixa_sessoes
+  as permissive for delete to authenticated
+  using (codigo_empresa = public.get_my_company_code());
+
+grant select, insert, update, delete on table public.caixa_sessoes to authenticated;
+
+-- ============================
+-- DOCUMENTAÇÃO DA VIEW (v_agendamento_participantes)
+-- Data: 2025-08-27
+-- Propósito: Explicar segurança/RLS e permissões da view de leitura usada pela Agenda
+-- ============================
+--
+-- A view public.v_agendamento_participantes é utilizada pelo front-end (ex.: `src/pages/AgendaPage.jsx`)
+-- exclusivamente para leitura (SELECT) de participantes, trazendo já o nome do cliente e o texto do status.
+--
+-- Segurança (RLS):
+-- - Views não possuem RLS própria. O Supabase Studio pode exibi-las como "Unrestricted".
+-- - A proteção continua sendo aplicada nas TABELAS BASE referenciadas pela view
+--   (neste caso, public.agendamento_participantes e public.clientes), que têm RLS por empresa.
+-- - A view NÃO utiliza SECURITY DEFINER; logo, herda os privilégios do chamador, e as RLS das tabelas base
+--   são respeitadas normalmente.
+--
+-- Permissões:
+-- - Conceder SELECT para a role authenticated (já aplicado acima em v3.1, mantido aqui como referência).
+--
+-- DDL (referência rápida):
+-- grant select on table public.v_agendamento_participantes to authenticated;
+--
+-- Observação de uso:
+-- - Todas as mutações (INSERT/UPDATE/DELETE) devem ocorrer diretamente na tabela
+--   public.agendamento_participantes, nunca na view.

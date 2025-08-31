@@ -11,7 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger, } from "@/components/ui/alert-dialog"
 import { Label } from '@/components/ui/label';
-import { listMesas, ensureCaixaAberto, fecharCaixa, getOrCreateComandaForMesa, listarItensDaComanda, adicionarItem, atualizarQuantidadeItem, removerItem, listarFinalizadoras, registrarPagamento, fecharComandaEMesa, listarComandasAbertas, listarTotaisPorComanda } from '@/lib/store';
+import { listMesas, ensureCaixaAberto, fecharCaixa, getOrCreateComandaForMesa, listarItensDaComanda, adicionarItem, atualizarQuantidadeItem, removerItem, listarFinalizadoras, registrarPagamento, fecharComandaEMesa, listarComandasAbertas, listarTotaisPorComanda, criarMesa, listarClientes } from '@/lib/store';
 import { listProducts } from '@/lib/products';
 
 // Mock Data
@@ -52,6 +52,10 @@ function VendasPage() {
   const [isCashierDetailsOpen, setIsCashierDetailsOpen] = useState(false);
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(false);
+  // Abrir mesa
+  const [isOpenTableDialog, setIsOpenTableDialog] = useState(false);
+  const [pendingTable, setPendingTable] = useState(null);
+  const [clienteNome, setClienteNome] = useState('');
   // Pagamento
   const [isPayOpen, setIsPayOpen] = useState(false);
   const [payMethods, setPayMethods] = useState([]);
@@ -98,7 +102,12 @@ function VendasPage() {
           };
         });
         setTables(uiTables);
-        setSelectedTable(uiTables[0] || null);
+        // manter seleção atual se existir na nova lista
+        setSelectedTable((prev) => {
+          if (!prev) return uiTables[0] || null;
+          const found = uiTables.find(t => t.id === prev.id);
+          return found ? { ...found, order: prev.order || [] } : (uiTables[0] || null);
+        });
         // Checar se existe sessão de caixa aberta para refletir no botão
         try {
           const sessao = await ensureCaixaAberto({ saldoInicial: 0 });
@@ -118,6 +127,9 @@ function VendasPage() {
       }
     };
     load();
+    // refresh periódico para evitar estado obsoleto após inatividade
+    const id = setInterval(load, 15000);
+    return () => clearInterval(id);
   }, []);
 
   const handleNotImplemented = () => {
@@ -161,21 +173,18 @@ function VendasPage() {
   const handleSelectTable = async (table) => {
     try {
       setLoading(true);
-      // obter/abrir comanda para a mesa
-      const comanda = await getOrCreateComandaForMesa({ mesaId: table.id });
-      // carregar itens
-      const itens = comanda ? await listarItensDaComanda({ comandaId: comanda.id }) : [];
-      const order = (itens || []).map((it) => ({
-        id: it.id,
-        name: it.descricao || 'Item',
-        price: Number(it.preco_unitario || 0),
-        quantity: Number(it.quantidade || 1),
-      }));
-      const uiStatus = comanda ? 'in-use' : table.status;
-      const enriched = { ...table, status: uiStatus, order, comandaId: comanda?.id || null };
-      setSelectedTable(enriched);
-      // Atualiza também na grade de mesas para refletir status
-      setTables((prev) => prev.map((t) => (t.id === table.id ? enriched : t)));
+      if (table.comandaId) {
+        // já há comanda aberta, apenas carregar itens
+        const itens = await listarItensDaComanda({ comandaId: table.comandaId });
+        const order = (itens || []).map((it) => ({ id: it.id, name: it.descricao || 'Item', price: Number(it.preco_unitario || 0), quantity: Number(it.quantidade || 1) }));
+        const enriched = { ...table, status: 'in-use', order };
+        setSelectedTable(enriched);
+        setTables((prev) => prev.map((t) => (t.id === table.id ? enriched : t)));
+      } else {
+        // não abrir automaticamente; solicitar abertura
+        setPendingTable(table);
+        setIsOpenTableDialog(true);
+      }
     } catch (e) {
       toast({ title: 'Falha ao carregar comanda da mesa', description: e?.message || 'Tente novamente', variant: 'destructive' });
     } finally {
@@ -208,7 +217,7 @@ function VendasPage() {
         <Icon className="w-8 h-8 mb-2" />
         <span className="text-xl font-bold text-text-primary">Mesa {table.number}</span>
         <span className="text-sm font-semibold h-5 mt-1 truncate max-w-full px-2">
-          {table.status === 'in-use' || table.status === 'awaiting-payment' ? table.customer || `R$ ${displayTotal.toFixed(2)}` : config.label}
+          {table.status === 'in-use' || table.status === 'awaiting-payment' ? (table.customer ? `${table.customer}` : `R$ ${displayTotal.toFixed(2)}`) : config.label}
         </span>
       </div>
     )
@@ -222,6 +231,7 @@ function VendasPage() {
         <p>Clique em uma mesa para ver os detalhes da comanda.</p>
       </div>
     );
+
 
   const PayDialog = () => {
     const total = selectedTable ? calculateTotal(selectedTable.order) : 0;
@@ -330,6 +340,24 @@ function VendasPage() {
           <p className={cn("text-sm font-semibold mt-1", statusConfig[table.status].color.replace('bg-', 'text-'))}>
             Status: {statusConfig[table.status].label}
           </p>
+          <div className="mt-3 flex gap-2">
+            {!table.comandaId && (
+              <Button size="sm" onClick={() => { setPendingTable(table); setIsOpenTableDialog(true); }}>Abrir Mesa</Button>
+            )}
+            {table.comandaId && (
+              <Button size="sm" variant="outline" onClick={async () => {
+                try {
+                  await fecharComandaEMesa({ comandaId: table.comandaId });
+                  const updated = { ...table, status: 'available', order: [], comandaId: null, customer: null };
+                  setSelectedTable(updated);
+                  setTables((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
+                  toast({ title: 'Mesa liberada', variant: 'success' });
+                } catch(e) {
+                  toast({ title: 'Falha ao liberar mesa', description: e?.message || 'Tente novamente', variant: 'destructive' });
+                }
+              }}>Liberar Mesa</Button>
+            )}
+          </div>
         </div>
         <div className="flex-1 overflow-y-auto p-6">
           {table.order.length === 0 ? (
@@ -577,6 +605,105 @@ function VendasPage() {
     </AlertDialog>
   );
 
+  const OpenTableDialog = () => {
+    const [search, setSearch] = useState('');
+    const [loadingClients, setLoadingClients] = useState(false);
+    const [clients, setClients] = useState([]);
+    const [selectedClientId, setSelectedClientId] = useState(null);
+
+    useEffect(() => {
+      let active = true;
+      const load = async () => {
+        try {
+          setLoadingClients(true);
+          const rows = await listarClientes({ searchTerm: search, limit: 20 });
+          if (!active) return;
+          setClients(rows);
+        } catch {
+          if (!active) return;
+          setClients([]);
+        } finally {
+          if (active) setLoadingClients(false);
+        }
+      };
+      const t = setTimeout(load, 200);
+      return () => { active = false; clearTimeout(t); };
+    }, [search]);
+
+    const confirmOpen = async () => {
+      try {
+        if (!pendingTable) return;
+        const isRegistered = !!selectedClientId;
+        const chosenName = isRegistered
+          ? (clients.find(c => c.id === selectedClientId)?.nome || '')
+          : (clienteNome || '');
+        const comanda = await getOrCreateComandaForMesa({
+          mesaId: pendingTable.id,
+          clienteId: isRegistered ? selectedClientId : undefined,
+          clienteNome: !isRegistered ? chosenName : undefined,
+        });
+        const enriched = { ...pendingTable, comandaId: comanda.id, status: 'in-use', customer: chosenName, order: [] };
+        setSelectedTable(enriched);
+        setTables(prev => prev.map(t => t.id === enriched.id ? enriched : t));
+        setIsOpenTableDialog(false);
+        setPendingTable(null);
+        setClienteNome('');
+        setSelectedClientId(null);
+        toast({ title: 'Mesa aberta', description: `Comanda criada${chosenName ? ` para ${chosenName}` : ''}.`, variant: 'success' });
+      } catch (e) {
+        toast({ title: 'Falha ao abrir mesa', description: e?.message || 'Tente novamente', variant: 'destructive' });
+      }
+    };
+
+    return (
+      <Dialog open={isOpenTableDialog} onOpenChange={(open) => { setIsOpenTableDialog(open); if (!open) { setPendingTable(null); setClienteNome(''); setSelectedClientId(null); } }}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle className="text-2xl font-bold">Abrir Mesa {pendingTable ? `#${pendingTable.number}` : ''}</DialogTitle>
+            <DialogDescription>Selecione um cliente cadastrado ou informe um nome para convidado comum.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label className="mb-2 block">Buscar cliente</Label>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted" />
+                <Input placeholder="Nome, e-mail, telefone ou código" className="pl-9" value={search} onChange={(e) => setSearch(e.target.value)} />
+              </div>
+              <div className="mt-2 max-h-44 overflow-auto border rounded-md">
+                {loadingClients ? (
+                  <div className="p-3 text-sm text-text-muted">Carregando clientes...</div>
+                ) : (clients.length > 0 ? (
+                  <ul>
+                    {clients.map(c => (
+                      <li key={c.id} className={cn('p-2 flex items-center justify-between cursor-pointer hover:bg-surface-2', selectedClientId === c.id && 'bg-surface-2')} onClick={() => setSelectedClientId(c.id)}>
+                        <div>
+                          <div className="font-medium">{c.nome}</div>
+                          <div className="text-xs text-text-muted">{c.email || '—'} {c.telefone ? `• ${c.telefone}` : ''}</div>
+                        </div>
+                        {selectedClientId === c.id && <CheckCircle size={16} className="text-success" />}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <div className="p-3 text-sm text-text-muted">Nenhum cliente encontrado.</div>
+                ))}
+              </div>
+            </div>
+            <div className="grid grid-cols-1 gap-2">
+              <Label className="mb-1 block">Ou informe um nome (cliente comum)</Label>
+              <Input placeholder="Ex.: Mesa do João" value={clienteNome} onChange={(e) => setClienteNome(e.target.value)} />
+              <div className="text-xs text-text-muted">Se um cliente cadastrado estiver selecionado acima, este campo será ignorado.</div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setIsOpenTableDialog(false); setPendingTable(null); setClienteNome(''); setSelectedClientId(null); }}>Cancelar</Button>
+            <Button onClick={confirmOpen} disabled={!pendingTable}>Confirmar Abertura</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    )
+  }
+
   return (
     <>
       <Helmet>
@@ -597,7 +724,18 @@ function VendasPage() {
             </Button>
             <div className="w-px h-6 bg-border mx-2"></div>
             <Button variant="outline" onClick={() => setIsCounterModeOpen(true)}><Store className="mr-2 h-4 w-4" /> Modo Balcão</Button>
-            <Button onClick={handleNotImplemented}><Plus className="mr-2 h-4 w-4" /> Nova Mesa</Button>
+            <Button onClick={async () => {
+              try {
+                setLoading(true);
+                const mesa = await criarMesa({});
+                toast({ title: 'Mesa criada', description: `Mesa ${mesa.numero} adicionada`, variant: 'success' });
+              } catch (e) {
+                toast({ title: 'Falha ao criar mesa', description: e?.message || 'Tente novamente', variant: 'destructive' });
+              } finally {
+                // força um refresh das mesas para aparecer na grid
+                setLoading(false);
+              }
+            }}><Plus className="mr-2 h-4 w-4" /> Nova Mesa</Button>
           </div>
         </motion.div>
         
@@ -634,6 +772,7 @@ function VendasPage() {
       </motion.div>
       <CounterModeModal />
       <CashierDetailsDialog />
+      <OpenTableDialog />
     </>
   );
 }
