@@ -53,8 +53,7 @@ const timeSlots = Array.from({ length: (END_HOUR - START_HOUR) * (60 / SLOT_MINU
   };
 });
 
-// Mock Data para clientes e modalidades (agendamentos locais)
-const customers = ['João Silva', 'Maria Oliveira', 'Carlos Pereira', 'Ana Costa', 'Pedro Lima', 'Luiza Santos', 'Rafael Souza', 'Camila Rocha'];
+// Modalidades disponíveis (clientes sempre vêm do banco por empresa; não usar mock)
 const modalities = ['Futebol', 'Beach Tennis', 'Futevôlei', 'Treino'];
 // Novos status alinhados ao statusConfig
 const statuses = ['scheduled', 'confirmed', 'in_progress', 'finished', 'canceled', 'absent'];
@@ -188,8 +187,8 @@ function AgendaPage() {
     }
   });
 
-  // Lista de clientes mutável (para permitir criação de novos)
-  const [customerOptions, setCustomerOptions] = useState(customers);
+  // Lista de clientes vinda do banco (sem clientes fictícios)
+  const [customerOptions, setCustomerOptions] = useState([]);
   const scrollRef = useRef(null);
   // Prefill ao clicar em um slot livre
   const [prefill, setPrefill] = useState(null);
@@ -241,6 +240,9 @@ function AgendaPage() {
         .eq('codigo_empresa', userProfile.codigo_empresa)
         .gte('inicio', dayStart.toISOString())
         .lt('inicio', dayEnd.toISOString())
+        .eq('codigo_empresa', userProfile.codigo_empresa)
+        .gte('inicio', dayStart.toISOString())
+        .lt('inicio', dayEnd.toISOString())
         .order('inicio', { ascending: true });
       if (error) {
         toast({ title: 'Erro ao carregar agendamentos', description: error.message, variant: 'destructive' });
@@ -273,8 +275,8 @@ function AgendaPage() {
         const end = new Date(row.fim);
         // Nome da quadra
         const courtName = row.quadra?.[0]?.nome || row.quadra?.nome || Object.values(courtsMap).find(c => c.id === row.quadra_id)?.nome || '';
-        // Nome do cliente: preferir cliente relacionado; senão primeiro do array de nomes
-        const customerName = (row.cliente?.[0]?.nome || row.cliente?.nome || (Array.isArray(row.clientes) && row.clientes.length > 0 ? row.clientes[0] : ''));
+        // Nome do cliente: usar apenas o cliente relacionado real; não usar fallback do array "clientes"
+        const customerName = (row.cliente?.[0]?.nome || row.cliente?.nome || '');
         return {
           id: row.id,
           court: courtName,
@@ -552,7 +554,7 @@ function AgendaPage() {
                 </span>
                 {/* Indicador de pagamento de participantes (pago/total) */}
                 {totalParticipants > 0 && (
-                  <span className="text-xs font-semibold text-text-secondary bg-white/5 border border-white/10 rounded px-2 py-0.5">
+                  <span className={`text-xs font-semibold rounded px-2 py-0.5 border ${paidCount === totalParticipants ? 'text-emerald-300 bg-emerald-500/10 border-emerald-400/30' : 'text-amber-300 bg-amber-500/10 border-amber-400/30'}`}>
                     {paidCount}/{totalParticipants} pagos
                   </span>
                 )}
@@ -632,10 +634,15 @@ function AgendaPage() {
     // Participantes (apenas no modo edição): { cliente_id, nome, valor_cota, status_pagamento }
     const [participantsForm, setParticipantsForm] = useState([]);
     const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
+    const [isSavingPayments, setIsSavingPayments] = useState(false);
     const [paymentSelectedId, setPaymentSelectedId] = useState(null);
+    // Aviso de pendências no modal de pagamento
+    const [paymentWarning, setPaymentWarning] = useState(null);
     const participantsPrefillOnceRef = useRef(false);
     // Evita que a auto-correção de horários rode imediatamente após aplicar um prefill
     const suppressAutoAdjustRef = useRef(false);
+    // Lista local de clientes para evitar re-render do componente pai durante a 1ª abertura
+    const [localCustomers, setLocalCustomers] = useState(customerOptions);
     // Rótulo resumido para o seletor de clientes (ex.: "Daniel +3")
     const selectedClientsLabel = useMemo(() => {
       const arr = form.selectedClients || [];
@@ -647,6 +654,10 @@ function AgendaPage() {
 
     // Evitar recarregar clientes repetidamente durante a mesma abertura do modal
     const clientsLoadedKeyRef = useRef(null);
+    useEffect(() => {
+      // Sincroniza lista local com o snapshot atual do pai apenas no abrir
+      if (isModalOpen) setLocalCustomers(customerOptions);
+    }, [isModalOpen]);
     useEffect(() => {
       const loadClients = async () => {
         if (!isModalOpen || !userProfile?.codigo_empresa) return;
@@ -660,9 +671,9 @@ function AgendaPage() {
             .eq('status', 'active')
             .order('nome', { ascending: true });
           if (!error && Array.isArray(data)) {
-            // Evita churn se não mudou
-            const same = JSON.stringify(data) === JSON.stringify(customerOptions);
-            if (!same) setCustomerOptions(data);
+            // Atualiza somente a lista local para não provocar re-render do pai durante animação
+            const same = JSON.stringify(data) === JSON.stringify(localCustomers);
+            if (!same) setLocalCustomers(data);
             clientsLoadedKeyRef.current = key;
           }
         } catch {}
@@ -671,7 +682,8 @@ function AgendaPage() {
       if (!isModalOpen) {
         clientsLoadedKeyRef.current = null; // reset ao fechar
       }
-    }, [isModalOpen, userProfile?.codigo_empresa, customerOptions]);
+      // Dependemos de isModalOpen e localCustomers (snapshot) para evitar loop
+    }, [isModalOpen, userProfile?.codigo_empresa, localCustomers]);
 
     // timeOptions/endTimeOptions são declarados após helpers de disponibilidade para evitar TDZ
 
@@ -703,21 +715,29 @@ function AgendaPage() {
           .map(p => ({ id: p.cliente_id, nome: p.nome }))
           // Evitar duplicidades por segurança
           .filter((v, i, a) => a.findIndex(x => x.id === v.id) === i);
+        // Garante modalidade válida para a quadra do agendamento
+        const allowedForEdit = courtsMap[editingBooking.court]?.modalidades || modalities;
+        const safeModality = allowedForEdit.includes(editingBooking.modality) ? editingBooking.modality : (allowedForEdit[0] || '');
         setForm({
           selectedClients: selectedFromParts,
           court: editingBooking.court,
-          modality: editingBooking.modality,
+          modality: safeModality,
           status: editingBooking.status,
           date: startOfDay(editingBooking.start),
           startMinutes: startM,
           endMinutes: endM,
         });
+        // Evita autoajuste imediato durante a animação de abertura
+        suppressAutoAdjustRef.current = true;
         // Preenche formulário de participantes com valores atuais
         setParticipantsForm(
           loadedParts.map(p => ({
             cliente_id: p.cliente_id,
             nome: p.nome,
-            valor_cota: p.valor_cota ?? null,
+            valor_cota: (() => {
+              const num = Number.isFinite(Number(p.valor_cota)) ? Number(p.valor_cota) : parseBRL(p.valor_cota);
+              return maskBRL(String((Number.isFinite(num) ? num : 0).toFixed(2)));
+            })(),
             status_pagamento: p.status_pagamento_text || 'Pendente',
           }))
         );
@@ -741,7 +761,10 @@ function AgendaPage() {
                 setParticipantsForm(data.map(p => ({
                   cliente_id: p.cliente_id,
                   nome: p.cliente?.nome || '',
-                  valor_cota: p.valor_cota ?? null,
+                  valor_cota: (() => {
+                    const num = Number.isFinite(Number(p.valor_cota)) ? Number(p.valor_cota) : parseBRL(p.valor_cota);
+                    return maskBRL(String((Number.isFinite(num) ? num : 0).toFixed(2)));
+                  })(),
                   status_pagamento: p.status_pagamento || 'Pendente',
                 })));
                 setPaymentSelectedId(sel[0]?.id || null);
@@ -756,7 +779,7 @@ function AgendaPage() {
         setForm({
           selectedClients: [],
           court: prefill.court ?? (availableCourts[0] || ''),
-          modality: modalities[0],
+          modality: (() => { const c = prefill.court ?? (availableCourts[0] || ''); const allowed = courtsMap[c]?.modalidades || modalities; return allowed[0] || ''; })(),
           status: 'scheduled',
           date: prefill.date ?? currentDate,
           startMinutes: prefill.startMinutes ?? nearestSlot(),
@@ -765,16 +788,20 @@ function AgendaPage() {
         setParticipantsForm([]);
         suppressAutoAdjustRef.current = true;
       } else {
+        const initialCourt = availableCourts[0] || '';
+        const allowed = courtsMap[initialCourt]?.modalidades || modalities;
         setForm({
           selectedClients: [],
-          court: availableCourts[0] || '',
-          modality: modalities[0],
+          court: initialCourt,
+          modality: allowed[0] || '',
           status: 'scheduled',
           date: currentDate,
           startMinutes: nearestSlot(),
           endMinutes: nearestSlot() + 60,
         });
         setParticipantsForm([]);
+        // Evita autoajuste imediato durante a animação de abertura
+        suppressAutoAdjustRef.current = true;
       }
     }, [isModalOpen, editingBooking, currentDate, prefill, availableCourts, modalities, participantsByAgendamento]);
 
@@ -794,7 +821,10 @@ function AgendaPage() {
           loadedParts.map(p => ({
             cliente_id: p.cliente_id,
             nome: p.nome,
-            valor_cota: p.valor_cota ?? null,
+            valor_cota: (() => {
+              const num = Number.isFinite(Number(p.valor_cota)) ? Number(p.valor_cota) : parseBRL(p.valor_cota);
+              return maskBRL(String((Number.isFinite(num) ? num : 0).toFixed(2)));
+            })(),
             status_pagamento: p.status_pagamento_text || 'Pendente',
           }))
         );
@@ -946,6 +976,16 @@ function AgendaPage() {
       return { totalAssigned, totalTarget, diff, paid, pending };
     }, [form.selectedClients, participantsForm, paymentTotal]);
 
+    // Regra global: se qualquer participante cobrir o total do agendamento, todos ficam 'Pago'
+    useEffect(() => {
+      const totalTarget = parseBRL(paymentTotal);
+      if (!Number.isFinite(totalTarget) || totalTarget <= 0) return;
+      const anyCoversAll = (participantsForm || []).some(p => parseBRL(p?.valor_cota) >= totalTarget);
+      if (anyCoversAll && (participantsForm || []).some(p => p.status_pagamento !== 'Pago')) {
+        setParticipantsForm(prev => prev.map(p => ({ ...p, status_pagamento: 'Pago' })));
+      }
+    }, [participantsForm, paymentTotal]);
+
     const splitEqually = useCallback(() => {
       const count = (form.selectedClients || []).length;
       if (!count) return;
@@ -990,7 +1030,12 @@ function AgendaPage() {
           }
         }}
       >
-        <DialogContent className="sm:max-w-[960px] max-h-[90vh] overflow-y-auto" onOpenAutoFocus={(e) => e.preventDefault()}>
+        <DialogContent
+          className="sm:max-w-[960px] max-h-[90vh] overflow-y-auto"
+          onOpenAutoFocus={(e) => e.preventDefault()}
+          onInteractOutside={(e) => { if (isPaymentModalOpen) e.preventDefault(); }}
+          onEscapeKeyDown={(e) => { if (isPaymentModalOpen) e.preventDefault(); }}
+        >
           <DialogHeader>
             <DialogTitle>{editingBooking ? 'Editar Agendamento' : 'Novo Agendamento'}</DialogTitle>
             <DialogDescription>
@@ -1020,28 +1065,27 @@ function AgendaPage() {
                           onChange={(e) => setCustomerQuery(e.target.value)}
                         />
                         <div className="max-h-[260px] overflow-y-auto divide-y divide-border rounded-md border border-border">
-                          {((customerOptions || []).filter((c) => {
+                          {((localCustomers || []).filter((c) => {
                             const q = customerQuery.trim().toLowerCase();
                             if (!q) return true;
                             const label = String(getCustomerLabel(c) || '').toLowerCase();
                             return label.includes(q);
                           })).map((c) => {
-                            const selected = (form.selectedClients || []).some(sc => sc.id === c.id);
+                            const id = typeof c === 'object' ? c.id : null;
+                            const nome = getCustomerName(c);
+                            const selected = (form.selectedClients || []).some(sc => sc.id === id || sc.nome === nome);
                             return (
                               <button
+                                key={id || nome}
                                 type="button"
-                                key={c.id}
-                                className={cn(
-                                  "w-full text-left px-3 py-2 hover:bg-surface-2 flex items-center justify-between",
-                                  selected && "opacity-60"
-                                )}
+                                className="w-full text-left py-2 px-3 hover:bg-white/5 flex items-center justify-between"
                                 onClick={() => {
                                   setForm((f) => {
-                                    const exists = (f.selectedClients || []).some((sc) => sc.id === c.id);
+                                    const exists = (f.selectedClients || []).some(sc => sc.id === id || sc.nome === nome);
                                     if (exists) {
-                                      return { ...f, selectedClients: (f.selectedClients || []).filter(x => x.id !== c.id) };
+                                      return { ...f, selectedClients: (f.selectedClients || []).filter(x => (x.id || x.nome) !== (id || nome)) };
                                     }
-                                    const novo = { id: c.id, nome: c.nome || getCustomerName(c) };
+                                    const novo = { id, nome };
                                     return { ...f, selectedClients: [...(f.selectedClients || []), novo] };
                                   });
                                 }}
@@ -1309,7 +1353,12 @@ function AgendaPage() {
       {/* Payment Modal */}
       {editingBooking && (
         <Dialog open={isPaymentModalOpen} onOpenChange={setIsPaymentModalOpen}>
-          <DialogContent className="sm:max-w-[960px] max-h-[90vh] overflow-y-auto" onOpenAutoFocus={(e) => e.preventDefault()}>
+          <DialogContent
+            className="sm:max-w-[960px] max-h-[90vh] overflow-y-auto"
+            onOpenAutoFocus={(e) => e.preventDefault()}
+            onInteractOutside={(e) => { if (paymentWarning?.type === 'pending') e.preventDefault(); }}
+            onEscapeKeyDown={(e) => { if (paymentWarning?.type === 'pending') e.preventDefault(); }}
+          >
             <DialogHeader>
               <DialogTitle>Registrar pagamento</DialogTitle>
               <DialogDescription>Gerencie valores, divisão e status de pagamento dos participantes.</DialogDescription>
@@ -1337,28 +1386,7 @@ function AgendaPage() {
                         onClick={splitEqually}
                         disabled={!paymentTotal || participantsCount === 0}
                       >Dividir igualmente</Button>
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        className="bg-blue-600 hover:bg-blue-500 text-white"
-                        onClick={() => {
-                          setParticipantsForm(prev => {
-                            const total = parseBRL(paymentTotal);
-                            const count = (form.selectedClients || []).length;
-                            const per = (Number.isFinite(total) && total > 0 && count > 0) ? Number((total / count).toFixed(2)) : null;
-                            const maskedPer = per != null ? maskBRL(String(per.toFixed(2))) : null;
-                            const map = new Map(prev.map(p => [p.cliente_id, p]));
-                            for (const c of (form.selectedClients || [])) {
-                              const row = map.get(c.id) || { cliente_id: c.id, nome: c.nome, valor_cota: '', status_pagamento: 'Pendente' };
-                              row.status_pagamento = 'Pago';
-                              if (maskedPer) row.valor_cota = maskedPer;
-                              map.set(c.id, row);
-                            }
-                            return Array.from(map.values());
-                          });
-                        }}
-                        disabled={participantsCount === 0}
-                      >Pagar todos</Button>
+                      {/* Removed secondary mass-pay button as requested */}
                       <Button type="button" variant="ghost" className="border border-white/10" onClick={zeroAllValues} disabled={participantsCount === 0}>Zerar valores</Button>
                     </div>
                   </div>
@@ -1412,7 +1440,38 @@ function AgendaPage() {
               )}
 
               {(form.selectedClients || []).length > 0 && (
-                <div className="border border-border rounded-md overflow-hidden">
+                <>
+                {paymentWarning?.type === 'pending' && (
+                  <div role="alert" className="mb-2 rounded-md border border-amber-600/40 bg-amber-500/10 px-3 py-2 text-amber-200 flex items-start gap-3">
+                    <div className="mt-0.5">
+                      <AlertTriangle className="w-4 h-4 text-amber-300" />
+                    </div>
+                    <div className="flex-1 text-sm">
+                      <strong>Atenção:</strong> Existem <strong>{paymentWarning.count}</strong> participante(s) com status <strong>Pendente</strong>.
+                      <span className="ml-1">Marque como <strong>Pago</strong> antes de salvar.</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        className="text-xs px-2 py-1 rounded bg-white/10 hover:bg-white/15 border border-white/10"
+                        onClick={() => {
+                          const id = paymentWarning.firstPendingId;
+                          if (id) {
+                            setPaymentSelectedId(id);
+                            const el = document.getElementById(`payment-row-${id}`);
+                            if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                          }
+                        }}
+                      >Ver pendentes</button>
+                      <button
+                        type="button"
+                        className="text-xs px-2 py-1 rounded bg-amber-500/20 hover:bg-amber-500/30 border border-amber-600/40"
+                        onClick={() => setPaymentWarning(null)}
+                      >Entendi</button>
+                    </div>
+                  </div>
+                )}
+                <div className="border border-border rounded-md overflow-x-auto">
                   <div className="grid grid-cols-12 items-center px-3 py-2 bg-surface-2 text-[11px] uppercase tracking-wide text-text-secondary">
                     <div className="col-span-6">Participante</div>
                     <div className="col-span-3">Valor</div>
@@ -1421,12 +1480,16 @@ function AgendaPage() {
                     </div>
                     <div className="col-span-1 text-right">Ações</div>
                   </div>
-                  <div className="divide-y divide-border max-h-[50vh] overflow-auto fx-scroll">
+                  <div className="divide-y divide-border max-h-[50vh] overflow-y-auto fx-scroll">
                     {(form.selectedClients || []).map((c) => {
                       const pf = participantsForm.find(p => p.cliente_id === c.id) || { cliente_id: c.id, nome: c.nome, valor_cota: '', status_pagamento: 'Pendente' };
                       return (
-                        <div key={c.id} className="grid grid-cols-12 items-center px-3 py-2 overflow-x-auto fx-scroll">
-                          <div className="col-span-6 truncate text-sm font-medium">{c.nome}</div>
+                        <div
+                          key={c.id}
+                          id={`payment-row-${c.id}`}
+                          className={`grid grid-cols-12 items-center px-3 py-2 ${paymentWarning?.type === 'pending' && pf.status_pagamento !== 'Pago' ? 'bg-amber-500/5' : ''}`}
+                        >
+                          <div className="col-span-6 truncate text-[15px] font-medium">{c.nome}</div>
                           <div className="col-span-3 pr-2">
                             <Input
                               type="text"
@@ -1439,42 +1502,35 @@ function AgendaPage() {
                                 const amount = parseBRL(masked);
                                 const autoStatus = (Number.isFinite(amount) && amount > 0) ? 'Pago' : 'Pendente';
                                 setParticipantsForm(prev => {
-                                  const idx = prev.findIndex(p => p.cliente_id === c.id);
+                                  let list = [...prev];
+                                  const idx = list.findIndex(p => p.cliente_id === c.id);
                                   if (idx >= 0) {
-                                    const clone = [...prev];
-                                    clone[idx] = { ...clone[idx], valor_cota: masked, status_pagamento: autoStatus };
-                                    return clone;
+                                    list[idx] = { ...list[idx], valor_cota: masked, status_pagamento: autoStatus };
+                                  } else {
+                                    list = [...list, { cliente_id: c.id, nome: c.nome, valor_cota: masked, status_pagamento: autoStatus }];
                                   }
-                                  return [...prev, { cliente_id: c.id, nome: c.nome, valor_cota: masked, status_pagamento: autoStatus }];
+                                  const totalTarget = parseBRL(paymentTotal);
+                                  if (Number.isFinite(totalTarget)) {
+                                    const anyCoversAll = parseBRL(masked) >= totalTarget; // participante atual cobre tudo
+                                    if (anyCoversAll) {
+                                      list = list.map(p => ({ ...p, status_pagamento: 'Pago' }));
+                                      return list;
+                                    }
+                                  }
+                                  return list;
                                 });
                               }}
                               className="w-24 md:w-28 text-sm"
                             />
                           </div>
                           <div className="col-span-2 pr-2">
-                            <Select
-                              value={['Pendente','Pago'].includes(pf.status_pagamento) ? pf.status_pagamento : 'Pendente'}
-                              onValueChange={(v) => {
-                                setParticipantsForm(prev => {
-                                  const idx = prev.findIndex(p => p.cliente_id === c.id);
-                                  if (idx >= 0) {
-                                    const clone = [...prev];
-                                    clone[idx] = { ...clone[idx], status_pagamento: v };
-                                    return clone;
-                                  }
-                                  return [...prev, { cliente_id: c.id, nome: c.nome, valor_cota: pf.valor_cota, status_pagamento: v }];
-                                });
-                              }}
+                            {/* Status automático, apenas leitura (derivado do valor_cota) */}
+                            <span
+                              className={`inline-flex items-center justify-center h-8 px-2 rounded text-sm font-medium border w-full select-none ${pf.status_pagamento === 'Pago' ? 'bg-emerald-600/20 text-emerald-400 border-emerald-700/40' : 'bg-amber-600/20 text-amber-400 border-amber-700/40'}`}
+                              title={pf.status_pagamento === 'Pago' ? 'Status automático: Pago (valor > 0)' : 'Status automático: Pendente (valor = 0)'}
                             >
-                              <SelectTrigger className={`h-8 text-sm border ${pf.status_pagamento === 'Pago' ? 'bg-emerald-600/20 text-emerald-400 border-emerald-700/40' : 'bg-amber-600/20 text-amber-400 border-amber-700/40'}`}>
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {['Pendente','Pago'].map(opt => (
-                                  <SelectItem key={opt} value={opt}>{opt}</SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
+                              {pf.status_pagamento === 'Pago' ? 'Pago' : 'Pendente'}
+                            </span>
                           </div>
                           <div className="col-span-1 text-right">
                             <Button
@@ -1495,13 +1551,18 @@ function AgendaPage() {
                     })}
                   </div>
                 </div>
+                </>
               )}
 
               <DialogFooter>
+                <Button type="button" variant="ghost" className="border border-white/10" onClick={() => setIsPaymentModalOpen(false)}>Cancelar</Button>
                 <Button
                   type="button"
-                  className="bg-emerald-600 hover:bg-emerald-500 text-white"
+                  className="bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-60 disabled:cursor-not-allowed"
+                  disabled={isSavingPayments}
                   onClick={async () => {
+                    if (isSavingPayments) return;
+                    setIsSavingPayments(true);
                     try {
                       const agendamentoId = editingBooking.id;
                       const codigo = userProfile.codigo_empresa;
@@ -1518,16 +1579,21 @@ function AgendaPage() {
                         return acc + (st !== 'Pago' ? 1 : 0);
                       }, 0);
                       if (pendingCount > 0) {
-                        toast({ title: 'Pagamentos pendentes', description: `Existem ${pendingCount} participante(s) com status pendente. Atualize para Pago antes de salvar.`, variant: 'destructive' });
-                        console.warn('[ParticipantsSave] Blocked save due to pending payments', { pendingCount });
-                        console.groupEnd();
-                        return;
+                        // Aviso mais chamativo, porém não bloqueia o salvamento
+                        const firstPending = (form.selectedClients || []).find(c => ((mapForm.get(c.id)?.status_pagamento) || 'Pendente') !== 'Pago');
+                        setPaymentWarning({ type: 'pending', count: pendingCount, firstPendingId: firstPending?.id || null });
+                        console.warn('[ParticipantsSave] Proceeding save with pending payments', { pendingCount });
                       }
-                      await supabase
+                      const { error: delErr } = await supabase
                         .from('agendamento_participantes')
                         .delete()
                         .eq('codigo_empresa', codigo)
                         .eq('agendamento_id', agendamentoId);
+                      if (delErr) {
+                        console.error('[ParticipantsSave] Delete error', delErr);
+                        toast({ title: 'Erro ao salvar pagamentos', description: 'Falha ao limpar registros anteriores.', variant: 'destructive' });
+                        throw delErr;
+                      }
                       console.log('[ParticipantsSave] Existing rows deleted for booking');
                       const rows = (form.selectedClients || []).map((c) => {
                         const pf = participantsForm.find(p => p.cliente_id === c.id) || { valor_cota: null, status_pagamento: 'Pendente' };
@@ -1548,21 +1614,50 @@ function AgendaPage() {
                           .select();
                         if (error) {
                           console.error('[ParticipantsSave] Insert error', error);
+                          toast({ title: 'Erro ao salvar pagamentos', description: 'Falha ao inserir pagamentos.', variant: 'destructive' });
                           throw error;
                         }
                         console.log('[ParticipantsSave] Inserted rows', inserted?.length ?? 0, inserted);
                       } else {
                         console.warn('[ParticipantsSave] No rows to insert (selectedClients is empty)');
                       }
+                      // Recarrega participantes deste agendamento para atualizar o indicador "pagos/total" na agenda
+                      try {
+                        const { data: freshParts, error: freshErr } = await supabase
+                          .from('v_agendamento_participantes')
+                          .select('id, agendamento_id, codigo_empresa, cliente_id, nome, valor_cota, status_pagamento_text')
+                          .eq('codigo_empresa', codigo)
+                          .eq('agendamento_id', agendamentoId);
+                        if (freshErr) {
+                          console.warn('[ParticipantsSave] Refresh participants warning', freshErr);
+                        } else {
+                          setParticipantsByAgendamento((prev) => ({ ...prev, [agendamentoId]: freshParts || [] }));
+                        }
+                      } catch (rfErr) {
+                        console.warn('[ParticipantsSave] Refresh participants exception', rfErr);
+                      }
                       console.log('[ParticipantsSave] Done in', Date.now() - t0, 'ms');
                       console.groupEnd();
-                      toast({ title: 'Pagamentos salvos com sucesso' });
+                      if (pendingCount > 0) {
+                        toast({
+                          title: 'Pagamentos salvos',
+                          description: `${pendingCount} participante(s) pendente(s).`,
+                          variant: 'destructive',
+                        });
+                      } else {
+                        toast({ title: 'Pagamentos salvos com sucesso' });
+                      }
+                      setPaymentWarning(null);
+                      // Fecha modal de pagamentos e o modal de agendamento para voltar à agenda
                       setIsPaymentModalOpen(false);
+                      setIsModalOpen(false);
                     } catch (e) {
                       toast({ title: 'Erro ao salvar pagamentos', description: 'Tente novamente.', variant: 'destructive' });
                       // eslint-disable-next-line no-console
                       console.error('Salvar pagamentos:', e);
                       try { console.groupEnd(); } catch {}
+                    } finally {
+                      setIsSavingPayments(false);
                     }
                   }}
                 >Salvar Pagamentos</Button>
@@ -1579,8 +1674,12 @@ function AgendaPage() {
               try {
                 if (saved && typeof saved === 'object') {
                   // Atualiza lista se ainda não contém este cliente
-                  const exists = customerOptions.some((c) => typeof c === 'object' ? c.id === saved.id : false);
-                  if (!exists) setCustomerOptions((prev) => [...prev, saved]);
+                  const exists = (localCustomers || []).some((c) => typeof c === 'object' ? c.id === saved.id : false);
+                  if (!exists) {
+                    setLocalCustomers((prev) => [...(prev || []), saved]);
+                    // Opcional: sincroniza com o pai fora da animação inicial
+                    setCustomerOptions((prev) => [...(prev || []), saved]);
+                  }
                   setForm((f) => {
                     const already = f.selectedClients?.some(sc => sc.id === saved.id);
                     if (already) return f;
