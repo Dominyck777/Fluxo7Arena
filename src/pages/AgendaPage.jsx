@@ -1858,12 +1858,13 @@ function AgendaPage() {
 
         {/* Controls */}
         <motion.div variants={itemVariants} className="p-3 rounded-lg bg-surface mb-6">
-          <div className="max-w-[1200px] mx-auto w-full flex items-center justify-between">
+          <div className="max-w-[1200px] mx-auto w-full flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            {/* Navegação de data */}
             <div className="flex items-center gap-2">
               <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => setCurrentDate(subDays(currentDate, 1))}><ChevronLeft className="h-5 w-5" /></Button>
               <Popover>
                 <PopoverTrigger asChild>
-                  <Button variant="ghost" className="w-64 justify-center text-base font-semibold">
+                  <Button variant="ghost" className="w-full sm:w-64 justify-center text-base font-semibold">
                     <CalendarIcon className="mr-2 h-4 w-4" />
                     {format(currentDate, "EEEE, dd 'de' MMMM 'de' yyyy", { locale: ptBR })}
                   </Button>
@@ -1874,7 +1875,9 @@ function AgendaPage() {
               </Popover>
               <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => setCurrentDate(addDays(currentDate, 1))}><ChevronRight className="h-5 w-5" /></Button>
             </div>
-            <div className="flex items-center gap-3">
+            {/* Filtros e ações */}
+            <div className="flex items-center flex-wrap gap-3 justify-end">
+              <span className="text-xs text-text-muted select-none">Exibir:</span>
               <div className="flex items-center space-x-2">
                 <Checkbox
                   id="show-scheduled"
@@ -1910,7 +1913,7 @@ function AgendaPage() {
                 />
                 <Label htmlFor="show-canceled-only" className="text-sm font-medium text-text-secondary cursor-pointer">Cancelados</Label>
               </div>
-              <div className="relative w-56">
+              <div className="relative w-full sm:w-56">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted" />
                 <Input
                   placeholder="Buscar agendamento..."
