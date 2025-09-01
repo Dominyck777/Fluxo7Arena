@@ -1864,7 +1864,7 @@ function AgendaPage() {
               <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => setCurrentDate(subDays(currentDate, 1))}><ChevronLeft className="h-5 w-5" /></Button>
               <Popover>
                 <PopoverTrigger asChild>
-                  <Button variant="ghost" className="w-full sm:w-64 justify-center text-base font-semibold">
+                  <Button variant="ghost" className="w-full sm:w-auto max-w-full justify-center text-base font-semibold whitespace-nowrap truncate">
                     <CalendarIcon className="mr-2 h-4 w-4" />
                     {format(currentDate, "EEEE, dd 'de' MMMM 'de' yyyy", { locale: ptBR })}
                   </Button>
@@ -1877,42 +1877,6 @@ function AgendaPage() {
             </div>
             {/* Filtros e ações */}
             <div className="flex items-center flex-wrap gap-3 justify-end">
-              <span className="text-xs text-text-muted select-none">Exibir:</span>
-              <div className="flex items-center space-x-2">
-                <Checkbox
-                  id="show-scheduled"
-                  checked={viewFilter.scheduled}
-                  onCheckedChange={(checked) => setViewFilter(prev => ({...prev, scheduled: !!checked, canceledOnly: checked ? false : prev.canceledOnly}))}
-                />
-                <Label htmlFor="show-scheduled" className="text-sm font-medium text-text-secondary cursor-pointer">Agendados</Label>
-              </div>
-              <div className="flex items-center space-x-2">
-                <Checkbox
-                  id="show-available"
-                  checked={viewFilter.available}
-                  onCheckedChange={(checked) => setViewFilter(prev => ({...prev, available: !!checked, canceledOnly: checked ? false : prev.canceledOnly}))}
-                />
-                <Label htmlFor="show-available" className="text-sm font-medium text-text-secondary cursor-pointer">Livres</Label>
-              </div>
-              <div className="flex items-center space-x-2">
-                <Checkbox
-                  id="show-canceled-only"
-                  checked={viewFilter.canceledOnly}
-                  onCheckedChange={(checked) => {
-                    const isOn = !!checked;
-                    setViewFilter(prev => ({
-                      ...prev,
-                      canceledOnly: isOn,
-                      scheduled: isOn ? false : prev.scheduled,
-                      available: isOn ? false : prev.available,
-                    }));
-                    if (isOn && !hideCanceledInfo) {
-                      setShowCanceledInfo(true);
-                    }
-                  }}
-                />
-                <Label htmlFor="show-canceled-only" className="text-sm font-medium text-text-secondary cursor-pointer">Cancelados</Label>
-              </div>
               <div className="relative w-full sm:w-56">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted" />
                 <Input
@@ -1942,8 +1906,62 @@ function AgendaPage() {
                     <SlidersHorizontal className="h-4 w-4" /> Filtros
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-56">
-                  <DropdownMenuLabel>Quadras</DropdownMenuLabel>
+                <DropdownMenuContent align="end" className="w-64">
+                  <DropdownMenuLabel>
+                    Exibição
+                  </DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={(e) => e.preventDefault()}>
+                    <div className="flex items-center justify-between gap-3 w-full">
+                      <div className="flex items-center gap-2">
+                        <CalendarIcon className="h-4 w-4 text-text-muted" />
+                        <span>Agendados</span>
+                      </div>
+                      <Checkbox
+                        checked={viewFilter.scheduled}
+                        onCheckedChange={(checked) => setViewFilter(prev => ({...prev, scheduled: !!checked, canceledOnly: checked ? false : prev.canceledOnly}))}
+                      />
+                    </div>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={(e) => e.preventDefault()}>
+                    <div className="flex items-center justify-between gap-3 w-full">
+                      <div className="flex items-center gap-2">
+                        <Sparkles className="h-4 w-4 text-text-muted" />
+                        <span>Livres</span>
+                      </div>
+                      <Checkbox
+                        checked={viewFilter.available}
+                        onCheckedChange={(checked) => setViewFilter(prev => ({...prev, available: !!checked, canceledOnly: checked ? false : prev.canceledOnly}))}
+                      />
+                    </div>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={(e) => e.preventDefault()}>
+                    <div className="flex items-center justify-between gap-3 w-full">
+                      <div className="flex items-center gap-2">
+                        <XCircle className="h-4 w-4 text-rose-400" />
+                        <span>Cancelados</span>
+                      </div>
+                      <Checkbox
+                        checked={viewFilter.canceledOnly}
+                        onCheckedChange={(checked) => {
+                          const isOn = !!checked;
+                          setViewFilter(prev => ({
+                            ...prev,
+                            canceledOnly: isOn,
+                            scheduled: isOn ? false : prev.scheduled,
+                            available: isOn ? false : prev.available,
+                          }));
+                          if (isOn && !hideCanceledInfo) {
+                            setShowCanceledInfo(true);
+                          }
+                        }}
+                      />
+                    </div>
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuLabel>
+                    Quadras • {selectedCourts.length}/{availableCourts.length}
+                  </DropdownMenuLabel>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={(e) => { e.preventDefault(); setSelectedCourts(availableCourts); }}>Selecionar todas</DropdownMenuItem>
                   <DropdownMenuItem onClick={(e) => { e.preventDefault(); setSelectedCourts([]); }}>Limpar</DropdownMenuItem>
@@ -1951,10 +1969,20 @@ function AgendaPage() {
                   {availableCourts.map((c) => {
                     const checked = selectedCourts.includes(c);
                     return (
-                      <DropdownMenuItem key={c} onClick={(e) => { e.preventDefault(); setSelectedCourts(prev => checked ? prev.filter(x => x !== c) : [...prev, c]); }}>
-                        <div className="flex items-center gap-2">
-                          <Checkbox checked={checked} onCheckedChange={() => { /* handled by item click */ }} />
-                          <span>{c}</span>
+                      <DropdownMenuItem key={c} onClick={(e) => e.preventDefault()}>
+                        <div className="flex items-center justify-between gap-3 w-full">
+                          <div className="flex items-center gap-2">
+                            <span
+                              className="inline-block w-2.5 h-2.5 rounded-full"
+                              style={{ backgroundColor: getCourtColor(c), boxShadow: '0 0 0 2px rgba(255,255,255,0.06)' }}
+                              aria-hidden="true"
+                            />
+                            <span>{c}</span>
+                          </div>
+                          <Checkbox
+                            checked={checked}
+                            onCheckedChange={() => setSelectedCourts(prev => checked ? prev.filter(x => x !== c) : [...prev, c])}
+                          />
                         </div>
                       </DropdownMenuItem>
                     );
