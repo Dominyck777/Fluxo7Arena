@@ -152,10 +152,10 @@ function AgendaPage() {
     try {
       const saved = JSON.parse(localStorage.getItem('agenda:viewFilter') || '{}');
       if (saved && typeof saved === 'object') {
-        return { scheduled: true, available: true, ...saved };
+        return { scheduled: true, available: true, canceledOnly: false, ...saved };
       }
     } catch {}
-    return { scheduled: true, available: true };
+    return { scheduled: true, available: true, canceledOnly: false };
   });
 
   // Lista de quadras vinda do banco (objetos com nome, modalidades, horario)
@@ -190,6 +190,7 @@ function AgendaPage() {
   // Lista de clientes vinda do banco (sem clientes fictícios)
   const [customerOptions, setCustomerOptions] = useState([]);
   const scrollRef = useRef(null);
+  const prevFiltersRef = useRef({ scheduled: true, canceledOnly: false });
   // Prefill ao clicar em um slot livre
   const [prefill, setPrefill] = useState(null);
   // Busca
@@ -197,6 +198,15 @@ function AgendaPage() {
   // Re-tentativas controladas para Vercel (evita sobrescrever cache com vazio em delays de token)
   const bookingsRetryRef = useRef(false);
   const courtsRetryRef = useRef(false);
+
+  // Aviso inteligente sobre cancelados
+  const [showCanceledInfo, setShowCanceledInfo] = useState(false);
+  const [hideCanceledInfo, setHideCanceledInfo] = useState(() => {
+    try { return localStorage.getItem('agenda:hideCanceledInfo') === '1'; } catch { return false; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('agenda:hideCanceledInfo', hideCanceledInfo ? '1' : '0'); } catch {}
+  }, [hideCanceledInfo]);
 
   // Chave de cache por empresa/data (yyyy-mm-dd)
   const bookingsCacheKey = useMemo(() => {
@@ -406,7 +416,7 @@ function AgendaPage() {
     }
     // Restaura filtros se existirem
     if (savedFilter && (typeof savedFilter === 'object')) {
-      setViewFilter((prev) => ({ ...prev, ...savedFilter }));
+      setViewFilter((prev) => ({ ...prev, canceledOnly: false, ...savedFilter }));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [courtsLoading, availableCourts.length]);
@@ -654,9 +664,24 @@ function AgendaPage() {
 
     // Evitar recarregar clientes repetidamente durante a mesma abertura do modal
     const clientsLoadedKeyRef = useRef(null);
+    const clientsRetryRef = useRef(false);
     useEffect(() => {
-      // Sincroniza lista local com o snapshot atual do pai apenas no abrir
-      if (isModalOpen) setLocalCustomers(customerOptions);
+      // Sincroniza lista local com o snapshot atual do pai ao abrir
+      if (isModalOpen) {
+        setLocalCustomers(customerOptions);
+        // Tenta hidratar de cache se lista estiver vazia
+        try {
+          if (!localCustomers || localCustomers.length === 0) {
+            const key = userProfile?.codigo_empresa ? `clientes:list:${userProfile.codigo_empresa}` : null;
+            if (key) {
+              const cached = JSON.parse(localStorage.getItem(key) || '[]');
+              if (Array.isArray(cached) && cached.length > 0) {
+                setLocalCustomers(cached);
+              }
+            }
+          }
+        } catch {}
+      }
     }, [isModalOpen]);
     useEffect(() => {
       const loadClients = async () => {
@@ -670,17 +695,51 @@ function AgendaPage() {
             .eq('codigo_empresa', userProfile.codigo_empresa)
             .eq('status', 'active')
             .order('nome', { ascending: true });
-          if (!error && Array.isArray(data)) {
-            // Atualiza somente a lista local para não provocar re-render do pai durante animação
+          if (error) {
+            // eslint-disable-next-line no-console
+            console.error('Falha ao carregar clientes:', error);
+            return;
+          }
+          if (Array.isArray(data)) {
+            if (data.length === 0) {
+              // Não sobrescrever com vazio; tenta de novo se houver cache
+              let cachedLen = 0;
+              try {
+                const cacheKey = `clientes:list:${userProfile.codigo_empresa}`;
+                const cached = JSON.parse(localStorage.getItem(cacheKey) || '[]');
+                cachedLen = Array.isArray(cached) ? cached.length : 0;
+              } catch {}
+              if (cachedLen > 0 && !clientsRetryRef.current) {
+                clientsRetryRef.current = true;
+                setTimeout(loadClients, 700);
+                return;
+              }
+              // Mantém estado atual se não há cache
+              return;
+            }
+            // Temos dados: atualiza local e cache, e marca como carregado
             const same = JSON.stringify(data) === JSON.stringify(localCustomers);
             if (!same) setLocalCustomers(data);
+            try {
+              const cacheKey = `clientes:list:${userProfile.codigo_empresa}`;
+              localStorage.setItem(cacheKey, JSON.stringify(data));
+            } catch {}
+            clientsRetryRef.current = false;
             clientsLoadedKeyRef.current = key;
+            // Opcional: sincroniza lista do pai
+            try {
+              setCustomerOptions((prev) => {
+                const sameParent = JSON.stringify(prev) === JSON.stringify(data);
+                return sameParent ? prev : data;
+              });
+            } catch {}
           }
         } catch {}
       };
       loadClients();
       if (!isModalOpen) {
         clientsLoadedKeyRef.current = null; // reset ao fechar
+        clientsRetryRef.current = false;
       }
       // Dependemos de isModalOpen e localCustomers (snapshot) para evitar loop
     }, [isModalOpen, userProfile?.codigo_empresa, localCustomers]);
@@ -1155,7 +1214,12 @@ function AgendaPage() {
                   <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     {Object.keys(statusConfig).map((k) => (
-                      <SelectItem key={k} value={k}>{statusConfig[k].label}</SelectItem>
+                      <SelectItem key={k} value={k}>
+                        <span className="flex items-center gap-2">
+                          <span aria-hidden className={`inline-block h-4 w-1 rounded ${statusConfig[k].accent}`} />
+                          {statusConfig[k].label}
+                        </span>
+                      </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -1220,7 +1284,7 @@ function AgendaPage() {
               <Button
                 type="button"
                 variant="secondary"
-                className="bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-700"
+                className="ml-6 mr-auto bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-700"
                 onClick={() => setIsPaymentModalOpen(true)}
               >
                 <DollarSign className="w-4 h-4 mr-2 opacity-90" /> Pagamentos
@@ -1356,8 +1420,8 @@ function AgendaPage() {
           <DialogContent
             className="sm:max-w-[960px] max-h-[90vh] overflow-y-auto"
             onOpenAutoFocus={(e) => e.preventDefault()}
-            onInteractOutside={(e) => { if (paymentWarning?.type === 'pending') e.preventDefault(); }}
-            onEscapeKeyDown={(e) => { if (paymentWarning?.type === 'pending') e.preventDefault(); }}
+            onInteractOutside={(e) => { e.preventDefault(); }}
+            onEscapeKeyDown={(e) => { e.preventDefault(); }}
           >
             <DialogHeader>
               <DialogTitle>Registrar pagamento</DialogTitle>
@@ -1572,16 +1636,13 @@ function AgendaPage() {
                       console.log('[ParticipantsSave] Selected clients', form.selectedClients);
                       console.log('[ParticipantsSave] Participants form', participantsForm);
 
-                      // Verificação: bloqueia se houver pagamentos pendentes
+                      // Verificação: pendentes (somente notificação; não exibir banner bloqueante)
                       const mapForm = new Map((participantsForm || []).map(p => [p.cliente_id, p]));
                       const pendingCount = (form.selectedClients || []).reduce((acc, c) => {
                         const st = (mapForm.get(c.id)?.status_pagamento) || 'Pendente';
                         return acc + (st !== 'Pago' ? 1 : 0);
                       }, 0);
                       if (pendingCount > 0) {
-                        // Aviso mais chamativo, porém não bloqueia o salvamento
-                        const firstPending = (form.selectedClients || []).find(c => ((mapForm.get(c.id)?.status_pagamento) || 'Pendente') !== 'Pago');
-                        setPaymentWarning({ type: 'pending', count: pendingCount, firstPendingId: firstPending?.id || null });
                         console.warn('[ParticipantsSave] Proceeding save with pending payments', { pendingCount });
                       }
                       const { error: delErr } = await supabase
@@ -1638,19 +1699,32 @@ function AgendaPage() {
                       }
                       console.log('[ParticipantsSave] Done in', Date.now() - t0, 'ms');
                       console.groupEnd();
-                      if (pendingCount > 0) {
+                      // Avalia total atribuído vs total alvo e pendências (notificações; salvamento não é bloqueado)
+                      const totalTargetParsed = parseBRL(paymentTotal);
+                      const totalTarget = Number.isFinite(totalTargetParsed) ? totalTargetParsed : 0;
+                      const totalAssigned = (form.selectedClients || []).reduce((sum, c) => {
+                        const pf = participantsForm.find(p => p.cliente_id === c.id);
+                        const v = parseBRL(pf?.valor_cota);
+                        return sum + (Number.isFinite(v) ? v : 0);
+                      }, 0);
+                      if (totalTarget > 0 && totalAssigned < totalTarget - 0.005) {
                         toast({
                           title: 'Pagamentos salvos',
-                          description: `${pendingCount} participante(s) pendente(s).`,
+                          description: 'Total não alcançado.',
                           variant: 'destructive',
                         });
+                      } else if (pendingCount > 0) {
+                        toast({
+                          title: 'Pagamentos salvos',
+                          description: `Pendentes: ${pendingCount}`,
+                          variant: 'warning',
+                        });
                       } else {
-                        toast({ title: 'Pagamentos salvos com sucesso' });
+                        toast({ title: 'Pagamentos salvos', variant: 'success' });
                       }
                       setPaymentWarning(null);
-                      // Fecha modal de pagamentos e o modal de agendamento para voltar à agenda
+                      // Fecha somente o modal de pagamentos; mantém o modal principal aberto
                       setIsPaymentModalOpen(false);
-                      setIsModalOpen(false);
                     } catch (e) {
                       toast({ title: 'Erro ao salvar pagamentos', description: 'Tente novamente.', variant: 'destructive' });
                       // eslint-disable-next-line no-console
@@ -1696,29 +1770,29 @@ function AgendaPage() {
         };
 
     const filteredBookings = useMemo(() => {
-    const dayStr = format(currentDate, 'yyyy-MM-dd');
-    let dayBookings = bookings.filter(b => format(b.start, 'yyyy-MM-dd') === dayStr);
-    if (searchQuery.trim()) {
-      const q = searchQuery.trim().toLowerCase();
-      dayBookings = dayBookings.filter(b => {
-        const cfg = statusConfig[b.status] || {};
-        const timeStr = `${format(b.start, 'HH:mm')}–${format(b.end, 'HH:mm')}`;
-        return (
-          (b.customer && b.customer.toLowerCase().includes(q)) ||
-          (b.court && b.court.toLowerCase().includes(q)) ||
-          (b.modality && b.modality.toLowerCase().includes(q)) ||
-          (cfg.label && cfg.label.toLowerCase().includes(q)) ||
-          timeStr.includes(q)
+      const dayStr = format(currentDate, 'yyyy-MM-dd');
+      let dayBookings = bookings.filter(b => format(b.start, 'yyyy-MM-dd') === dayStr);
+      // Regras de cancelados:
+      // - Quando canceledOnly ativo: mostrar somente cancelados
+      // - Caso contrário: excluir cancelados da agenda
+      dayBookings = viewFilter.canceledOnly
+        ? dayBookings.filter(b => b.status === 'canceled')
+        : dayBookings.filter(b => b.status !== 'canceled');
+      if (searchQuery.trim()) {
+        const q = searchQuery.trim().toLowerCase();
+        dayBookings = dayBookings.filter(b =>
+          (b.customer || '').toLowerCase().includes(q)
+          || (b.court || '').toLowerCase().includes(q)
+          || (statusConfig[b.status]?.label || '').toLowerCase().includes(q)
         );
-      });
-    }
-    return viewFilter.scheduled ? dayBookings : [];
-  }, [bookings, currentDate, viewFilter.scheduled, searchQuery]);
+      }
+      return (viewFilter.scheduled || viewFilter.canceledOnly) ? dayBookings : [];
+    }, [bookings, currentDate, viewFilter.scheduled, viewFilter.canceledOnly, searchQuery]);
 
   // Após computar os resultados, rola até o primeiro match quando houver busca
   useEffect(() => {
     if (!searchQuery.trim()) return;
-    if (!viewFilter.scheduled) return; // só quando agendados visíveis
+    if (!(viewFilter.scheduled || viewFilter.canceledOnly)) return; // só quando agendados ou cancelados visíveis
     if (!filteredBookings || filteredBookings.length === 0) return;
     const first = [...filteredBookings].sort((a, b) => a.start - b.start)[0];
     if (!first?.id) return;
@@ -1726,7 +1800,42 @@ function AgendaPage() {
     if (el?.scrollIntoView) {
       el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
     }
-  }, [searchQuery, filteredBookings, viewFilter.scheduled]);
+  }, [searchQuery, filteredBookings, viewFilter.scheduled, viewFilter.canceledOnly]);
+
+  // Inteligência nos checkboxes: ao ativar Agendados ou Cancelados, rola até o primeiro visível daquele tipo
+  useEffect(() => {
+    const container = scrollRef.current;
+    const prev = prevFiltersRef.current || {};
+    // Detecta habilitação dos filtros
+    const justEnabledCanceled = viewFilter.canceledOnly && !prev.canceledOnly;
+    const justEnabledScheduled = viewFilter.scheduled && !prev.scheduled && !viewFilter.canceledOnly; // scheduled ativo e não em modo cancelados
+    if (!container || (!justEnabledCanceled && !justEnabledScheduled)) {
+      prevFiltersRef.current = { scheduled: viewFilter.scheduled, canceledOnly: viewFilter.canceledOnly };
+      return;
+    }
+    // Lista já está filtrada para o modo atual (canceledOnly restringe para cancelados)
+    const list = filteredBookings || [];
+    if (list.length === 0) {
+      prevFiltersRef.current = { scheduled: viewFilter.scheduled, canceledOnly: viewFilter.canceledOnly };
+      return;
+    }
+    // Verifica se algum desses itens já está visível no viewport do container
+    const cRect = container.getBoundingClientRect();
+    const anyVisible = list.some((b) => {
+      const el = document.getElementById(`booking-${b.id}`);
+      if (!el) return false;
+      const r = el.getBoundingClientRect();
+      return r.bottom > cRect.top && r.top < cRect.bottom;
+    });
+    if (!anyVisible) {
+      const first = [...list].sort((a, b) => a.start - b.start)[0];
+      const el = first && document.getElementById(`booking-${first.id}`);
+      if (el?.scrollIntoView) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+      }
+    }
+    prevFiltersRef.current = { scheduled: viewFilter.scheduled, canceledOnly: viewFilter.canceledOnly };
+  }, [viewFilter.scheduled, viewFilter.canceledOnly, filteredBookings]);
 
   // Cores por quadra agora são geradas de forma determinística via getCourtColor(name)
 
@@ -1767,12 +1876,39 @@ function AgendaPage() {
             </div>
             <div className="flex items-center gap-3">
               <div className="flex items-center space-x-2">
-                <Checkbox id="show-scheduled" checked={viewFilter.scheduled} onCheckedChange={(checked) => setViewFilter(prev => ({...prev, scheduled: !!checked}))} />
+                <Checkbox
+                  id="show-scheduled"
+                  checked={viewFilter.scheduled}
+                  onCheckedChange={(checked) => setViewFilter(prev => ({...prev, scheduled: !!checked, canceledOnly: checked ? false : prev.canceledOnly}))}
+                />
                 <Label htmlFor="show-scheduled" className="text-sm font-medium text-text-secondary cursor-pointer">Agendados</Label>
               </div>
               <div className="flex items-center space-x-2">
-                <Checkbox id="show-available" checked={viewFilter.available} onCheckedChange={(checked) => setViewFilter(prev => ({...prev, available: !!checked}))} />
+                <Checkbox
+                  id="show-available"
+                  checked={viewFilter.available}
+                  onCheckedChange={(checked) => setViewFilter(prev => ({...prev, available: !!checked, canceledOnly: checked ? false : prev.canceledOnly}))}
+                />
                 <Label htmlFor="show-available" className="text-sm font-medium text-text-secondary cursor-pointer">Livres</Label>
+              </div>
+              <div className="flex items-center space-x-2">
+                <Checkbox
+                  id="show-canceled-only"
+                  checked={viewFilter.canceledOnly}
+                  onCheckedChange={(checked) => {
+                    const isOn = !!checked;
+                    setViewFilter(prev => ({
+                      ...prev,
+                      canceledOnly: isOn,
+                      scheduled: isOn ? false : prev.scheduled,
+                      available: isOn ? false : prev.available,
+                    }));
+                    if (isOn && !hideCanceledInfo) {
+                      setShowCanceledInfo(true);
+                    }
+                  }}
+                />
+                <Label htmlFor="show-canceled-only" className="text-sm font-medium text-text-secondary cursor-pointer">Cancelados</Label>
               </div>
               <div className="relative w-56">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted" />
@@ -1825,6 +1961,32 @@ function AgendaPage() {
             </div>
           </div>
         </motion.div>
+
+        {/* Info Modal para filtro de Cancelados */}
+        <Dialog open={showCanceledInfo} onOpenChange={setShowCanceledInfo}>
+          <DialogContent className="sm:max-w-[520px]" onOpenAutoFocus={(e) => e.preventDefault()}>
+            <DialogHeader>
+              <DialogTitle>Sobre agendamentos cancelados</DialogTitle>
+              <DialogDescription>
+                Agendamentos cancelados não aparecem na agenda quando o filtro não está selecionado e não ocupam horário.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="flex items-start gap-3 mt-2">
+              <Checkbox
+                id="hide-canceled-info"
+                checked={hideCanceledInfo}
+                onCheckedChange={(v) => setHideCanceledInfo(!!v)}
+                className="mt-0.5"
+              />
+              <Label htmlFor="hide-canceled-info" className="text-sm cursor-pointer text-text-secondary">
+                Não mostrar novamente
+              </Label>
+            </div>
+            <DialogFooter className="mt-4">
+              <Button type="button" onClick={() => setShowCanceledInfo(false)}>Entendi</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         {/* Aviso: nenhuma quadra cadastrada */}
         {!courtsLoading && availableCourts.length === 0 && (
@@ -1915,7 +2077,7 @@ function AgendaPage() {
               {/* Container relativo para posicionar reservas */}
               <div className="relative" style={{ height: totalGridHeight }}>
                 {/* Linhas base por quadra: exibe apenas durante o horário de funcionamento dessa quadra */}
-                {viewFilter.scheduled && (() => {
+                {(viewFilter.scheduled || viewFilter.canceledOnly) && (() => {
                   const bounds = (() => {
                     const tStart = courtsMap[court]?.hora_inicio;
                     const tEnd = courtsMap[court]?.hora_fim;
@@ -1951,8 +2113,8 @@ function AgendaPage() {
                     </>
                   );
                 })()}
-                {/* Agendados */}
-                {viewFilter.scheduled && filteredBookings
+                {/* Agendados ou Cancelados (filtrados) */}
+                {(viewFilter.scheduled || viewFilter.canceledOnly) && filteredBookings
                   .filter(b => b.court === court)
                   .map(b => <BookingCard key={b.id} booking={b} />)
                 }
@@ -1974,7 +2136,7 @@ function AgendaPage() {
                   const toMinutes = (d) => getHours(d) * 60 + getMinutes(d);
                   const dayStr = format(currentDate, 'yyyy-MM-dd');
                   const intervals = bookings
-                    .filter(b => b.court === court && format(b.start, 'yyyy-MM-dd') === dayStr)
+                    .filter(b => b.court === court && format(b.start, 'yyyy-MM-dd') === dayStr && b.status !== 'canceled')
                     .map(b => [toMinutes(b.start), toMinutes(b.end)])
                     .sort((a,b) => a[0]-b[0]);
                   const free = [];
