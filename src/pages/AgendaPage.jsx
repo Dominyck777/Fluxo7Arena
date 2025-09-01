@@ -906,7 +906,7 @@ function AgendaPage() {
       const dayStr = format(form.date, 'yyyy-MM-dd');
       const toMinutes = (d) => getHours(d) * 60 + getMinutes(d);
       return bookings
-        .filter(b => b.court === form.court && format(b.start, 'yyyy-MM-dd') === dayStr && (!editingBooking || b.id !== editingBooking.id))
+        .filter(b => b.court === form.court && format(b.start, 'yyyy-MM-dd') === dayStr && b.status !== 'canceled' && (!editingBooking || b.id !== editingBooking.id))
         .map(b => [toMinutes(b.start), toMinutes(b.end)])
         .sort((a, b) => a[0] - b[0]);
     }, [bookings, form.court, form.date, editingBooking]);
