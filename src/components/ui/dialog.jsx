@@ -12,11 +12,14 @@ const DialogPortal = DialogPrimitive.Portal
 
 const DialogClose = DialogPrimitive.Close
 
-const DialogOverlay = React.forwardRef(({ className, ...props }, ref) => (
+const DialogOverlay = React.forwardRef(({ className, disableAnimations, ...props }, ref) => (
   <DialogPrimitive.Overlay
     ref={ref}
     className={cn(
-      "fixed inset-0 z-50 bg-background/80 backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
+      "fixed inset-0 z-50 bg-background/80 backdrop-blur-sm",
+      disableAnimations
+        ? "data-[state=open]:animate-none data-[state=closed]:animate-none"
+        : "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
       className
     )}
     {...props}
@@ -24,13 +27,19 @@ const DialogOverlay = React.forwardRef(({ className, ...props }, ref) => (
 ))
 DialogOverlay.displayName = DialogPrimitive.Overlay.displayName
 
-const DialogContent = React.forwardRef(({ className, children, ...props }, ref) => (
+const DialogContent = React.forwardRef(({ className, children, overlayClassName, disableAnimations, alignTop, ...props }, ref) => (
   <DialogPortal>
-    <DialogOverlay />
+    <DialogOverlay disableAnimations={disableAnimations} className={overlayClassName} />
     <DialogPrimitive.Content
       ref={ref}
       className={cn(
-        "fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 border border-border bg-surface p-6 shadow-lg duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 sm:rounded-lg",
+        "fixed z-50 grid w-full max-w-lg gap-4 border border-border bg-surface p-6 shadow-lg duration-200 sm:rounded-lg",
+        alignTop
+          ? "left-1/2 top-[10%] -translate-x-1/2"
+          : "left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2",
+        disableAnimations
+          ? "data-[state=open]:animate-none data-[state=closed]:animate-none"
+          : "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
         className
       )}
       {...props}

@@ -148,6 +148,23 @@ function AgendaPage() {
   const [editingBooking, setEditingBooking] = useState(null); // quando definido, modal entra em modo edição
   // Participantes por agendamento (carregado após buscar bookings do dia)
   const [participantsByAgendamento, setParticipantsByAgendamento] = useState({});
+  // Controle de concorrência e limpeza segura
+  const participantsReqIdRef = useRef(0);
+  const lastParticipantsDateKeyRef = useRef('');
+
+  // Evita duplo disparo de abertura em dev/StrictMode ou por eventos sobrepostos
+  const lastOpenRef = useRef(0);
+  const hasOpenedRef = useRef(false);
+  const openBookingModal = useCallback(() => {
+    const now = Date.now();
+    if (isModalOpen) return; // já aberto
+    if (now - lastOpenRef.current < 350) return; // ignora repetição em ~350ms
+    lastOpenRef.current = now;
+    // debug leve
+    try { console.info('[Agenda] openBookingModal'); } catch {}
+    setIsModalOpen(true);
+    hasOpenedRef.current = true;
+  }, []);
   const [viewFilter, setViewFilter] = useState(() => {
     try {
       const saved = JSON.parse(localStorage.getItem('agenda:viewFilter') || '{}');
@@ -215,6 +232,13 @@ function AgendaPage() {
     return `agenda:bookings:${userProfile.codigo_empresa}:${dayStr}`;
   }, [userProfile?.codigo_empresa, currentDate]);
 
+  // Cache local específico dos participantes por empresa/data
+  const participantsCacheKey = useMemo(() => {
+    if (!userProfile?.codigo_empresa) return null;
+    const dayStr = format(currentDate, 'yyyy-MM-dd');
+    return `agenda:participants:${userProfile.codigo_empresa}:${dayStr}`;
+  }, [userProfile?.codigo_empresa, currentDate]);
+
   // efeito de rolagem automática será definido após filteredBookings
 
   // Hidrata agendamentos a partir do cache antes da busca
@@ -233,6 +257,18 @@ function AgendaPage() {
       }
     } catch {}
   }, [bookingsCacheKey]);
+
+  // Hidrata participantes a partir do cache do dia (evita sumiço ao voltar para a aba)
+  useEffect(() => {
+    if (!participantsCacheKey) return;
+    try {
+      const cached = JSON.parse(localStorage.getItem(participantsCacheKey) || '{}');
+      if (cached && typeof cached === 'object') {
+        setParticipantsByAgendamento(cached);
+        lastParticipantsDateKeyRef.current = format(currentDate, 'yyyy-MM-dd');
+      }
+    } catch {}
+  }, [participantsCacheKey]);
 
   // Carrega agendamentos do dia atual a partir do banco
   useEffect(() => {
@@ -316,30 +352,46 @@ function AgendaPage() {
     const loadParticipants = async () => {
       if (!authReady || !userProfile?.codigo_empresa) return;
       const ids = (bookings || []).map(b => b.id).filter(Boolean);
+      const dateKey = format(currentDate, 'yyyy-MM-dd');
+      // Evita wipe em estados transitórios de carregamento de bookings
       if (!ids.length) {
-        setParticipantsByAgendamento({});
+        if (lastParticipantsDateKeyRef.current !== dateKey) {
+          setParticipantsByAgendamento({});
+          try { if (participantsCacheKey) localStorage.setItem(participantsCacheKey, '{}'); } catch {}
+          lastParticipantsDateKeyRef.current = dateKey;
+        }
         return;
       }
+      const reqId = ++participantsReqIdRef.current;
       const { data, error } = await supabase
         .from('v_agendamento_participantes')
-        .select('id, agendamento_id, codigo_empresa, cliente_id, nome, valor_cota, status_pagamento_text')
-        .eq('codigo_empresa', userProfile.codigo_empresa)
+        .select('*')
         .in('agendamento_id', ids);
+      // Ignora respostas atrasadas
+      if (participantsReqIdRef.current !== reqId) return;
       if (error) {
-        // eslint-disable-next-line no-console
-        console.error('Falha ao carregar participantes:', error);
-        return;
+        console.warn('[Participants] load error', error);
+        return; // mantém estado anterior
       }
       const map = {};
-      for (const row of data || []) {
+      for (const row of (data || [])) {
         const k = row.agendamento_id;
         if (!map[k]) map[k] = [];
         map[k].push(row);
       }
-      setParticipantsByAgendamento(map);
+      lastParticipantsDateKeyRef.current = dateKey;
+      // Atualiza apenas os IDs consultados, preservando outros e persiste em cache
+      setParticipantsByAgendamento(prev => {
+        const next = { ...prev };
+        for (const id of ids) {
+          next[id] = map[id] || [];
+        }
+        try { if (participantsCacheKey) localStorage.setItem(participantsCacheKey, JSON.stringify(next)); } catch {}
+        return next;
+      });
     };
     loadParticipants();
-  }, [authReady, userProfile?.codigo_empresa, bookings]);
+  }, [authReady, userProfile?.codigo_empresa, bookings, currentDate, participantsCacheKey]);
 
   // Carregar quadras do banco por empresa (inclui modalidades e horários)
   useEffect(() => {
@@ -527,10 +579,10 @@ function AgendaPage() {
     const totalParticipants = participants.length;
     return (
       <motion.div
-        layout="position"
-        initial={{ opacity: 0, y: 6 }}
-        animate={{ opacity: 1, y: 0 }}
-        exit={{ opacity: 0, y: 6 }}
+        layout={isModalOpen ? false : "position"}
+        initial={isModalOpen ? false : { opacity: 0, y: 6 }}
+        animate={isModalOpen ? false : { opacity: 1, y: 0 }}
+        exit={isModalOpen ? false : { opacity: 0, y: 6 }}
         id={`booking-${booking.id}`}
         className={cn(
           "absolute left-2 right-2 rounded-md border-2 bg-surface text-sm shadow-sm z-0 cursor-pointer",
@@ -539,7 +591,7 @@ function AgendaPage() {
           "overflow-hidden transition-all duration-150 hover:bg-surface-2 hover:shadow-md"
         )}
         style={{ top: `${adjTop}px`, height: `${adjHeight}px` }}
-        onClick={() => { setEditingBooking(booking); setIsModalOpen(true); }}
+        onClick={() => { setEditingBooking(booking); openBookingModal(); }}
       >
         {/* Acento de status à esquerda */}
         <div className={cn("absolute left-0 top-0 h-full w-[6px] rounded-l-md", config.accent)} />
@@ -644,7 +696,9 @@ function AgendaPage() {
     // Participantes (apenas no modo edição): { cliente_id, nome, valor_cota, status_pagamento }
     const [participantsForm, setParticipantsForm] = useState([]);
     const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
+    const [clientsLoading, setClientsLoading] = useState(false);
     const [isSavingPayments, setIsSavingPayments] = useState(false);
+    const [isSavingBooking, setIsSavingBooking] = useState(false);
     const [paymentSelectedId, setPaymentSelectedId] = useState(null);
     // Aviso de pendências no modal de pagamento
     const [paymentWarning, setPaymentWarning] = useState(null);
@@ -667,82 +721,74 @@ function AgendaPage() {
     const clientsRetryRef = useRef(false);
     useEffect(() => {
       // Sincroniza lista local com o snapshot atual do pai ao abrir
-      if (isModalOpen) {
-        setLocalCustomers(customerOptions);
-        // Tenta hidratar de cache se lista estiver vazia
-        try {
-          if (!localCustomers || localCustomers.length === 0) {
-            const key = userProfile?.codigo_empresa ? `clientes:list:${userProfile.codigo_empresa}` : null;
-            if (key) {
-              const cached = JSON.parse(localStorage.getItem(key) || '[]');
-              if (Array.isArray(cached) && cached.length > 0) {
-                setLocalCustomers(cached);
-              }
+      if (!isModalOpen) return;
+      setLocalCustomers(customerOptions);
+      // Tenta hidratar de cache se lista estiver vazia
+      try {
+        if (!localCustomers || localCustomers.length === 0) {
+          const key = userProfile?.codigo_empresa ? `clientes:list:${userProfile.codigo_empresa}` : null;
+          if (key) {
+            const cached = JSON.parse(localStorage.getItem(key) || '[]');
+            if (Array.isArray(cached) && cached.length > 0) {
+              setLocalCustomers(cached);
             }
           }
-        } catch {}
-      }
-    }, [isModalOpen]);
-    useEffect(() => {
-      const loadClients = async () => {
-        if (!isModalOpen || !userProfile?.codigo_empresa) return;
-        const key = String(userProfile.codigo_empresa);
-        if (clientsLoadedKeyRef.current === key) return; // já carregado nesta abertura
-        try {
-          const { data, error } = await supabase
-            .from('clientes')
-            .select('id, nome, codigo, email, telefone, status, codigo_empresa')
-            .eq('codigo_empresa', userProfile.codigo_empresa)
-            .eq('status', 'active')
-            .order('nome', { ascending: true });
-          if (error) {
-            // eslint-disable-next-line no-console
-            console.error('Falha ao carregar clientes:', error);
-            return;
-          }
-          if (Array.isArray(data)) {
-            if (data.length === 0) {
-              // Não sobrescrever com vazio; tenta de novo se houver cache
-              let cachedLen = 0;
-              try {
-                const cacheKey = `clientes:list:${userProfile.codigo_empresa}`;
-                const cached = JSON.parse(localStorage.getItem(cacheKey) || '[]');
-                cachedLen = Array.isArray(cached) ? cached.length : 0;
-              } catch {}
-              if (cachedLen > 0 && !clientsRetryRef.current) {
-                clientsRetryRef.current = true;
-                setTimeout(loadClients, 700);
-                return;
-              }
-              // Mantém estado atual se não há cache
-              return;
-            }
-            // Temos dados: atualiza local e cache, e marca como carregado
-            const same = JSON.stringify(data) === JSON.stringify(localCustomers);
-            if (!same) setLocalCustomers(data);
+        }
+      } catch {}
+    }, [isModalOpen, customerOptions]);
+  useEffect(() => {
+    const loadClients = async () => {
+      if (!isModalOpen || !userProfile?.codigo_empresa) return;
+      const key = String(userProfile.codigo_empresa);
+      if (clientsLoadedKeyRef.current === key) return; // já carregado nesta abertura
+      try {
+        setClientsLoading(true);
+        const { data, error } = await supabase
+          .from('clientes')
+          .select('id, nome, codigo, email, telefone, status, codigo_empresa')
+          .eq('codigo_empresa', userProfile.codigo_empresa)
+          .eq('status', 'active')
+          .order('nome', { ascending: true });
+        if (error) {
+          // eslint-disable-next-line no-console
+          console.error('Falha ao carregar clientes:', error);
+          return;
+        }
+        if (Array.isArray(data)) {
+          if (data.length === 0) {
+            // Não sobrescrever com vazio; tenta de novo se houver cache
+            let cachedLen = 0;
             try {
               const cacheKey = `clientes:list:${userProfile.codigo_empresa}`;
-              localStorage.setItem(cacheKey, JSON.stringify(data));
+              const cached = JSON.parse(localStorage.getItem(cacheKey) || '[]');
+              cachedLen = Array.isArray(cached) ? cached.length : 0;
             } catch {}
-            clientsRetryRef.current = false;
-            clientsLoadedKeyRef.current = key;
-            // Opcional: sincroniza lista do pai
-            try {
-              setCustomerOptions((prev) => {
-                const sameParent = JSON.stringify(prev) === JSON.stringify(data);
-                return sameParent ? prev : data;
-              });
-            } catch {}
+            if (cachedLen > 0 && !clientsRetryRef.current) {
+              clientsRetryRef.current = true;
+              setTimeout(loadClients, 700);
+              return;
+            }
           }
-        } catch {}
-      };
-      loadClients();
-      if (!isModalOpen) {
-        clientsLoadedKeyRef.current = null; // reset ao fechar
-        clientsRetryRef.current = false;
+          clientsRetryRef.current = false;
+          clientsLoadedKeyRef.current = key;
+          setLocalCustomers(data);
+          try {
+            const cacheKey = `clientes:list:${userProfile.codigo_empresa}`;
+            localStorage.setItem(cacheKey, JSON.stringify(data));
+          } catch {}
+          try {
+            setCustomerOptions((prev) => {
+              const sameParent = JSON.stringify(prev) === JSON.stringify(data);
+              return sameParent ? prev : data;
+            });
+          } catch {}
+        }
+      } catch {} finally {
+        setClientsLoading(false);
       }
-      // Dependemos de isModalOpen e localCustomers (snapshot) para evitar loop
-    }, [isModalOpen, userProfile?.codigo_empresa, localCustomers]);
+    };
+    loadClients();
+  }, [isModalOpen, userProfile?.codigo_empresa]);
 
     // timeOptions/endTimeOptions são declarados após helpers de disponibilidade para evitar TDZ
 
@@ -1081,8 +1127,9 @@ function AgendaPage() {
       <Dialog
         open={isModalOpen}
         onOpenChange={(open) => {
-          setIsModalOpen(open);
+          // Apenas trata fechamento aqui; abertura é feita por openBookingModal()
           if (!open) {
+            setIsModalOpen(false);
             setEditingBooking(null);
             setPrefill(null);
             participantsPrefillOnceRef.current = false;
@@ -1090,7 +1137,10 @@ function AgendaPage() {
         }}
       >
         <DialogContent
-          className="sm:max-w-[960px] max-h-[90vh] overflow-y-auto"
+          forceMount
+          disableAnimations={true}
+          alignTop
+          className="sm:max-w-[960px] max-h-[90vh] overflow-y-auto min-h-[360px]"
           onOpenAutoFocus={(e) => e.preventDefault()}
           onInteractOutside={(e) => { if (isPaymentModalOpen) e.preventDefault(); }}
           onEscapeKeyDown={(e) => { if (isPaymentModalOpen) e.preventDefault(); }}
@@ -1109,14 +1159,26 @@ function AgendaPage() {
               <div>
                 <Label className="font-bold">Clientes</Label>
                 <div className="flex gap-2 mt-1">
-                  <Popover open={isCustomerPickerOpen} onOpenChange={setIsCustomerPickerOpen}>
+                  <Popover
+                    open={isCustomerPickerOpen}
+                    onOpenChange={(open) => {
+                      // Não fechar automaticamente enquanto o modal de novo cliente estiver aberto ou enquanto a lista estiver recarregando
+                      if ((isClientFormOpen || clientsLoading) && open === false) return;
+                      setIsCustomerPickerOpen(open);
+                    }}
+                  >
                     <PopoverTrigger asChild>
                       <Button type="button" variant="outline" className="min-w-[180px] justify-between">
                         {selectedClientsLabel}
                         <ChevronDown className="w-4 h-4 ml-2 opacity-60" />
                       </Button>
                     </PopoverTrigger>
-                    <PopoverContent className="w-[360px] p-2">
+                    <PopoverContent
+                      className="w-[360px] p-2"
+                      onPointerDownOutside={(e) => { if (clientsLoading || isClientFormOpen) e.preventDefault(); }}
+                      onFocusOutside={(e) => { if (clientsLoading || isClientFormOpen) e.preventDefault(); }}
+                      onEscapeKeyDown={(e) => { if (clientsLoading || isClientFormOpen) e.preventDefault(); }}
+                    >
                       <div className="space-y-2">
                         <Input
                           placeholder="Buscar cliente..."
@@ -1149,8 +1211,10 @@ function AgendaPage() {
                                   });
                                 }}
                               >
-                                <span className="truncate mr-2">{getCustomerLabel(c)}</span>
-                                {selected && <span className="text-xs text-text-muted">Selecionado</span>}
+                                <span className={`truncate mr-2 ${selected ? 'text-text-muted' : ''}`}>{getCustomerLabel(c)}</span>
+                                {selected && (
+                                  <CheckCircle className={`w-4 h-4 ${statusConfig.confirmed.text}`} aria-label="Selecionado" />
+                                )}
                               </button>
                             );
                           })}
@@ -1164,7 +1228,17 @@ function AgendaPage() {
                       </div>
                     </PopoverContent>
                   </Popover>
-                  <Button type="button" onClick={() => { setClientForModal(null); setIsClientFormOpen(true); }}>+ Novo</Button>
+                  <Button
+                    type="button"
+                    onClick={() => {
+                      // Fecha o popover antes de abrir o modal para evitar flicker/fechamento tardio
+                      setIsCustomerPickerOpen(false);
+                      setClientForModal(null);
+                      setIsClientFormOpen(true);
+                    }}
+                  >
+                    + Novo
+                  </Button>
                 </div>
                 {(form.selectedClients || []).length > 0 && (
                   <div className="flex flex-wrap gap-2 mt-2">
@@ -1294,15 +1368,21 @@ function AgendaPage() {
               <Button type="button" variant="ghost" className="border border-white/10" onClick={() => setIsModalOpen(false)}>Cancelar</Button>
               <Button
                 type="button"
+                className="bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-60 disabled:cursor-not-allowed"
+                disabled={isSavingBooking}
                 onClick={async () => {
+                  if (isSavingBooking) return;
+                  console.group('[AgendamentoSave] Start');
                   try {
-                    console.group('[AgendamentoSave] Start');
                     const court = courtsMap[form.court];
-                    if (!court) { toast({ title: 'Selecione uma quadra', variant: 'destructive' }); return; }
+                    if (!court) { toast({ title: 'Selecione uma quadra', variant: 'destructive' }); console.groupEnd(); return; }
                     const s = form.startMinutes, e = form.endMinutes;
-                    if (!(Number.isFinite(s) && Number.isFinite(e) && e > s)) { toast({ title: 'Horário inválido', variant: 'destructive' }); return; }
+                    if (!(Number.isFinite(s) && Number.isFinite(e) && e > s)) { toast({ title: 'Horário inválido', variant: 'destructive' }); console.groupEnd(); return; }
                     // Evitar sobreposição
-                    if (!isRangeFree(s, e)) { toast({ title: 'Conflito de horário', description: 'O horário selecionado está ocupado.', variant: 'destructive' }); return; }
+                    if (!isRangeFree(s, e)) { toast({ title: 'Conflito de horário', description: 'O horário selecionado está ocupado.', variant: 'destructive' }); console.groupEnd(); return; }
+
+                    // Passou nas validações: trava envio
+                    setIsSavingBooking(true);
 
                     const buildDate = (base, minutes) => new Date(
                       base.getFullYear(), base.getMonth(), base.getDate(), Math.floor(minutes / 60), minutes % 60, 0, 0
@@ -1400,15 +1480,15 @@ function AgendaPage() {
                     setIsModalOpen(false);
                     console.groupEnd();
                   } catch (e) {
-                    toast({ title: 'Erro ao salvar', description: 'Tente novamente.', variant: 'destructive' });
                     // eslint-disable-next-line no-console
-                    console.error(e);
+                    console.error('[AgendamentoSave] Error', e);
+                    toast({ title: 'Erro ao salvar agendamento', description: e?.message || 'Tente novamente.', variant: 'destructive' });
+                  } finally {
                     try { console.groupEnd(); } catch {}
+                    setIsSavingBooking(false);
                   }
                 }}
-              >
-                Salvar Agendamento
-              </Button>
+              >Salvar</Button>
             </div>
           </DialogFooter>
         </DialogContent>
@@ -1418,6 +1498,7 @@ function AgendaPage() {
       {editingBooking && (
         <Dialog open={isPaymentModalOpen} onOpenChange={setIsPaymentModalOpen}>
           <DialogContent
+            forceMount
             className="sm:max-w-[960px] max-h-[90vh] overflow-y-auto"
             onOpenAutoFocus={(e) => e.preventDefault()}
             onInteractOutside={(e) => { e.preventDefault(); }}
@@ -1483,13 +1564,15 @@ function AgendaPage() {
                     </div>
                     {(() => {
                       const pctRaw = paymentSummary.totalTarget > 0 ? (paymentSummary.totalAssigned / paymentSummary.totalTarget) * 100 : 0;
-                      const bump = pctRaw > 0 ? 5 : 0; // só incrementa visualmente se houver progresso real
-                      const pct = Math.max(0, Math.min(100, pctRaw + bump));
+                      // Usa o percentual real, sem "bump" artificial, e faz clamp entre 0 e 100
+                      const pct = Math.max(0, Math.min(100, pctRaw));
+                      // Apenas para a barra ficar visível quando >0% mas muito pequeno, sem alterar o texto
+                      const pctVisual = pct > 0 && pct < 1 ? 1 : pct;
                       const barColor = paymentSummary.diff === 0 ? 'bg-emerald-500' : (paymentSummary.diff > 0 ? 'bg-amber-500' : 'bg-rose-500');
                       return (
                         <div className="mt-2 w-full min-w-[280px]">
                           <div className="h-2 w-full rounded bg-white/10 overflow-hidden">
-                            <div className={`h-full ${barColor}`} style={{ width: `${pct}%` }} />
+                            <div className={`h-full ${barColor}`} style={{ width: `${pctVisual}%` }} />
                           </div>
                           <div className="mt-1 text-sm font-medium text-text-muted">{pct.toFixed(0)}% atribuído</div>
                         </div>
@@ -1692,7 +1775,11 @@ function AgendaPage() {
                         if (freshErr) {
                           console.warn('[ParticipantsSave] Refresh participants warning', freshErr);
                         } else {
-                          setParticipantsByAgendamento((prev) => ({ ...prev, [agendamentoId]: freshParts || [] }));
+                          setParticipantsByAgendamento((prev) => {
+                            const next = { ...prev, [agendamentoId]: freshParts || [] };
+                            try { if (participantsCacheKey) localStorage.setItem(participantsCacheKey, JSON.stringify(next)); } catch {}
+                            return next;
+                          });
                         }
                       } catch (rfErr) {
                         console.warn('[ParticipantsSave] Refresh participants exception', rfErr);
@@ -1745,25 +1832,26 @@ function AgendaPage() {
             onOpenChange={(open) => { setIsClientFormOpen(open); if (!open) setClientForModal(null); }}
             client={clientForModal}
             onSaved={(saved) => {
-              try {
-                if (saved && typeof saved === 'object') {
-                  // Atualiza lista se ainda não contém este cliente
-                  const exists = (localCustomers || []).some((c) => typeof c === 'object' ? c.id === saved.id : false);
-                  if (!exists) {
-                    setLocalCustomers((prev) => [...(prev || []), saved]);
-                    // Opcional: sincroniza com o pai fora da animação inicial
-                    setCustomerOptions((prev) => [...(prev || []), saved]);
-                  }
-                  setForm((f) => {
-                    const already = f.selectedClients?.some(sc => sc.id === saved.id);
-                    if (already) return f;
-                    const novo = { id: saved.id, nome: saved.nome || saved.name || getCustomerName(saved), codigo: saved.codigo };
-                    return { ...f, selectedClients: [...(f.selectedClients || []), novo] };
-                  });
-                  setIsCustomerPickerOpen(false);
+            try {
+              if (saved && typeof saved === 'object') {
+                // Atualiza lista se ainda não contém este cliente
+                const exists = (localCustomers || []).some((c) => typeof c === 'object' ? c.id === saved.id : false);
+                if (!exists) {
+                  setLocalCustomers((prev) => [...(prev || []), saved]);
+                  // Opcional: sincroniza com o pai fora da animação inicial
+                  setCustomerOptions((prev) => [...(prev || []), saved]);
                 }
-              } catch {}
-            }}
+                // Insere como cliente primário do agendamento
+                setForm((f) => {
+                  const prev = Array.isArray(f.selectedClients) ? f.selectedClients : [];
+                  const novo = { id: saved.id, nome: saved.nome || saved.name || getCustomerName(saved), codigo: saved.codigo };
+                  const withoutDup = prev.filter(sc => sc.id !== saved.id);
+                  return { ...f, selectedClients: [novo, ...withoutDup] };
+                });
+                setIsCustomerPickerOpen(false);
+              }
+            } catch {}
+          }}
           />
           </>
           );
@@ -1854,7 +1942,7 @@ function AgendaPage() {
       {/* Payment Modal movido para AddBookingModal para manter escopo correto */}
 
       {/* ClientFormModal já é renderizado dentro do AddBookingModal */}
-      <motion.div variants={pageVariants} initial="hidden" animate="visible" className="h-full flex flex-col">
+      <motion.div variants={isModalOpen ? undefined : pageVariants} initial={isModalOpen ? false : "hidden"} animate={isModalOpen ? false : "visible"} className="h-full flex flex-col">
 
         {/* Controls */}
         <motion.div variants={itemVariants} className="p-3 rounded-lg bg-surface mb-6">
@@ -1897,7 +1985,7 @@ function AgendaPage() {
                   </button>
                 )}
               </div>
-              <Button size="sm" onClick={() => setIsModalOpen(true)} aria-label="Novo agendamento" className="gap-2" disabled={availableCourts.length === 0}>
+              <Button size="sm" onClick={openBookingModal} aria-label="Novo agendamento" className="gap-2" disabled={availableCourts.length === 0}>
                 <Plus className="h-4 w-4" /> Agendar
               </Button>
               <DropdownMenu>
@@ -1907,9 +1995,7 @@ function AgendaPage() {
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-64">
-                  <DropdownMenuLabel>
-                    Exibição
-                  </DropdownMenuLabel>
+                  <DropdownMenuLabel>Exibição</DropdownMenuLabel>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={(e) => e.preventDefault()}>
                     <div className="flex items-center justify-between gap-3 w-full">
@@ -1919,7 +2005,7 @@ function AgendaPage() {
                       </div>
                       <Checkbox
                         checked={viewFilter.scheduled}
-                        onCheckedChange={(checked) => setViewFilter(prev => ({...prev, scheduled: !!checked, canceledOnly: checked ? false : prev.canceledOnly}))}
+                        onCheckedChange={(checked) => setViewFilter(prev => ({ ...prev, scheduled: !!checked, canceledOnly: checked ? false : prev.canceledOnly }))}
                       />
                     </div>
                   </DropdownMenuItem>
@@ -1931,7 +2017,7 @@ function AgendaPage() {
                       </div>
                       <Checkbox
                         checked={viewFilter.available}
-                        onCheckedChange={(checked) => setViewFilter(prev => ({...prev, available: !!checked, canceledOnly: checked ? false : prev.canceledOnly}))}
+                        onCheckedChange={(checked) => setViewFilter(prev => ({ ...prev, available: !!checked, canceledOnly: checked ? false : prev.canceledOnly }))}
                       />
                     </div>
                   </DropdownMenuItem>
@@ -1951,20 +2037,13 @@ function AgendaPage() {
                             scheduled: isOn ? false : prev.scheduled,
                             available: isOn ? false : prev.available,
                           }));
-                          if (isOn && !hideCanceledInfo) {
-                            setShowCanceledInfo(true);
-                          }
+                          if (isOn && !hideCanceledInfo) setShowCanceledInfo(true);
                         }}
                       />
                     </div>
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
-                  <DropdownMenuLabel>
-                    Quadras • {selectedCourts.length}/{availableCourts.length}
-                  </DropdownMenuLabel>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={(e) => { e.preventDefault(); setSelectedCourts(availableCourts); }}>Selecionar todas</DropdownMenuItem>
-                  <DropdownMenuItem onClick={(e) => { e.preventDefault(); setSelectedCourts([]); }}>Limpar</DropdownMenuItem>
+                  <DropdownMenuLabel className="text-xs text-text-muted">Filtrar quadras</DropdownMenuLabel>
                   <DropdownMenuSeparator />
                   {availableCourts.map((c) => {
                     const checked = selectedCourts.includes(c);
@@ -1972,11 +2051,6 @@ function AgendaPage() {
                       <DropdownMenuItem key={c} onClick={(e) => e.preventDefault()}>
                         <div className="flex items-center justify-between gap-3 w-full">
                           <div className="flex items-center gap-2">
-                            <span
-                              className="inline-block w-2.5 h-2.5 rounded-full"
-                              style={{ backgroundColor: getCourtColor(c), boxShadow: '0 0 0 2px rgba(255,255,255,0.06)' }}
-                              aria-hidden="true"
-                            />
                             <span>{c}</span>
                           </div>
                           <Checkbox
@@ -2034,18 +2108,18 @@ function AgendaPage() {
 
         {/* Calendar Grid */}
         {selectedCourts.length > 0 && (
-        <motion.div variants={itemVariants} className="flex-1 overflow-auto bg-surface rounded-lg border border-border fx-scroll" ref={scrollRef}>
+        <motion.div variants={isModalOpen ? undefined : itemVariants} className="flex-1 overflow-auto bg-surface rounded-lg border border-border fx-scroll" ref={scrollRef}>
           <div
             className="grid mx-auto"
             style={{
               gridTemplateColumns:
                 selectedCourts.length === 1
-                  ? `144px 760px`
+                  ? `120px 760px`
                   : selectedCourts.length === 2
-                  ? `144px repeat(2, 520px)`
-                  : `144px repeat(${selectedCourts.length}, 1fr)`,
+                  ? `120px repeat(2, 520px)`
+                  : `120px repeat(${selectedCourts.length}, 1fr)`,
               width: (selectedCourts.length <= 2) ? 'fit-content' : undefined,
-              minWidth: selectedCourts.length >= 3 ? '1280px' : undefined,
+              columnGap: '16px'
             }}
           >
             {/* Time Column */}
@@ -2053,7 +2127,7 @@ function AgendaPage() {
               <div className="sticky top-0 z-20 h-14 border-b border-r border-border bg-surface flex items-center justify-center px-2">
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <Button size="sm" variant="ghost" className="hover:bg-surface-2/50">
+                    <Button size="sm" variant="ghost" className="hover:bg-surface-2/50 text-lg font-semibold">
                       {isSameDay(currentDate, new Date())
                         ? 'Hoje'
                         : format(currentDate, 'EEEE', { locale: ptBR })}
@@ -2248,7 +2322,7 @@ function AgendaPage() {
 
                           setPrefill({ court, date: currentDate, startMinutes: clickedStart, endMinutes: clickedEnd });
                           setEditingBooking(null);
-                          setIsModalOpen(true);
+                          openBookingModal();
                         }}
                         title={`Livre: ${sLabel}–${eLabel}`}
                       >
@@ -2274,8 +2348,8 @@ function AgendaPage() {
           </div>
         </motion.div>
         )}
-        <AddBookingModal />
       </motion.div>
+      <AddBookingModal />
     </>
   );
 }
