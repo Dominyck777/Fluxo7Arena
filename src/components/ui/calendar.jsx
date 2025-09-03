@@ -1,13 +1,18 @@
 import React from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { DayPicker } from 'react-day-picker';
+import { ptBR } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
 import { buttonVariants } from '@/components/ui/button';
 
-function Calendar({ className, classNames, showOutsideDays = true, ...props }) {
+function Calendar({ className, classNames, showOutsideDays = true, weekStartsOn = 1, locale = ptBR, ...props }) {
+  // Abreviações em pt-BR começando por domingo (0) até sábado (6)
+  const WEEKDAY_ABBR = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'];
   return (
     <DayPicker
       showOutsideDays={showOutsideDays}
+      weekStartsOn={weekStartsOn}
+      locale={locale}
       className={cn('p-3', className)}
       classNames={{
         months: 'flex flex-col sm:flex-row space-y-4 sm:space-x-4 sm:space-y-0',
@@ -38,6 +43,10 @@ function Calendar({ className, classNames, showOutsideDays = true, ...props }) {
         day_range_middle: 'aria-selected:bg-accent aria-selected:text-accent-foreground',
         day_hidden: 'invisible',
         ...classNames,
+      }}
+      formatters={{
+        // Ajusta as legendas do cabeçalho dos dias da semana
+        formatWeekdayName: (weekday, options) => WEEKDAY_ABBR[weekday.getDay()],
       }}
       components={{
         IconLeft: ({ ...props }) => <ChevronLeft className="h-4 w-4" />,
