@@ -6334,3 +6334,53 @@ begin
   begin execute $$create index if not exists idx_pagamentos_comanda on public.pagamentos (comanda_id)$$; exception when others then null; end;
   begin execute $$create index if not exists idx_pagamentos_finalizadora on public.pagamentos (finalizadora_id)$$; exception when others then null; end;
 end$$;
+
+-- ============================
+-- AGENDA_SETTINGS (v1.0)
+-- Data: 2025-09-03
+-- Propósito: Tabela de configurações de automação da agenda por empresa (1:1 com empresas).
+-- Observação: Este bloco documenta o DDL aplicado diretamente no banco.
+-- ============================
+
+-- 1) Função utilitária compartilhada para manter updated_at
+create or replace function public.set_updated_at()
+returns trigger
+language plpgsql
+as $$
+begin
+  new.updated_at := now();
+  return new;
+end;
+$$;
+
+-- 2) Tabela agenda_settings (1:1 por empresa)
+create table if not exists public.agenda_settings (
+  empresa_id uuid primary key
+    references public.empresas(id)
+    on delete cascade,
+
+  -- Regras em horas (0–168) alinhadas ao modal
+  auto_confirm_enabled boolean not null default false,
+  auto_confirm_hours integer
+    check (auto_confirm_hours is null or auto_confirm_hours between 0 and 168),
+
+  auto_cancel_if_not_confirmed_enabled boolean not null default false,
+  auto_cancel_hours integer
+    check (auto_cancel_hours is null or auto_cancel_hours between 0 and 168),
+
+  auto_start_enabled boolean not null default true,
+  auto_finish_enabled boolean not null default true,
+
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+comment on table public.agenda_settings is
+  'Configurações de automação da agenda por empresa (1:1 com empresas).';
+
+-- 3) Trigger para atualizar updated_at
+drop trigger if exists trg_agenda_settings_set_updated_at on public.agenda_settings;
+create trigger trg_agenda_settings_set_updated_at
+before update on public.agenda_settings
+for each row
+execute function public.set_updated_at();

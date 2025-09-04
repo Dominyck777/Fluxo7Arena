@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { Helmet } from 'react-helmet';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
-import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Plus, Lock, Search, SlidersHorizontal, Clock, CheckCircle, XCircle, CalendarPlus, Users, DollarSign, Repeat, Trash2, GripVertical, Sparkles, Ban, AlertTriangle, ChevronDown, Play, PlayCircle, Flag, UserX, X } from 'lucide-react';
+import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Plus, Lock, Search, SlidersHorizontal, Clock, CheckCircle, XCircle, CalendarPlus, Users, DollarSign, Repeat, Trash2, GripVertical, Sparkles, Ban, AlertTriangle, ChevronDown, Play, PlayCircle, Flag, UserX, X, Settings } from 'lucide-react';
 import { useToast } from "@/components/ui/use-toast";
 import { format, addDays, subDays, startOfDay, addHours, getHours, getMinutes, setHours, setMinutes, addMinutes, startOfWeek, isSameDay } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -38,6 +38,14 @@ const parseBRL = (str) => {
   const n = parseFloat(s);
   return Number.isFinite(n) ? n : NaN;
 };
+
+// Exibe apenas primeiro e segundo nomes (primeiros dois tokens)
+function shortName(name) {
+  const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return '';
+  if (parts.length === 1) return parts[0];
+  return `${parts[0]} ${parts[1]}`;
+}
 const SLOT_HEIGHT = 56; // altura de cada bloco de 30 minutos (mais espaço para conteúdo)
 const BOOKING_GAP_Y = 6; // margem vertical sutil (top/bottom) aplicada a todos os agendamentos (aumentada)
 const START_HOUR = 6;
@@ -141,21 +149,36 @@ const itemVariants = {
 
 function AgendaPage() {
   const { toast } = useToast();
-  const { userProfile, authReady } = useAuth();
+  const { userProfile, authReady, company } = useAuth();
   const [currentDate, setCurrentDate] = useState(new Date());
   const [bookings, setBookings] = useState([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingBooking, setEditingBooking] = useState(null); // quando definido, modal entra em modo edição
   // Participantes por agendamento (carregado após buscar bookings do dia)
   const [participantsByAgendamento, setParticipantsByAgendamento] = useState({});
+  // Controle de concorrência e limpeza segura
+  const participantsReqIdRef = useRef(0);
+  const lastParticipantsDateKeyRef = useRef('');
+
+  // Evita duplo disparo de abertura em dev/StrictMode ou por eventos sobrepostos
+  const lastOpenRef = useRef(0);
+  const hasOpenedRef = useRef(false);
+  const openBookingModal = useCallback(() => {
+    const now = Date.now();
+    if (isModalOpen) return; // já aberto
+    if (now - lastOpenRef.current < 350) return; // ignora repetição em ~350ms
+    lastOpenRef.current = now;
+    setIsModalOpen(true);
+    hasOpenedRef.current = true;
+  }, []);
   const [viewFilter, setViewFilter] = useState(() => {
     try {
       const saved = JSON.parse(localStorage.getItem('agenda:viewFilter') || '{}');
       if (saved && typeof saved === 'object') {
-        return { scheduled: true, available: true, ...saved };
+        return { scheduled: true, available: true, canceledOnly: false, ...saved };
       }
     } catch {}
-    return { scheduled: true, available: true };
+    return { scheduled: true, available: true, canceledOnly: false };
   });
 
   // Lista de quadras vinda do banco (objetos com nome, modalidades, horario)
@@ -190,6 +213,7 @@ function AgendaPage() {
   // Lista de clientes vinda do banco (sem clientes fictícios)
   const [customerOptions, setCustomerOptions] = useState([]);
   const scrollRef = useRef(null);
+  const prevFiltersRef = useRef({ scheduled: true, canceledOnly: false });
   // Prefill ao clicar em um slot livre
   const [prefill, setPrefill] = useState(null);
   // Busca
@@ -198,6 +222,15 @@ function AgendaPage() {
   const bookingsRetryRef = useRef(false);
   const courtsRetryRef = useRef(false);
 
+  // Aviso inteligente sobre cancelados
+  const [showCanceledInfo, setShowCanceledInfo] = useState(false);
+  const [hideCanceledInfo, setHideCanceledInfo] = useState(() => {
+    try { return localStorage.getItem('agenda:hideCanceledInfo') === '1'; } catch { return false; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('agenda:hideCanceledInfo', hideCanceledInfo ? '1' : '0'); } catch {}
+  }, [hideCanceledInfo]);
+
   // Chave de cache por empresa/data (yyyy-mm-dd)
   const bookingsCacheKey = useMemo(() => {
     if (!userProfile?.codigo_empresa) return null;
@@ -205,7 +238,208 @@ function AgendaPage() {
     return `agenda:bookings:${userProfile.codigo_empresa}:${dayStr}`;
   }, [userProfile?.codigo_empresa, currentDate]);
 
+  // Cache local específico dos participantes por empresa/data
+  const participantsCacheKey = useMemo(() => {
+    if (!userProfile?.codigo_empresa) return null;
+    const dayStr = format(currentDate, 'yyyy-MM-dd');
+    return `agenda:participants:${userProfile.codigo_empresa}:${dayStr}`;
+  }, [userProfile?.codigo_empresa, currentDate]);
+
   // efeito de rolagem automática será definido após filteredBookings
+
+  // Configurações (modal) e regras de automação de status
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const defaultAutomation = useMemo(() => ({
+    autoConfirmEnabled: false,
+    autoConfirmMinutesBefore: 120,
+    autoStartEnabled: true,
+    autoFinishEnabled: true,
+  }), []);
+  const [automation, setAutomation] = useState(defaultAutomation);
+  const [savingSettings, setSavingSettings] = useState(false);
+  // Carrega regras salvas quando empresa está disponível
+  useEffect(() => {
+    if (!userProfile?.codigo_empresa) return;
+    try {
+      const raw = localStorage.getItem(`agenda:automation:${userProfile.codigo_empresa}`);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        setAutomation((prev) => ({ ...defaultAutomation, ...parsed }));
+      } else {
+        setAutomation(defaultAutomation);
+      }
+    } catch {
+      setAutomation(defaultAutomation);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userProfile?.codigo_empresa]);
+  // Persiste quando alterar
+  useEffect(() => {
+    if (!userProfile?.codigo_empresa) return;
+    try { localStorage.setItem(`agenda:automation:${userProfile.codigo_empresa}`, JSON.stringify(automation)); } catch {}
+  }, [automation, userProfile?.codigo_empresa]);
+
+  // Carregar do banco (agenda_settings) quando empresa estiver disponível
+  useEffect(() => {
+    const loadSettings = async () => {
+      if (!authReady || !company?.id) return;
+      try {
+        const { data, error } = await supabase
+          .from('agenda_settings')
+          .select('*')
+          .eq('empresa_id', company.id)
+          .maybeSingle();
+        if (error) {
+          // não quebra UX; mantém localStorage/defaults
+          console.warn('[AgendaSettings] load error', error);
+          return;
+        }
+        if (!data) return; // ainda não criado -> mantém defaults/local cache
+        // Mapear colunas (horas -> minutos)
+        const next = {
+          autoConfirmEnabled: !!data.auto_confirm_enabled,
+          autoConfirmMinutesBefore: data.auto_confirm_enabled && Number.isFinite(Number(data.auto_confirm_hours))
+            ? Number(data.auto_confirm_hours) * 60
+            : defaultAutomation.autoConfirmMinutesBefore,
+          autoStartEnabled: !!data.auto_start_enabled,
+          autoFinishEnabled: !!data.auto_finish_enabled,
+        };
+        setAutomation((prev) => ({ ...prev, ...next }));
+      } catch (e) {
+        console.warn('[AgendaSettings] unexpected load error', e);
+      }
+    };
+    loadSettings();
+  }, [authReady, company?.id]);
+
+  // Manual override tracking: user actions take precedence over automation
+  const [manualOverrides, setManualOverrides] = useState({});
+  const MANUAL_OVERRIDE_WINDOW_MS = 2 * 60 * 60 * 1000; // 2 horas
+  const markManualOverride = useCallback((bookingId) => {
+    setManualOverrides((prev) => ({ ...prev, [bookingId]: Date.now() }));
+  }, []);
+  const isOverriddenRecently = useCallback((bookingId) => {
+    const ts = manualOverrides?.[bookingId];
+    return typeof ts === 'number' && (Date.now() - ts) < MANUAL_OVERRIDE_WINDOW_MS;
+  }, [manualOverrides]);
+
+  // Salvar no banco (upsert)
+  const handleSaveSettings = useCallback(async () => {
+    if (!authReady || !company?.id) {
+      toast({ title: 'Não autenticado', description: 'Faça login para salvar as configurações.', variant: 'destructive' });
+      return;
+    }
+    try {
+      setSavingSettings(true);
+      const payload = {
+        empresa_id: company.id,
+        auto_confirm_enabled: !!automation.autoConfirmEnabled,
+        auto_confirm_hours: !!automation.autoConfirmEnabled
+          ? Math.max(0, Math.round(Number(automation.autoConfirmMinutesBefore || 0) / 60))
+          : null,
+        auto_start_enabled: !!automation.autoStartEnabled,
+        auto_finish_enabled: !!automation.autoFinishEnabled,
+      };
+      const { error } = await supabase
+        .from('agenda_settings')
+        .upsert(payload, { onConflict: 'empresa_id' });
+      if (error) throw error;
+      toast({ title: 'Configurações salvas', description: 'As automações da agenda foram atualizadas com sucesso.' });
+      setIsSettingsOpen(false);
+    } catch (e) {
+      console.error('[AgendaSettings] save error', e);
+      const message = e?.message || 'Falha ao salvar as configurações.';
+      toast({ title: 'Erro ao salvar', description: message, variant: 'destructive' });
+    } finally {
+      setSavingSettings(false);
+    }
+  }, [authReady, company?.id, automation]);
+
+  // Atualiza status no banco e estados locais
+  // source: 'user' | 'automation'
+  const updateBookingStatus = useCallback(async (bookingId, newStatus, source = 'user') => {
+    try {
+      const { error } = await supabase
+        .from('agendamentos')
+        .update({ status: newStatus })
+        .eq('id', bookingId)
+        .select('id');
+      if (error) throw error;
+      setBookings(prev => prev.map(b => b.id === bookingId ? { ...b, status: newStatus } : b));
+      try {
+        if (bookingsCacheKey) {
+          const cached = JSON.parse(localStorage.getItem(bookingsCacheKey) || '[]');
+          const updated = Array.isArray(cached) ? cached.map(b => b.id === bookingId ? { ...b, status: newStatus } : b) : cached;
+          localStorage.setItem(bookingsCacheKey, JSON.stringify(updated));
+        }
+      } catch {}
+      // Marca override manual somente quando a origem é usuário
+      if (source === 'user') {
+        try { markManualOverride(bookingId); } catch {}
+      }
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error('Auto-status: falha ao atualizar', bookingId, newStatus, e);
+    }
+  }, [bookingsCacheKey, markManualOverride]);
+
+  // Runner periódico
+  const automationRunningRef = useRef(false);
+  const runAutomation = useCallback(async () => {
+    if (!authReady || !userProfile?.codigo_empresa) return;
+    if (automationRunningRef.current) return;
+    automationRunningRef.current = true;
+    try {
+      const now = new Date();
+      const nowMin = getHours(now) * 60 + getMinutes(now);
+      const todayStr = format(now, 'yyyy-MM-dd');
+      let todays = (bookings || []).filter(b => format(b.start, 'yyyy-MM-dd') === todayStr);
+      // Se UI não está no dia de hoje, buscamos diretamente do banco os agendamentos de hoje
+      if (todays.length === 0) {
+        try {
+          const dayStart = startOfDay(now);
+          const dayEnd = addDays(dayStart, 1);
+          const { data, error } = await supabase
+            .from('agendamentos')
+            .select('id, inicio, fim, status')
+            .eq('codigo_empresa', userProfile.codigo_empresa)
+            .gte('inicio', dayStart.toISOString())
+            .lt('inicio', dayEnd.toISOString());
+          if (!error && Array.isArray(data)) {
+            todays = data.map(row => ({
+              id: row.id,
+              start: new Date(row.inicio),
+              end: new Date(row.fim),
+              status: row.status || 'scheduled',
+            }));
+          }
+        } catch {}
+      }
+      for (const b of todays) {
+        // Respeita override manual recente
+        if (isOverriddenRecently(b.id)) continue;
+        const startMin = getHours(b.start) * 60 + getMinutes(b.start);
+        const endMin = getHours(b.end) * 60 + getMinutes(b.end);
+        if (b.status === 'scheduled') {
+          const shouldConfirm = automation.autoConfirmEnabled && (nowMin >= (startMin - Number(automation.autoConfirmMinutesBefore || 0)));
+          if (shouldConfirm) { await updateBookingStatus(b.id, 'confirmed', 'automation'); continue; }
+        }
+        if (b.status === 'confirmed' && automation.autoStartEnabled) {
+          if (nowMin >= startMin) { await updateBookingStatus(b.id, 'in_progress', 'automation'); continue; }
+        }
+        if (b.status === 'in_progress' && automation.autoFinishEnabled) {
+          if (nowMin >= endMin) { await updateBookingStatus(b.id, 'finished', 'automation'); continue; }
+        }
+      }
+    } finally {
+      automationRunningRef.current = false;
+    }
+  }, [authReady, userProfile?.codigo_empresa, bookings, automation, updateBookingStatus, isOverriddenRecently]);
+  useEffect(() => {
+    const id = setInterval(runAutomation, 30000);
+    try { runAutomation(); } catch {}
+    return () => clearInterval(id);
+  }, [runAutomation]);
 
   // Hidrata agendamentos a partir do cache antes da busca
   useEffect(() => {
@@ -223,6 +457,44 @@ function AgendaPage() {
       }
     } catch {}
   }, [bookingsCacheKey]);
+
+  // Recuperação resiliente ao voltar foco/visibilidade da aba: reidrata cache e refaz fetch
+  useEffect(() => {
+    const onVisOrFocus = () => {
+      if (document.visibilityState === 'visible') {
+        try {
+          if (bookingsCacheKey) {
+            const cached = JSON.parse(localStorage.getItem(bookingsCacheKey) || '[]');
+            if (Array.isArray(cached) && cached.length > 0) {
+              const mapped = cached.map((b) => ({ ...b, start: new Date(b.start), end: new Date(b.end) }));
+              setBookings((prev) => (prev && prev.length > 0 ? prev : mapped));
+            }
+          }
+        } catch {}
+        // Recarrega dados frescos do backend
+        try { fetchBookings(); } catch {}
+        try { loadParticipants(); } catch {}
+      }
+    };
+    document.addEventListener('visibilitychange', onVisOrFocus);
+    window.addEventListener('focus', onVisOrFocus);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisOrFocus);
+      window.removeEventListener('focus', onVisOrFocus);
+    };
+  }, [bookingsCacheKey]);
+
+  // Hidrata participantes a partir do cache do dia (evita sumiço ao voltar para a aba)
+  useEffect(() => {
+    if (!participantsCacheKey) return;
+    try {
+      const cached = JSON.parse(localStorage.getItem(participantsCacheKey) || '{}');
+      if (cached && typeof cached === 'object') {
+        setParticipantsByAgendamento(cached);
+        lastParticipantsDateKeyRef.current = format(currentDate, 'yyyy-MM-dd');
+      }
+    } catch {}
+  }, [participantsCacheKey]);
 
   // Carrega agendamentos do dia atual a partir do banco
   useEffect(() => {
@@ -306,30 +578,46 @@ function AgendaPage() {
     const loadParticipants = async () => {
       if (!authReady || !userProfile?.codigo_empresa) return;
       const ids = (bookings || []).map(b => b.id).filter(Boolean);
+      const dateKey = format(currentDate, 'yyyy-MM-dd');
+      // Evita wipe em estados transitórios de carregamento de bookings
       if (!ids.length) {
-        setParticipantsByAgendamento({});
+        if (lastParticipantsDateKeyRef.current !== dateKey) {
+          setParticipantsByAgendamento({});
+          try { if (participantsCacheKey) localStorage.setItem(participantsCacheKey, '{}'); } catch {}
+          lastParticipantsDateKeyRef.current = dateKey;
+        }
         return;
       }
+      const reqId = ++participantsReqIdRef.current;
       const { data, error } = await supabase
         .from('v_agendamento_participantes')
-        .select('id, agendamento_id, codigo_empresa, cliente_id, nome, valor_cota, status_pagamento_text')
-        .eq('codigo_empresa', userProfile.codigo_empresa)
+        .select('*')
         .in('agendamento_id', ids);
+      // Ignora respostas atrasadas
+      if (participantsReqIdRef.current !== reqId) return;
       if (error) {
-        // eslint-disable-next-line no-console
-        console.error('Falha ao carregar participantes:', error);
-        return;
+        console.warn('[Participants] load error', error);
+        return; // mantém estado anterior
       }
       const map = {};
-      for (const row of data || []) {
+      for (const row of (data || [])) {
         const k = row.agendamento_id;
         if (!map[k]) map[k] = [];
         map[k].push(row);
       }
-      setParticipantsByAgendamento(map);
+      lastParticipantsDateKeyRef.current = dateKey;
+      // Atualiza apenas os IDs consultados, preservando outros e persiste em cache
+      setParticipantsByAgendamento(prev => {
+        const next = { ...prev };
+        for (const id of ids) {
+          next[id] = map[id] || [];
+        }
+        try { if (participantsCacheKey) localStorage.setItem(participantsCacheKey, JSON.stringify(next)); } catch {}
+        return next;
+      });
     };
     loadParticipants();
-  }, [authReady, userProfile?.codigo_empresa, bookings]);
+  }, [authReady, userProfile?.codigo_empresa, bookings, currentDate, participantsCacheKey]);
 
   // Carregar quadras do banco por empresa (inclui modalidades e horários)
   useEffect(() => {
@@ -406,7 +694,7 @@ function AgendaPage() {
     }
     // Restaura filtros se existirem
     if (savedFilter && (typeof savedFilter === 'object')) {
-      setViewFilter((prev) => ({ ...prev, ...savedFilter }));
+      setViewFilter((prev) => ({ ...prev, canceledOnly: false, ...savedFilter }));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [courtsLoading, availableCourts.length]);
@@ -517,10 +805,10 @@ function AgendaPage() {
     const totalParticipants = participants.length;
     return (
       <motion.div
-        layout="position"
-        initial={{ opacity: 0, y: 6 }}
-        animate={{ opacity: 1, y: 0 }}
-        exit={{ opacity: 0, y: 6 }}
+        layout={isModalOpen ? false : "position"}
+        initial={isModalOpen ? false : { opacity: 0, y: 6 }}
+        animate={isModalOpen ? false : { opacity: 1, y: 0 }}
+        exit={isModalOpen ? false : { opacity: 0, y: 6 }}
         id={`booking-${booking.id}`}
         className={cn(
           "absolute left-2 right-2 rounded-md border-2 bg-surface text-sm shadow-sm z-0 cursor-pointer",
@@ -529,7 +817,7 @@ function AgendaPage() {
           "overflow-hidden transition-all duration-150 hover:bg-surface-2 hover:shadow-md"
         )}
         style={{ top: `${adjTop}px`, height: `${adjHeight}px` }}
-        onClick={() => { setEditingBooking(booking); setIsModalOpen(true); }}
+        onClick={() => { setEditingBooking(booking); openBookingModal(); }}
       >
         {/* Acento de status à esquerda */}
         <div className={cn("absolute left-0 top-0 h-full w-[6px] rounded-l-md", config.accent)} />
@@ -541,7 +829,7 @@ function AgendaPage() {
             <div className={cn("flex justify-between gap-2", isHalfHour ? "items-center" : "items-start") }>
               {/* Esquerda: cliente e, em meia hora, modalidade à direita do nome */}
               <div className="flex items-center gap-2 min-w-0">
-                <p className="font-semibold text-text-primary truncate text-base">{booking.customer}</p>
+                <p className="font-semibold text-text-primary truncate text-base">{shortName(booking.customer)}</p>
                 {isHalfHour && (
                   <span className="text-sm font-medium text-text-secondary truncate bg-white/5 border border-white/10 rounded px-2.5 py-0 whitespace-nowrap">
                     {booking.modality}
@@ -631,10 +919,19 @@ function AgendaPage() {
     const [customerQuery, setCustomerQuery] = useState('');
     const [isClientFormOpen, setIsClientFormOpen] = useState(false);
     const [clientForModal, setClientForModal] = useState(null);
+    // Destaque sutil no trigger ao fechar por clique fora
+    const [highlightCustomerTrigger, setHighlightCustomerTrigger] = useState(false);
+    const closedByOutsideRef = useRef(false);
+    // Ref para o input de busca (para focar após limpar)
+    const customerQueryInputRef = useRef(null);
     // Participantes (apenas no modo edição): { cliente_id, nome, valor_cota, status_pagamento }
     const [participantsForm, setParticipantsForm] = useState([]);
     const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
+    const [clientsLoading, setClientsLoading] = useState(false);
     const [isSavingPayments, setIsSavingPayments] = useState(false);
+    const [isSavingBooking, setIsSavingBooking] = useState(false);
+    const pendingSaveRef = useRef(false);
+    const completedSaveRef = useRef(false);
     const [paymentSelectedId, setPaymentSelectedId] = useState(null);
     // Aviso de pendências no modal de pagamento
     const [paymentWarning, setPaymentWarning] = useState(null);
@@ -654,36 +951,327 @@ function AgendaPage() {
 
     // Evitar recarregar clientes repetidamente durante a mesma abertura do modal
     const clientsLoadedKeyRef = useRef(null);
+    const clientsRetryRef = useRef(false);
     useEffect(() => {
-      // Sincroniza lista local com o snapshot atual do pai apenas no abrir
-      if (isModalOpen) setLocalCustomers(customerOptions);
+      // Sincroniza lista local com o snapshot atual do pai ao abrir
+      if (!isModalOpen) return;
+      // Apenas propaga para local se vier com conteúdo (>0) para evitar apagar cache/hidratação temporária
+      if (Array.isArray(customerOptions) && customerOptions.length > 0) {
+        setLocalCustomers(customerOptions);
+      }
+      // Tenta hidratar de cache se lista estiver vazia
+      try {
+        if (!localCustomers || localCustomers.length === 0) {
+          const key = userProfile?.codigo_empresa ? `clientes:list:${userProfile.codigo_empresa}` : null;
+          if (key) {
+            const cached = JSON.parse(localStorage.getItem(key) || '[]');
+            if (Array.isArray(cached) && cached.length > 0) {
+              setLocalCustomers(cached);
+            }
+          }
+        }
+      } catch {}
+    }, [isModalOpen, customerOptions]);
+
+    // Ao fechar o modal, reseta a chave de carregamento para permitir novo fetch na próxima abertura
+    useEffect(() => {
+      if (!isModalOpen) {
+        clientsLoadedKeyRef.current = null;
+        setClientsLoading(false);
+      }
     }, [isModalOpen]);
+
+    // Reidrata quando o usuário volta a aba (tab visibility) para evitar lista vazia
     useEffect(() => {
-      const loadClients = async () => {
-        if (!isModalOpen || !userProfile?.codigo_empresa) return;
-        const key = String(userProfile.codigo_empresa);
-        if (clientsLoadedKeyRef.current === key) return; // já carregado nesta abertura
-        try {
-          const { data, error } = await supabase
-            .from('clientes')
-            .select('id, nome, codigo, email, telefone, status, codigo_empresa')
+      if (!isModalOpen) return;
+      const onVis = () => {
+        if (document.visibilityState === 'visible') {
+          try {
+            const key = userProfile?.codigo_empresa ? `clientes:list:${userProfile.codigo_empresa}` : null;
+            if (!key) return;
+            const cached = JSON.parse(localStorage.getItem(key) || '[]');
+            if (Array.isArray(cached) && cached.length > 0) {
+              setLocalCustomers((prev) => (prev && prev.length > 0 ? prev : cached));
+            }
+          } catch {}
+        }
+      };
+      document.addEventListener('visibilitychange', onVis);
+      return () => document.removeEventListener('visibilitychange', onVis);
+    }, [isModalOpen, userProfile?.codigo_empresa]);
+
+    // Limpa flags de salvamento quando abrir/fechar modal
+    useEffect(() => {
+      if (!isModalOpen) {
+        pendingSaveRef.current = false;
+        completedSaveRef.current = false;
+        setIsSavingBooking(false);
+      }
+    }, [isModalOpen]);
+
+    // Função idempotente para salvar uma vez; reusada em onClick e ao voltar foco da aba
+    const saveBookingOnce = useCallback(async () => {
+      if (isSavingBooking) return;
+      setIsSavingBooking(true);
+      console.group('[AgendamentoSave] Auto/Manual Start');
+      try {
+        const court = courtsMap[form.court];
+        if (!court) {
+          try { console.warn('[AgendamentoSave] Early return: court not found', { courtKey: form?.court, courtsKeys: Object.keys(courtsMap || {}) }); } catch {}
+          toast({ title: 'Selecione uma quadra', variant: 'destructive' });
+          // Falha de validação local: não manter pendência para auto-retry
+          pendingSaveRef.current = false;
+          completedSaveRef.current = false;
+          try { console.log('[AgendamentoSave] Flags set: pending=false, completed=false (court invalid)'); } catch {}
+          return;
+        }
+        const s = form.startMinutes, e = form.endMinutes;
+        if (!(Number.isFinite(s) && Number.isFinite(e) && e > s)) {
+          try { console.warn('[AgendamentoSave] Early return: invalid time range', { s, e }); } catch {}
+          toast({ title: 'Horário inválido', variant: 'destructive' });
+          pendingSaveRef.current = false;
+          completedSaveRef.current = false;
+          try { console.log('[AgendamentoSave] Flags set: pending=false, completed=false (invalid time)'); } catch {}
+          return;
+        }
+        const free = isRangeFree(s, e);
+        try { console.log('[AgendamentoSave] Range check', { s, e, free }); } catch {}
+        if (!free) {
+          toast({ title: 'Conflito de horário', description: 'O horário selecionado está ocupado.', variant: 'destructive' });
+          pendingSaveRef.current = false;
+          completedSaveRef.current = false;
+          try { console.log('[AgendamentoSave] Flags set: pending=false, completed=false (conflict)'); } catch {}
+          return;
+        }
+
+        const buildDate = (base, minutes) => new Date(
+          base.getFullYear(), base.getMonth(), base.getDate(), Math.floor(minutes / 60), minutes % 60, 0, 0
+        );
+        const inicio = buildDate(form.date, s);
+        const fim = buildDate(form.date, e);
+        try { console.log('[AgendamentoSave] Computed dates', { inicio: inicio.toISOString(), fim: fim.toISOString() }); } catch {}
+        const primaryClient = (form.selectedClients || [])[0];
+        const clientesArr = (form.selectedClients || []).map(getCustomerName).filter(Boolean);
+
+        if (editingBooking?.id) {
+          try { console.log('[AgendamentoSave] Path: UPDATE', { id: editingBooking.id }); } catch {}
+          const { error } = await supabase
+            .from('agendamentos')
+            .update({
+              quadra_id: court.id,
+              cliente_id: primaryClient?.id ?? null,
+              clientes: clientesArr,
+              inicio: inicio.toISOString(),
+              fim: fim.toISOString(),
+              modalidade: form.modality,
+              status: form.status,
+            })
             .eq('codigo_empresa', userProfile.codigo_empresa)
-            .eq('status', 'active')
-            .order('nome', { ascending: true });
-          if (!error && Array.isArray(data)) {
-            // Atualiza somente a lista local para não provocar re-render do pai durante animação
-            const same = JSON.stringify(data) === JSON.stringify(localCustomers);
-            if (!same) setLocalCustomers(data);
-            clientsLoadedKeyRef.current = key;
+            .eq('id', editingBooking.id);
+          if (error) throw error;
+          // Atualiza estado local
+          setBookings((prev) => prev.map((b) => b.id === editingBooking.id ? ({
+            ...b,
+            court: form.court,
+            customer: primaryClient?.nome || b.customer,
+            start: inicio,
+            end: fim,
+            modality: form.modality,
+            status: form.status,
+          }) : b));
+          toast({ title: 'Agendamento atualizado' });
+          completedSaveRef.current = true;
+          pendingSaveRef.current = false;
+          try { console.log('[AgendamentoSave] Success UPDATE: flags set completed=true, pending=false'); } catch {}
+          setIsModalOpen(false);
+          return;
+        }
+
+        // CREATE com checagem idempotente (evita duplicar em reexecuções)
+        let existingRow = null;
+        try {
+          try { console.log('[AgendamentoSave] Checking existing equivalent record…'); } catch {}
+          const { data: found } = await supabase
+            .from('agendamentos')
+            .select('id, status')
+            .eq('codigo_empresa', userProfile.codigo_empresa)
+            .eq('quadra_id', court.id)
+            .eq('inicio', inicio.toISOString())
+            .eq('fim', fim.toISOString())
+            .limit(1);
+          if (Array.isArray(found) && found.length > 0) existingRow = found[0];
+          try { console.log('[AgendamentoSave] Existing check result', { existingId: existingRow?.id, status: existingRow?.status }); } catch {}
+        } catch {}
+
+        if (existingRow?.id) {
+          if (existingRow.status !== 'canceled') {
+            // Já existe registro ativo equivalente; tratar como sucesso (não duplica)
+            try { console.log('[AgendamentoSave] Path: CREATE->EXISTING treated as success (active exists)', { existingId: existingRow.id, status: existingRow.status }); } catch {}
+            const newItem = {
+              id: existingRow.id,
+              court: form.court,
+              customer: primaryClient?.nome || clientesArr[0] || '',
+              start: inicio,
+              end: fim,
+              status: form.status,
+              modality: form.modality,
+            };
+            setBookings((prev) => {
+              const foundLocal = prev.some((b) => b.id === existingRow.id);
+              return foundLocal ? prev : [...prev, newItem];
+            });
+            toast({ title: 'Agendamento confirmado' });
+            completedSaveRef.current = true;
+            setIsModalOpen(false);
+            return;
+          }
+          // Se o existente estiver cancelado, não atualiza: cairá no INSERT para manter histórico do cancelado
+          try { console.log('[AgendamentoSave] Existing is canceled; will insert a new record to preserve history', { existingId: existingRow.id }); } catch {}
+        }
+
+        try { console.log('[AgendamentoSave] Path: CREATE inserting…'); } catch {}
+        const { data, error } = await supabase
+          .from('agendamentos')
+          .insert({
+            codigo_empresa: userProfile.codigo_empresa,
+            quadra_id: court.id,
+            cliente_id: primaryClient?.id ?? null,
+            clientes: clientesArr,
+            inicio: inicio.toISOString(),
+            fim: fim.toISOString(),
+            modalidade: form.modality,
+            status: form.status,
+          })
+          .select('id')
+          .single();
+        if (error) throw error;
+        try { console.log('[AgendamentoSave] Inserted new agendamento', { id: data?.id }); } catch {}
+        const newItem = {
+          id: data.id,
+          court: form.court,
+          customer: primaryClient?.nome || clientesArr[0] || '',
+          start: inicio,
+          end: fim,
+          status: form.status,
+          modality: form.modality,
+        };
+        setBookings((prev) => [...prev, newItem]);
+        toast({ title: 'Agendamento criado' });
+
+        // Participantes (não bloqueia conclusão do salvamento principal)
+        try {
+          const rows = (form.selectedClients || []).map((c) => ({
+            codigo_empresa: userProfile.codigo_empresa,
+            agendamento_id: data.id,
+            cliente_id: c.id,
+            valor_cota: 0,
+            status_pagamento: 'Pendente',
+          }));
+          if (rows.length > 0) {
+            try { console.log('[ParticipantsCreate] Inserting', { count: rows.length }); } catch {}
+            const { error: perr } = await supabase
+              .from('agendamento_participantes')
+              .insert(rows);
+            if (perr) console.error('[ParticipantsCreate] Insert error', perr);
+            else try { console.log('[ParticipantsCreate] Inserted successfully'); } catch {}
+          }
+        } catch (pe) {
+          console.error('[ParticipantsCreate] Unexpected error', pe);
+        }
+
+        completedSaveRef.current = true;
+        pendingSaveRef.current = false;
+        try { console.log('[AgendamentoSave] Success CREATE: flags set completed=true, pending=false'); } catch {}
+        setIsModalOpen(false);
+      } catch (e) {
+        console.error('[AgendamentoSave] Error', e);
+        // Mantém pendingSaveRef = true para auto-reexecução
+        toast({ title: 'Erro ao salvar agendamento', description: e?.message || 'Tentando novamente automaticamente…', variant: 'destructive' });
+      } finally {
+        setIsSavingBooking(false);
+        console.groupEnd();
+      }
+    }, [isSavingBooking, courtsMap, form, editingBooking, userProfile, isRangeFree, setBookings, toast, setIsModalOpen]);
+
+    // Ao voltar para a aba, se houver salvamento pendente e não concluído, reexecuta automaticamente
+    useEffect(() => {
+      const onVis = () => {
+        if (document.visibilityState === 'visible' && isModalOpen && pendingSaveRef.current && !completedSaveRef.current && !isSavingBooking) {
+          try { console.info('[AgendamentoSave] visibilitychange: auto-resume triggered'); } catch {}
+          // Reexecuta sem intervenção do usuário
+          saveBookingOnce();
+        }
+      };
+      document.addEventListener('visibilitychange', onVis);
+      return () => document.removeEventListener('visibilitychange', onVis);
+    }, [isModalOpen, isSavingBooking, saveBookingOnce]);
+  useEffect(() => {
+    const loadClients = async () => {
+      if (!isModalOpen || !userProfile?.codigo_empresa) return;
+      const key = String(userProfile.codigo_empresa);
+      if (clientsLoadedKeyRef.current === key) return; // já carregado nesta abertura
+      try {
+        setClientsLoading(true);
+        // Hidrata imediatamente a lista a partir do cache local para evitar "sumir clientes"
+        try {
+          const cacheKey = `clientes:list:${userProfile.codigo_empresa}`;
+          const cached = JSON.parse(localStorage.getItem(cacheKey) || '[]');
+          if (Array.isArray(cached) && cached.length > 0) {
+            setLocalCustomers(cached);
+            try {
+              setCustomerOptions((prev) => {
+                const sameParent = JSON.stringify(prev) === JSON.stringify(cached);
+                return sameParent ? prev : cached;
+              });
+            } catch {}
           }
         } catch {}
-      };
-      loadClients();
-      if (!isModalOpen) {
-        clientsLoadedKeyRef.current = null; // reset ao fechar
+        const { data, error } = await supabase
+          .from('clientes')
+          .select('id, nome, codigo, email, telefone, status, codigo_empresa')
+          .eq('codigo_empresa', userProfile.codigo_empresa)
+          .eq('status', 'active')
+          .order('nome', { ascending: true });
+        if (error) {
+          // eslint-disable-next-line no-console
+          console.error('Falha ao carregar clientes:', error);
+          return;
+        }
+        if (Array.isArray(data)) {
+          if (data.length === 0) {
+            // Não sobrescrever com vazio; tenta de novo se houver cache
+            let cachedLen = 0;
+            try {
+              const cacheKey = `clientes:list:${userProfile.codigo_empresa}`;
+              const cached = JSON.parse(localStorage.getItem(cacheKey) || '[]');
+              cachedLen = Array.isArray(cached) ? cached.length : 0;
+            } catch {}
+            if (cachedLen > 0 && !clientsRetryRef.current) {
+              clientsRetryRef.current = true;
+              setTimeout(loadClients, 700);
+              return;
+            }
+          }
+          clientsRetryRef.current = false;
+          clientsLoadedKeyRef.current = key;
+          setLocalCustomers(data);
+          try {
+            const cacheKey = `clientes:list:${userProfile.codigo_empresa}`;
+            localStorage.setItem(cacheKey, JSON.stringify(data));
+          } catch {}
+          try {
+            setCustomerOptions((prev) => {
+              const sameParent = JSON.stringify(prev) === JSON.stringify(data);
+              return sameParent ? prev : data;
+            });
+          } catch {}
+        }
+      } catch {} finally {
+        setClientsLoading(false);
       }
-      // Dependemos de isModalOpen e localCustomers (snapshot) para evitar loop
-    }, [isModalOpen, userProfile?.codigo_empresa, localCustomers]);
+    };
+    loadClients();
+  }, [isModalOpen, userProfile?.codigo_empresa]);
 
     // timeOptions/endTimeOptions são declarados após helpers de disponibilidade para evitar TDZ
 
@@ -847,13 +1435,13 @@ function AgendaPage() {
       const dayStr = format(form.date, 'yyyy-MM-dd');
       const toMinutes = (d) => getHours(d) * 60 + getMinutes(d);
       return bookings
-        .filter(b => b.court === form.court && format(b.start, 'yyyy-MM-dd') === dayStr && (!editingBooking || b.id !== editingBooking.id))
+        .filter(b => b.court === form.court && format(b.start, 'yyyy-MM-dd') === dayStr && b.status !== 'canceled' && (!editingBooking || b.id !== editingBooking.id))
         .map(b => [toMinutes(b.start), toMinutes(b.end)])
         .sort((a, b) => a[0] - b[0]);
     }, [bookings, form.court, form.date, editingBooking]);
 
     const overlaps = (a0, a1, b0, b1) => a0 < b1 && b0 < a1;
-    const isRangeFree = (s, e) => {
+    function isRangeFree(s, e) {
       if (e <= s) return false;
       // Garantir dentro da janela da quadra
       if (s < courtBounds.start || e > courtBounds.end) return false;
@@ -861,7 +1449,7 @@ function AgendaPage() {
         if (overlaps(s, e, bs, be)) return false;
       }
       return true;
-    };
+    }
 
     // Calcula o maior fim livre contínuo a partir de um início
     const maxFreeEndFrom = (start) => {
@@ -953,6 +1541,37 @@ function AgendaPage() {
 
     // (Resumo removido conforme solicitação)
 
+    // Mensagem simples indicando automação ativa (não bloqueia ação manual)
+    const nextAutomationMessage = useMemo(() => {
+      if (!isModalOpen) return '';
+      const now = new Date();
+      const nowMin = getHours(now) * 60 + getMinutes(now);
+      const startMin = Number(form.startMinutes);
+      const endMin = Number(form.endMinutes);
+      const hhmm = (mins) => {
+        const h = Math.floor(mins / 60);
+        const m = mins % 60;
+        return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+      };
+      if (automation.autoConfirmEnabled && form.status === 'scheduled') {
+        const threshold = Math.max(0, startMin - Number(automation.autoConfirmMinutesBefore || 0));
+        if (nowMin < threshold) {
+          return `Este agendamento está com automação ativa (Confirmar automaticamente às ${hhmm(threshold)})`;
+        }
+      }
+      if (automation.autoStartEnabled && form.status === 'confirmed') {
+        if (nowMin < startMin) {
+          return `Este agendamento está com automação ativa (Iniciar automaticamente às ${hhmm(startMin)})`;
+        }
+      }
+      if (automation.autoFinishEnabled && form.status === 'in_progress') {
+        if (nowMin < endMin) {
+          return `Este agendamento está com automação ativa (Finalizar automaticamente às ${hhmm(endMin)})`;
+        }
+      }
+      return '';
+    }, [isModalOpen, form.startMinutes, form.endMinutes, form.status, automation]);
+
     // ======================== Pagamentos: estado e helpers ========================
     const [paymentTotal, setPaymentTotal] = useState('');
     const participantsCount = useMemo(() => (form.selectedClients || []).length, [form.selectedClients]);
@@ -990,17 +1609,25 @@ function AgendaPage() {
       const count = (form.selectedClients || []).length;
       if (!count) return;
       const total = parseBRL(paymentTotal);
-      const per = Number.isFinite(total) ? Math.max(0, total / count) : 0;
-      const masked = maskBRL(String(per.toFixed(2)));
+      if (!Number.isFinite(total) || total < 0) return;
+      // Distribui por centavos para somar exatamente ao total
+      const totalCents = Math.round(total * 100);
+      const base = Math.floor(totalCents / count);
+      let remainder = totalCents - base * count; // número de participantes que recebem +1 centavo
       setParticipantsForm(prev => {
         const map = new Map(prev.map(p => [p.cliente_id, p]));
-        for (const c of (form.selectedClients || [])) {
+        const ordered = (form.selectedClients || []).slice();
+        ordered.forEach((c, idx) => {
+          const cents = base + (remainder > 0 ? 1 : 0);
+          if (remainder > 0) remainder--;
+          const valueStr = (cents / 100).toFixed(2);
+          const masked = maskBRL(String(valueStr));
+          const amount = parseBRL(masked);
           const row = map.get(c.id) || { cliente_id: c.id, nome: c.nome, status_pagamento: 'Pendente', valor_cota: '' };
           row.valor_cota = masked;
-          const amount = parseBRL(masked);
           row.status_pagamento = (Number.isFinite(amount) && amount > 0) ? 'Pago' : 'Pendente';
           map.set(c.id, row);
-        }
+        });
         return Array.from(map.values());
       });
     }, [form.selectedClients, paymentTotal, setParticipantsForm]);
@@ -1022,16 +1649,21 @@ function AgendaPage() {
       <Dialog
         open={isModalOpen}
         onOpenChange={(open) => {
-          setIsModalOpen(open);
+          // Apenas trata fechamento aqui; abertura é feita por openBookingModal()
           if (!open) {
+            setIsModalOpen(false);
             setEditingBooking(null);
             setPrefill(null);
+            setIsPaymentModalOpen(false);
             participantsPrefillOnceRef.current = false;
           }
         }}
       >
         <DialogContent
-          className="sm:max-w-[960px] max-h-[90vh] overflow-y-auto"
+          forceMount
+          disableAnimations={true}
+          alignTop
+          className="sm:max-w-[960px] max-h-[90vh] overflow-y-auto min-h-[360px]"
           onOpenAutoFocus={(e) => e.preventDefault()}
           onInteractOutside={(e) => { if (isPaymentModalOpen) e.preventDefault(); }}
           onEscapeKeyDown={(e) => { if (isPaymentModalOpen) e.preventDefault(); }}
@@ -1050,27 +1682,75 @@ function AgendaPage() {
               <div>
                 <Label className="font-bold">Clientes</Label>
                 <div className="flex gap-2 mt-1">
-                  <Popover open={isCustomerPickerOpen} onOpenChange={setIsCustomerPickerOpen}>
+                  <Popover
+                    open={isCustomerPickerOpen}
+                    onOpenChange={(open) => {
+                      // Não fechar automaticamente enquanto o modal de novo cliente estiver aberto ou enquanto a lista estiver recarregando
+                      if ((isClientFormOpen || clientsLoading) && open === false) return;
+                      // Se estiver fechando e foi por clique fora, aplica destaque temporário ao trigger
+                      if (!open && closedByOutsideRef.current) {
+                        setHighlightCustomerTrigger(true);
+                        closedByOutsideRef.current = false;
+                        setTimeout(() => setHighlightCustomerTrigger(false), 1200);
+                      }
+                      setIsCustomerPickerOpen(open);
+                    }}
+                  >
                     <PopoverTrigger asChild>
-                      <Button type="button" variant="outline" className="min-w-[180px] justify-between">
+                      <Button type="button" variant="outline" className={cn("min-w-[180px] justify-between", highlightCustomerTrigger && "ring-2 ring-emerald-500/40 ring-offset-2 ring-offset-transparent transition-shadow") }>
                         {selectedClientsLabel}
                         <ChevronDown className="w-4 h-4 ml-2 opacity-60" />
                       </Button>
                     </PopoverTrigger>
-                    <PopoverContent className="w-[360px] p-2">
+                    <PopoverContent
+                      className="w-[360px] p-2"
+                      onPointerDownOutside={(e) => {
+                        if (clientsLoading || isClientFormOpen) { e.preventDefault(); return; }
+                        // Marca intenção de fechar por clique fora
+                        closedByOutsideRef.current = true;
+                      }}
+                      onFocusOutside={(e) => { if (clientsLoading || isClientFormOpen) e.preventDefault(); }}
+                      onEscapeKeyDown={(e) => { if (clientsLoading || isClientFormOpen) e.preventDefault(); }}
+                    >
                       <div className="space-y-2">
-                        <Input
-                          placeholder="Buscar cliente..."
-                          value={customerQuery}
-                          onChange={(e) => setCustomerQuery(e.target.value)}
-                        />
+                        <div className="relative">
+                          <Input
+                            ref={customerQueryInputRef}
+                            placeholder="Buscar cliente..."
+                            value={customerQuery}
+                            onChange={(e) => setCustomerQuery(e.target.value)}
+                            className="pr-10"
+                          />
+                          {customerQuery && (
+                            <button
+                              type="button"
+                              aria-label="Limpar busca"
+                              className="absolute right-2 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-primary p-1 rounded hover:bg-white/10"
+                              onClick={() => { setCustomerQuery(''); customerQueryInputRef.current?.focus(); }}
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
                         <div className="max-h-[260px] overflow-y-auto divide-y divide-border rounded-md border border-border">
-                          {((localCustomers || []).filter((c) => {
-                            const q = customerQuery.trim().toLowerCase();
-                            if (!q) return true;
-                            const label = String(getCustomerLabel(c) || '').toLowerCase();
-                            return label.includes(q);
-                          })).map((c) => {
+                          {((localCustomers || [])
+                            .filter((c) => {
+                              const q = customerQuery.trim().toLowerCase();
+                              if (!q) return true;
+                              const label = String(getCustomerLabel(c) || '').toLowerCase();
+                              return label.includes(q);
+                            })
+                            // Ordena por codigo asc (itens sem codigo vão para o final); desempate por nome
+                            .slice()
+                            .sort((a, b) => {
+                              const ca = typeof a === 'object' ? (Number.isFinite(Number(a?.codigo)) ? Number(a.codigo) : Infinity) : Infinity;
+                              const cb = typeof b === 'object' ? (Number.isFinite(Number(b?.codigo)) ? Number(b.codigo) : Infinity) : Infinity;
+                              if (ca !== cb) return ca - cb;
+                              const na = String(getCustomerName(a) || '').toLowerCase();
+                              const nb = String(getCustomerName(b) || '').toLowerCase();
+                              return na.localeCompare(nb);
+                            })
+                          ).map((c) => {
                             const id = typeof c === 'object' ? c.id : null;
                             const nome = getCustomerName(c);
                             const selected = (form.selectedClients || []).some(sc => sc.id === id || sc.nome === nome);
@@ -1090,14 +1770,23 @@ function AgendaPage() {
                                   });
                                 }}
                               >
-                                <span className="truncate mr-2">{getCustomerLabel(c)}</span>
-                                {selected && <span className="text-xs text-text-muted">Selecionado</span>}
+                                <span className={`truncate mr-2 ${selected ? 'text-text-muted' : ''}`}>{getCustomerLabel(c)}</span>
+                                {selected && (
+                                  <CheckCircle className={`w-4 h-4 ${statusConfig.confirmed.text}`} aria-label="Selecionado" />
+                                )}
                               </button>
                             );
                           })}
                         </div>
                         <div className="flex items-center justify-between pt-1">
-                          <Button type="button" variant="ghost" size="sm" onClick={() => setIsCustomerPickerOpen(false)}>Concluir</Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            className="bg-emerald-600 hover:bg-emerald-500 text-white shadow-md ring-2 ring-emerald-400/40 ring-offset-2 ring-offset-transparent"
+                            onClick={() => setIsCustomerPickerOpen(false)}
+                          >
+                            Concluir
+                          </Button>
                           <div className="flex items-center gap-2">
                             <span className="text-xs text-text-muted">{(form.selectedClients || []).length} selecionado(s)</span>
                           </div>
@@ -1105,13 +1794,23 @@ function AgendaPage() {
                       </div>
                     </PopoverContent>
                   </Popover>
-                  <Button type="button" onClick={() => { setClientForModal(null); setIsClientFormOpen(true); }}>+ Novo</Button>
+                  <Button
+                    type="button"
+                    onClick={() => {
+                      // Fecha o popover antes de abrir o modal para evitar flicker/fechamento tardio
+                      setIsCustomerPickerOpen(false);
+                      setClientForModal(null);
+                      setIsClientFormOpen(true);
+                    }}
+                  >
+                    + Novo
+                  </Button>
                 </div>
                 {(form.selectedClients || []).length > 0 && (
                   <div className="flex flex-wrap gap-2 mt-2">
                     {(form.selectedClients || []).map((c) => (
                       <span key={c.id} className="text-xs bg-white/5 border border-white/10 rounded px-2 py-1 flex items-center gap-2">
-                        {c.nome}
+                        {shortName(c.nome)}
                         <button type="button" className="text-text-muted hover:text-red-400" onClick={() => setForm((f) => ({ ...f, selectedClients: (f.selectedClients || []).filter((x) => x.id !== c.id) }))}>×</button>
                       </span>
                     ))}
@@ -1155,10 +1854,20 @@ function AgendaPage() {
                   <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     {Object.keys(statusConfig).map((k) => (
-                      <SelectItem key={k} value={k}>{statusConfig[k].label}</SelectItem>
+                      <SelectItem key={k} value={k}>
+                        <span className="flex items-center gap-2">
+                          <span aria-hidden className={`inline-block h-4 w-1 rounded ${statusConfig[k].accent}`} />
+                          {statusConfig[k].label}
+                        </span>
+                      </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
+                {nextAutomationMessage && (
+                  <div className="mt-1 text-xs text-text-secondary italic">
+                    {nextAutomationMessage}
+                  </div>
+                )}
               </div>
 
               {/* Horário */}
@@ -1220,7 +1929,7 @@ function AgendaPage() {
               <Button
                 type="button"
                 variant="secondary"
-                className="bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-700"
+                className="ml-6 mr-auto bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-700"
                 onClick={() => setIsPaymentModalOpen(true)}
               >
                 <DollarSign className="w-4 h-4 mr-2 opacity-90" /> Pagamentos
@@ -1230,121 +1939,30 @@ function AgendaPage() {
               <Button type="button" variant="ghost" className="border border-white/10" onClick={() => setIsModalOpen(false)}>Cancelar</Button>
               <Button
                 type="button"
+                className="bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-60 disabled:cursor-not-allowed"
+                disabled={isSavingBooking}
                 onClick={async () => {
+                  const clickTs = Date.now();
+                  const traceId = `[Click:SaveBooking ${clickTs}]`;
+                  try { console.group(traceId); } catch {}
                   try {
-                    console.group('[AgendamentoSave] Start');
-                    const court = courtsMap[form.court];
-                    if (!court) { toast({ title: 'Selecione uma quadra', variant: 'destructive' }); return; }
-                    const s = form.startMinutes, e = form.endMinutes;
-                    if (!(Number.isFinite(s) && Number.isFinite(e) && e > s)) { toast({ title: 'Horário inválido', variant: 'destructive' }); return; }
-                    // Evitar sobreposição
-                    if (!isRangeFree(s, e)) { toast({ title: 'Conflito de horário', description: 'O horário selecionado está ocupado.', variant: 'destructive' }); return; }
-
-                    const buildDate = (base, minutes) => new Date(
-                      base.getFullYear(), base.getMonth(), base.getDate(), Math.floor(minutes / 60), minutes % 60, 0, 0
-                    );
-                    const inicio = buildDate(form.date, s);
-                    const fim = buildDate(form.date, e);
-                    const primaryClient = (form.selectedClients || [])[0];
-                    const clientesArr = (form.selectedClients || []).map(getCustomerName).filter(Boolean);
-                    console.log('[AgendamentoSave] Selected clients on save', form.selectedClients);
-
-                    if (editingBooking?.id) {
-                      const { error } = await supabase
-                        .from('agendamentos')
-                        .update({
-                          quadra_id: court.id,
-                          cliente_id: primaryClient?.id ?? null,
-                          clientes: clientesArr,
-                          inicio: inicio.toISOString(),
-                          fim: fim.toISOString(),
-                          modalidade: form.modality,
-                          status: form.status,
-                        })
-                        .eq('codigo_empresa', userProfile.codigo_empresa)
-                        .eq('id', editingBooking.id);
-                      if (error) throw error;
-                      // Atualiza estado local
-                      setBookings((prev) => prev.map((b) => b.id === editingBooking.id ? ({
-                        ...b,
-                        court: form.court,
-                        customer: primaryClient?.nome || b.customer,
-                        start: inicio,
-                        end: fim,
-                        modality: form.modality,
-                        status: form.status,
-                      }) : b));
-                      toast({ title: 'Agendamento atualizado' });
-                    } else {
-                      const { data, error } = await supabase
-                        .from('agendamentos')
-                        .insert({
-                          codigo_empresa: userProfile.codigo_empresa,
-                          quadra_id: court.id,
-                          cliente_id: primaryClient?.id ?? null,
-                          clientes: clientesArr,
-                          inicio: inicio.toISOString(),
-                          fim: fim.toISOString(),
-                          modalidade: form.modality,
-                          status: form.status,
-                        })
-                        .select('id')
-                        .single();
-                      if (error) throw error;
-                      const newItem = {
-                        id: data.id,
-                        court: form.court,
-                        customer: primaryClient?.nome || clientesArr[0] || '',
-                        start: inicio,
-                        end: fim,
-                        status: form.status,
-                        modality: form.modality,
-                      };
-                      setBookings((prev) => [...prev, newItem]);
-                      toast({ title: 'Agendamento criado' });
-
-                      // Criar participantes imediatamente após criar o agendamento
-                      try {
-                        const rows = (form.selectedClients || []).map((c) => ({
-                          codigo_empresa: userProfile.codigo_empresa,
-                          agendamento_id: data.id,
-                          cliente_id: c.id,
-                          valor_cota: 0,
-                          status_pagamento: 'Pendente',
-                        }));
-                        console.group('[ParticipantsCreate] Start');
-                        console.log('[ParticipantsCreate] Rows to insert', rows);
-                        if (rows.length > 0) {
-                          const { data: inserted, error: perr } = await supabase
-                            .from('agendamento_participantes')
-                            .insert(rows)
-                            .select();
-                          if (perr) {
-                            console.error('[ParticipantsCreate] Insert error', perr);
-                          } else {
-                            console.log('[ParticipantsCreate] Inserted rows', inserted?.length ?? 0, inserted);
-                          }
-                        } else {
-                          console.warn('[ParticipantsCreate] No rows to insert (no selected clients)');
-                        }
-                        console.groupEnd();
-                      } catch (pe) {
-                        // eslint-disable-next-line no-console
-                        console.error('[ParticipantsCreate] Unexpected error', pe);
-                      }
+                    try { console.log('Start', { isSavingBooking, hasEditing: !!editingBooking, formSnapshot: { court: form?.court, start: form?.startMinutes, end: form?.endMinutes, status: form?.status } }); } catch {}
+                    if (isSavingBooking) {
+                      try { console.warn('Ignored click: already saving'); } catch {}
+                      return;
                     }
-                    setIsModalOpen(false);
-                    console.groupEnd();
+                    // Marca como pendente e executa; se algo interromper (ex.: troca de aba), auto-resume via visibilitychange
+                    pendingSaveRef.current = true;
+                    completedSaveRef.current = false;
+                    await saveBookingOnce();
+                    try { console.log('Completed saveBookingOnce()'); } catch {}
                   } catch (e) {
-                    toast({ title: 'Erro ao salvar', description: 'Tente novamente.', variant: 'destructive' });
-                    // eslint-disable-next-line no-console
-                    console.error(e);
+                    try { console.error('Unhandled click error (Salvar agendamento)', e); } catch {}
+                  } finally {
                     try { console.groupEnd(); } catch {}
                   }
                 }}
-              >
-                Salvar Agendamento
-              </Button>
+              >Salvar</Button>
             </div>
           </DialogFooter>
         </DialogContent>
@@ -1354,10 +1972,11 @@ function AgendaPage() {
       {editingBooking && (
         <Dialog open={isPaymentModalOpen} onOpenChange={setIsPaymentModalOpen}>
           <DialogContent
+            forceMount
             className="sm:max-w-[960px] max-h-[90vh] overflow-y-auto"
             onOpenAutoFocus={(e) => e.preventDefault()}
-            onInteractOutside={(e) => { if (paymentWarning?.type === 'pending') e.preventDefault(); }}
-            onEscapeKeyDown={(e) => { if (paymentWarning?.type === 'pending') e.preventDefault(); }}
+            onInteractOutside={(e) => { e.preventDefault(); }}
+            onEscapeKeyDown={(e) => { e.preventDefault(); }}
           >
             <DialogHeader>
               <DialogTitle>Registrar pagamento</DialogTitle>
@@ -1419,13 +2038,15 @@ function AgendaPage() {
                     </div>
                     {(() => {
                       const pctRaw = paymentSummary.totalTarget > 0 ? (paymentSummary.totalAssigned / paymentSummary.totalTarget) * 100 : 0;
-                      const bump = pctRaw > 0 ? 5 : 0; // só incrementa visualmente se houver progresso real
-                      const pct = Math.max(0, Math.min(100, pctRaw + bump));
+                      // Usa o percentual real, sem "bump" artificial, e faz clamp entre 0 e 100
+                      const pct = Math.max(0, Math.min(100, pctRaw));
+                      // Apenas para a barra ficar visível quando >0% mas muito pequeno, sem alterar o texto
+                      const pctVisual = pct > 0 && pct < 1 ? 1 : pct;
                       const barColor = paymentSummary.diff === 0 ? 'bg-emerald-500' : (paymentSummary.diff > 0 ? 'bg-amber-500' : 'bg-rose-500');
                       return (
                         <div className="mt-2 w-full min-w-[280px]">
                           <div className="h-2 w-full rounded bg-white/10 overflow-hidden">
-                            <div className={`h-full ${barColor}`} style={{ width: `${pct}%` }} />
+                            <div className={`h-full ${barColor}`} style={{ width: `${pctVisual}%` }} />
                           </div>
                           <div className="mt-1 text-sm font-medium text-text-muted">{pct.toFixed(0)}% atribuído</div>
                         </div>
@@ -1561,28 +2182,28 @@ function AgendaPage() {
                   className="bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-60 disabled:cursor-not-allowed"
                   disabled={isSavingPayments}
                   onClick={async () => {
-                    if (isSavingPayments) return;
-                    setIsSavingPayments(true);
+                    const clickTs = Date.now();
+                    const traceId = `[Click:SavePayments ${clickTs}]`;
+                    try { console.group(traceId); } catch {}
                     try {
+                      try { console.log('Start', { isSavingPayments, participantsCount, selectedClients: (form?.selectedClients || []).map(c => c?.id), paymentTotal }); } catch {}
+                      if (isSavingPayments) {
+                        try { console.warn('Ignored click: already saving payments'); } catch {}
+                        return;
+                      }
+                      setIsSavingPayments(true);
                       const agendamentoId = editingBooking.id;
                       const codigo = userProfile.codigo_empresa;
                       const t0 = Date.now();
-                      console.group('[ParticipantsSave] Start');
-                      console.log('[ParticipantsSave] Context', { agendamentoId, codigo });
-                      console.log('[ParticipantsSave] Selected clients', form.selectedClients);
-                      console.log('[ParticipantsSave] Participants form', participantsForm);
 
-                      // Verificação: bloqueia se houver pagamentos pendentes
+                      // Verificação: pendentes (somente notificação; não exibir banner bloqueante)
                       const mapForm = new Map((participantsForm || []).map(p => [p.cliente_id, p]));
                       const pendingCount = (form.selectedClients || []).reduce((acc, c) => {
                         const st = (mapForm.get(c.id)?.status_pagamento) || 'Pendente';
                         return acc + (st !== 'Pago' ? 1 : 0);
                       }, 0);
                       if (pendingCount > 0) {
-                        // Aviso mais chamativo, porém não bloqueia o salvamento
-                        const firstPending = (form.selectedClients || []).find(c => ((mapForm.get(c.id)?.status_pagamento) || 'Pendente') !== 'Pago');
-                        setPaymentWarning({ type: 'pending', count: pendingCount, firstPendingId: firstPending?.id || null });
-                        console.warn('[ParticipantsSave] Proceeding save with pending payments', { pendingCount });
+                        // manter apenas toast mais abaixo; sem logs
                       }
                       const { error: delErr } = await supabase
                         .from('agendamento_participantes')
@@ -1594,7 +2215,7 @@ function AgendaPage() {
                         toast({ title: 'Erro ao salvar pagamentos', description: 'Falha ao limpar registros anteriores.', variant: 'destructive' });
                         throw delErr;
                       }
-                      console.log('[ParticipantsSave] Existing rows deleted for booking');
+                      
                       const rows = (form.selectedClients || []).map((c) => {
                         const pf = participantsForm.find(p => p.cliente_id === c.id) || { valor_cota: null, status_pagamento: 'Pendente' };
                         const valor = parseBRL(pf.valor_cota);
@@ -1606,20 +2227,20 @@ function AgendaPage() {
                           status_pagamento: pf.status_pagamento || 'Pendente',
                         };
                       });
-                      console.log('[ParticipantsSave] Rows to insert', rows);
+                      
                       if (rows.length > 0) {
                         const { data: inserted, error } = await supabase
                           .from('agendamento_participantes')
                           .insert(rows)
                           .select();
                         if (error) {
-                          console.error('[ParticipantsSave] Insert error', error);
+                          // erro tratado com toast abaixo
                           toast({ title: 'Erro ao salvar pagamentos', description: 'Falha ao inserir pagamentos.', variant: 'destructive' });
                           throw error;
                         }
-                        console.log('[ParticipantsSave] Inserted rows', inserted?.length ?? 0, inserted);
+                        
                       } else {
-                        console.warn('[ParticipantsSave] No rows to insert (selectedClients is empty)');
+                        // nenhum participante selecionado
                       }
                       // Recarrega participantes deste agendamento para atualizar o indicador "pagos/total" na agenda
                       try {
@@ -1628,36 +2249,51 @@ function AgendaPage() {
                           .select('id, agendamento_id, codigo_empresa, cliente_id, nome, valor_cota, status_pagamento_text')
                           .eq('codigo_empresa', codigo)
                           .eq('agendamento_id', agendamentoId);
-                        if (freshErr) {
-                          console.warn('[ParticipantsSave] Refresh participants warning', freshErr);
-                        } else {
-                          setParticipantsByAgendamento((prev) => ({ ...prev, [agendamentoId]: freshParts || [] }));
+                        if (!freshErr) {
+                          setParticipantsByAgendamento((prev) => {
+                            const next = { ...prev, [agendamentoId]: freshParts || [] };
+                            try { if (participantsCacheKey) localStorage.setItem(participantsCacheKey, JSON.stringify(next)); } catch {}
+                            return next;
+                          });
                         }
                       } catch (rfErr) {
-                        console.warn('[ParticipantsSave] Refresh participants exception', rfErr);
+                        // falha silenciosa; indicador pode não atualizar imediatamente
                       }
-                      console.log('[ParticipantsSave] Done in', Date.now() - t0, 'ms');
-                      console.groupEnd();
-                      if (pendingCount > 0) {
+                      
+                      // Avalia total atribuído vs total alvo e pendências (notificações; salvamento não é bloqueado)
+                      const totalTargetParsed = parseBRL(paymentTotal);
+                      const totalTarget = Number.isFinite(totalTargetParsed) ? totalTargetParsed : 0;
+                      const totalAssigned = (form.selectedClients || []).reduce((sum, c) => {
+                        const pf = participantsForm.find(p => p.cliente_id === c.id);
+                        const v = parseBRL(pf?.valor_cota);
+                        return sum + (Number.isFinite(v) ? v : 0);
+                      }, 0);
+                      if (totalTarget > 0 && totalAssigned < totalTarget - 0.005) {
                         toast({
                           title: 'Pagamentos salvos',
-                          description: `${pendingCount} participante(s) pendente(s).`,
+                          description: 'Total não alcançado.',
                           variant: 'destructive',
                         });
+                      } else if (pendingCount > 0) {
+                        toast({
+                          title: 'Pagamentos salvos',
+                          description: `Pendentes: ${pendingCount}`,
+                          variant: 'warning',
+                        });
                       } else {
-                        toast({ title: 'Pagamentos salvos com sucesso' });
+                        toast({ title: 'Pagamentos salvos', variant: 'success' });
                       }
                       setPaymentWarning(null);
-                      // Fecha modal de pagamentos e o modal de agendamento para voltar à agenda
-                      setIsPaymentModalOpen(false);
+                      try { console.log('Payments saved successfully in ms', Date.now() - t0); } catch {}
+                      // Fecha o modal principal para voltar direto à agenda
                       setIsModalOpen(false);
                     } catch (e) {
                       toast({ title: 'Erro ao salvar pagamentos', description: 'Tente novamente.', variant: 'destructive' });
                       // eslint-disable-next-line no-console
                       console.error('Salvar pagamentos:', e);
-                      try { console.groupEnd(); } catch {}
                     } finally {
                       setIsSavingPayments(false);
+                      try { console.groupEnd(); } catch {}
                     }
                   }}
                 >Salvar Pagamentos</Button>
@@ -1671,54 +2307,55 @@ function AgendaPage() {
             onOpenChange={(open) => { setIsClientFormOpen(open); if (!open) setClientForModal(null); }}
             client={clientForModal}
             onSaved={(saved) => {
-              try {
-                if (saved && typeof saved === 'object') {
-                  // Atualiza lista se ainda não contém este cliente
-                  const exists = (localCustomers || []).some((c) => typeof c === 'object' ? c.id === saved.id : false);
-                  if (!exists) {
-                    setLocalCustomers((prev) => [...(prev || []), saved]);
-                    // Opcional: sincroniza com o pai fora da animação inicial
-                    setCustomerOptions((prev) => [...(prev || []), saved]);
-                  }
-                  setForm((f) => {
-                    const already = f.selectedClients?.some(sc => sc.id === saved.id);
-                    if (already) return f;
-                    const novo = { id: saved.id, nome: saved.nome || saved.name || getCustomerName(saved), codigo: saved.codigo };
-                    return { ...f, selectedClients: [...(f.selectedClients || []), novo] };
-                  });
-                  setIsCustomerPickerOpen(false);
+            try {
+              if (saved && typeof saved === 'object') {
+                // Atualiza lista se ainda não contém este cliente
+                const exists = (localCustomers || []).some((c) => typeof c === 'object' ? c.id === saved.id : false);
+                if (!exists) {
+                  setLocalCustomers((prev) => [...(prev || []), saved]);
+                  // Opcional: sincroniza com o pai fora da animação inicial
+                  setCustomerOptions((prev) => [...(prev || []), saved]);
                 }
-              } catch {}
-            }}
+                // Insere como cliente primário do agendamento
+                setForm((f) => {
+                  const prev = Array.isArray(f.selectedClients) ? f.selectedClients : [];
+                  const novo = { id: saved.id, nome: saved.nome || saved.name || getCustomerName(saved), codigo: saved.codigo };
+                  const withoutDup = prev.filter(sc => sc.id !== saved.id);
+                  return { ...f, selectedClients: [novo, ...withoutDup] };
+                });
+                setIsCustomerPickerOpen(false);
+              }
+            } catch {}
+          }}
           />
           </>
           );
         };
 
     const filteredBookings = useMemo(() => {
-    const dayStr = format(currentDate, 'yyyy-MM-dd');
-    let dayBookings = bookings.filter(b => format(b.start, 'yyyy-MM-dd') === dayStr);
-    if (searchQuery.trim()) {
-      const q = searchQuery.trim().toLowerCase();
-      dayBookings = dayBookings.filter(b => {
-        const cfg = statusConfig[b.status] || {};
-        const timeStr = `${format(b.start, 'HH:mm')}–${format(b.end, 'HH:mm')}`;
-        return (
-          (b.customer && b.customer.toLowerCase().includes(q)) ||
-          (b.court && b.court.toLowerCase().includes(q)) ||
-          (b.modality && b.modality.toLowerCase().includes(q)) ||
-          (cfg.label && cfg.label.toLowerCase().includes(q)) ||
-          timeStr.includes(q)
+      const dayStr = format(currentDate, 'yyyy-MM-dd');
+      let dayBookings = bookings.filter(b => format(b.start, 'yyyy-MM-dd') === dayStr);
+      // Regras de cancelados:
+      // - Quando canceledOnly ativo: mostrar somente cancelados
+      // - Caso contrário: excluir cancelados da agenda
+      dayBookings = viewFilter.canceledOnly
+        ? dayBookings.filter(b => b.status === 'canceled')
+        : dayBookings.filter(b => b.status !== 'canceled');
+      if (searchQuery.trim()) {
+        const q = searchQuery.trim().toLowerCase();
+        dayBookings = dayBookings.filter(b =>
+          (b.customer || '').toLowerCase().includes(q)
+          || (b.court || '').toLowerCase().includes(q)
+          || (statusConfig[b.status]?.label || '').toLowerCase().includes(q)
         );
-      });
-    }
-    return viewFilter.scheduled ? dayBookings : [];
-  }, [bookings, currentDate, viewFilter.scheduled, searchQuery]);
+      }
+      return (viewFilter.scheduled || viewFilter.canceledOnly) ? dayBookings : [];
+    }, [bookings, currentDate, viewFilter.scheduled, viewFilter.canceledOnly, searchQuery]);
 
   // Após computar os resultados, rola até o primeiro match quando houver busca
   useEffect(() => {
     if (!searchQuery.trim()) return;
-    if (!viewFilter.scheduled) return; // só quando agendados visíveis
+    if (!(viewFilter.scheduled || viewFilter.canceledOnly)) return; // só quando agendados ou cancelados visíveis
     if (!filteredBookings || filteredBookings.length === 0) return;
     const first = [...filteredBookings].sort((a, b) => a.start - b.start)[0];
     if (!first?.id) return;
@@ -1726,7 +2363,42 @@ function AgendaPage() {
     if (el?.scrollIntoView) {
       el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
     }
-  }, [searchQuery, filteredBookings, viewFilter.scheduled]);
+  }, [searchQuery, filteredBookings, viewFilter.scheduled, viewFilter.canceledOnly]);
+
+  // Inteligência nos checkboxes: ao ativar Agendados ou Cancelados, rola até o primeiro visível daquele tipo
+  useEffect(() => {
+    const container = scrollRef.current;
+    const prev = prevFiltersRef.current || {};
+    // Detecta habilitação dos filtros
+    const justEnabledCanceled = viewFilter.canceledOnly && !prev.canceledOnly;
+    const justEnabledScheduled = viewFilter.scheduled && !prev.scheduled && !viewFilter.canceledOnly; // scheduled ativo e não em modo cancelados
+    if (!container || (!justEnabledCanceled && !justEnabledScheduled)) {
+      prevFiltersRef.current = { scheduled: viewFilter.scheduled, canceledOnly: viewFilter.canceledOnly };
+      return;
+    }
+    // Lista já está filtrada para o modo atual (canceledOnly restringe para cancelados)
+    const list = filteredBookings || [];
+    if (list.length === 0) {
+      prevFiltersRef.current = { scheduled: viewFilter.scheduled, canceledOnly: viewFilter.canceledOnly };
+      return;
+    }
+    // Verifica se algum desses itens já está visível no viewport do container
+    const cRect = container.getBoundingClientRect();
+    const anyVisible = list.some((b) => {
+      const el = document.getElementById(`booking-${b.id}`);
+      if (!el) return false;
+      const r = el.getBoundingClientRect();
+      return r.bottom > cRect.top && r.top < cRect.bottom;
+    });
+    if (!anyVisible) {
+      const first = [...list].sort((a, b) => a.start - b.start)[0];
+      const el = first && document.getElementById(`booking-${first.id}`);
+      if (el?.scrollIntoView) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+      }
+    }
+    prevFiltersRef.current = { scheduled: viewFilter.scheduled, canceledOnly: viewFilter.canceledOnly };
+  }, [viewFilter.scheduled, viewFilter.canceledOnly, filteredBookings]);
 
   // Cores por quadra agora são geradas de forma determinística via getCourtColor(name)
 
@@ -1745,16 +2417,17 @@ function AgendaPage() {
       {/* Payment Modal movido para AddBookingModal para manter escopo correto */}
 
       {/* ClientFormModal já é renderizado dentro do AddBookingModal */}
-      <motion.div variants={pageVariants} initial="hidden" animate="visible" className="h-full flex flex-col">
+      <motion.div variants={isModalOpen ? undefined : pageVariants} initial={isModalOpen ? false : "hidden"} animate={isModalOpen ? false : "visible"} className="h-full flex flex-col">
 
         {/* Controls */}
         <motion.div variants={itemVariants} className="p-3 rounded-lg bg-surface mb-6">
-          <div className="max-w-[1200px] mx-auto w-full flex items-center justify-between">
+          <div className="max-w-[1200px] mx-auto w-full flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            {/* Navegação de data */}
             <div className="flex items-center gap-2">
               <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => setCurrentDate(subDays(currentDate, 1))}><ChevronLeft className="h-5 w-5" /></Button>
               <Popover>
                 <PopoverTrigger asChild>
-                  <Button variant="ghost" className="w-64 justify-center text-base font-semibold">
+                  <Button variant="ghost" className="w-full sm:w-auto max-w-full justify-center text-base font-semibold whitespace-nowrap truncate">
                     <CalendarIcon className="mr-2 h-4 w-4" />
                     {format(currentDate, "EEEE, dd 'de' MMMM 'de' yyyy", { locale: ptBR })}
                   </Button>
@@ -1765,16 +2438,9 @@ function AgendaPage() {
               </Popover>
               <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => setCurrentDate(addDays(currentDate, 1))}><ChevronRight className="h-5 w-5" /></Button>
             </div>
-            <div className="flex items-center gap-3">
-              <div className="flex items-center space-x-2">
-                <Checkbox id="show-scheduled" checked={viewFilter.scheduled} onCheckedChange={(checked) => setViewFilter(prev => ({...prev, scheduled: !!checked}))} />
-                <Label htmlFor="show-scheduled" className="text-sm font-medium text-text-secondary cursor-pointer">Agendados</Label>
-              </div>
-              <div className="flex items-center space-x-2">
-                <Checkbox id="show-available" checked={viewFilter.available} onCheckedChange={(checked) => setViewFilter(prev => ({...prev, available: !!checked}))} />
-                <Label htmlFor="show-available" className="text-sm font-medium text-text-secondary cursor-pointer">Livres</Label>
-              </div>
-              <div className="relative w-56">
+            {/* Filtros e ações */}
+            <div className="flex items-center flex-wrap gap-3 justify-end">
+              <div className="relative w-full sm:w-56">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted" />
                 <Input
                   placeholder="Buscar agendamento..."
@@ -1794,7 +2460,7 @@ function AgendaPage() {
                   </button>
                 )}
               </div>
-              <Button size="sm" onClick={() => setIsModalOpen(true)} aria-label="Novo agendamento" className="gap-2" disabled={availableCourts.length === 0}>
+              <Button size="sm" onClick={openBookingModal} aria-label="Novo agendamento" className="gap-2" disabled={availableCourts.length === 0}>
                 <Plus className="h-4 w-4" /> Agendar
               </Button>
               <DropdownMenu>
@@ -1803,28 +2469,213 @@ function AgendaPage() {
                     <SlidersHorizontal className="h-4 w-4" /> Filtros
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-56">
-                  <DropdownMenuLabel>Quadras</DropdownMenuLabel>
+                <DropdownMenuContent align="end" className="w-64">
+                  <DropdownMenuLabel>Exibição</DropdownMenuLabel>
                   <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={(e) => { e.preventDefault(); setSelectedCourts(availableCourts); }}>Selecionar todas</DropdownMenuItem>
-                  <DropdownMenuItem onClick={(e) => { e.preventDefault(); setSelectedCourts([]); }}>Limpar</DropdownMenuItem>
+                  <DropdownMenuItem onClick={(e) => e.preventDefault()}>
+                    <div className="flex items-center justify-between gap-3 w-full">
+                      <div className="flex items-center gap-2">
+                        <CalendarIcon className="h-4 w-4 text-text-muted" />
+                        <span>Agendados</span>
+                      </div>
+                      <Checkbox
+                        checked={viewFilter.scheduled}
+                        onCheckedChange={(checked) => setViewFilter(prev => ({ ...prev, scheduled: !!checked, canceledOnly: checked ? false : prev.canceledOnly }))}
+                      />
+                    </div>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={(e) => e.preventDefault()}>
+                    <div className="flex items-center justify-between gap-3 w-full">
+                      <div className="flex items-center gap-2">
+                        <Sparkles className="h-4 w-4 text-text-muted" />
+                        <span>Livres</span>
+                      </div>
+                      <Checkbox
+                        checked={viewFilter.available}
+                        onCheckedChange={(checked) => setViewFilter(prev => ({ ...prev, available: !!checked, canceledOnly: checked ? false : prev.canceledOnly }))}
+                      />
+                    </div>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={(e) => e.preventDefault()}>
+                    <div className="flex items-center justify-between gap-3 w-full">
+                      <div className="flex items-center gap-2">
+                        <XCircle className="h-4 w-4 text-rose-400" />
+                        <span>Cancelados</span>
+                      </div>
+                      <Checkbox
+                        checked={viewFilter.canceledOnly}
+                        onCheckedChange={(checked) => {
+                          const isOn = !!checked;
+                          setViewFilter(prev => ({
+                            ...prev,
+                            canceledOnly: isOn,
+                            scheduled: isOn ? false : prev.scheduled,
+                            available: isOn ? false : prev.available,
+                          }));
+                          if (isOn && !hideCanceledInfo) setShowCanceledInfo(true);
+                        }}
+                      />
+                    </div>
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuLabel className="text-xs text-text-muted">Filtrar quadras</DropdownMenuLabel>
                   <DropdownMenuSeparator />
                   {availableCourts.map((c) => {
                     const checked = selectedCourts.includes(c);
                     return (
-                      <DropdownMenuItem key={c} onClick={(e) => { e.preventDefault(); setSelectedCourts(prev => checked ? prev.filter(x => x !== c) : [...prev, c]); }}>
-                        <div className="flex items-center gap-2">
-                          <Checkbox checked={checked} onCheckedChange={() => { /* handled by item click */ }} />
-                          <span>{c}</span>
+                      <DropdownMenuItem key={c} onClick={(e) => e.preventDefault()}>
+                        <div className="flex items-center justify-between gap-3 w-full">
+                          <div className="flex items-center gap-2">
+                            <span
+                              className="inline-block w-2.5 h-2.5 rounded-full"
+                              style={{ backgroundColor: getCourtColor(c), boxShadow: '0 0 0 2px rgba(255,255,255,0.06)' }}
+                              aria-hidden="true"
+                            />
+                            <span>{c}</span>
+                          </div>
+                          <Checkbox
+                            checked={checked}
+                            onCheckedChange={() => setSelectedCourts(prev => checked ? prev.filter(x => x !== c) : [...prev, c])}
+                          />
                         </div>
                       </DropdownMenuItem>
                     );
                   })}
                 </DropdownMenuContent>
               </DropdownMenu>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-10 w-10"
+                onClick={() => setIsSettingsOpen(true)}
+                disabled={availableCourts.length === 0}
+                aria-label="Configurar agenda"
+                title="Configurar agenda"
+              >
+                <Settings className="h-5 w-5" />
+              </Button>
             </div>
           </div>
         </motion.div>
+
+        {/* Modal de Configurações da Agenda */}
+        <Dialog open={isSettingsOpen} onOpenChange={setIsSettingsOpen}>
+          <DialogContent className="sm:max-w-[680px]" onOpenAutoFocus={(e) => e.preventDefault()}>
+            <DialogHeader className="pb-3 border-b border-border bg-surface-2/40 rounded-t-lg px-2 -mx-2 -mt-2">
+              <DialogTitle className="text-base font-semibold tracking-tight">Configurações da Agenda</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-8">
+              {/* Grupo: Confirmação */}
+              <div className="space-y-3">
+                <div className="flex items-center gap-2 text-text-secondary">
+                  <CheckCircle className="h-4 w-4" style={{ color: statusConfig.confirmed.hex }} />
+                  <span className="text-sm font-medium">Confirmação automática</span>
+                </div>
+                {/* Card confirmação */}
+                <div className="rounded-lg border border-border bg-surface-2/40 p-4 space-y-3" style={{ borderLeftWidth: 3, borderLeftColor: statusConfig.confirmed.hex }}>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Checkbox id="autoConfirmEnabled" checked={automation.autoConfirmEnabled} onCheckedChange={(v) => setAutomation(a => ({ ...a, autoConfirmEnabled: !!v }))} />
+                      <span className="inline-flex items-center gap-2">
+                        <span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: statusConfig.confirmed.hex }} />
+                        <Label htmlFor="autoConfirmEnabled" className="font-medium">Confirmação automática</Label>
+                      </span>
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-sm text-text-muted">Confirmar se faltar</Label>
+                    <div className="flex items-center gap-2">
+                      <Select
+                        value={String(Math.max(0, Math.round((automation.autoConfirmMinutesBefore || 0) / 60)))}
+                        onValueChange={(v) => setAutomation(a => ({ ...a, autoConfirmMinutesBefore: Math.max(0, Number(v)) * 60 }))}
+                        disabled={!automation.autoConfirmEnabled}
+                      >
+                        <SelectTrigger className="w-32">
+                          <SelectValue placeholder="Horas" />
+                        </SelectTrigger>
+                        <SelectContent align="start">
+                          <SelectItem value="0">Imediato</SelectItem>
+                          <SelectItem value="1">1 h</SelectItem>
+                          <SelectItem value="2">2 h</SelectItem>
+                          <SelectItem value="3">3 h</SelectItem>
+                          <SelectItem value="4">4 h</SelectItem>
+                          <SelectItem value="6">6 h</SelectItem>
+                          <SelectItem value="8">8 h</SelectItem>
+                          <SelectItem value="12">12 h</SelectItem>
+                          <SelectItem value="24">24 h</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <span className="text-sm text-text-muted">antes</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Grupo: Transições em tempo real */}
+              <div className="space-y-3">
+                <div className="flex items-center gap-2 text-text-secondary">
+                  <PlayCircle className="h-4 w-4" style={{ color: statusConfig.in_progress.hex }} />
+                  <span className="text-sm font-medium">Transições automáticas</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="rounded-lg border border-border bg-surface-2/40 p-4 space-y-2" style={{ borderLeftWidth: 3, borderLeftColor: statusConfig.in_progress.hex }}>
+                    <div className="flex items-center gap-2">
+                      <Checkbox id="autoStartEnabled" checked={automation.autoStartEnabled} onCheckedChange={(v) => setAutomation(a => ({ ...a, autoStartEnabled: !!v }))} />
+                      <span className="inline-flex items-center gap-2">
+                        <span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: statusConfig.in_progress.hex }} />
+                        <Label htmlFor="autoStartEnabled" className="font-medium">Iniciar no horário</Label>
+                      </span>
+                    </div>
+                    <p className="text-xs text-text-muted ml-7">Confirmado → Em andamento no horário de início.</p>
+                  </div>
+
+                  <div className="rounded-lg border border-border bg-surface-2/40 p-4 space-y-2" style={{ borderLeftWidth: 3, borderLeftColor: statusConfig.finished.hex }}>
+                    <div className="flex items-center gap-2">
+                      <Checkbox id="autoFinishEnabled" checked={automation.autoFinishEnabled} onCheckedChange={(v) => setAutomation(a => ({ ...a, autoFinishEnabled: !!v }))} />
+                      <span className="inline-flex items-center gap-2">
+                        <span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: statusConfig.finished.hex }} />
+                        <Label htmlFor="autoFinishEnabled" className="font-medium">Finalizar ao término</Label>
+                      </span>
+                    </div>
+                    <p className="text-xs text-text-muted ml-7">Em andamento → Finalizado no horário de término.</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <DialogFooter className="mt-2">
+              <Button type="button" variant="ghost" className="border border-white/10" onClick={() => setIsSettingsOpen(false)}>Cancelar</Button>
+              <Button type="button" variant="default" onClick={handleSaveSettings} disabled={savingSettings}>
+                {savingSettings ? 'Salvando…' : 'Salvar'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Info Modal para filtro de Cancelados */}
+        <Dialog open={showCanceledInfo} onOpenChange={setShowCanceledInfo}>
+          <DialogContent className="sm:max-w-[520px]" onOpenAutoFocus={(e) => e.preventDefault()}>
+            <DialogHeader>
+              <DialogTitle>Sobre agendamentos cancelados</DialogTitle>
+              <DialogDescription>
+                Agendamentos cancelados não aparecem na agenda quando o filtro não está selecionado e não ocupam horário.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="flex items-start gap-3 mt-2">
+              <Checkbox
+                id="hide-canceled-info"
+                checked={hideCanceledInfo}
+                onCheckedChange={(v) => setHideCanceledInfo(!!v)}
+                className="mt-0.5"
+              />
+              <Label htmlFor="hide-canceled-info" className="text-sm cursor-pointer text-text-secondary">
+                Não mostrar novamente
+              </Label>
+            </div>
+            <DialogFooter className="mt-4">
+              <Button type="button" onClick={() => setShowCanceledInfo(false)}>Entendi</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         {/* Aviso: nenhuma quadra cadastrada */}
         {!courtsLoading && availableCourts.length === 0 && (
@@ -1841,18 +2692,18 @@ function AgendaPage() {
 
         {/* Calendar Grid */}
         {selectedCourts.length > 0 && (
-        <motion.div variants={itemVariants} className="flex-1 overflow-auto bg-surface rounded-lg border border-border fx-scroll" ref={scrollRef}>
+        <motion.div variants={isModalOpen ? undefined : itemVariants} className="flex-1 overflow-auto bg-surface rounded-lg border border-border fx-scroll" ref={scrollRef}>
           <div
             className="grid mx-auto"
             style={{
               gridTemplateColumns:
                 selectedCourts.length === 1
-                  ? `144px 760px`
+                  ? `120px 760px`
                   : selectedCourts.length === 2
-                  ? `144px repeat(2, 520px)`
-                  : `144px repeat(${selectedCourts.length}, 1fr)`,
+                  ? `120px repeat(2, 520px)`
+                  : `120px repeat(${selectedCourts.length}, 1fr)`,
               width: (selectedCourts.length <= 2) ? 'fit-content' : undefined,
-              minWidth: selectedCourts.length >= 3 ? '1280px' : undefined,
+              columnGap: '16px'
             }}
           >
             {/* Time Column */}
@@ -1860,7 +2711,7 @@ function AgendaPage() {
               <div className="sticky top-0 z-20 h-14 border-b border-r border-border bg-surface flex items-center justify-center px-2">
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <Button size="sm" variant="ghost" className="hover:bg-surface-2/50">
+                    <Button size="sm" variant="ghost" className="hover:bg-surface-2/50 text-lg font-semibold">
                       {isSameDay(currentDate, new Date())
                         ? 'Hoje'
                         : format(currentDate, 'EEEE', { locale: ptBR })}
@@ -1915,7 +2766,7 @@ function AgendaPage() {
               {/* Container relativo para posicionar reservas */}
               <div className="relative" style={{ height: totalGridHeight }}>
                 {/* Linhas base por quadra: exibe apenas durante o horário de funcionamento dessa quadra */}
-                {viewFilter.scheduled && (() => {
+                {(viewFilter.scheduled || viewFilter.canceledOnly) && (() => {
                   const bounds = (() => {
                     const tStart = courtsMap[court]?.hora_inicio;
                     const tEnd = courtsMap[court]?.hora_fim;
@@ -1951,8 +2802,8 @@ function AgendaPage() {
                     </>
                   );
                 })()}
-                {/* Agendados */}
-                {viewFilter.scheduled && filteredBookings
+                {/* Agendados ou Cancelados (filtrados) */}
+                {(viewFilter.scheduled || viewFilter.canceledOnly) && filteredBookings
                   .filter(b => b.court === court)
                   .map(b => <BookingCard key={b.id} booking={b} />)
                 }
@@ -1974,7 +2825,7 @@ function AgendaPage() {
                   const toMinutes = (d) => getHours(d) * 60 + getMinutes(d);
                   const dayStr = format(currentDate, 'yyyy-MM-dd');
                   const intervals = bookings
-                    .filter(b => b.court === court && format(b.start, 'yyyy-MM-dd') === dayStr)
+                    .filter(b => b.court === court && format(b.start, 'yyyy-MM-dd') === dayStr && b.status !== 'canceled')
                     .map(b => [toMinutes(b.start), toMinutes(b.end)])
                     .sort((a,b) => a[0]-b[0]);
                   const free = [];
@@ -2055,7 +2906,7 @@ function AgendaPage() {
 
                           setPrefill({ court, date: currentDate, startMinutes: clickedStart, endMinutes: clickedEnd });
                           setEditingBooking(null);
-                          setIsModalOpen(true);
+                          openBookingModal();
                         }}
                         title={`Livre: ${sLabel}–${eLabel}`}
                       >
@@ -2081,8 +2932,8 @@ function AgendaPage() {
           </div>
         </motion.div>
         )}
-        <AddBookingModal />
       </motion.div>
+      <AddBookingModal />
     </>
   );
 }
