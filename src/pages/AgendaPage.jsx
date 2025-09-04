@@ -149,7 +149,7 @@ const itemVariants = {
 
 function AgendaPage() {
   const { toast } = useToast();
-  const { userProfile, authReady } = useAuth();
+  const { userProfile, authReady, company } = useAuth();
   const [currentDate, setCurrentDate] = useState(new Date());
   const [bookings, setBookings] = useState([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -252,12 +252,11 @@ function AgendaPage() {
   const defaultAutomation = useMemo(() => ({
     autoConfirmEnabled: false,
     autoConfirmMinutesBefore: 120,
-    autoCancelIfNotConfirmedEnabled: false,
-    autoCancelMinutesBefore: 240,
     autoStartEnabled: true,
     autoFinishEnabled: true,
   }), []);
   const [automation, setAutomation] = useState(defaultAutomation);
+  const [savingSettings, setSavingSettings] = useState(false);
   // Carrega regras salvas quando empresa está disponível
   useEffect(() => {
     if (!userProfile?.codigo_empresa) return;
@@ -280,8 +279,85 @@ function AgendaPage() {
     try { localStorage.setItem(`agenda:automation:${userProfile.codigo_empresa}`, JSON.stringify(automation)); } catch {}
   }, [automation, userProfile?.codigo_empresa]);
 
+  // Carregar do banco (agenda_settings) quando empresa estiver disponível
+  useEffect(() => {
+    const loadSettings = async () => {
+      if (!authReady || !company?.id) return;
+      try {
+        const { data, error } = await supabase
+          .from('agenda_settings')
+          .select('*')
+          .eq('empresa_id', company.id)
+          .maybeSingle();
+        if (error) {
+          // não quebra UX; mantém localStorage/defaults
+          console.warn('[AgendaSettings] load error', error);
+          return;
+        }
+        if (!data) return; // ainda não criado -> mantém defaults/local cache
+        // Mapear colunas (horas -> minutos)
+        const next = {
+          autoConfirmEnabled: !!data.auto_confirm_enabled,
+          autoConfirmMinutesBefore: data.auto_confirm_enabled && Number.isFinite(Number(data.auto_confirm_hours))
+            ? Number(data.auto_confirm_hours) * 60
+            : defaultAutomation.autoConfirmMinutesBefore,
+          autoStartEnabled: !!data.auto_start_enabled,
+          autoFinishEnabled: !!data.auto_finish_enabled,
+        };
+        setAutomation((prev) => ({ ...prev, ...next }));
+      } catch (e) {
+        console.warn('[AgendaSettings] unexpected load error', e);
+      }
+    };
+    loadSettings();
+  }, [authReady, company?.id]);
+
+  // Manual override tracking: user actions take precedence over automation
+  const [manualOverrides, setManualOverrides] = useState({});
+  const MANUAL_OVERRIDE_WINDOW_MS = 2 * 60 * 60 * 1000; // 2 horas
+  const markManualOverride = useCallback((bookingId) => {
+    setManualOverrides((prev) => ({ ...prev, [bookingId]: Date.now() }));
+  }, []);
+  const isOverriddenRecently = useCallback((bookingId) => {
+    const ts = manualOverrides?.[bookingId];
+    return typeof ts === 'number' && (Date.now() - ts) < MANUAL_OVERRIDE_WINDOW_MS;
+  }, [manualOverrides]);
+
+  // Salvar no banco (upsert)
+  const handleSaveSettings = useCallback(async () => {
+    if (!authReady || !company?.id) {
+      toast({ title: 'Não autenticado', description: 'Faça login para salvar as configurações.', variant: 'destructive' });
+      return;
+    }
+    try {
+      setSavingSettings(true);
+      const payload = {
+        empresa_id: company.id,
+        auto_confirm_enabled: !!automation.autoConfirmEnabled,
+        auto_confirm_hours: !!automation.autoConfirmEnabled
+          ? Math.max(0, Math.round(Number(automation.autoConfirmMinutesBefore || 0) / 60))
+          : null,
+        auto_start_enabled: !!automation.autoStartEnabled,
+        auto_finish_enabled: !!automation.autoFinishEnabled,
+      };
+      const { error } = await supabase
+        .from('agenda_settings')
+        .upsert(payload, { onConflict: 'empresa_id' });
+      if (error) throw error;
+      toast({ title: 'Configurações salvas', description: 'As automações da agenda foram atualizadas com sucesso.' });
+      setIsSettingsOpen(false);
+    } catch (e) {
+      console.error('[AgendaSettings] save error', e);
+      const message = e?.message || 'Falha ao salvar as configurações.';
+      toast({ title: 'Erro ao salvar', description: message, variant: 'destructive' });
+    } finally {
+      setSavingSettings(false);
+    }
+  }, [authReady, company?.id, automation]);
+
   // Atualiza status no banco e estados locais
-  const updateBookingStatus = useCallback(async (bookingId, newStatus) => {
+  // source: 'user' | 'automation'
+  const updateBookingStatus = useCallback(async (bookingId, newStatus, source = 'user') => {
     try {
       const { error } = await supabase
         .from('agendamentos')
@@ -297,44 +373,68 @@ function AgendaPage() {
           localStorage.setItem(bookingsCacheKey, JSON.stringify(updated));
         }
       } catch {}
+      // Marca override manual somente quando a origem é usuário
+      if (source === 'user') {
+        try { markManualOverride(bookingId); } catch {}
+      }
     } catch (e) {
       // eslint-disable-next-line no-console
       console.error('Auto-status: falha ao atualizar', bookingId, newStatus, e);
     }
-  }, [bookingsCacheKey]);
+  }, [bookingsCacheKey, markManualOverride]);
 
   // Runner periódico
   const automationRunningRef = useRef(false);
-  const runAutomation = useCallback(() => {
+  const runAutomation = useCallback(async () => {
     if (!authReady || !userProfile?.codigo_empresa) return;
     if (automationRunningRef.current) return;
     automationRunningRef.current = true;
     try {
       const now = new Date();
       const nowMin = getHours(now) * 60 + getMinutes(now);
-      const dayStr = format(currentDate, 'yyyy-MM-dd');
-      const todays = (bookings || []).filter(b => format(b.start, 'yyyy-MM-dd') === dayStr);
-      todays.forEach((b) => {
+      const todayStr = format(now, 'yyyy-MM-dd');
+      let todays = (bookings || []).filter(b => format(b.start, 'yyyy-MM-dd') === todayStr);
+      // Se UI não está no dia de hoje, buscamos diretamente do banco os agendamentos de hoje
+      if (todays.length === 0) {
+        try {
+          const dayStart = startOfDay(now);
+          const dayEnd = addDays(dayStart, 1);
+          const { data, error } = await supabase
+            .from('agendamentos')
+            .select('id, inicio, fim, status')
+            .eq('codigo_empresa', userProfile.codigo_empresa)
+            .gte('inicio', dayStart.toISOString())
+            .lt('inicio', dayEnd.toISOString());
+          if (!error && Array.isArray(data)) {
+            todays = data.map(row => ({
+              id: row.id,
+              start: new Date(row.inicio),
+              end: new Date(row.fim),
+              status: row.status || 'scheduled',
+            }));
+          }
+        } catch {}
+      }
+      for (const b of todays) {
+        // Respeita override manual recente
+        if (isOverriddenRecently(b.id)) continue;
         const startMin = getHours(b.start) * 60 + getMinutes(b.start);
         const endMin = getHours(b.end) * 60 + getMinutes(b.end);
         if (b.status === 'scheduled') {
-          const shouldCancel = automation.autoCancelIfNotConfirmedEnabled && (nowMin >= (startMin - Number(automation.autoCancelMinutesBefore || 0)));
           const shouldConfirm = automation.autoConfirmEnabled && (nowMin >= (startMin - Number(automation.autoConfirmMinutesBefore || 0)));
-          if (shouldCancel) { updateBookingStatus(b.id, 'canceled'); return; }
-          if (shouldConfirm) { updateBookingStatus(b.id, 'confirmed'); return; }
+          if (shouldConfirm) { await updateBookingStatus(b.id, 'confirmed', 'automation'); continue; }
         }
         if (b.status === 'confirmed' && automation.autoStartEnabled) {
-          if (nowMin >= startMin) { updateBookingStatus(b.id, 'in_progress'); return; }
+          if (nowMin >= startMin) { await updateBookingStatus(b.id, 'in_progress', 'automation'); continue; }
         }
         if (b.status === 'in_progress' && automation.autoFinishEnabled) {
-          if (nowMin >= endMin) { updateBookingStatus(b.id, 'finished'); return; }
+          if (nowMin >= endMin) { await updateBookingStatus(b.id, 'finished', 'automation'); continue; }
         }
-      });
+      }
     } finally {
       automationRunningRef.current = false;
     }
-  }, [authReady, userProfile?.codigo_empresa, bookings, currentDate, automation, updateBookingStatus]);
-
+  }, [authReady, userProfile?.codigo_empresa, bookings, automation, updateBookingStatus, isOverriddenRecently]);
   useEffect(() => {
     const id = setInterval(runAutomation, 30000);
     try { runAutomation(); } catch {}
@@ -1441,6 +1541,37 @@ function AgendaPage() {
 
     // (Resumo removido conforme solicitação)
 
+    // Mensagem simples indicando automação ativa (não bloqueia ação manual)
+    const nextAutomationMessage = useMemo(() => {
+      if (!isModalOpen) return '';
+      const now = new Date();
+      const nowMin = getHours(now) * 60 + getMinutes(now);
+      const startMin = Number(form.startMinutes);
+      const endMin = Number(form.endMinutes);
+      const hhmm = (mins) => {
+        const h = Math.floor(mins / 60);
+        const m = mins % 60;
+        return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+      };
+      if (automation.autoConfirmEnabled && form.status === 'scheduled') {
+        const threshold = Math.max(0, startMin - Number(automation.autoConfirmMinutesBefore || 0));
+        if (nowMin < threshold) {
+          return `Este agendamento está com automação ativa (Confirmar automaticamente às ${hhmm(threshold)})`;
+        }
+      }
+      if (automation.autoStartEnabled && form.status === 'confirmed') {
+        if (nowMin < startMin) {
+          return `Este agendamento está com automação ativa (Iniciar automaticamente às ${hhmm(startMin)})`;
+        }
+      }
+      if (automation.autoFinishEnabled && form.status === 'in_progress') {
+        if (nowMin < endMin) {
+          return `Este agendamento está com automação ativa (Finalizar automaticamente às ${hhmm(endMin)})`;
+        }
+      }
+      return '';
+    }, [isModalOpen, form.startMinutes, form.endMinutes, form.status, automation]);
+
     // ======================== Pagamentos: estado e helpers ========================
     const [paymentTotal, setPaymentTotal] = useState('');
     const participantsCount = useMemo(() => (form.selectedClients || []).length, [form.selectedClients]);
@@ -1732,6 +1863,11 @@ function AgendaPage() {
                     ))}
                   </SelectContent>
                 </Select>
+                {nextAutomationMessage && (
+                  <div className="mt-1 text-xs text-text-secondary italic">
+                    {nextAutomationMessage}
+                  </div>
+                )}
               </div>
 
               {/* Horário */}
@@ -2429,88 +2565,47 @@ function AgendaPage() {
               <DialogTitle className="text-base font-semibold tracking-tight">Configurações da Agenda</DialogTitle>
             </DialogHeader>
             <div className="space-y-8">
-              {/* Grupo: Confirmação e cancelamento */}
+              {/* Grupo: Confirmação */}
               <div className="space-y-3">
                 <div className="flex items-center gap-2 text-text-secondary">
                   <CheckCircle className="h-4 w-4" style={{ color: statusConfig.confirmed.hex }} />
-                  <span className="text-sm font-medium">Regras de confirmação e cancelamento</span>
+                  <span className="text-sm font-medium">Confirmação automática</span>
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {/* Card confirmação */}
-                  <div className="rounded-lg border border-border bg-surface-2/40 p-4 space-y-3" style={{ borderLeftWidth: 3, borderLeftColor: statusConfig.confirmed.hex }}>
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <Checkbox id="autoConfirmEnabled" checked={automation.autoConfirmEnabled} onCheckedChange={(v) => setAutomation(a => ({ ...a, autoConfirmEnabled: !!v }))} />
-                        <span className="inline-flex items-center gap-2">
-                          <span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: statusConfig.confirmed.hex }} />
-                          <Label htmlFor="autoConfirmEnabled" className="font-medium">Confirmação automática</Label>
-                        </span>
-                      </div>
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-sm text-text-muted">Confirmar se faltar</Label>
-                      <div className="flex items-center gap-2">
-                        <Select
-                          value={String(Math.max(0, Math.round((automation.autoConfirmMinutesBefore || 0) / 60)))}
-                          onValueChange={(v) => setAutomation(a => ({ ...a, autoConfirmMinutesBefore: Math.max(0, Number(v)) * 60 }))}
-                          disabled={!automation.autoConfirmEnabled}
-                        >
-                          <SelectTrigger className="w-32">
-                            <SelectValue placeholder="Horas" />
-                          </SelectTrigger>
-                          <SelectContent align="start">
-                            <SelectItem value="0">0 h</SelectItem>
-                            <SelectItem value="1">1 h</SelectItem>
-                            <SelectItem value="2">2 h</SelectItem>
-                            <SelectItem value="3">3 h</SelectItem>
-                            <SelectItem value="4">4 h</SelectItem>
-                            <SelectItem value="6">6 h</SelectItem>
-                            <SelectItem value="8">8 h</SelectItem>
-                            <SelectItem value="12">12 h</SelectItem>
-                            <SelectItem value="24">24 h</SelectItem>
-                          </SelectContent>
-                        </Select>
-                        <span className="text-sm text-text-muted">antes</span>
-                      </div>
+                {/* Card confirmação */}
+                <div className="rounded-lg border border-border bg-surface-2/40 p-4 space-y-3" style={{ borderLeftWidth: 3, borderLeftColor: statusConfig.confirmed.hex }}>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Checkbox id="autoConfirmEnabled" checked={automation.autoConfirmEnabled} onCheckedChange={(v) => setAutomation(a => ({ ...a, autoConfirmEnabled: !!v }))} />
+                      <span className="inline-flex items-center gap-2">
+                        <span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: statusConfig.confirmed.hex }} />
+                        <Label htmlFor="autoConfirmEnabled" className="font-medium">Confirmação automática</Label>
+                      </span>
                     </div>
                   </div>
-
-                  {/* Card cancelamento */}
-                  <div className="rounded-lg border border-border bg-surface-2/40 p-4 space-y-3" style={{ borderLeftWidth: 3, borderLeftColor: statusConfig.canceled.hex }}>
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <Checkbox id="autoCancelEnabled" checked={automation.autoCancelIfNotConfirmedEnabled} onCheckedChange={(v) => setAutomation(a => ({ ...a, autoCancelIfNotConfirmedEnabled: !!v }))} />
-                        <span className="inline-flex items-center gap-2">
-                          <span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: statusConfig.canceled.hex }} />
-                          <Label htmlFor="autoCancelEnabled" className="font-medium">Cancelamento automático</Label>
-                        </span>
-                      </div>
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-sm text-text-muted">Cancelar se faltar</Label>
-                      <div className="flex items-center gap-2">
-                        <Select
-                          value={String(Math.max(0, Math.round((automation.autoCancelMinutesBefore || 0) / 60)))}
-                          onValueChange={(v) => setAutomation(a => ({ ...a, autoCancelMinutesBefore: Math.max(0, Number(v)) * 60 }))}
-                          disabled={!automation.autoCancelIfNotConfirmedEnabled}
-                        >
-                          <SelectTrigger className="w-32">
-                            <SelectValue placeholder="Horas" />
-                          </SelectTrigger>
-                          <SelectContent align="start">
-                            <SelectItem value="0">0 h</SelectItem>
-                            <SelectItem value="1">1 h</SelectItem>
-                            <SelectItem value="2">2 h</SelectItem>
-                            <SelectItem value="3">3 h</SelectItem>
-                            <SelectItem value="4">4 h</SelectItem>
-                            <SelectItem value="6">6 h</SelectItem>
-                            <SelectItem value="8">8 h</SelectItem>
-                            <SelectItem value="12">12 h</SelectItem>
-                            <SelectItem value="24">24 h</SelectItem>
-                          </SelectContent>
-                        </Select>
-                        <span className="text-sm text-text-muted">antes</span>
-                      </div>
+                  <div className="space-y-1">
+                    <Label className="text-sm text-text-muted">Confirmar se faltar</Label>
+                    <div className="flex items-center gap-2">
+                      <Select
+                        value={String(Math.max(0, Math.round((automation.autoConfirmMinutesBefore || 0) / 60)))}
+                        onValueChange={(v) => setAutomation(a => ({ ...a, autoConfirmMinutesBefore: Math.max(0, Number(v)) * 60 }))}
+                        disabled={!automation.autoConfirmEnabled}
+                      >
+                        <SelectTrigger className="w-32">
+                          <SelectValue placeholder="Horas" />
+                        </SelectTrigger>
+                        <SelectContent align="start">
+                          <SelectItem value="0">Imediato</SelectItem>
+                          <SelectItem value="1">1 h</SelectItem>
+                          <SelectItem value="2">2 h</SelectItem>
+                          <SelectItem value="3">3 h</SelectItem>
+                          <SelectItem value="4">4 h</SelectItem>
+                          <SelectItem value="6">6 h</SelectItem>
+                          <SelectItem value="8">8 h</SelectItem>
+                          <SelectItem value="12">12 h</SelectItem>
+                          <SelectItem value="24">24 h</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <span className="text-sm text-text-muted">antes</span>
                     </div>
                   </div>
                 </div>
@@ -2548,8 +2643,10 @@ function AgendaPage() {
               </div>
             </div>
             <DialogFooter className="mt-2">
-              <Button type="button" variant="outline" onClick={() => setAutomation(defaultAutomation)}>Restaurar padrões</Button>
-              <Button type="button" variant="default" onClick={() => setIsSettingsOpen(false)}>Fechar</Button>
+              <Button type="button" variant="ghost" className="border border-white/10" onClick={() => setIsSettingsOpen(false)}>Cancelar</Button>
+              <Button type="button" variant="default" onClick={handleSaveSettings} disabled={savingSettings}>
+                {savingSettings ? 'Salvando…' : 'Salvar'}
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
