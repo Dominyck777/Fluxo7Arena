@@ -12,6 +12,52 @@ function getCachedCompanyCode() {
   }
 }
 
+// Histórico / Relatórios
+export async function listarComandas({ status, from, to, search = '', limit = 50, offset = 0, codigoEmpresa } = {}) {
+  const codigo = codigoEmpresa || getCachedCompanyCode()
+  let q = supabase
+    .from('comandas')
+    .select('id, mesa_id, status, aberto_em, fechado_em')
+    .order('aberto_em', { ascending: false })
+    .range(offset, offset + limit - 1)
+
+  if (codigo) q = q.eq('codigo_empresa', codigo)
+
+  if (status && Array.isArray(status) && status.length) q = q.in('status', status)
+  else if (typeof status === 'string') q = q.eq('status', status)
+
+  if (from) q = q.gte('aberto_em', new Date(from).toISOString())
+  if (to) q = q.lte('aberto_em', new Date(to).toISOString())
+
+  const s = (search || '').trim()
+  if (s) {
+    // pesquisa básica por id de comanda (numérico) ou status
+    const isNumeric = /^\d+$/.test(s)
+    if (isNumeric) {
+      q = q.or(`id.eq.${s},status.ilike.%${s}%`)
+    } else {
+      q = q.or(`status.ilike.%${s}%`)
+    }
+  }
+
+  const { data, error } = await q
+  if (error) throw error
+  return data || []
+}
+
+export async function listarPagamentos({ comandaId, codigoEmpresa } = {}) {
+  const codigo = codigoEmpresa || getCachedCompanyCode()
+  let q = supabase
+    .from('pagamentos')
+    .select('*')
+    .order('recebido_em', { ascending: true })
+  if (comandaId) q = q.eq('comanda_id', comandaId)
+  if (codigo) q = q.eq('codigo_empresa', codigo)
+  const { data, error } = await q
+  if (error) throw error
+  return data || []
+}
+
 // Clientes
 export async function listarClientes({ searchTerm = '', limit = 20, codigoEmpresa } = {}) {
   const codigo = codigoEmpresa || getCachedCompanyCode()

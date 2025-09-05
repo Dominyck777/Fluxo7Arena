@@ -66,6 +66,20 @@ function VendasPage() {
   const [selectedPayId, setSelectedPayId] = useState(null);
   const [payLoading, setPayLoading] = useState(false);
 
+  // Evita movimentação do layout quando diálogos estão abertos (bloqueia scroll do fundo)
+  useEffect(() => {
+    const anyOpen = isCreateMesaOpen || isOpenTableDialog || isOrderDetailsOpen || isCashierDetailsOpen || isPayOpen;
+    const original = document.body.style.overflow;
+    if (anyOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = original || '';
+    }
+    return () => {
+      document.body.style.overflow = original || '';
+    };
+  }, [isCreateMesaOpen, isOpenTableDialog, isOrderDetailsOpen, isCashierDetailsOpen, isPayOpen]);
+
   useEffect(() => {
     const mapStatus = (s) => {
       if (s === 'in_use') return 'in-use';
@@ -340,7 +354,7 @@ function VendasPage() {
     const total = tbl ? calculateTotal(items) : 0;
     return (
       <Dialog open={isOrderDetailsOpen} onOpenChange={setIsOrderDetailsOpen}>
-        <DialogContent className="max-w-xl">
+        <DialogContent className="max-w-xl" onKeyDown={(e) => e.stopPropagation()} onKeyDownCapture={(e) => e.stopPropagation()}>
           <DialogHeader>
             <DialogTitle className="text-2xl font-bold">Comanda da Mesa {tbl?.number ?? '—'}</DialogTitle>
             <DialogDescription>{tbl?.customer ? `Cliente: ${tbl.customer}` : 'Sem cliente vinculado'}</DialogDescription>
@@ -356,18 +370,18 @@ function VendasPage() {
                       <div className="font-medium truncate">{it.name}</div>
                       <div className="text-xs text-text-muted">Qtd: {it.quantity} • Unit: R$ {Number(it.price || 0).toFixed(2)}</div>
                     </div>
-                    <div className="font-semibold whitespace-nowrap">R$ {(Number(it.price || 0) * Number(it.quantity || 1)).toFixed(2)}</div>
+                    <div className="font-semibold">R$ {(Number(it.price || 0) * Number(it.quantity || 0)).toFixed(2)}</div>
                   </li>
                 ))}
               </ul>
             )}
           </div>
-          <div className="flex justify-between items-center pt-2 border-t border-border mt-2 text-lg font-semibold">
-            <span>Total</span>
-            <span>R$ {total.toFixed(2)}</span>
-          </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsOrderDetailsOpen(false)}>Fechar</Button>
+            <div className="mr-auto text-sm font-semibold">Total: R$ {total.toFixed(2)}</div>
+            <Button variant="secondary" onClick={() => setIsOrderDetailsOpen(false)}>Fechar</Button>
+            <Button onClick={() => { setIsOrderDetailsOpen(false); setIsPayOpen(true); }} disabled={!tbl || (items.length === 0)}>
+              <DollarSign className="mr-2 h-4 w-4" /> Fechar Conta
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -525,7 +539,7 @@ function VendasPage() {
     };
     return (
       <Dialog open={isCreateMesaOpen} onOpenChange={(open) => { setIsCreateMesaOpen(open); if (!open) setNovaMesaNumero(''); }}>
-        <DialogContent className="max-w-md w-[400px]">
+        <DialogContent className="max-w-md w-[400px]" onKeyDown={(e) => e.stopPropagation()} onKeyDownCapture={(e) => e.stopPropagation()}>
           <DialogHeader>
             <DialogTitle className="text-2xl font-bold">Nova Mesa</DialogTitle>
             <DialogDescription>Crie uma nova mesa informando, opcionalmente, o número desejado. Em branco cria a próxima sequência.</DialogDescription>
@@ -708,7 +722,7 @@ function VendasPage() {
 
     return (
       <Dialog open={isOpenTableDialog} onOpenChange={(open) => { setIsOpenTableDialog(open); if (!open) { setPendingTable(null); setClienteNome(''); setSelectedClientIds([]); setCommonName(''); setMode('registered'); } }}>
-        <DialogContent className="max-w-xl w-[720px] max-h-[80vh] overflow-y-auto">
+        <DialogContent className="max-w-xl w-[720px] max-h-[80vh] overflow-y-auto" onKeyDown={(e) => e.stopPropagation()} onKeyDownCapture={(e) => e.stopPropagation()}>
           <DialogHeader>
             <DialogTitle className="text-2xl font-bold">Abrir Mesa {pendingTable ? `#${pendingTable.number}` : ''}</DialogTitle>
             <DialogDescription>Escolha uma das opções: cliente cadastrado OU cliente comum.</DialogDescription>
@@ -861,6 +875,9 @@ function VendasPage() {
               <Banknote className="mr-2 h-4 w-4" /> Detalhes do Caixa
             </Button>
             <div className="w-px h-6 bg-border mx-2"></div>
+            <Button variant="outline" onClick={() => { window.location.href = '/historico'; }}>
+              <FileText className="mr-2 h-4 w-4" /> Histórico
+            </Button>
             <Button variant="outline" onClick={() => setIsCounterModeOpen(true)}><Store className="mr-2 h-4 w-4" /> Modo Balcão</Button>
             <Button onClick={() => setIsCreateMesaOpen(true)}><Plus className="mr-2 h-4 w-4" /> Nova Mesa</Button>
           </div>
