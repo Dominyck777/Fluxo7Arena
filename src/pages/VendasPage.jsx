@@ -50,6 +50,7 @@ function VendasPage() {
   const [isCounterModeOpen, setIsCounterModeOpen] = useState(false);
   const [counterOrder, setCounterOrder] = useState([]);
   const [isCashierDetailsOpen, setIsCashierDetailsOpen] = useState(false);
+  const [isOrderDetailsOpen, setIsOrderDetailsOpen] = useState(false);
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(false);
   // Abrir mesa
@@ -209,26 +210,35 @@ function VendasPage() {
     const displayTotal = (table.status === 'in-use' || table.status === 'awaiting-payment')
       ? (total > 0 ? total : Number(table.totalHint || 0))
       : 0;
+    const badgeClass = table.status === 'available'
+      ? 'text-success bg-success/10 border-success/30'
+      : (table.status === 'in-use'
+        ? 'text-warning bg-warning/10 border-warning/30'
+        : 'text-info bg-info/10 border-info/30');
     return (
       <div
         ref={provided.innerRef}
         {...provided.draggableProps}
         className={cn(
-          "p-4 rounded-lg border-2 flex flex-col items-center justify-center cursor-pointer transition-all duration-200 relative h-32",
-          config.color,
-          isDragging ? 'shadow-2xl scale-105 bg-surface-2' : 'shadow-md',
-          selectedTable?.id === table.id && 'ring-2 ring-brand scale-105 bg-surface-2'
+          "p-4 rounded-lg border bg-surface flex flex-col items-center justify-center cursor-pointer transition-colors duration-150 relative h-40 shadow-sm min-w-[220px]",
+          isDragging && 'shadow-md',
+          selectedTable?.id === table.id && 'ring-2 ring-brand/60 bg-surface-2'
         )}
         onClick={() => handleSelectTable(table)}
       >
-        <div {...provided.dragHandleProps} className="absolute top-2 right-2 text-text-muted opacity-50 hover:opacity-100">
-           <GripVertical size={16} />
+        <div {...provided.dragHandleProps} className="absolute top-2 right-2 text-text-muted opacity-60 hover:opacity-100">
+           <GripVertical size={14} />
         </div>
-        <Icon className="w-8 h-8 mb-2" />
-        <span className="text-xl font-bold text-text-primary">Mesa {table.number}</span>
-        <span className="text-sm font-semibold h-5 mt-1 truncate max-w-full px-2">
-          {table.status === 'in-use' || table.status === 'awaiting-payment' ? (table.customer ? `${table.customer}` : `R$ ${displayTotal.toFixed(2)}`) : config.label}
+        <Icon className="w-5 h-5 mb-1 text-text-secondary" />
+        <span className="text-lg font-semibold text-text-primary">Mesa {table.number}</span>
+        <span className={cn("mt-2 text-[11px] font-medium px-2 py-0.5 rounded-full border", badgeClass)}>
+          {config.label}
         </span>
+        {(table.status === 'in-use' || table.status === 'awaiting-payment') && (
+          <span className="mt-1 text-xs text-text-secondary truncate max-w-[90%]">
+            {table.customer ? `${table.customer}` : `R$ ${displayTotal.toFixed(2)}`}
+          </span>
+        )}
       </div>
     )
   };
@@ -296,6 +306,74 @@ function VendasPage() {
     );
   };
 
+  const CashierDetailsDialog = () => (
+    <Dialog open={isCashierDetailsOpen} onOpenChange={setIsCashierDetailsOpen}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="text-2xl font-bold">Detalhes do Caixa</DialogTitle>
+          <DialogDescription>Resumo da sessão atual do caixa.</DialogDescription>
+        </DialogHeader>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="bg-surface-2 rounded-lg p-3 border border-border">
+            <p className="text-xs text-text-secondary">Saldo Inicial</p>
+            <p className="text-2xl font-bold tabular-nums">R$ 0,00</p>
+          </div>
+          <div className="bg-surface-2 rounded-lg p-3 border border-border">
+            <p className="text-xs text-text-secondary">Entradas</p>
+            <p className="text-2xl font-bold text-success tabular-nums">R$ 0,00</p>
+          </div>
+          <div className="bg-surface-2 rounded-lg p-3 border border-border">
+            <p className="text-xs text-text-secondary">Saídas</p>
+            <p className="text-2xl font-bold text-danger tabular-nums">R$ 0,00</p>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="secondary" onClick={() => setIsCashierDetailsOpen(false)}>Fechar</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+
+  const OrderDetailsDialog = () => {
+    const tbl = selectedTable;
+    const items = tbl?.order || [];
+    const total = tbl ? calculateTotal(items) : 0;
+    return (
+      <Dialog open={isOrderDetailsOpen} onOpenChange={setIsOrderDetailsOpen}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle className="text-2xl font-bold">Comanda da Mesa {tbl?.number ?? '—'}</DialogTitle>
+            <DialogDescription>{tbl?.customer ? `Cliente: ${tbl.customer}` : 'Sem cliente vinculado'}</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 max-h-[60vh] overflow-y-auto thin-scroll">
+            {items.length === 0 ? (
+              <div className="text-sm text-text-muted">Nenhum item na comanda.</div>
+            ) : (
+              <ul className="divide-y divide-border">
+                {items.map((it) => (
+                  <li key={it.id} className="py-2 flex items-center justify-between gap-4">
+                    <div className="min-w-0">
+                      <div className="font-medium truncate">{it.name}</div>
+                      <div className="text-xs text-text-muted">Qtd: {it.quantity} • Unit: R$ {Number(it.price || 0).toFixed(2)}</div>
+                    </div>
+                    <div className="font-semibold whitespace-nowrap">R$ {(Number(it.price || 0) * Number(it.quantity || 1)).toFixed(2)}</div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+          <div className="flex justify-between items-center pt-2 border-t border-border mt-2 text-lg font-semibold">
+            <span>Total</span>
+            <span>R$ {total.toFixed(2)}</span>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsOrderDetailsOpen(false)}>Fechar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    );
+  };
+
   const OrderPanel = ({ table }) => {
     if (!table) return (
       <div className="flex flex-col items-center justify-center h-full text-center text-text-muted">
@@ -344,33 +422,35 @@ function VendasPage() {
     };
     return (
       <>
-      <div className="flex flex-col h-full">
-        <div className="p-6 border-b border-border">
-          <h2 className="text-lg font-semibold text-text-primary">{table.customer || '—'}</h2>
-          <p className="text-xs font-medium mt-1">{statusConfig[table.status].label}</p>
-          {table.customer && (
-            <p className="text-xs text-text-muted mt-1">Clientes: {table.customer}</p>
-          )}
-          <div className="mt-3 flex gap-2">
-            {!table.comandaId && (
-              <Button size="sm" onClick={() => { setPendingTable(table); setIsOpenTableDialog(true); }}>Abrir Mesa</Button>
-            )}
-            {table.comandaId && (
-              <Button size="sm" variant="outline" onClick={async () => {
-                try {
-                  await fecharComandaEMesa({ comandaId: table.comandaId });
-                  const updated = { ...table, status: 'available', order: [], comandaId: null, customer: null };
-                  setSelectedTable(updated);
-                  setTables((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
-                  toast({ title: 'Mesa liberada', variant: 'success' });
-                } catch(e) {
-                  toast({ title: 'Falha ao liberar mesa', description: e?.message || 'Tente novamente', variant: 'destructive' });
-                }
-              }}>Liberar Mesa</Button>
+      <div className="flex flex-col h-full min-h-0">
+        <div className="p-3 border-b border-border flex items-center justify-between gap-2">
+          <div className="text-sm font-medium text-text-primary leading-none truncate">{table.customer || '—'}</div>
+          <div className="flex items-center gap-2">
+            {table.comandaId ? (
+              <>
+                <Button size="sm" variant="secondary" className="h-7 px-2.5 rounded-full text-[12px] font-medium leading-none whitespace-nowrap" onClick={() => setIsOrderDetailsOpen(true)}>
+                  <FileText size={12} className="mr-1.5 shrink-0" /> Comanda
+                </Button>
+                <Button size="sm" variant="destructive" className="h-7 px-2.5 rounded-full text-[12px] font-medium leading-none whitespace-nowrap" onClick={async () => {
+                  try {
+                    await fecharComandaEMesa({ comandaId: table.comandaId });
+                    const updated = { ...table, status: 'available', order: [], comandaId: null, customer: null };
+                    setSelectedTable(updated);
+                    setTables((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
+                    toast({ title: 'Mesa liberada', variant: 'success' });
+                  } catch(e) {
+                    toast({ title: 'Falha ao liberar mesa', description: e?.message || 'Tente novamente', variant: 'destructive' });
+                  }
+                }}>
+                  <X size={12} className="mr-1.5 shrink-0" /> Liberar
+                </Button>
+              </>
+            ) : (
+              <Button size="sm" className="h-7 px-2.5 rounded-full text-[12px] font-medium leading-none whitespace-nowrap" onClick={() => { setPendingTable(table); setIsOpenTableDialog(true); }}>Abrir Mesa</Button>
             )}
           </div>
         </div>
-        <div className="flex-1 min-h-0 overflow-y-auto p-6 thin-scroll">
+        <div className="flex-1 min-h-0 overflow-y-auto p-4 thin-scroll">
           {table.order.length === 0 ? (
             <div className="text-center text-text-muted pt-16">
               <p>Comanda vazia. Adicione produtos na aba ao lado.</p>
@@ -395,7 +475,7 @@ function VendasPage() {
             </ul>
           )}
         </div>
-        <div className="p-6 border-t border-border mt-auto">
+        <div className="p-4 border-t border-border mt-auto">
           <div className="flex justify-between items-center text-sm font-semibold text-text-secondary mb-2">
             <span>Total</span>
             <span>R$ {total.toFixed(2)}</span>
@@ -406,35 +486,7 @@ function VendasPage() {
       <PayDialog />
       </>
     );
-  };
-
-  const CashierDetailsDialog = () => (
-    <Dialog open={isCashierDetailsOpen} onOpenChange={setIsCashierDetailsOpen}>
-      <DialogContent className="max-w-3xl">
-        <DialogHeader>
-          <DialogTitle className="text-2xl font-bold">Detalhes do Caixa</DialogTitle>
-          <DialogDescription>Resumo da sessão atual e atalhos rápidos.</DialogDescription>
-        </DialogHeader>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <div className="bg-surface-2 rounded-lg p-3 border border-border">
-            <p className="text-xs text-text-secondary">Saldo Inicial</p>
-            <p className="text-2xl font-bold tabular-nums">R$ 0,00</p>
-          </div>
-          <div className="bg-surface-2 rounded-lg p-3 border border-border">
-            <p className="text-xs text-text-secondary">Entradas</p>
-            <p className="text-2xl font-bold text-success tabular-nums">R$ 0,00</p>
-          </div>
-          <div className="bg-surface-2 rounded-lg p-3 border border-border">
-            <p className="text-xs text-text-secondary">Saídas</p>
-            <p className="text-2xl font-bold text-danger tabular-nums">R$ 0,00</p>
-          </div>
-        </div>
-        <DialogFooter>
-          <Button variant="secondary" onClick={() => setIsCashierDetailsOpen(false)}>Fechar</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
+};
 
   const CreateMesaDialog = () => {
     const confirmCreate = async () => {
@@ -473,14 +525,25 @@ function VendasPage() {
     };
     return (
       <Dialog open={isCreateMesaOpen} onOpenChange={(open) => { setIsCreateMesaOpen(open); if (!open) setNovaMesaNumero(''); }}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-md w-[400px]">
           <DialogHeader>
             <DialogTitle className="text-2xl font-bold">Nova Mesa</DialogTitle>
             <DialogDescription>Crie uma nova mesa informando, opcionalmente, o número desejado. Em branco cria a próxima sequência.</DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
             <Label htmlFor="nova-mesa-numero">Número da mesa (opcional)</Label>
-            <Input id="nova-mesa-numero" type="text" inputMode="numeric" placeholder="Ex.: 12" value={novaMesaNumero} onChange={(e) => setNovaMesaNumero(e.target.value)} />
+            <Input
+              id="nova-mesa-numero"
+              type="text"
+              inputMode="numeric"
+              placeholder="Ex.: 12"
+              value={novaMesaNumero}
+              onChange={(e) => setNovaMesaNumero(e.target.value)}
+              onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Enter') e.preventDefault(); }}
+              onKeyUp={(e) => e.stopPropagation()}
+              onKeyPress={(e) => e.stopPropagation()}
+              autoFocus
+            />
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => setIsCreateMesaOpen(false)} disabled={loading}>Cancelar</Button>
@@ -645,7 +708,7 @@ function VendasPage() {
 
     return (
       <Dialog open={isOpenTableDialog} onOpenChange={(open) => { setIsOpenTableDialog(open); if (!open) { setPendingTable(null); setClienteNome(''); setSelectedClientIds([]); setCommonName(''); setMode('registered'); } }}>
-        <DialogContent className="max-w-xl">
+        <DialogContent className="max-w-xl w-[720px] max-h-[80vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="text-2xl font-bold">Abrir Mesa {pendingTable ? `#${pendingTable.number}` : ''}</DialogTitle>
             <DialogDescription>Escolha uma das opções: cliente cadastrado OU cliente comum.</DialogDescription>
@@ -809,7 +872,7 @@ function VendasPage() {
                 <DragDropContext onDragEnd={onDragEnd}>
                     <Droppable droppableId="tables">
                         {(provided) => (
-                             <div {...provided.droppableProps} ref={provided.innerRef} className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                             <div {...provided.droppableProps} ref={provided.innerRef} className="grid gap-5 grid-cols-[repeat(auto-fit,minmax(240px,1fr))]">
                                 {tables.map((table, index) => (
                                     <Draggable key={table.id} draggableId={table.id} index={index}>
                                         {(provided, snapshot) => <TableCard table={table} provided={provided} isDragging={snapshot.isDragging} />}
@@ -836,6 +899,7 @@ function VendasPage() {
       </motion.div>
       <CounterModeModal />
       <CashierDetailsDialog />
+      <OrderDetailsDialog />
       <OpenTableDialog />
       <CreateMesaDialog />
     </>
