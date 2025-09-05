@@ -2505,6 +2505,16 @@ ANTES DE ATUALIZAR ESSE ARQUIVO, O USUARIO PRECISA ATUALIZAR O BANCO DE DADOS CO
                   "position": 11,
                   "generated_kind": null,
                   "identity_generation": null
+                },
+                {
+                  "name": "auto_disabled",
+                  "type": "boolean",
+                  "comment": "Quando true, desativa QUALQUER automação (auto-confirmar, auto-iniciar, auto-finalizar) para este agendamento.",
+                  "default": "false",
+                  "nullable": false,
+                  "position": 12,
+                  "generated_kind": null,
+                  "identity_generation": null
                 }
               ],
               "indexes": [
