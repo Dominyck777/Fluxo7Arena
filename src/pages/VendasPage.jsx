@@ -11,7 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger, } from "@/components/ui/alert-dialog"
 import { Label } from '@/components/ui/label';
-import { listMesas, ensureCaixaAberto, fecharCaixa, getOrCreateComandaForMesa, listarItensDaComanda, adicionarItem, atualizarQuantidadeItem, removerItem, listarFinalizadoras, registrarPagamento, fecharComandaEMesa, listarComandasAbertas, listarTotaisPorComanda, criarMesa, listarClientes } from '@/lib/store';
+import { listMesas, ensureCaixaAberto, fecharCaixa, getOrCreateComandaForMesa, listarItensDaComanda, adicionarItem, atualizarQuantidadeItem, removerItem, listarFinalizadoras, registrarPagamento, fecharComandaEMesa, listarComandasAbertas, listarTotaisPorComanda, criarMesa, listarClientes, adicionarClientesAComanda, listarClientesDaComanda } from '@/lib/store';
 import { listProducts } from '@/lib/products';
 
 // Mock Data
@@ -50,6 +50,7 @@ function VendasPage() {
   const [isCounterModeOpen, setIsCounterModeOpen] = useState(false);
   const [counterOrder, setCounterOrder] = useState([]);
   const [isCashierDetailsOpen, setIsCashierDetailsOpen] = useState(false);
+  const [isOrderDetailsOpen, setIsOrderDetailsOpen] = useState(false);
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(false);
   // Abrir mesa
@@ -64,6 +65,20 @@ function VendasPage() {
   const [payMethods, setPayMethods] = useState([]);
   const [selectedPayId, setSelectedPayId] = useState(null);
   const [payLoading, setPayLoading] = useState(false);
+
+  // Evita movimentação do layout quando diálogos estão abertos (bloqueia scroll do fundo)
+  useEffect(() => {
+    const anyOpen = isCreateMesaOpen || isOpenTableDialog || isOrderDetailsOpen || isCashierDetailsOpen || isPayOpen;
+    const original = document.body.style.overflow;
+    if (anyOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = original || '';
+    }
+    return () => {
+      document.body.style.overflow = original || '';
+    };
+  }, [isCreateMesaOpen, isOpenTableDialog, isOrderDetailsOpen, isCashierDetailsOpen, isPayOpen]);
 
   useEffect(() => {
     const mapStatus = (s) => {
@@ -180,7 +195,14 @@ function VendasPage() {
         // já há comanda aberta, apenas carregar itens
         const itens = await listarItensDaComanda({ comandaId: table.comandaId });
         const order = (itens || []).map((it) => ({ id: it.id, name: it.descricao || 'Item', price: Number(it.preco_unitario || 0), quantity: Number(it.quantidade || 1) }));
-        const enriched = { ...table, status: 'in-use', order };
+        // carregar clientes vinculados para exibir no cabeçalho e cards
+        let customer = null;
+        try {
+          const vinculos = await listarClientesDaComanda({ comandaId: table.comandaId });
+          const nomes = (vinculos || []).map(v => v?.nome).filter(Boolean);
+          customer = nomes.length ? nomes.join(', ') : null;
+        } catch {}
+        const enriched = { ...table, status: 'in-use', order, customer };
         setSelectedTable(enriched);
         setTables((prev) => prev.map((t) => (t.id === table.id ? enriched : t)));
       } else {
@@ -202,41 +224,40 @@ function VendasPage() {
     const displayTotal = (table.status === 'in-use' || table.status === 'awaiting-payment')
       ? (total > 0 ? total : Number(table.totalHint || 0))
       : 0;
+    const badgeClass = table.status === 'available'
+      ? 'text-success bg-success/10 border-success/30'
+      : (table.status === 'in-use'
+        ? 'text-warning bg-warning/10 border-warning/30'
+        : 'text-info bg-info/10 border-info/30');
     return (
       <div
         ref={provided.innerRef}
         {...provided.draggableProps}
         className={cn(
-          "p-4 rounded-lg border-2 flex flex-col items-center justify-center cursor-pointer transition-all duration-200 relative h-32",
-          config.color,
-          isDragging ? 'shadow-2xl scale-105 bg-surface-2' : 'shadow-md',
-          selectedTable?.id === table.id && 'ring-2 ring-brand scale-105 bg-surface-2'
+          "p-4 rounded-lg border bg-surface flex flex-col items-center justify-center cursor-pointer transition-colors duration-150 relative h-40 shadow-sm min-w-[220px]",
+          isDragging && 'shadow-md',
+          selectedTable?.id === table.id && 'ring-2 ring-brand/60 bg-surface-2'
         )}
         onClick={() => handleSelectTable(table)}
       >
-        <div {...provided.dragHandleProps} className="absolute top-2 right-2 text-text-muted opacity-50 hover:opacity-100">
-           <GripVertical size={16} />
+        <div {...provided.dragHandleProps} className="absolute top-2 right-2 text-text-muted opacity-60 hover:opacity-100">
+           <GripVertical size={14} />
         </div>
-        <Icon className="w-8 h-8 mb-2" />
-        <span className="text-xl font-bold text-text-primary">Mesa {table.number}</span>
-        <span className="text-sm font-semibold h-5 mt-1 truncate max-w-full px-2">
-          {table.status === 'in-use' || table.status === 'awaiting-payment' ? (table.customer ? `${table.customer}` : `R$ ${displayTotal.toFixed(2)}`) : config.label}
+        <Icon className="w-5 h-5 mb-1 text-text-secondary" />
+        <span className="text-lg font-semibold text-text-primary">Mesa {table.number}</span>
+        <span className={cn("mt-2 text-[11px] font-medium px-2 py-0.5 rounded-full border", badgeClass)}>
+          {config.label}
         </span>
+        {(table.status === 'in-use' || table.status === 'awaiting-payment') && (
+          <span className="mt-1 text-xs text-text-secondary truncate max-w-[90%]">
+            {table.customer ? `${table.customer}` : `R$ ${displayTotal.toFixed(2)}`}
+          </span>
+        )}
       </div>
     )
   };
 
-  const OrderPanel = ({ table }) => {
-    if (!table) return (
-      <div className="flex flex-col items-center justify-center h-full text-center text-text-muted">
-        <ShoppingBag size={48} className="mb-4" />
-        <h3 className="text-xl font-bold text-text-primary">Nenhuma mesa selecionada</h3>
-        <p>Clique em uma mesa para ver os detalhes da comanda.</p>
-      </div>
-    );
-
-
-
+  // Define PayDialog before OrderPanel to avoid reference errors
   const PayDialog = () => {
     const total = selectedTable ? calculateTotal(selectedTable.order) : 0;
     const confirmPay = async () => {
@@ -299,6 +320,83 @@ function VendasPage() {
     );
   };
 
+  const CashierDetailsDialog = () => (
+    <Dialog open={isCashierDetailsOpen} onOpenChange={setIsCashierDetailsOpen}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="text-2xl font-bold">Detalhes do Caixa</DialogTitle>
+          <DialogDescription>Resumo da sessão atual do caixa.</DialogDescription>
+        </DialogHeader>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="bg-surface-2 rounded-lg p-3 border border-border">
+            <p className="text-xs text-text-secondary">Saldo Inicial</p>
+            <p className="text-2xl font-bold tabular-nums">R$ 0,00</p>
+          </div>
+          <div className="bg-surface-2 rounded-lg p-3 border border-border">
+            <p className="text-xs text-text-secondary">Entradas</p>
+            <p className="text-2xl font-bold text-success tabular-nums">R$ 0,00</p>
+          </div>
+          <div className="bg-surface-2 rounded-lg p-3 border border-border">
+            <p className="text-xs text-text-secondary">Saídas</p>
+            <p className="text-2xl font-bold text-danger tabular-nums">R$ 0,00</p>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="secondary" onClick={() => setIsCashierDetailsOpen(false)}>Fechar</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+
+  const OrderDetailsDialog = () => {
+    const tbl = selectedTable;
+    const items = tbl?.order || [];
+    const total = tbl ? calculateTotal(items) : 0;
+    return (
+      <Dialog open={isOrderDetailsOpen} onOpenChange={setIsOrderDetailsOpen}>
+        <DialogContent className="max-w-xl" onKeyDown={(e) => e.stopPropagation()} onKeyDownCapture={(e) => e.stopPropagation()}>
+          <DialogHeader>
+            <DialogTitle className="text-2xl font-bold">Comanda da Mesa {tbl?.number ?? '—'}</DialogTitle>
+            <DialogDescription>{tbl?.customer ? `Cliente: ${tbl.customer}` : 'Sem cliente vinculado'}</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 max-h-[60vh] overflow-y-auto thin-scroll">
+            {items.length === 0 ? (
+              <div className="text-sm text-text-muted">Nenhum item na comanda.</div>
+            ) : (
+              <ul className="divide-y divide-border">
+                {items.map((it) => (
+                  <li key={it.id} className="py-2 flex items-center justify-between gap-4">
+                    <div className="min-w-0">
+                      <div className="font-medium truncate">{it.name}</div>
+                      <div className="text-xs text-text-muted">Qtd: {it.quantity} • Unit: R$ {Number(it.price || 0).toFixed(2)}</div>
+                    </div>
+                    <div className="font-semibold">R$ {(Number(it.price || 0) * Number(it.quantity || 0)).toFixed(2)}</div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+          <DialogFooter>
+            <div className="mr-auto text-sm font-semibold">Total: R$ {total.toFixed(2)}</div>
+            <Button variant="secondary" onClick={() => setIsOrderDetailsOpen(false)}>Fechar</Button>
+            <Button onClick={() => { setIsOrderDetailsOpen(false); setIsPayOpen(true); }} disabled={!tbl || (items.length === 0)}>
+              <DollarSign className="mr-2 h-4 w-4" /> Fechar Conta
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    );
+  };
+
+  const OrderPanel = ({ table }) => {
+    if (!table) return (
+      <div className="flex flex-col items-center justify-center h-full text-center text-text-muted">
+        <ShoppingBag size={48} className="mb-4" />
+        <h3 className="text-xl font-bold text-text-primary">Nenhuma mesa selecionada</h3>
+        <p>Clique em uma mesa para ver os detalhes da comanda.</p>
+      </div>
+    );
+
     const total = calculateTotal(table.order);
     const reloadItems = async () => {
       if (!table?.comandaId) return;
@@ -338,32 +436,35 @@ function VendasPage() {
     };
     return (
       <>
-      <div className="flex flex-col h-full">
-        <div className="p-6 border-b border-border">
-          <h2 className="text-2xl font-bold text-text-primary">Comanda: Mesa {table.number}</h2>
-          <p className={cn("text-sm font-semibold mt-1", statusConfig[table.status].color.replace('bg-', 'text-'))}>
-            Status: {statusConfig[table.status].label}
-          </p>
-          <div className="mt-3 flex gap-2">
-            {!table.comandaId && (
-              <Button size="sm" onClick={() => { setPendingTable(table); setIsOpenTableDialog(true); }}>Abrir Mesa</Button>
-            )}
-            {table.comandaId && (
-              <Button size="sm" variant="outline" onClick={async () => {
-                try {
-                  await fecharComandaEMesa({ comandaId: table.comandaId });
-                  const updated = { ...table, status: 'available', order: [], comandaId: null, customer: null };
-                  setSelectedTable(updated);
-                  setTables((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
-                  toast({ title: 'Mesa liberada', variant: 'success' });
-                } catch(e) {
-                  toast({ title: 'Falha ao liberar mesa', description: e?.message || 'Tente novamente', variant: 'destructive' });
-                }
-              }}>Liberar Mesa</Button>
+      <div className="flex flex-col h-full min-h-0">
+        <div className="p-3 border-b border-border flex items-center justify-between gap-2">
+          <div className="text-sm font-medium text-text-primary leading-none truncate">{table.customer || '—'}</div>
+          <div className="flex items-center gap-2">
+            {table.comandaId ? (
+              <>
+                <Button size="sm" variant="secondary" className="h-7 px-2.5 rounded-full text-[12px] font-medium leading-none whitespace-nowrap" onClick={() => setIsOrderDetailsOpen(true)}>
+                  <FileText size={12} className="mr-1.5 shrink-0" /> Comanda
+                </Button>
+                <Button size="sm" variant="destructive" className="h-7 px-2.5 rounded-full text-[12px] font-medium leading-none whitespace-nowrap" onClick={async () => {
+                  try {
+                    await fecharComandaEMesa({ comandaId: table.comandaId });
+                    const updated = { ...table, status: 'available', order: [], comandaId: null, customer: null };
+                    setSelectedTable(updated);
+                    setTables((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
+                    toast({ title: 'Mesa liberada', variant: 'success' });
+                  } catch(e) {
+                    toast({ title: 'Falha ao liberar mesa', description: e?.message || 'Tente novamente', variant: 'destructive' });
+                  }
+                }}>
+                  <X size={12} className="mr-1.5 shrink-0" /> Liberar
+                </Button>
+              </>
+            ) : (
+              <Button size="sm" className="h-7 px-2.5 rounded-full text-[12px] font-medium leading-none whitespace-nowrap" onClick={() => { setPendingTable(table); setIsOpenTableDialog(true); }}>Abrir Mesa</Button>
             )}
           </div>
         </div>
-        <div className="flex-1 overflow-y-auto p-6">
+        <div className="flex-1 min-h-0 overflow-y-auto p-4 thin-scroll">
           {table.order.length === 0 ? (
             <div className="text-center text-text-muted pt-16">
               <p>Comanda vazia. Adicione produtos na aba ao lado.</p>
@@ -373,8 +474,8 @@ function VendasPage() {
               {table.order.map(item => (
                 <li key={item.id} className="flex items-center gap-2">
                   <div className="flex-1">
-                    <p className="font-semibold text-text-primary">{item.name}</p>
-                    <p className="text-sm text-text-muted">{item.quantity} x R$ {item.price.toFixed(2)}</p>
+                    <p className="text-sm font-semibold text-text-primary">{item.name}</p>
+                    <p className="text-xs text-text-muted">{item.quantity} x R$ {item.price.toFixed(2)}</p>
                   </div>
                   <div className="flex items-center gap-1">
                     <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => changeQty(item, -1)}><Minus size={14} /></Button>
@@ -388,10 +489,10 @@ function VendasPage() {
             </ul>
           )}
         </div>
-        <div className="p-6 border-t border-border mt-auto">
-          <div className="flex justify-between items-center text-xl font-bold mb-4">
-            <span className="text-text-secondary">Total</span>
-            <span className="text-text-primary">R$ {total.toFixed(2)}</span>
+        <div className="p-4 border-t border-border mt-auto">
+          <div className="flex justify-between items-center text-sm font-semibold text-text-secondary mb-2">
+            <span>Total</span>
+            <span>R$ {total.toFixed(2)}</span>
           </div>
           <Button size="lg" className="w-full" onClick={openPayDialog}><DollarSign className="mr-2" /> Fechar Conta</Button>
         </div>
@@ -399,41 +500,14 @@ function VendasPage() {
       <PayDialog />
       </>
     );
-  };
-
-  const CashierDetailsDialog = () => (
-    <Dialog open={isCashierDetailsOpen} onOpenChange={setIsCashierDetailsOpen}>
-      <DialogContent className="max-w-3xl">
-        <DialogHeader>
-          <DialogTitle className="text-2xl font-bold">Detalhes do Caixa</DialogTitle>
-          <DialogDescription>Resumo da sessão atual e atalhos rápidos.</DialogDescription>
-        </DialogHeader>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <div className="bg-surface-2 rounded-lg p-3 border border-border">
-            <p className="text-xs text-text-secondary">Saldo Inicial</p>
-            <p className="text-2xl font-bold tabular-nums">R$ 0,00</p>
-          </div>
-          <div className="bg-surface-2 rounded-lg p-3 border border-border">
-            <p className="text-xs text-text-secondary">Entradas</p>
-            <p className="text-2xl font-bold text-success tabular-nums">R$ 0,00</p>
-          </div>
-          <div className="bg-surface-2 rounded-lg p-3 border border-border">
-            <p className="text-xs text-text-secondary">Saídas</p>
-            <p className="text-2xl font-bold text-danger tabular-nums">R$ 0,00</p>
-          </div>
-        </div>
-        <DialogFooter>
-          <Button variant="secondary" onClick={() => setIsCashierDetailsOpen(false)}>Fechar</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
+};
 
   const CreateMesaDialog = () => {
     const confirmCreate = async () => {
       try {
         setLoading(true);
-        const numero = novaMesaNumero?.trim() ? Number(novaMesaNumero) : undefined;
+        const raw = (novaMesaNumero ?? '').toString().trim();
+        const numero = raw ? Number(raw) : undefined;
         if (numero !== undefined && (Number.isNaN(numero) || numero <= 0)) {
           toast({ title: 'Número inválido', description: 'Informe um número positivo.', variant: 'warning' });
           return;
@@ -465,18 +539,29 @@ function VendasPage() {
     };
     return (
       <Dialog open={isCreateMesaOpen} onOpenChange={(open) => { setIsCreateMesaOpen(open); if (!open) setNovaMesaNumero(''); }}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-md w-[400px]" onKeyDown={(e) => e.stopPropagation()} onKeyDownCapture={(e) => e.stopPropagation()}>
           <DialogHeader>
             <DialogTitle className="text-2xl font-bold">Nova Mesa</DialogTitle>
             <DialogDescription>Crie uma nova mesa informando, opcionalmente, o número desejado. Em branco cria a próxima sequência.</DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
             <Label htmlFor="nova-mesa-numero">Número da mesa (opcional)</Label>
-            <Input id="nova-mesa-numero" type="number" min="1" placeholder="Ex.: 12" value={novaMesaNumero} onChange={(e) => setNovaMesaNumero(e.target.value)} />
+            <Input
+              id="nova-mesa-numero"
+              type="text"
+              inputMode="numeric"
+              placeholder="Ex.: 12"
+              value={novaMesaNumero}
+              onChange={(e) => setNovaMesaNumero(e.target.value)}
+              onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Enter') e.preventDefault(); }}
+              onKeyUp={(e) => e.stopPropagation()}
+              onKeyPress={(e) => e.stopPropagation()}
+              autoFocus
+            />
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsCreateMesaOpen(false)} disabled={loading}>Cancelar</Button>
-            <Button onClick={confirmCreate} disabled={loading}>{loading ? 'Criando...' : 'Criar Mesa'}</Button>
+            <Button type="button" variant="outline" onClick={() => setIsCreateMesaOpen(false)} disabled={loading}>Cancelar</Button>
+            <Button type="button" onClick={confirmCreate} disabled={loading}>{loading ? 'Criando...' : 'Criar Mesa'}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -517,7 +602,7 @@ function VendasPage() {
               <Input placeholder="Buscar produto..." className="pl-9" />
            </div>
        </div>
-       <div className="flex-1 overflow-y-auto p-4">
+       <div className="flex-1 overflow-y-auto p-4 thin-scroll">
           <ul className="space-y-2">
               {(products.length ? products : productsData).map(prod => (
                   <li key={prod.id} className="flex items-center p-2 rounded-md hover:bg-surface-2 transition-colors">
@@ -547,7 +632,7 @@ function VendasPage() {
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted" />
                         <Input placeholder="Buscar produto..." className="pl-9" />
                     </div>
-                    <div className="flex-1 overflow-y-auto -mr-4 pr-4">
+                    <div className="flex-1 overflow-y-auto -mr-4 pr-4 thin-scroll">
                         <ul className="space-y-2">
                         {productsData.map(prod => (
                             <li key={prod.id} className="flex items-center p-3 rounded-md bg-surface-2">
@@ -563,7 +648,7 @@ function VendasPage() {
                 </div>
                 <div className="col-span-1 flex flex-col">
                     <h3 className="text-lg font-semibold mb-4">Comanda do Balcão</h3>
-                    <div className="flex-1 overflow-y-auto bg-surface-2 rounded-lg p-4">
+                    <div className="flex-1 overflow-y-auto bg-surface-2 rounded-lg p-4 thin-scroll">
                       {counterOrder.length === 0 ? <p className="text-center text-text-muted pt-16">Adicione produtos à comanda.</p> : <p>...</p>}
                     </div>
                      <div className="p-4 border-t border-border mt-auto">
@@ -578,6 +663,129 @@ function VendasPage() {
         </DialogContent>
     </Dialog>
   )
+
+  const OpenTableDialog = () => {
+    const [search, setSearch] = useState('');
+    const [loadingClients, setLoadingClients] = useState(false);
+    const [clients, setClients] = useState([]);
+    const [mode, setMode] = useState('registered'); // 'registered' | 'common'
+    const [selectedClientIds, setSelectedClientIds] = useState([]); // multi-seleção de cadastrados
+    const [commonName, setCommonName] = useState(''); // nome do cliente comum
+
+    useEffect(() => {
+      let active = true;
+      const load = async () => {
+        try {
+          setLoadingClients(true);
+          const rows = await listarClientes({ searchTerm: search, limit: 20 });
+          if (!active) return;
+          setClients(rows);
+        } catch {
+          if (!active) return;
+          setClients([]);
+        } finally {
+          if (active) setLoadingClients(false);
+        }
+      };
+      const t = setTimeout(load, 200);
+      return () => { active = false; clearTimeout(t); };
+    }, [search]);
+
+    const confirmOpen = async () => {
+      try {
+        if (!pendingTable) return;
+        // 1) abre (ou obtém) a comanda para a mesa
+        const comanda = await getOrCreateComandaForMesa({ mesaId: pendingTable.id });
+        // 2) associa somente 1 cliente cadastrado OU 1 nome comum
+        const clienteIds = mode === 'registered' ? Array.from(new Set(selectedClientIds || [])) : [];
+        const nomesLivres = mode === 'common' && commonName?.trim() ? [commonName.trim()] : [];
+        if (clienteIds.length > 0 || nomesLivres.length > 0) {
+          await adicionarClientesAComanda({ comandaId: comanda.id, clienteIds, nomesLivres });
+        }
+        const displayName = clienteIds.length
+          ? clienteIds.map(cid => clients.find(c => c.id === cid)?.nome).filter(Boolean).join(', ')
+          : (nomesLivres[0] || '');
+        const enriched = { ...pendingTable, comandaId: comanda.id, status: 'in-use', customer: displayName || null, order: [] };
+        setSelectedTable(enriched);
+        setTables(prev => prev.map(t => t.id === enriched.id ? enriched : t));
+        setIsOpenTableDialog(false);
+        setPendingTable(null);
+        setClienteNome('');
+        setSelectedClientIds([]);
+        setCommonName('');
+        setMode('registered');
+        toast({ title: 'Mesa aberta', description: displayName ? `Comanda criada para: ${displayName}` : 'Comanda criada.', variant: 'success' });
+      } catch (e) {
+        toast({ title: 'Falha ao abrir mesa', description: e?.message || 'Tente novamente', variant: 'destructive' });
+      }
+    };
+
+    return (
+      <Dialog open={isOpenTableDialog} onOpenChange={(open) => { setIsOpenTableDialog(open); if (!open) { setPendingTable(null); setClienteNome(''); setSelectedClientIds([]); setCommonName(''); setMode('registered'); } }}>
+        <DialogContent className="max-w-xl w-[720px] max-h-[80vh] overflow-y-auto" onKeyDown={(e) => e.stopPropagation()} onKeyDownCapture={(e) => e.stopPropagation()}>
+          <DialogHeader>
+            <DialogTitle className="text-2xl font-bold">Abrir Mesa {pendingTable ? `#${pendingTable.number}` : ''}</DialogTitle>
+            <DialogDescription>Escolha uma das opções: cliente cadastrado OU cliente comum.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="flex gap-2">
+              <Button type="button" variant={mode === 'registered' ? 'default' : 'outline'} onClick={() => { setMode('registered'); setCommonName(''); }}>Cliente cadastrado</Button>
+              <Button type="button" variant={mode === 'common' ? 'default' : 'outline'} onClick={() => { setMode('common'); setSelectedClientIds([]); }}>Cliente comum</Button>
+            </div>
+            {mode === 'registered' && (
+            <div>
+              <Label className="mb-2 block">Buscar cliente</Label>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted" />
+                <Input placeholder="Nome, e-mail, telefone ou código" className="pl-9" value={search} onChange={(e) => setSearch(e.target.value)} />
+              </div>
+              <div className="mt-2 max-h-44 overflow-auto border rounded-md thin-scroll">
+                {loadingClients ? (
+                  <div className="p-3 text-sm text-text-muted">Carregando clientes...</div>
+                ) : (clients.length > 0 ? (
+                  <ul>
+                    {clients.map(c => {
+                      const active = selectedClientIds.includes(c.id);
+                      return (
+                        <li key={c.id} className={cn('p-2 flex items-center justify-between cursor-pointer hover:bg-surface-2', active && 'bg-surface-2')} onClick={() => {
+                          setClienteNome('');
+                          setSelectedClientIds(prev => prev.includes(c.id) ? prev.filter(id => id !== c.id) : [...prev, c.id]);
+                        }}>
+                          <div>
+                            <div className="font-medium">{c.nome}</div>
+                            <div className="text-xs text-text-muted">{c.email || '—'} {c.telefone ? `• ${c.telefone}` : ''}</div>
+                          </div>
+                          {active && <CheckCircle size={16} className="text-success" />}
+                        </li>
+                      )
+                    })}
+                  </ul>
+                ) : (
+                  <div className="p-3 text-sm text-text-muted">Nenhum cliente encontrado.</div>
+                ))}
+              </div>
+              <div className="mt-3 flex justify-between items-center">
+                <span className="text-xs text-text-muted">Selecione um ou mais clientes cadastrados.</span>
+                <Button type="button" variant="outline" size="sm" onClick={() => { window.location.href = '/clientes'; }}>Cadastrar cliente</Button>
+              </div>
+            </div>
+            )}
+            {mode === 'common' && (
+            <div className="grid grid-cols-1 gap-2">
+              <Label className="mb-1 block">Nome do cliente comum</Label>
+              <Input placeholder="Ex.: João" value={commonName} onChange={(e) => setCommonName(e.target.value)} />
+              <div className="text-xs text-text-muted">Você pode usar apenas um nome simples.</div>
+            </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => { setIsOpenTableDialog(false); setPendingTable(null); setClienteNome(''); setSelectedClientIds([]); setCommonName(''); setMode('registered'); }}>Cancelar</Button>
+            <Button onClick={confirmOpen} disabled={!pendingTable}>Confirmar Abertura</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    )
+  }
 
   const OpenCashierDialog = () => (
     <AlertDialog>
@@ -648,105 +856,6 @@ function VendasPage() {
     </AlertDialog>
   );
 
-  const OpenTableDialog = () => {
-    const [search, setSearch] = useState('');
-    const [loadingClients, setLoadingClients] = useState(false);
-    const [clients, setClients] = useState([]);
-    const [selectedClientId, setSelectedClientId] = useState(null);
-
-    useEffect(() => {
-      let active = true;
-      const load = async () => {
-        try {
-          setLoadingClients(true);
-          const rows = await listarClientes({ searchTerm: search, limit: 20 });
-          if (!active) return;
-          setClients(rows);
-        } catch {
-          if (!active) return;
-          setClients([]);
-        } finally {
-          if (active) setLoadingClients(false);
-        }
-      };
-      const t = setTimeout(load, 200);
-      return () => { active = false; clearTimeout(t); };
-    }, [search]);
-
-    const confirmOpen = async () => {
-      try {
-        if (!pendingTable) return;
-        const isRegistered = !!selectedClientId;
-        const chosenName = isRegistered
-          ? (clients.find(c => c.id === selectedClientId)?.nome || '')
-          : (clienteNome || '');
-        const comanda = await getOrCreateComandaForMesa({
-          mesaId: pendingTable.id,
-          clienteId: isRegistered ? selectedClientId : undefined,
-          clienteNome: !isRegistered ? chosenName : undefined,
-        });
-        const enriched = { ...pendingTable, comandaId: comanda.id, status: 'in-use', customer: chosenName, order: [] };
-        setSelectedTable(enriched);
-        setTables(prev => prev.map(t => t.id === enriched.id ? enriched : t));
-        setIsOpenTableDialog(false);
-        setPendingTable(null);
-        setClienteNome('');
-        setSelectedClientId(null);
-        toast({ title: 'Mesa aberta', description: `Comanda criada${chosenName ? ` para ${chosenName}` : ''}.`, variant: 'success' });
-      } catch (e) {
-        toast({ title: 'Falha ao abrir mesa', description: e?.message || 'Tente novamente', variant: 'destructive' });
-      }
-    };
-
-    return (
-      <Dialog open={isOpenTableDialog} onOpenChange={(open) => { setIsOpenTableDialog(open); if (!open) { setPendingTable(null); setClienteNome(''); setSelectedClientId(null); } }}>
-        <DialogContent className="max-w-xl">
-          <DialogHeader>
-            <DialogTitle className="text-2xl font-bold">Abrir Mesa {pendingTable ? `#${pendingTable.number}` : ''}</DialogTitle>
-            <DialogDescription>Selecione um cliente cadastrado ou informe um nome para convidado comum.</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div>
-              <Label className="mb-2 block">Buscar cliente</Label>
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted" />
-                <Input placeholder="Nome, e-mail, telefone ou código" className="pl-9" value={search} onChange={(e) => setSearch(e.target.value)} />
-              </div>
-              <div className="mt-2 max-h-44 overflow-auto border rounded-md">
-                {loadingClients ? (
-                  <div className="p-3 text-sm text-text-muted">Carregando clientes...</div>
-                ) : (clients.length > 0 ? (
-                  <ul>
-                    {clients.map(c => (
-                      <li key={c.id} className={cn('p-2 flex items-center justify-between cursor-pointer hover:bg-surface-2', selectedClientId === c.id && 'bg-surface-2')} onClick={() => setSelectedClientId(c.id)}>
-                        <div>
-                          <div className="font-medium">{c.nome}</div>
-                          <div className="text-xs text-text-muted">{c.email || '—'} {c.telefone ? `• ${c.telefone}` : ''}</div>
-                        </div>
-                        {selectedClientId === c.id && <CheckCircle size={16} className="text-success" />}
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <div className="p-3 text-sm text-text-muted">Nenhum cliente encontrado.</div>
-                ))}
-              </div>
-            </div>
-            <div className="grid grid-cols-1 gap-2">
-              <Label className="mb-1 block">Ou informe um nome (cliente comum)</Label>
-              <Input placeholder="Ex.: Mesa do João" value={clienteNome} onChange={(e) => setClienteNome(e.target.value)} />
-              <div className="text-xs text-text-muted">Se um cliente cadastrado estiver selecionado acima, este campo será ignorado.</div>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => { setIsOpenTableDialog(false); setPendingTable(null); setClienteNome(''); setSelectedClientId(null); }}>Cancelar</Button>
-            <Button onClick={confirmOpen} disabled={!pendingTable}>Confirmar Abertura</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    )
-  }
-
   return (
     <>
       <Helmet>
@@ -766,18 +875,21 @@ function VendasPage() {
               <Banknote className="mr-2 h-4 w-4" /> Detalhes do Caixa
             </Button>
             <div className="w-px h-6 bg-border mx-2"></div>
+            <Button variant="outline" onClick={() => { window.location.href = '/historico'; }}>
+              <FileText className="mr-2 h-4 w-4" /> Histórico
+            </Button>
             <Button variant="outline" onClick={() => setIsCounterModeOpen(true)}><Store className="mr-2 h-4 w-4" /> Modo Balcão</Button>
             <Button onClick={() => setIsCreateMesaOpen(true)}><Plus className="mr-2 h-4 w-4" /> Nova Mesa</Button>
           </div>
         </motion.div>
         
-        <div className="flex-1 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 overflow-hidden">
-            <motion.div variants={itemVariants} className="lg:col-span-2 bg-surface rounded-lg border border-border p-6 overflow-y-auto">
+        <div className="flex-1 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 overflow-hidden min-h-0">
+            <motion.div variants={itemVariants} className="lg:col-span-2 bg-surface rounded-lg border border-border p-6 overflow-y-auto thin-scroll min-h-0">
               <h2 className="text-xl font-bold mb-4">Mapa de Mesas</h2>
                 <DragDropContext onDragEnd={onDragEnd}>
                     <Droppable droppableId="tables">
                         {(provided) => (
-                             <div {...provided.droppableProps} ref={provided.innerRef} className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                             <div {...provided.droppableProps} ref={provided.innerRef} className="grid gap-5 grid-cols-[repeat(auto-fit,minmax(240px,1fr))]">
                                 {tables.map((table, index) => (
                                     <Draggable key={table.id} draggableId={table.id} index={index}>
                                         {(provided, snapshot) => <TableCard table={table} provided={provided} isDragging={snapshot.isDragging} />}
@@ -790,20 +902,21 @@ function VendasPage() {
                 </DragDropContext>
             </motion.div>
 
-            <motion.div variants={itemVariants} className="bg-surface rounded-lg border border-border flex flex-col">
+            <motion.div variants={itemVariants} className="bg-surface rounded-lg border border-border flex flex-col min-h-0">
                 <Tabs defaultValue="order" className="flex flex-col h-full">
                     <TabsList className="grid w-full grid-cols-2 m-2">
                         <TabsTrigger value="order">Comanda</TabsTrigger>
                         <TabsTrigger value="products">Produtos</TabsTrigger>
                     </TabsList>
-                    <TabsContent value="order" className="flex-1 overflow-hidden"><OrderPanel table={selectedTable} /></TabsContent>
-                    <TabsContent value="products" className="flex-1 overflow-hidden"><ProductsPanel/></TabsContent>
+                    <TabsContent value="order" className="flex-1 overflow-hidden min-h-0"><OrderPanel table={selectedTable} /></TabsContent>
+                    <TabsContent value="products" className="flex-1 overflow-hidden min-h-0"><ProductsPanel/></TabsContent>
                 </Tabs>
             </motion.div>
         </div>
       </motion.div>
       <CounterModeModal />
       <CashierDetailsDialog />
+      <OrderDetailsDialog />
       <OpenTableDialog />
       <CreateMesaDialog />
     </>

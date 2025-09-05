@@ -12,6 +12,52 @@ function getCachedCompanyCode() {
   }
 }
 
+// Histórico / Relatórios
+export async function listarComandas({ status, from, to, search = '', limit = 50, offset = 0, codigoEmpresa } = {}) {
+  const codigo = codigoEmpresa || getCachedCompanyCode()
+  let q = supabase
+    .from('comandas')
+    .select('id, mesa_id, status, aberto_em, fechado_em')
+    .order('aberto_em', { ascending: false })
+    .range(offset, offset + limit - 1)
+
+  if (codigo) q = q.eq('codigo_empresa', codigo)
+
+  if (status && Array.isArray(status) && status.length) q = q.in('status', status)
+  else if (typeof status === 'string') q = q.eq('status', status)
+
+  if (from) q = q.gte('aberto_em', new Date(from).toISOString())
+  if (to) q = q.lte('aberto_em', new Date(to).toISOString())
+
+  const s = (search || '').trim()
+  if (s) {
+    // pesquisa básica por id de comanda (numérico) ou status
+    const isNumeric = /^\d+$/.test(s)
+    if (isNumeric) {
+      q = q.or(`id.eq.${s},status.ilike.%${s}%`)
+    } else {
+      q = q.or(`status.ilike.%${s}%`)
+    }
+  }
+
+  const { data, error } = await q
+  if (error) throw error
+  return data || []
+}
+
+export async function listarPagamentos({ comandaId, codigoEmpresa } = {}) {
+  const codigo = codigoEmpresa || getCachedCompanyCode()
+  let q = supabase
+    .from('pagamentos')
+    .select('*')
+    .order('recebido_em', { ascending: true })
+  if (comandaId) q = q.eq('comanda_id', comandaId)
+  if (codigo) q = q.eq('codigo_empresa', codigo)
+  const { data, error } = await q
+  if (error) throw error
+  return data || []
+}
+
 // Clientes
 export async function listarClientes({ searchTerm = '', limit = 20, codigoEmpresa } = {}) {
   const codigo = codigoEmpresa || getCachedCompanyCode()
@@ -124,16 +170,16 @@ export async function ensureCaixaAberto({ saldoInicial = 0, codigoEmpresa } = {}
 export async function fecharCaixa({ saldoFinal = 0, codigoEmpresa } = {}) {
   const codigo = codigoEmpresa || getCachedCompanyCode()
   // pegar sessão aberta
-  let q = supabase.from('caixa_sessoes').select('id').eq('status', 'open').order('aberto_em', { ascending: false }).limit(1)
+  let q = supabase.from('caixa_sessoes').select('id').eq('status','open').order('aberto_em', { ascending: false }).limit(1)
   if (codigo) q = q.eq('codigo_empresa', codigo)
-  const { data: abertas, error: qErr } = await q
+  const { data: sess, error: qErr } = await q
   if (qErr) throw qErr
-  const sessao = abertas?.[0]
-  if (!sessao) return null
+  const caixaId = sess?.[0]?.id || null
+
   const { data, error } = await supabase
     .from('caixa_sessoes')
     .update({ status: 'closed', saldo_final: saldoFinal, fechado_em: new Date().toISOString() })
-    .eq('id', sessao.id)
+    .eq('id', caixaId)
     .select('id,status,fechado_em')
     .single()
   if (error) throw error
@@ -141,29 +187,21 @@ export async function fecharCaixa({ saldoFinal = 0, codigoEmpresa } = {}) {
 }
 
 // Comandas
-export async function abrirComandaParaMesa({ mesaId, codigoEmpresa, clienteId, clienteNome }) {
+export async function abrirComandaParaMesa({ mesaId, codigoEmpresa } = {}) {
   const codigo = codigoEmpresa || getCachedCompanyCode()
   if (!mesaId) throw new Error('mesaId é obrigatório')
   // Evitar duplicar se já houver aberta
-  let q = supabase.from('comandas').select('id,status,cliente_id,cliente_nome').eq('mesa_id', mesaId).in('status', ['open','awaiting-payment']).limit(1)
+  let q = supabase.from('comandas').select('id,status').eq('mesa_id', mesaId).in('status', ['open','awaiting-payment']).limit(1)
   if (codigo) q = q.eq('codigo_empresa', codigo)
   const { data: abertas, error: errA } = await q
   if (errA) throw errA
   if (abertas && abertas.length > 0) {
-    const atual = abertas[0]
-    // Se já existe e foi informado cliente, opcionalmente atualizar
-    if ((clienteId || clienteNome) && (atual.cliente_id !== clienteId || (clienteNome && atual.cliente_nome !== clienteNome))) {
-      await atualizarClienteDaComanda({ comandaId: atual.id, clienteId, clienteNome, codigoEmpresa: codigo })
-      return { ...atual, cliente_id: clienteId ?? atual.cliente_id, cliente_nome: clienteNome ?? atual.cliente_nome }
-    }
-    return atual
+    return abertas[0]
   }
 
   const payload = { mesa_id: mesaId, status: 'open' }
   if (codigo) payload.codigo_empresa = codigo
-  if (clienteId) payload.cliente_id = clienteId
-  if (clienteNome) payload.cliente_nome = clienteNome
-  const { data, error } = await supabase.from('comandas').insert(payload).select('id,status,cliente_id,cliente_nome').single()
+  const { data, error } = await supabase.from('comandas').insert(payload).select('id,status').single()
   if (error) throw error
   return data
 }
@@ -172,7 +210,7 @@ export async function listarComandaDaMesa({ mesaId, codigoEmpresa }) {
   const codigo = codigoEmpresa || getCachedCompanyCode()
   let q = supabase
     .from('comandas')
-    .select('id,status,aberto_em,cliente_id,cliente_nome')
+    .select('id,status,aberto_em')
     .eq('mesa_id', mesaId)
     .in('status', ['open','awaiting-payment'])
     .order('aberto_em', { ascending: false })
@@ -197,35 +235,45 @@ export async function listarItensDaComanda({ comandaId, codigoEmpresa }) {
   return data || []
 }
 
-// Conveniência: obter ou abrir comanda para mesa
-export async function getOrCreateComandaForMesa({ mesaId, codigoEmpresa, clienteId, clienteNome }) {
+// Conveniência: obter ou abrir comanda para mesa (sem tocar em clientes)
+export async function getOrCreateComandaForMesa({ mesaId, codigoEmpresa } = {}) {
   const codigo = codigoEmpresa || getCachedCompanyCode()
   const atual = await listarComandaDaMesa({ mesaId, codigoEmpresa: codigo })
   if (atual) {
-    if (clienteId || clienteNome) {
-      if (atual.cliente_id !== clienteId || (clienteNome && atual.cliente_nome !== clienteNome)) {
-        await atualizarClienteDaComanda({ comandaId: atual.id, clienteId, clienteNome, codigoEmpresa: codigo })
-        return { ...atual, cliente_id: clienteId ?? atual.cliente_id, cliente_nome: clienteNome ?? atual.cliente_nome }
-      }
-    }
     return atual
   }
-  return abrirComandaParaMesa({ mesaId, codigoEmpresa: codigo, clienteId, clienteNome })
+  return abrirComandaParaMesa({ mesaId, codigoEmpresa: codigo })
 }
 
-// Atualiza cliente associado à comanda (id do cliente cadastrado e/ou nome livre)
-export async function atualizarClienteDaComanda({ comandaId, clienteId, clienteNome, codigoEmpresa }) {
+// Multi-clientes por comanda através de tabela de vínculo
+export async function adicionarClientesAComanda({ comandaId, clienteIds = [], nomesLivres = [], codigoEmpresa } = {}) {
   const codigo = codigoEmpresa || getCachedCompanyCode()
   if (!comandaId) throw new Error('comandaId é obrigatório')
-  const update = {}
-  if (typeof clienteId !== 'undefined') update.cliente_id = clienteId || null
-  if (typeof clienteNome !== 'undefined') update.cliente_nome = clienteNome || null
-  if (Object.keys(update).length === 0) return true
-  let q = supabase.from('comandas').update(update).eq('id', comandaId)
-  if (codigo) q = q.eq('codigo_empresa', codigo)
-  const { error } = await q.select('id').single()
+  const rows = []
+  for (const id of (clienteIds || [])) rows.push({ comanda_id: comandaId, cliente_id: id })
+  for (const nome of (nomesLivres || [])) {
+    const n = (nome || '').trim()
+    if (n) rows.push({ comanda_id: comandaId, nome_livre: n })
+  }
+  if (rows.length === 0) return true
+  const payload = rows.map(r => (codigo ? { ...r, codigo_empresa: codigo } : r))
+  const { error } = await supabase.from('comanda_clientes').insert(payload)
   if (error) throw error
   return true
+}
+
+export async function listarClientesDaComanda({ comandaId, codigoEmpresa } = {}) {
+  const codigo = codigoEmpresa || getCachedCompanyCode()
+  if (!comandaId) throw new Error('comandaId é obrigatório')
+  let q = supabase
+    .from('comanda_clientes')
+    .select('id, cliente_id, nome_livre, clientes:cliente_id(id, nome, email, telefone)')
+    .eq('comanda_id', comandaId)
+    .order('created_at', { ascending: true })
+  if (codigo) q = q.eq('codigo_empresa', codigo)
+  const { data, error } = await q
+  if (error) throw error
+  return (data || []).map(r => ({ id: r.id, tipo: r.cliente_id ? 'cadastrado' : 'comum', nome: r.clientes?.nome || r.nome_livre, cliente_id: r.cliente_id }))
 }
 
 // Itens (depende de tabela 'produtos' existir)
