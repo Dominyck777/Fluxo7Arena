@@ -9,6 +9,7 @@ import { ptBR } from 'date-fns/locale';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
+import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction } from '@/components/ui/alert-dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -318,10 +319,26 @@ function AgendaPage() {
   const markManualOverride = useCallback((bookingId) => {
     setManualOverrides((prev) => ({ ...prev, [bookingId]: Date.now() }));
   }, []);
+  const clearManualOverride = useCallback((bookingId) => {
+    setManualOverrides((prev) => {
+      if (!prev || !(bookingId in prev)) return prev;
+      const next = { ...prev };
+      delete next[bookingId];
+      return next;
+    });
+  }, []);
   const isOverriddenRecently = useCallback((bookingId) => {
     const ts = manualOverrides?.[bookingId];
     return typeof ts === 'number' && (Date.now() - ts) < MANUAL_OVERRIDE_WINDOW_MS;
   }, [manualOverrides]);
+
+  // Modal harmonizado para reativação da automação
+  const [reactivateAsk, setReactivateAsk] = useState(null); // { resolve }
+  const askReactivate = useCallback(() => {
+    return new Promise((resolve) => {
+      setReactivateAsk({ resolve });
+    });
+  }, []);
 
   // Salvar no banco (upsert)
   const handleSaveSettings = useCallback(async () => {
@@ -359,29 +376,69 @@ function AgendaPage() {
   // source: 'user' | 'automation'
   const updateBookingStatus = useCallback(async (bookingId, newStatus, source = 'user') => {
     try {
+      const terminalStatuses = ['canceled', 'finished', 'absent'];
+      const activeStatuses = ['scheduled', 'confirmed', 'in_progress'];
+      const shouldDisable = terminalStatuses.includes(newStatus);
+
+      // Verifica se devemos oferecer reativação da automação ao voltar para status ativo
+      let reactivate = false;
+      if (source === 'user' && activeStatuses.includes(newStatus)) {
+        const prev = (bookings || []).find(b => b.id === bookingId);
+        const wasTerminal = prev ? terminalStatuses.includes(prev.status) : false;
+        const wasAutoDisabled = prev ? !!prev.auto_disabled : false;
+        if (wasTerminal || wasAutoDisabled) {
+          const confirmReactivate = await askReactivate();
+          reactivate = !!confirmReactivate;
+        }
+      }
+
+      const updatePayload = shouldDisable
+        ? { status: newStatus, auto_disabled: true }
+        : (reactivate ? { status: newStatus, auto_disabled: false } : { status: newStatus });
       const { error } = await supabase
         .from('agendamentos')
-        .update({ status: newStatus })
+        .update(updatePayload)
         .eq('id', bookingId)
         .select('id');
       if (error) throw error;
-      setBookings(prev => prev.map(b => b.id === bookingId ? { ...b, status: newStatus } : b));
+      setBookings(prev => prev.map(b => {
+        if (b.id !== bookingId) return b;
+        const next = { ...b, status: newStatus };
+        if (shouldDisable) next.auto_disabled = true;
+        else if (reactivate) next.auto_disabled = false;
+        return next;
+      }));
       try {
         if (bookingsCacheKey) {
           const cached = JSON.parse(localStorage.getItem(bookingsCacheKey) || '[]');
-          const updated = Array.isArray(cached) ? cached.map(b => b.id === bookingId ? { ...b, status: newStatus } : b) : cached;
+          const updated = Array.isArray(cached)
+            ? cached.map(b => {
+                if (b.id !== bookingId) return b;
+                const next = { ...b, status: newStatus };
+                if (shouldDisable) next.auto_disabled = true;
+                else if (reactivate) next.auto_disabled = false;
+                return next;
+              })
+            : cached;
           localStorage.setItem(bookingsCacheKey, JSON.stringify(updated));
         }
       } catch {}
-      // Marca override manual somente quando a origem é usuário
+      // Marca override manual somente quando a origem é usuário e NÃO houve reativação da automação.
+      // Se houve reativação, removemos qualquer override existente para permitir que a automação atue imediatamente.
       if (source === 'user') {
-        try { markManualOverride(bookingId); } catch {}
+        try {
+          if (reactivate) {
+            clearManualOverride(bookingId);
+          } else {
+            markManualOverride(bookingId);
+          }
+        } catch {}
       }
     } catch (e) {
       // eslint-disable-next-line no-console
       console.error('Auto-status: falha ao atualizar', bookingId, newStatus, e);
     }
-  }, [bookingsCacheKey, markManualOverride]);
+  }, [bookings, bookingsCacheKey, markManualOverride, clearManualOverride, askReactivate, viewFilter]);
 
   // Runner periódico
   const automationRunningRef = useRef(false);
@@ -391,44 +448,74 @@ function AgendaPage() {
     automationRunningRef.current = true;
     try {
       const now = new Date();
-      const nowMin = getHours(now) * 60 + getMinutes(now);
+      const nowTs = now.getTime();
       const todayStr = format(now, 'yyyy-MM-dd');
-      let todays = (bookings || []).filter(b => format(b.start, 'yyyy-MM-dd') === todayStr);
-      // Se UI não está no dia de hoje, buscamos diretamente do banco os agendamentos de hoje
-      if (todays.length === 0) {
+      // Candidatos do dia atual (da UI ou DB fallback)
+      let candidates = (bookings || []).filter(b => format(b.start, 'yyyy-MM-dd') === todayStr);
+      if (candidates.length === 0) {
         try {
           const dayStart = startOfDay(now);
           const dayEnd = addDays(dayStart, 1);
           const { data, error } = await supabase
             .from('agendamentos')
-            .select('id, inicio, fim, status')
+            .select('id, inicio, fim, status, auto_disabled')
             .eq('codigo_empresa', userProfile.codigo_empresa)
             .gte('inicio', dayStart.toISOString())
             .lt('inicio', dayEnd.toISOString());
           if (!error && Array.isArray(data)) {
-            todays = data.map(row => ({
+            candidates = data.map(row => ({
               id: row.id,
               start: new Date(row.inicio),
               end: new Date(row.fim),
               status: row.status || 'scheduled',
+              auto_disabled: !!row.auto_disabled,
             }));
           }
         } catch {}
       }
-      for (const b of todays) {
-        // Respeita override manual recente
-        if (isOverriddenRecently(b.id)) continue;
-        const startMin = getHours(b.start) * 60 + getMinutes(b.start);
-        const endMin = getHours(b.end) * 60 + getMinutes(b.end);
-        if (b.status === 'scheduled') {
-          const shouldConfirm = automation.autoConfirmEnabled && (nowMin >= (startMin - Number(automation.autoConfirmMinutesBefore || 0)));
-          if (shouldConfirm) { await updateBookingStatus(b.id, 'confirmed', 'automation'); continue; }
+      // Candidatos atrasados (dias anteriores) ainda não finalizados e com fim < agora
+      try {
+        const { data: backlog, error: backlogErr } = await supabase
+          .from('agendamentos')
+          .select('id, inicio, fim, status, auto_disabled')
+          .eq('codigo_empresa', userProfile.codigo_empresa)
+          .lt('fim', now.toISOString())
+          .in('status', ['scheduled','confirmed','in_progress']);
+        if (!backlogErr && Array.isArray(backlog) && backlog.length > 0) {
+          const items = backlog.map(row => ({
+            id: row.id,
+            start: new Date(row.inicio),
+            end: new Date(row.fim),
+            status: row.status || 'scheduled',
+            auto_disabled: !!row.auto_disabled,
+          }));
+          // Merge evitando duplicatas por id
+          const byId = new Map(candidates.map(c => [c.id, c]));
+          for (const it of items) { if (!byId.has(it.id)) byId.set(it.id, it); }
+          candidates = Array.from(byId.values());
+        }
+      } catch {}
+
+      for (const b of candidates) {
+        if (b.auto_disabled) continue; // desligado
+        if (isOverriddenRecently(b.id)) continue; // override manual
+        const startTs = b.start instanceof Date ? b.start.getTime() : new Date(b.start).getTime();
+        const endTs = b.end instanceof Date ? b.end.getTime() : new Date(b.end).getTime();
+
+        // Ordem: finalizar > iniciar > confirmar
+        if (b.status === 'in_progress' && automation.autoFinishEnabled) {
+          if (nowTs >= endTs) { await updateBookingStatus(b.id, 'finished', 'automation'); continue; }
         }
         if (b.status === 'confirmed' && automation.autoStartEnabled) {
-          if (nowMin >= startMin) { await updateBookingStatus(b.id, 'in_progress', 'automation'); continue; }
+          if (nowTs >= startTs) { await updateBookingStatus(b.id, 'in_progress', 'automation'); continue; }
         }
-        if (b.status === 'in_progress' && automation.autoFinishEnabled) {
-          if (nowMin >= endMin) { await updateBookingStatus(b.id, 'finished', 'automation'); continue; }
+        if (b.status === 'scheduled' && automation.autoConfirmEnabled) {
+          const msBefore = Number(automation.autoConfirmMinutesBefore || 0) * 60000;
+          if (nowTs >= (startTs - msBefore)) { await updateBookingStatus(b.id, 'confirmed', 'automation'); continue; }
+        }
+        // Catch-up: se ficou agendado/confirmado e já passou do fim, finalize direto
+        if ((b.status === 'scheduled' || b.status === 'confirmed') && automation.autoFinishEnabled) {
+          if (nowTs >= endTs) { await updateBookingStatus(b.id, 'finished', 'automation'); continue; }
         }
       }
     } finally {
@@ -505,7 +592,7 @@ function AgendaPage() {
       const { data, error } = await supabase
         .from('agendamentos')
         .select(`
-          id, codigo_empresa, quadra_id, cliente_id, clientes, inicio, fim, modalidade, status,
+          id, codigo_empresa, quadra_id, cliente_id, clientes, inicio, fim, modalidade, status, auto_disabled,
           quadra:quadra_id ( nome ),
           cliente:cliente_id ( nome )
         `)
@@ -556,7 +643,8 @@ function AgendaPage() {
           start,
           end,
           status: row.status || 'scheduled',
-          modality: row.modalidade || ''
+          modality: row.modalidade || '',
+          auto_disabled: !!row.auto_disabled,
         };
       });
       setBookings(mapped);
@@ -927,9 +1015,21 @@ function AgendaPage() {
     // Participantes (apenas no modo edição): { cliente_id, nome, valor_cota, status_pagamento }
     const [participantsForm, setParticipantsForm] = useState([]);
     const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
+    const [isCancelConfirmOpen, setIsCancelConfirmOpen] = useState(false);
     const [clientsLoading, setClientsLoading] = useState(false);
     const [isSavingPayments, setIsSavingPayments] = useState(false);
     const [isSavingBooking, setIsSavingBooking] = useState(false);
+    // Busca de participantes no modal de pagamentos
+    const [paymentSearch, setPaymentSearch] = useState('');
+    const paymentSearchRef = useRef(null);
+    // Ocultar participantes apenas na UI de Pagamentos (não altera o agendamento até salvar pagamentos)
+    const [paymentHiddenIds, setPaymentHiddenIds] = useState([]);
+    useEffect(() => {
+      if (isPaymentModalOpen) {
+        // Ao abrir o modal de pagamentos, não manter remoções anteriores
+        setPaymentHiddenIds([]);
+      }
+    }, [isPaymentModalOpen]);
     const pendingSaveRef = useRef(false);
     const completedSaveRef = useRef(false);
     const [paymentSelectedId, setPaymentSelectedId] = useState(null);
@@ -1055,21 +1155,46 @@ function AgendaPage() {
 
         if (editingBooking?.id) {
           try { console.log('[AgendamentoSave] Path: UPDATE', { id: editingBooking.id }); } catch {}
+          const prevStatus = editingBooking.status;
+          const statusChanged = form.status !== prevStatus;
+          // Atualiza primeiro os campos não relacionados ao status
+          const baseUpdate = {
+            quadra_id: court.id,
+            cliente_id: primaryClient?.id ?? null,
+            clientes: clientesArr,
+            inicio: inicio.toISOString(),
+            fim: fim.toISOString(),
+            modalidade: form.modality,
+          };
+          // Se o usuário NÃO mudou manualmente o status, reavaliar automaticamente conforme janela de confirmação
+          if (!statusChanged) {
+            let nextStatus = form.status;
+            try {
+              const nowTs = Date.now();
+              const startTs = inicio.getTime();
+              const canAutoConfirm = !!automation?.autoConfirmEnabled && Number.isFinite(Number(automation?.autoConfirmMinutesBefore));
+              if (canAutoConfirm) {
+                const msBefore = Number(automation.autoConfirmMinutesBefore) * 60000;
+                const thresholdTs = startTs - msBefore;
+                // Se estava confirmado e editou o horário para fora da janela, volta para scheduled
+                if (nextStatus === 'confirmed' && nowTs < thresholdTs) {
+                  nextStatus = 'scheduled';
+                }
+                // Se estava scheduled e editou para dentro da janela, confirma
+                else if (nextStatus === 'scheduled' && nowTs >= thresholdTs) {
+                  nextStatus = 'confirmed';
+                }
+              }
+            } catch {}
+            baseUpdate.status = nextStatus;
+          }
           const { error } = await supabase
             .from('agendamentos')
-            .update({
-              quadra_id: court.id,
-              cliente_id: primaryClient?.id ?? null,
-              clientes: clientesArr,
-              inicio: inicio.toISOString(),
-              fim: fim.toISOString(),
-              modalidade: form.modality,
-              status: form.status,
-            })
+            .update(baseUpdate)
             .eq('codigo_empresa', userProfile.codigo_empresa)
             .eq('id', editingBooking.id);
           if (error) throw error;
-          // Atualiza estado local
+          // Atualiza estado local (sem mexer em status quando ele mudou; será tratado abaixo)
           setBookings((prev) => prev.map((b) => b.id === editingBooking.id ? ({
             ...b,
             court: form.court,
@@ -1077,8 +1202,19 @@ function AgendaPage() {
             start: inicio,
             end: fim,
             modality: form.modality,
-            status: form.status,
+            ...(statusChanged ? {} : { status: baseUpdate.status ?? form.status }),
           }) : b));
+          // Se o status mudou, delega a atualização de status (e auto_disabled) para updateBookingStatus,
+          // garantindo a exibição do modal de reativação quando aplicável.
+          if (statusChanged) {
+            try {
+              // Fecha o modal de edição antes de abrir o modal de reativação para evitar sobreposição incorreta
+              setIsModalOpen(false);
+              await updateBookingStatus(editingBooking.id, form.status, 'user');
+            } catch (stErr) {
+              console.error('[AgendamentoSave] updateBookingStatus failed', stErr);
+            }
+          }
           toast({ title: 'Agendamento atualizado' });
           completedSaveRef.current = true;
           pendingSaveRef.current = false;
@@ -1191,7 +1327,7 @@ function AgendaPage() {
         setIsSavingBooking(false);
         console.groupEnd();
       }
-    }, [isSavingBooking, courtsMap, form, editingBooking, userProfile, isRangeFree, setBookings, toast, setIsModalOpen]);
+    }, [isSavingBooking, courtsMap, form, editingBooking, userProfile, isRangeFree, setBookings, toast, setIsModalOpen, updateBookingStatus]);
 
     // Ao voltar para a aba, se houver salvamento pendente e não concluído, reexecuta automaticamente
     useEffect(() => {
@@ -1645,6 +1781,47 @@ function AgendaPage() {
         <title>Agenda - Fluxo7 Arena</title>
         <meta name="description" content="Gerencie seus agendamentos, horários e quadras." />
       </Helmet>
+      {/* Dialogo de reativação de automação (top-level) */}
+      <Dialog
+        open={!!reactivateAsk}
+        onOpenChange={(open) => {
+          if (!open && reactivateAsk) {
+            try { reactivateAsk.resolve(false); } catch {}
+            setReactivateAsk(null);
+          }
+        }}
+      >
+        <DialogContent onOpenAutoFocus={(e) => e.preventDefault()}>
+          <DialogHeader>
+            <DialogTitle>Reativar automação?</DialogTitle>
+            <DialogDescription>
+              Ao reativar, este agendamento voltará a ser atualizado automaticamente (início e término) pelas regras da agenda.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <div className="ml-auto flex gap-2">
+              <Button
+                type="button"
+                variant="ghost"
+                className="border border-white/10"
+                onClick={() => {
+                  try { reactivateAsk?.resolve(false); } catch {}
+                  setReactivateAsk(null);
+                }}
+              >Cancelar</Button>
+              <Button
+                type="button"
+                className="bg-emerald-600 hover:bg-emerald-500 text-white"
+                onClick={() => {
+                  try { reactivateAsk?.resolve(true); } catch {}
+                  setReactivateAsk(null);
+                }}
+              >Reativar</Button>
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Main Add/Edit Booking Modal (restaurado) */}
       <Dialog
         open={isModalOpen}
@@ -1669,7 +1846,26 @@ function AgendaPage() {
           onEscapeKeyDown={(e) => { if (isPaymentModalOpen) e.preventDefault(); }}
         >
           <DialogHeader>
-            <DialogTitle>{editingBooking ? 'Editar Agendamento' : 'Novo Agendamento'}</DialogTitle>
+            <DialogTitle className="flex items-center justify-between gap-3 flex-wrap">
+              <span>{editingBooking ? 'Editar Agendamento' : 'Novo Agendamento'}</span>
+              <span
+                className="inline-flex items-center gap-2 px-3 py-1 rounded-md border text-sm bg-white/5 border-white/10 text-text-primary"
+                title="Data do agendamento"
+              >
+                <CalendarIcon className="w-4 h-4 opacity-80" />
+                <span className="font-semibold">
+                  {format(form.date, 'dd/MM/yyyy')}
+                  {(() => {
+                    const s = Number(form?.startMinutes);
+                    const e = Number(form?.endMinutes);
+                    const valid = Number.isFinite(s) && Number.isFinite(e) && e > s;
+                    if (!valid) return '';
+                    const hhmm = (mins) => `${String(Math.floor(mins / 60)).padStart(2,'0')}:${String(mins % 60).padStart(2,'0')}`;
+                    return ` • ${hhmm(s)}–${hhmm(e)}`;
+                  })()}
+                </span>
+              </span>
+            </DialogTitle>
             <DialogDescription>
               {editingBooking ? 'Atualize os detalhes do agendamento.' : 'Preencha os detalhes para criar uma nova reserva.'}
             </DialogDescription>
@@ -1732,7 +1928,12 @@ function AgendaPage() {
                             </button>
                           )}
                         </div>
-                        <div className="max-h-[260px] overflow-y-auto divide-y divide-border rounded-md border border-border">
+                        <div
+                          className="max-h-[260px] overflow-y-auto divide-y divide-border rounded-md border border-border"
+                          onWheel={(e) => { e.stopPropagation(); }}
+                          onTouchMove={(e) => { e.stopPropagation(); }}
+                          style={{ overscrollBehavior: 'contain' }}
+                        >
                           {((localCustomers || [])
                             .filter((c) => {
                               const q = customerQuery.trim().toLowerCase();
@@ -1926,17 +2127,57 @@ function AgendaPage() {
 
           <DialogFooter className="w-full flex items-center -mx-6">
             {editingBooking && (
-              <Button
-                type="button"
-                variant="secondary"
-                className="ml-6 mr-auto bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-700"
-                onClick={() => setIsPaymentModalOpen(true)}
-              >
-                <DollarSign className="w-4 h-4 mr-2 opacity-90" /> Pagamentos
-              </Button>
+              <>
+                <div className="ml-6 mr-auto flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    className="bg-red-600 hover:bg-red-500 text-white border border-red-700"
+                    onClick={() => setIsCancelConfirmOpen(true)}
+                  >
+                    <XCircle className="w-4 h-4 mr-2 opacity-90" /> Cancelar
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    className="bg-teal-600 hover:bg-teal-500 text-white border-teal-700"
+                    onClick={() => setIsPaymentModalOpen(true)}
+                  >
+                    <DollarSign className="w-4 h-4 mr-2 opacity-90" /> Pagamentos
+                  </Button>
+                </div>
+                <AlertDialog open={isCancelConfirmOpen} onOpenChange={setIsCancelConfirmOpen}>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Cancelar agendamento?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        Ao cancelar, este agendamento deixará de aparecer na agenda padrão. Ele só será visível ao selecionar o filtro "Cancelados".
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Voltar</AlertDialogCancel>
+                      <AlertDialogAction
+                        className="bg-red-600 hover:bg-red-500"
+                        onClick={async () => {
+                          try {
+                            setIsCancelConfirmOpen(false);
+                            setIsModalOpen(false);
+                            await updateBookingStatus(editingBooking.id, 'canceled', 'user');
+                            toast({ title: 'Agendamento cancelado' });
+                          } catch (e) {
+                            toast({ title: 'Erro ao cancelar', description: e?.message || 'Tente novamente.' });
+                          }
+                        }}
+                      >
+                        Confirmar cancelamento
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              </>
             )}
             <div className="ml-auto flex gap-2 pr-6">
-              <Button type="button" variant="ghost" className="border border-white/10" onClick={() => setIsModalOpen(false)}>Cancelar</Button>
+              <Button type="button" variant="ghost" className="border border-white/10" onClick={() => setIsModalOpen(false)}>Fechar</Button>
               <Button
                 type="button"
                 className="bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-60 disabled:cursor-not-allowed"
@@ -2062,6 +2303,27 @@ function AgendaPage() {
 
               {(form.selectedClients || []).length > 0 && (
                 <>
+                {/* Busca por participante */}
+                <div className="flex items-center justify-between">
+                  <div className="relative w-full max-w-[320px]">
+                    <Input
+                      ref={paymentSearchRef}
+                      type="text"
+                      placeholder="Buscar participante..."
+                      value={paymentSearch}
+                      onChange={(e) => setPaymentSearch(e.target.value)}
+                      className="pr-16"
+                    />
+                    <button
+                      type="button"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-amber-400 hover:text-amber-300"
+                      onClick={() => {
+                        setPaymentSearch('');
+                        try { paymentSearchRef.current?.focus(); } catch {}
+                      }}
+                    >limpar</button>
+                  </div>
+                </div>
                 {paymentWarning?.type === 'pending' && (
                   <div role="alert" className="mb-2 rounded-md border border-amber-600/40 bg-amber-500/10 px-3 py-2 text-amber-200 flex items-start gap-3">
                     <div className="mt-0.5">
@@ -2102,7 +2364,16 @@ function AgendaPage() {
                     <div className="col-span-1 text-right">Ações</div>
                   </div>
                   <div className="divide-y divide-border max-h-[50vh] overflow-y-auto fx-scroll">
-                    {(form.selectedClients || []).map((c) => {
+                    {(() => {
+                      const q = paymentSearch.trim().toLowerCase();
+                      const filtered = (form.selectedClients || [])
+                        .filter((c) => !paymentHiddenIds.includes(c.id))
+                        .filter((c) => {
+                          if (!q) return true;
+                          return String(c?.nome || '').toLowerCase().includes(q);
+                        });
+                      return filtered;
+                    })().map((c) => {
                       const pf = participantsForm.find(p => p.cliente_id === c.id) || { cliente_id: c.id, nome: c.nome, valor_cota: '', status_pagamento: 'Pendente' };
                       return (
                         <div
@@ -2160,7 +2431,8 @@ function AgendaPage() {
                               size="sm"
                               className="text-red-500 hover:text-red-400"
                               onClick={() => {
-                                setForm(f => ({ ...f, selectedClients: (f.selectedClients || []).filter(x => x.id !== c.id) }));
+                                // Remove apenas na UI de pagamentos (não altera os clientes do agendamento aqui)
+                                setPaymentHiddenIds((prev) => prev.includes(c.id) ? prev : [...prev, c.id]);
                                 setParticipantsForm(prev => prev.filter(p => p.cliente_id !== c.id));
                               }}
                             >
@@ -2198,7 +2470,8 @@ function AgendaPage() {
 
                       // Verificação: pendentes (somente notificação; não exibir banner bloqueante)
                       const mapForm = new Map((participantsForm || []).map(p => [p.cliente_id, p]));
-                      const pendingCount = (form.selectedClients || []).reduce((acc, c) => {
+                      const effectiveSelected = (form.selectedClients || []).filter(c => !paymentHiddenIds.includes(c.id));
+                      const pendingCount = effectiveSelected.reduce((acc, c) => {
                         const st = (mapForm.get(c.id)?.status_pagamento) || 'Pendente';
                         return acc + (st !== 'Pago' ? 1 : 0);
                       }, 0);
@@ -2216,7 +2489,7 @@ function AgendaPage() {
                         throw delErr;
                       }
                       
-                      const rows = (form.selectedClients || []).map((c) => {
+                      const rows = effectiveSelected.map((c) => {
                         const pf = participantsForm.find(p => p.cliente_id === c.id) || { valor_cota: null, status_pagamento: 'Pendente' };
                         const valor = parseBRL(pf.valor_cota);
                         return {
@@ -2242,6 +2515,30 @@ function AgendaPage() {
                       } else {
                         // nenhum participante selecionado
                       }
+                      // Se houve remoções na UI (paymentHiddenIds), persistir também nos dados do agendamento (cliente_id e clientes)
+                      try {
+                        if ((paymentHiddenIds || []).length > 0) {
+                          const newSelected = effectiveSelected;
+                          const primary = newSelected[0] || null;
+                          const clientesArr = newSelected.map(c => c?.nome).filter(Boolean);
+                          await supabase
+                            .from('agendamentos')
+                            .update({
+                              cliente_id: primary?.id ?? null,
+                              clientes: clientesArr,
+                            })
+                            .eq('codigo_empresa', codigo)
+                            .eq('id', agendamentoId);
+                          // Reflete imediatamente no formulário/modais
+                          setForm(f => ({ ...f, selectedClients: newSelected }));
+                          // Atualiza o cartão na agenda (nome do cliente primário)
+                          setBookings(prev => prev.map(b => b.id === agendamentoId ? {
+                            ...b,
+                            customer: primary?.nome || '',
+                          } : b));
+                        }
+                      } catch {}
+
                       // Recarrega participantes deste agendamento para atualizar o indicador "pagos/total" na agenda
                       try {
                         const { data: freshParts, error: freshErr } = await supabase
