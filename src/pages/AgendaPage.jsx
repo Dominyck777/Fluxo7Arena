@@ -2010,9 +2010,18 @@ function AgendaPage() {
                 {(form.selectedClients || []).length > 0 && (
                   <div className="flex flex-wrap gap-2 mt-2">
                     {(form.selectedClients || []).map((c) => (
-                      <span key={c.id} className="text-xs bg-white/5 border border-white/10 rounded px-2 py-1 flex items-center gap-2">
+                      <span key={c.id} className="text-sm font-medium bg-white/5 border border-white/10 rounded px-2 py-1 flex items-center gap-2">
                         {shortName(c.nome)}
-                        <button type="button" className="text-text-muted hover:text-red-400" onClick={() => setForm((f) => ({ ...f, selectedClients: (f.selectedClients || []).filter((x) => x.id !== c.id) }))}>×</button>
+                        <button
+                          type="button"
+                          aria-label="Remover cliente"
+                          title="Remover cliente"
+                          className="text-text-muted hover:text-red-400 p-1 rounded hover:bg-red-500/10"
+                          onClick={() => setForm((f) => ({ ...f, selectedClients: (f.selectedClients || []).filter((x) => x.id !== c.id) }))}
+                        >
+                          <X className="w-5 h-5" />
+                          <span className="sr-only">Remover</span>
+                        </button>
                       </span>
                     ))}
                   </div>
@@ -2372,8 +2381,12 @@ function AgendaPage() {
                           if (!q) return true;
                           return String(c?.nome || '').toLowerCase().includes(q);
                         });
-                      return filtered;
-                    })().map((c) => {
+                      if (filtered.length === 0) {
+                        return (
+                          <div className="px-3 py-4 text-sm text-text-muted">Nenhum participante com esse nome</div>
+                        );
+                      }
+                      return filtered.map((c) => {
                       const pf = participantsForm.find(p => p.cliente_id === c.id) || { cliente_id: c.id, nome: c.nome, valor_cota: '', status_pagamento: 'Pendente' };
                       return (
                         <div
@@ -2441,7 +2454,8 @@ function AgendaPage() {
                           </div>
                         </div>
                       );
-                    })}
+                    });
+                    })()}
                   </div>
                 </div>
                 </>

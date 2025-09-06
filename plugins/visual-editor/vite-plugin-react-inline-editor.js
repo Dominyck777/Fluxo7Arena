@@ -9,7 +9,7 @@ import fs from 'fs';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const VITE_PROJECT_ROOT = path.resolve(__dirname, '../..');
-const EDITABLE_HTML_TAGS = ["a", "Button", "button", "p", "span", "h1", "h2", "h3", "h4", "h5", "h6", "label", "Label", "img"];
+const EDITABLE_HTML_TAGS = ["a", "p", "span", "h1", "h2", "h3", "h4", "h5", "h6", "label", "Label", "img"];
 
 function parseEditId(editId) {
   const parts = editId.split(':');
