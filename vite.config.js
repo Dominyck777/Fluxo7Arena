@@ -145,7 +145,11 @@ async function getConfig() {
       'Using UNSAFE_componentWillMount in strict mode is not recommended',
       'Each child in a list should have a unique "key" prop',
       '[AuthDebug]',
-      '[AuthContext]'
+      '[AuthContext]',
+      // Suppress known noisy third-party warning from react-beautiful-dnd
+      'Connect(Droppable): Support for defaultProps will be removed from memo components',
+      // Suppress verbose products api logs
+      '[products.api]'
     ];
 
     function shouldSuppress(args) {

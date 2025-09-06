@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Helmet } from 'react-helmet';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
@@ -6,6 +6,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { listarFinalizadoras, criarFinalizadora, atualizarFinalizadora, ativarDesativarFinalizadora } from '@/lib/store';
+import { useAuth } from '@/contexts/AuthContext';
 
 const pageVariants = { hidden: { opacity: 0 }, visible: { opacity: 1, transition: { when: 'beforeChildren', staggerChildren: 0.06, delayChildren: 0.05 } } };
 const itemVariants = { hidden: { opacity: 0, y: 12 }, visible: { opacity: 1, y: 0, transition: { duration: 0.35 } } };
@@ -29,8 +30,14 @@ function Input({ label, ...props }) {
 
 export default function FinalizadorasPage() {
   const { toast } = useToast();
+  const { userProfile, authReady } = useAuth();
   const [finalizadoras, setFinalizadoras] = useState([]);
   const [loadingFins, setLoadingFins] = useState(false);
+  // Debug helpers
+  const lastLoadTsRef = useRef(0);
+  const loadsCountRef = useRef(0);
+  const lastDataSizeRef = useRef(0);
+  const retryOnceRef = useRef(false);
   // Modal: criar
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [formFin, setFormFin] = useState({ nome: '', tipo: 'outros', ativo: true, taxa_percentual: '' });
@@ -39,23 +46,61 @@ export default function FinalizadorasPage() {
   const [editingFin, setEditingFin] = useState(null);
 
   const loadFinalizadoras = async () => {
+    const trace = `[Finalizadoras:load ${++loadsCountRef.current}]`;
+    const t0 = Date.now();
+    lastLoadTsRef.current = t0;
     try {
+      try { console.group(trace); } catch {}
+      try { console.log('start', { t0, loadingFinsBefore: loadingFins }); } catch {}
       setLoadingFins(true);
-      const data = await listarFinalizadoras({ somenteAtivas: false });
-      setFinalizadoras(data || []);
+      const codigoEmpresa = userProfile?.codigo_empresa || null;
+      const data = await listarFinalizadoras({ somenteAtivas: false, codigoEmpresa });
+      const size = Array.isArray(data) ? data.length : (data ? 1 : 0);
+      try { console.log('loaded', { size, sample: Array.isArray(data) ? data.slice(0, 3) : data }); } catch {}
+      setFinalizadoras((prev) => {
+        const next = Array.isArray(data) ? data : [];
+        lastDataSizeRef.current = next.length;
+        try { console.log('applyState', { prevSize: prev.length, nextSize: next.length, empty: next.length === 0 }); } catch {}
+        return next;
+      });
+      // Retry once if empty due to late auth hydration
+      if ((size === 0) && !retryOnceRef.current && authReady && codigoEmpresa) {
+        retryOnceRef.current = true;
+        setTimeout(() => { try { console.log('[Finalizadoras] retry after empty'); } catch {}; loadFinalizadoras(); }, 500);
+      }
     } catch (e) {
+      try { console.error(trace + ' error', e); } catch {}
       toast({ title: 'Falha ao carregar finalizadoras', description: e?.message || 'Tente novamente', variant: 'destructive' });
     } finally {
       setLoadingFins(false);
+      try { console.log('finish', { dtMs: Date.now() - t0, loadingFinsAfter: loadingFins }); } catch {}
+      try { console.groupEnd(); } catch {}
     }
   };
 
   useEffect(() => {
-    loadFinalizadoras();
-  }, []);
+    try { console.log('[Finalizadoras] mount'); } catch {}
+    if (authReady && userProfile?.codigo_empresa) {
+      loadFinalizadoras();
+    }
+    const onVis = () => {
+      try { console.log('[Finalizadoras] visibilitychange', { visibility: document.visibilityState, lastLoadTs: lastLoadTsRef.current, lastDataSize: lastDataSizeRef.current }); } catch {}
+    };
+    const onFocus = () => { try { console.log('[Finalizadoras] window:focus'); } catch {}; };
+    window.addEventListener('visibilitychange', onVis);
+    window.addEventListener('focus', onFocus);
+    return () => {
+      try { console.log('[Finalizadoras] unmount'); } catch {}
+      window.removeEventListener('visibilitychange', onVis);
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [authReady, userProfile?.codigo_empresa]);
 
   const submitCreate = async () => {
+    const trace = '[Finalizadoras:create]';
     try {
+      try { console.group(trace); } catch {}
+      try { console.log('payloadDraft', { ...formFin }); } catch {}
       if (!formFin.nome?.trim()) {
         toast({ title: 'Nome é obrigatório', variant: 'warning' });
         return;
@@ -66,24 +111,32 @@ export default function FinalizadorasPage() {
         ativo: !!formFin.ativo,
         taxa_percentual: formFin.taxa_percentual === '' ? null : Number(formFin.taxa_percentual),
       };
-      await criarFinalizadora(payload);
+      try { console.log('create:calling'); } catch {}
+      await criarFinalizadora(payload, userProfile?.codigo_empresa);
       setFormFin({ nome: '', tipo: 'outros', ativo: true, taxa_percentual: '' });
       setIsCreateOpen(false);
+      try { console.log('create:success -> reload'); } catch {}
       await loadFinalizadoras();
       toast({ title: 'Finalizadora criada', variant: 'success' });
     } catch (e) {
+      try { console.error(trace + ' error', e); } catch {}
       toast({ title: 'Falha ao criar finalizadora', description: e?.message || 'Tente novamente', variant: 'destructive' });
-    }
+    } finally { try { console.groupEnd(); } catch {} }
   };
 
   const toggleAtivo = async (fin) => {
+    const trace = '[Finalizadoras:toggleAtivo]';
     try {
-      await ativarDesativarFinalizadora(fin.id, !fin.ativo);
+      try { console.group(trace); } catch {}
+      try { console.log('args', { id: fin?.id, fromAtivo: fin?.ativo }); } catch {}
+      await ativarDesativarFinalizadora(fin.id, !fin.ativo, userProfile?.codigo_empresa);
+      try { console.log('success -> reload'); } catch {}
       await loadFinalizadoras();
       toast({ title: `${!fin.ativo ? 'Ativada' : 'Desativada'}`, description: fin.nome, variant: 'info' });
     } catch (e) {
+      try { console.error(trace + ' error', e); } catch {}
       toast({ title: 'Falha ao alterar status', description: e?.message || 'Tente novamente', variant: 'destructive' });
-    }
+    } finally { try { console.groupEnd(); } catch {} }
   };
 
   const openEdit = (fin) => {
@@ -98,8 +151,10 @@ export default function FinalizadorasPage() {
   };
 
   const submitEdit = async () => {
+    const trace = '[Finalizadoras:edit]';
     try {
-      if (!editingFin) return;
+      try { console.group(trace); } catch {}
+      if (!editingFin) { try { console.warn('no editingFin'); } catch {}; return; }
       if (!formFin.nome?.trim()) {
         toast({ title: 'Nome é obrigatório', variant: 'warning' });
         return;
@@ -110,14 +165,17 @@ export default function FinalizadorasPage() {
         ativo: !!formFin.ativo,
         taxa_percentual: formFin.taxa_percentual === '' ? null : Number(formFin.taxa_percentual),
       };
-      await atualizarFinalizadora(editingFin.id, payload);
+      try { console.log('update:calling', { id: editingFin.id }); } catch {}
+      await atualizarFinalizadora(editingFin.id, payload, userProfile?.codigo_empresa);
       setIsEditOpen(false);
       setEditingFin(null);
+      try { console.log('update:success -> reload'); } catch {}
       await loadFinalizadoras();
       toast({ title: 'Finalizadora atualizada', variant: 'success' });
     } catch (e) {
+      try { console.error(trace + ' error', e); } catch {}
       toast({ title: 'Falha ao atualizar', description: e?.message || 'Tente novamente', variant: 'destructive' });
-    }
+    } finally { try { console.groupEnd(); } catch {} }
   };
 
   return (

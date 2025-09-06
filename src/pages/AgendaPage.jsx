@@ -398,6 +398,7 @@ function AgendaPage() {
       const { error } = await supabase
         .from('agendamentos')
         .update(updatePayload)
+        .eq('codigo_empresa', userProfile.codigo_empresa)
         .eq('id', bookingId)
         .select('id');
       if (error) throw error;
@@ -504,18 +505,18 @@ function AgendaPage() {
 
         // Ordem: finalizar > iniciar > confirmar
         if (b.status === 'in_progress' && automation.autoFinishEnabled) {
-          if (nowTs >= endTs) { await updateBookingStatus(b.id, 'finished', 'automation'); continue; }
+          if (nowTs >= endTs) { try { console.debug('[Auto] finish', { id: b.id }); } catch {}; await updateBookingStatus(b.id, 'finished', 'automation'); continue; }
         }
         if (b.status === 'confirmed' && automation.autoStartEnabled) {
-          if (nowTs >= startTs) { await updateBookingStatus(b.id, 'in_progress', 'automation'); continue; }
+          if (nowTs >= startTs) { try { console.debug('[Auto] start', { id: b.id }); } catch {}; await updateBookingStatus(b.id, 'in_progress', 'automation'); continue; }
         }
         if (b.status === 'scheduled' && automation.autoConfirmEnabled) {
           const msBefore = Number(automation.autoConfirmMinutesBefore || 0) * 60000;
-          if (nowTs >= (startTs - msBefore)) { await updateBookingStatus(b.id, 'confirmed', 'automation'); continue; }
+          if (nowTs >= (startTs - msBefore)) { try { console.debug('[Auto] confirm', { id: b.id }); } catch {}; await updateBookingStatus(b.id, 'confirmed', 'automation'); continue; }
         }
         // Catch-up: se ficou agendado/confirmado e já passou do fim, finalize direto
         if ((b.status === 'scheduled' || b.status === 'confirmed') && automation.autoFinishEnabled) {
-          if (nowTs >= endTs) { await updateBookingStatus(b.id, 'finished', 'automation'); continue; }
+          if (nowTs >= endTs) { try { console.debug('[Auto] catchup-finish', { id: b.id }); } catch {}; await updateBookingStatus(b.id, 'finished', 'automation'); continue; }
         }
       }
     } finally {
