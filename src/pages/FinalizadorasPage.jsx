@@ -56,6 +56,21 @@ export default function FinalizadorasPage() {
       if (!mountedRef.current) { try { console.warn(trace + ' skip: unmounted'); } catch {}; return; }
       setLoadingFins(true);
       const codigoEmpresa = userProfile?.codigo_empresa || null;
+      // Slow-load fallback: if after 5s we still have 0 items, try to hydrate from cache
+      const slowFallback = setTimeout(() => {
+        if (!mountedRef.current) return;
+        if (lastDataSizeRef.current === 0 && codigoEmpresa) {
+          try {
+            const cacheKey = `finalizadoras:list:${codigoEmpresa}`;
+            const cached = JSON.parse(localStorage.getItem(cacheKey) || '[]');
+            if (Array.isArray(cached) && cached.length > 0) {
+              console.warn('[Finalizadoras] slow fallback: using cached snapshot');
+              setFinalizadoras(cached);
+              lastDataSizeRef.current = cached.length;
+            }
+          } catch {}
+        }
+      }, 5000);
       const data = await listarFinalizadoras({ somenteAtivas: false, codigoEmpresa });
       if (!mountedRef.current) { try { console.warn(trace + ' skip apply: unmounted after fetch'); } catch {}; return; }
       const size = Array.isArray(data) ? data.length : (data ? 1 : 0);
@@ -64,6 +79,11 @@ export default function FinalizadorasPage() {
         const next = Array.isArray(data) ? data : [];
         lastDataSizeRef.current = next.length;
         try { console.log('applyState', { prevSize: prev.length, nextSize: next.length, empty: next.length === 0 }); } catch {}
+        // Persist fresh list to cache for resilience
+        try {
+          const cacheKey = `finalizadoras:list:${codigoEmpresa}`;
+          localStorage.setItem(cacheKey, JSON.stringify(next));
+        } catch {}
         return next;
       });
       // Retry once if empty due to late auth hydration
@@ -75,6 +95,7 @@ export default function FinalizadorasPage() {
       try { console.error(trace + ' error', e); } catch {}
       toast({ title: 'Falha ao carregar finalizadoras', description: e?.message || 'Tente novamente', variant: 'destructive' });
     } finally {
+      try { clearTimeout(slowFallback); } catch {}
       if (mountedRef.current) setLoadingFins(false);
       try { console.log('finish', { dtMs: Date.now() - t0, loadingFinsAfter: loadingFins }); } catch {}
       try { console.groupEnd(); } catch {}
@@ -85,6 +106,15 @@ export default function FinalizadorasPage() {
     mountedRef.current = true;
     try { console.log('[Finalizadoras] mount'); } catch {}
     if (authReady && userProfile?.codigo_empresa) {
+      // Immediate cache hydration to avoid empty list perception
+      try {
+        const cacheKey = `finalizadoras:list:${userProfile.codigo_empresa}`;
+        const cached = JSON.parse(localStorage.getItem(cacheKey) || '[]');
+        if (Array.isArray(cached) && cached.length > 0) {
+          setFinalizadoras(cached);
+          lastDataSizeRef.current = cached.length;
+        }
+      } catch {}
       loadFinalizadoras();
     }
     const onVis = () => {

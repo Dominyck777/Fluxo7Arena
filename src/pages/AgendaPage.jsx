@@ -444,6 +444,7 @@ function AgendaPage() {
   // Runner periódico
   const automationRunningRef = useRef(false);
   const nextAutoTimerRef = useRef(null);
+  const runAutomationRef = useRef(null);
   const clearNextAutoTimer = useCallback(() => {
     try { if (nextAutoTimerRef.current) { clearTimeout(nextAutoTimerRef.current); nextAutoTimerRef.current = null; } } catch {}
   }, []);
@@ -477,9 +478,9 @@ function AgendaPage() {
     if (nextTs !== Infinity) {
       const delay = Math.max(0, Math.min(nextTs - now + 250, 10 * 60 * 1000)); // pequeno buffer de 250ms
       try { console.debug('[Auto] next schedule in ms', delay); } catch {}
-      nextAutoTimerRef.current = setTimeout(() => { try { runAutomation(); } catch {} }, delay);
+      nextAutoTimerRef.current = setTimeout(() => { try { runAutomationRef.current && runAutomationRef.current(); } catch {} }, delay);
     }
-  }, [authReady, userProfile?.codigo_empresa, bookings, automation, isOverriddenRecently, runAutomation, clearNextAutoTimer]);
+  }, [authReady, userProfile?.codigo_empresa, bookings, automation, isOverriddenRecently, clearNextAutoTimer]);
   const runAutomation = useCallback(async () => {
     if (!authReady || !userProfile?.codigo_empresa) return;
     if (automationRunningRef.current) return;
@@ -568,9 +569,14 @@ function AgendaPage() {
       automationRunningRef.current = false;
     }
   }, [authReady, userProfile?.codigo_empresa, bookings, automation, updateBookingStatus, isOverriddenRecently, scheduleNextAutomation]);
+
+  // Keep a callable reference to avoid TDZ issues when scheduling before runAutomation is initialized
+  useEffect(() => {
+    runAutomationRef.current = runAutomation;
+  }, [runAutomation]);
   useEffect(() => {
     const id = setInterval(runAutomation, 10000);
-    try { runAutomation(); } catch {}
+    try { runAutomationRef.current && runAutomationRef.current(); } catch {}
     try { scheduleNextAutomation(); } catch {}
     return () => clearInterval(id);
   }, [runAutomation]);
@@ -606,7 +612,7 @@ function AgendaPage() {
           }
         } catch {}
         // Ao voltar, roda automação e recarrega dados frescos do backend
-        try { runAutomation(); } catch {}
+        try { runAutomationRef.current && runAutomationRef.current(); } catch {}
         try { fetchBookings(); } catch {}
         try { loadParticipants(); } catch {}
         try { scheduleNextAutomation(); } catch {}
@@ -1903,6 +1909,29 @@ function AgendaPage() {
           <DialogHeader>
             <DialogTitle className="flex items-center justify-between gap-3 flex-wrap">
               <span>{editingBooking ? 'Editar Agendamento' : 'Novo Agendamento'}</span>
+              {editingBooking && (
+                (() => {
+                  const allPaid = paymentSummary?.pending === 0 && participantsCount > 0;
+                  const hasPending = (paymentSummary?.pending || 0) > 0;
+                  const badgeBase = 'inline-flex items-center gap-2 px-2.5 py-1 rounded-full border text-xs';
+                  const green = 'bg-emerald-600/10 text-emerald-400 border-emerald-700/30';
+                  const amber = 'bg-amber-600/15 text-amber-400 border-amber-700/30';
+                  const dot = (cls) => (<span aria-hidden className={`inline-block w-2 h-2 rounded-full ${cls}`} />);
+                  return (
+                    <span
+                      className={`${badgeBase} ${hasPending ? amber : green}`}
+                      title={hasPending ? 'Há pagamentos pendentes' : 'Todos participantes pagos'}
+                      aria-live="polite"
+                    >
+                      {dot(hasPending ? 'bg-amber-400' : 'bg-emerald-400')}
+                      <span className="tracking-wide">Pagos</span>
+                      <strong className="text-base font-semibold tabular-nums">{paymentSummary?.paid || 0}</strong>
+                      <span className="opacity-60">/</span>
+                      <span className="text-base font-semibold tabular-nums">{participantsCount}</span>
+                    </span>
+                  );
+                })()
+              )}
               <span
                 className="inline-flex items-center gap-2 px-3 py-1 rounded-md border text-sm bg-white/5 border-white/10 text-text-primary"
                 title="Data do agendamento"
@@ -2199,7 +2228,7 @@ function AgendaPage() {
                     className="bg-red-600 hover:bg-red-500 text-white border border-red-700"
                     onClick={() => setIsCancelConfirmOpen(true)}
                   >
-                    <XCircle className="w-4 h-4 mr-2 opacity-90" /> Cancelar
+                    <XCircle className="w-4 h-4 mr-2 opacity-90" /> Cancelar agendamento
                   </Button>
                   <Button
                     type="button"
