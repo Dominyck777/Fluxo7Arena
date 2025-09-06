@@ -84,6 +84,7 @@ function handleGlobalEvent(event) {
   const editableElement = findEditableElementAtPoint(event);
 
   if (editableElement) {
+    // Intercept only when interacting with editable targets
     event.preventDefault();
     event.stopPropagation();
     event.stopImmediatePropagation();
@@ -106,10 +107,6 @@ function handleGlobalEvent(event) {
       
       showPopup(editableElement, editId, currentContent, isImage);
     }
-  } else {
-    event.preventDefault();
-    event.stopPropagation();
-    event.stopImmediatePropagation();
   }
 }
 

@@ -2582,7 +2582,8 @@ function AgendaPage() {
                       }
                       setPaymentWarning(null);
                       try { console.log('Payments saved successfully in ms', Date.now() - t0); } catch {}
-                      // Fecha o modal principal para voltar direto à agenda
+                      // Fecha o modal de pagamentos e, em seguida, o modal principal
+                      setIsPaymentModalOpen(false);
                       setIsModalOpen(false);
                     } catch (e) {
                       toast({ title: 'Erro ao salvar pagamentos', description: 'Tente novamente.', variant: 'destructive' });
