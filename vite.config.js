@@ -3,11 +3,13 @@ import react from '@vitejs/plugin-react';
 import { createLogger, defineConfig } from 'vite';
 
 const isDev = process.env.NODE_ENV !== 'production';
+// Feature flag: disable inline visual editor in dev to avoid intercepting app clicks
+const ENABLE_VISUAL_EDITOR = false;
 
 let inlineEditPlugin, editModeDevPlugin;
 
 async function getConfig() {
-  if (isDev) {
+  if (isDev && ENABLE_VISUAL_EDITOR) {
     inlineEditPlugin = (await import('./plugins/visual-editor/vite-plugin-react-inline-editor.js')).default;
     editModeDevPlugin = (await import('./plugins/visual-editor/vite-plugin-edit-mode.js')).default;
   }
@@ -233,7 +235,7 @@ async function getConfig() {
   return defineConfig({
     customLogger: logger,
     plugins: [
-      ...(isDev ? [inlineEditPlugin(), editModeDevPlugin()] : []),
+      ...(isDev && ENABLE_VISUAL_EDITOR ? [inlineEditPlugin(), editModeDevPlugin()] : []),
       react(),
       addTransformIndexHtml
     ],
