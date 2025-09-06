@@ -63,35 +63,69 @@ export default function EmpresasPage() {
   });
   const fileInputRef = useRef(null);
   const [logoPreviewUrl, setLogoPreviewUrl] = useState('');
+  const mountedRef = useRef(true);
+  useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
 
-  // Carrega dados atuais da empresa do contexto / banco
+  // Carrega dados atuais da empresa com resiliência (cache + fallback + guarda de montagem)
   useEffect(() => {
-    const hydrate = async () => {
+    const load = async () => {
       try {
-        if (!userProfile?.codigo_empresa) return;
-        // Preferir dados completos do banco, pois o objeto de contexto pode não ter os novos campos
+        const codigoEmpresa = userProfile?.codigo_empresa || null;
+        if (!codigoEmpresa) return;
+        const cacheKey = `empresa:form:${codigoEmpresa}`;
+        // hydrate cache first
+        try {
+          const raw = localStorage.getItem(cacheKey);
+          if (raw) {
+            const cached = JSON.parse(raw);
+            if (cached && typeof cached === 'object') {
+              setForm((prev) => ({ ...prev, ...cached }));
+              if (cached.logo_url) setLogoPreviewUrl(`${cached.logo_url.split('?')[0]}?v=${Date.now()}`);
+            }
+          }
+        } catch {}
+        // slow fallback: caso backend demore
+        const slowFallback = setTimeout(() => {
+          if (!mountedRef.current) return;
+          try {
+            const raw = localStorage.getItem(cacheKey);
+            if (raw) {
+              const cached = JSON.parse(raw);
+              if (cached && typeof cached === 'object') {
+                console.warn('[Empresas] slow fallback: using cached form');
+                setForm((prev) => ({ ...prev, ...cached }));
+                if (cached.logo_url) setLogoPreviewUrl(`${cached.logo_url.split('?')[0]}?v=${Date.now()}`);
+              }
+            }
+          } catch {}
+        }, 5000);
+        // fetch atual do banco (RLS por codigo_empresa)
         const { data: empresa, error } = await supabase
           .from('empresas')
           .select('*')
-          .eq('codigo_empresa', userProfile.codigo_empresa)
+          .eq('codigo_empresa', codigoEmpresa)
           .single();
+        clearTimeout(slowFallback);
         if (error) throw error;
-        setForm({
-          razao_social: empresa.razao_social || '',
-          nome_fantasia: empresa.nome_fantasia || empresa.nome || '',
-          cnpj: empresa.cnpj || '',
-          email: empresa.email || '',
-          telefone: empresa.telefone || '',
-          endereco: empresa.endereco || '',
-          logo_url: empresa.logo_url || '',
-        });
-        setLogoPreviewUrl(empresa.logo_url ? `${empresa.logo_url}?v=${Date.now()}` : '');
+        if (!mountedRef.current) return;
+        const fresh = {
+          razao_social: empresa?.razao_social || '',
+          nome_fantasia: empresa?.nome_fantasia || empresa?.nome || '',
+          cnpj: empresa?.cnpj || '',
+          email: empresa?.email || '',
+          telefone: empresa?.telefone || '',
+          endereco: empresa?.endereco || '',
+          logo_url: empresa?.logo_url || '',
+        };
+        setForm(fresh);
+        setLogoPreviewUrl(fresh.logo_url ? `${fresh.logo_url.split('?')[0]}?v=${Date.now()}` : '');
+        try { localStorage.setItem(cacheKey, JSON.stringify(fresh)); } catch {}
       } catch (e) {
         // eslint-disable-next-line no-console
         console.warn('Falha ao carregar empresa:', e);
       }
     };
-    hydrate();
+    load();
   }, [userProfile?.codigo_empresa]);
 
   // Sempre que a URL da logo no form mudar (ex.: após salvar e recarregar do DB), renove o preview com cache-buster

@@ -174,7 +174,7 @@ function mapUiToDb(data) {
 }
 
 export async function listProducts(options = {}) {
-  const { includeInactive = false, search = '' } = options
+  const { includeInactive = false, search = '', codigoEmpresa } = options
   // eslint-disable-next-line no-console
   console.info('[products.api] listProducts: start')
   const { data, error } = await withTimeout((signal) => {
@@ -183,6 +183,9 @@ export async function listProducts(options = {}) {
       .select('*')
       .order('nome', { ascending: true })
       .abortSignal(signal)
+    if (codigoEmpresa) {
+      q = q.eq('codigo_empresa', codigoEmpresa)
+    }
     if (!includeInactive) {
       // Incluir linhas onde status é null (produtos antigos) e excluir onde é 'inactive'
       q = q.or('status.is.null,status.neq.inactive')

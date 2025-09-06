@@ -169,16 +169,35 @@ export default function EquipePage() {
     const [searchTerm, setSearchTerm] = useState('');
     const [saving, setSaving] = useState(false);
     const retryRef = useRef(false);
+    const mountedRef = useRef(true);
+    useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
 
     const loadTeam = async () => {
       try {
-        const hasCache = team && team.length > 0;
-        if (!company?.codigo_empresa && !company?.id) return;
-        // Rely on RLS; no explicit company filter needed
+        const codigoEmpresa = company?.codigo_empresa || null;
+        if (!codigoEmpresa && !company?.id) return;
+        const cacheKey = codigoEmpresa ? `team:list:${codigoEmpresa}` : 'team:list';
+        // slow fallback: reidratar cache após 5s
+        const slowFallback = setTimeout(() => {
+          if (!mountedRef.current) return;
+          try {
+            const raw = localStorage.getItem(cacheKey);
+            const cached = raw ? JSON.parse(raw) : [];
+            if (Array.isArray(cached) && cached.length > 0) {
+              console.warn('[Equipe] slow fallback: using cached snapshot');
+              setTeam(cached);
+            }
+          } catch {}
+        }, 5000);
+
+        // Query com escopo explícito por empresa
         let query = supabase
           .from('colaboradores')
           .select('*')
           .order('nome', { ascending: true });
+        if (codigoEmpresa) {
+          query = query.eq('codigo_empresa', codigoEmpresa);
+        }
         const { data, error } = await query;
         if (error) {
           if (!retryRef.current) {
@@ -218,27 +237,38 @@ export default function EquipePage() {
             ];
           }
         }
+        if (!mountedRef.current) return;
         setTeam(mapped);
-        try { localStorage.setItem('team:list', JSON.stringify(mapped)); } catch {}
+        try { localStorage.setItem(cacheKey, JSON.stringify(mapped)); } catch {}
       } catch (e) {
         // eslint-disable-next-line no-console
         console.error('Falha ao carregar equipe:', e);
-        if (!team?.length) {
-          // fallback cache
-          try {
-            const raw = localStorage.getItem('team:list');
-            if (raw) setTeam(JSON.parse(raw));
-          } catch {}
-        }
+        const codigoEmpresa = company?.codigo_empresa || null;
+        const cacheKey = codigoEmpresa ? `team:list:${codigoEmpresa}` : 'team:list';
+        // fallback cache
+        try {
+          const raw = localStorage.getItem(cacheKey);
+          if (raw && mountedRef.current) setTeam(JSON.parse(raw));
+        } catch {}
       } finally {
         retryRef.current = false;
+        // limpar qualquer timeout pendente deste ciclo
+        // Nota: em erros, slowFallback pode já ter rodado; não é crítico se não limparmos aqui.
       }
     };
 
     useEffect(() => {
-      if (authReady && (company?.codigo_empresa || company?.id)) loadTeam();
+      const codigoEmpresa = company?.codigo_empresa || null;
+      if (!authReady || !codigoEmpresa) return;
+      // hydrate cache first para evitar UI vazia
+      try {
+        const raw = localStorage.getItem(`team:list:${codigoEmpresa}`);
+        const cached = raw ? JSON.parse(raw) : [];
+        if (Array.isArray(cached) && cached.length > 0) setTeam(cached);
+      } catch {}
+      loadTeam();
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [authReady, company?.codigo_empresa, company?.id]);
+    }, [authReady, company?.codigo_empresa]);
 
     // Recarregar quando a aba voltar a ficar visível ou quando a janela ganhar foco
     useEffect(() => {

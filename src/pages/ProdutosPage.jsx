@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 
 import { Helmet } from 'react-helmet';
 import { motion } from 'framer-motion';
@@ -12,10 +12,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
-import { format } from "date-fns";
+import { format, parseISO } from "date-fns";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Checkbox } from '@/components/ui/checkbox';
 import { listProducts, createProduct, updateProduct, deleteProduct, listCategories, createCategory, removeCategory } from '@/lib/products';
+import { useAuth } from '@/contexts/AuthContext';
 
 const initialProducts = [];
 
@@ -953,8 +954,10 @@ function CategoryManagerModal({ open, onOpenChange, categories, onAddCategory, o
 
 function ProdutosPage() {
     const { toast } = useToast();
+    const { userProfile, authReady } = useAuth();
     const [products, setProducts] = useState(initialProducts);
     const [categories, setCategories] = useState(initialCategories);
+
     const [viewMode, setViewMode] = useState('list');
     const [showStats, setShowStats] = useState(true);
     const [selectedProduct, setSelectedProduct] = useState(null);
@@ -972,51 +975,91 @@ function ProdutosPage() {
 
     // Sem persistência por enquanto
 
+    const mountedRef = useRef(true);
+    useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
+
     const refetchProducts = async () => {
+      const codigoEmpresa = userProfile?.codigo_empresa || null;
+      if (!authReady || !codigoEmpresa) return; // aguarda auth
+      const cacheKey = `produtos:list:${codigoEmpresa}`;
       setLoading(true);
+      const slowFallback = setTimeout(() => {
+        if (!mountedRef.current) return;
+        try {
+          const cached = JSON.parse(localStorage.getItem(cacheKey) || '[]');
+          if (Array.isArray(cached) && cached.length > 0) {
+            console.warn('[Produtos] slow fallback: using cached snapshot');
+            setProducts(cached);
+          }
+        } catch {}
+      }, 5000);
       try {
-        const data = await listProducts({ includeInactive: filters.status === 'inactive', search: searchTerm });
+        const data = await listProducts({ includeInactive: filters.status === 'inactive', search: searchTerm, codigoEmpresa });
+        if (!mountedRef.current) return;
         setProducts(data);
+        try { localStorage.setItem(cacheKey, JSON.stringify(data)); } catch {}
       } catch (err) {
         // eslint-disable-next-line no-console
         console.error('[Produtos] refetchProducts:error', err);
         const m = mapDbErrorToMessage(err, { action: 'fetch' });
         toast({ title: m.title, description: m.description, variant: 'destructive' });
       } finally {
+        clearTimeout(slowFallback);
         setLoading(false);
-      };
+      }
     };
 
-    // Carrega na montagem
+    // Carrega na montagem (com cache imediato) e quando auth estiver pronta
     useEffect(() => {
-      refetchProducts();
-      // Carregar categorias persistidas
-      (async () => {
-        try {
-          const cats = await listCategories();
-          setCategories(cats);
-        } catch (err) {
-          // eslint-disable-next-line no-console
-          console.error('[Categorias] load on mount:error', err);
+      const codigoEmpresa = userProfile?.codigo_empresa || null;
+      if (!codigoEmpresa) return;
+      // hydrate cache products
+      try {
+        const cached = JSON.parse(localStorage.getItem(`produtos:list:${codigoEmpresa}`) || '[]');
+        if (Array.isArray(cached) && cached.length > 0) {
+          const mapped = cached.map(p => ({
+            ...p,
+            validade: p?.validade ? (p.validade instanceof Date ? p.validade : new Date(p.validade)) : null,
+          }));
+          setProducts(mapped);
         }
-      })();
+      } catch {}
+      // hydrate cache categories
+      try {
+        const cachedCats = JSON.parse(localStorage.getItem(`produtos:cats:${codigoEmpresa}`) || '[]');
+        if (Array.isArray(cachedCats) && cachedCats.length > 0) setCategories(cachedCats);
+      } catch {}
+      if (authReady) {
+        refetchProducts();
+        (async () => {
+          try {
+            const cats = await listCategories({ codigoEmpresa });
+            if (!mountedRef.current) return;
+            setCategories(cats);
+            try { localStorage.setItem(`produtos:cats:${codigoEmpresa}`, JSON.stringify(cats)); } catch {}
+          } catch (err) {
+            // eslint-disable-next-line no-console
+            console.error('[Categorias] load on mount:error', err);
+          }
+        })();
+      }
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
+    }, [authReady, userProfile?.codigo_empresa]);
 
     // Quando o filtro de status muda, refetch para incluir/ocultar inativos no backend
     useEffect(() => {
-      refetchProducts();
+      if (authReady) refetchProducts();
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [filters.status]);
+    }, [filters.status, authReady]);
 
     // Debounce da busca
     useEffect(() => {
       const t = setTimeout(() => {
-        refetchProducts();
+        if (authReady) refetchProducts();
       }, 300);
       return () => clearTimeout(t);
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [searchTerm]);
+    }, [searchTerm, authReady]);
 
     const stats = useMemo(() => {
         const today = new Date();
@@ -1121,9 +1164,13 @@ function ProdutosPage() {
 
     // -------- Categorias backend handlers --------
     const reloadCategories = async () => {
+      const codigoEmpresa = userProfile?.codigo_empresa || null;
+      if (!authReady || !codigoEmpresa) return;
       try {
-        const cats = await listCategories();
+        const cats = await listCategories({ codigoEmpresa });
+        if (!mountedRef.current) return;
         setCategories(cats);
+        try { localStorage.setItem(`produtos:cats:${codigoEmpresa}`, JSON.stringify(cats)); } catch {}
       } catch (err) {
         // eslint-disable-next-line no-console
         console.error('[Categorias] load on mount:error', err);
@@ -1319,7 +1366,11 @@ function ProdutosPage() {
                                         <td className="p-3 text-text-secondary">{p.category}</td>
                                         <td className="p-3 text-right font-mono tabular-nums">R$ {p.price.toFixed(2)}</td>
                                         <td className="p-3 text-right font-mono tabular-nums">{p.stock}</td>
-                                        <td className="p-3 text-center font-mono tabular-nums">{p.validade ? format(p.validade, 'dd/MM/yy') : '-'}</td>
+                                        <td className="p-3 text-center font-mono tabular-nums">{(() => {
+                  if (!p.validade) return '-';
+                  const d = p.validade instanceof Date ? p.validade : parseISO(String(p.validade));
+                  return isNaN(d) ? '-' : format(d, 'dd/MM/yy');
+                })()}</td>
                                         <td className="p-3 text-center">
                                             <span className={cn(
                                                 "px-2 py-1 text-xs font-bold rounded-full",
