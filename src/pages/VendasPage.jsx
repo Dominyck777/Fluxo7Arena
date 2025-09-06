@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+
 import { Helmet } from 'react-helmet';
 import { motion } from 'framer-motion';
 import { DragDropContext, Droppable, Draggable } from 'react-beautiful-dnd';
@@ -12,6 +13,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger, } from "@/components/ui/alert-dialog"
 import { Label } from '@/components/ui/label';
 import { listMesas, ensureCaixaAberto, fecharCaixa, getOrCreateComandaForMesa, listarItensDaComanda, adicionarItem, atualizarQuantidadeItem, removerItem, listarFinalizadoras, registrarPagamento, fecharComandaEMesa, listarComandasAbertas, listarTotaisPorComanda, criarMesa, listarClientes, adicionarClientesAComanda, listarClientesDaComanda } from '@/lib/store';
+import { useAuth } from '@/contexts/AuthContext';
+
 import { listProducts } from '@/lib/products';
 
 // Mock Data
@@ -25,6 +28,7 @@ const initialTablesData = [
   { id: 'table-7', number: 7, status: 'available', order: [], customer: null },
   { id: 'table-8', number: 8, status: 'available', order: [], customer: null },
 ];
+
 const productsData = [
   { id: 'prod-1', name: 'Coca-cola', price: 5, category: 'Bebidas' },
   { id: 'prod-2', name: 'Porção de Fritas', price: 25, category: 'Comidas' },
@@ -44,7 +48,9 @@ const itemVariants = { hidden: { opacity: 0, y: 20 }, visible: { opacity: 1, y: 
 
 function VendasPage() {
   const { toast } = useToast();
+  const { userProfile, authReady } = useAuth();
   const [tables, setTables] = useState([]);
+
   const [selectedTable, setSelectedTable] = useState(null);
   const [isCashierOpen, setIsCashierOpen] = useState(false);
   const [isCounterModeOpen, setIsCounterModeOpen] = useState(false);
@@ -80,22 +86,44 @@ function VendasPage() {
     };
   }, [isCreateMesaOpen, isOpenTableDialog, isOrderDetailsOpen, isCashierDetailsOpen, isPayOpen]);
 
+  const mapStatus = (s) => {
+    if (s === 'in_use') return 'in-use';
+    if (s === 'awaiting_payment') return 'awaiting-payment';
+    return 'available';
+  };
+  const mountedRef = useRef(true);
+  useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
+
   useEffect(() => {
-    const mapStatus = (s) => {
-      if (s === 'in_use') return 'in-use';
-      if (s === 'awaiting_payment') return 'awaiting-payment';
-      return 'available';
+    const codigoEmpresa = userProfile?.codigo_empresa || null;
+    const cacheKey = codigoEmpresa ? `vendas:tables:${codigoEmpresa}` : null;
+    const trace = '[Vendas:loadTables]';
+
+    const hydrateFromCache = () => {
+      try {
+        if (!cacheKey) return;
+        const cached = JSON.parse(localStorage.getItem(cacheKey) || '[]');
+        if (Array.isArray(cached) && cached.length > 0) {
+          setTables(cached);
+        }
+      } catch {}
     };
+
     const load = async () => {
       try {
-        const mesas = await listMesas();
-        // buscar comandas abertas e totais para precarga
+        if (!authReady || !codigoEmpresa) return;
+        try { console.group(trace); } catch {}
+        try { console.log('start', { codigoEmpresa }); } catch {}
+        const slowFallback = setTimeout(() => {
+          if (!mountedRef.current) return;
+          try { console.warn(trace + ' still waiting... (showing cached tables if any)'); } catch {}
+          hydrateFromCache();
+        }, 5000);
+        const mesas = await listMesas(codigoEmpresa);
         let openComandas = [];
-        try {
-          openComandas = await listarComandasAbertas({});
-        } catch {}
+        try { openComandas = await listarComandasAbertas({ codigoEmpresa }); } catch {}
         const totals = await (async () => {
-          try { return await listarTotaisPorComanda((openComandas || []).map(c => c.id)); } catch { return {}; }
+          try { return await listarTotaisPorComanda((openComandas || []).map(c => c.id), codigoEmpresa); } catch { return {}; }
         })();
         const byMesa = new Map();
         (openComandas || []).forEach(c => byMesa.set(c.mesa_id, c));
@@ -109,46 +137,36 @@ function VendasPage() {
             comandaId = c.id;
             totalHint = Number(totals[c.id] || 0);
           }
-          return {
-            id: m.id,
-            number: m.numero,
-            status,
-            order: [],
-            customer: null,
-            comandaId,
-            totalHint,
-          };
+          return { id: m.id, number: m.numero, status, order: [], customer: null, comandaId, totalHint };
         });
+        if (!mountedRef.current) return;
         setTables(uiTables);
-        // manter seleção atual se existir na nova lista
+        try { if (cacheKey) localStorage.setItem(cacheKey, JSON.stringify(uiTables)); } catch {}
         setSelectedTable((prev) => {
           if (!prev) return uiTables[0] || null;
           const found = uiTables.find(t => t.id === prev.id);
           return found ? { ...found, order: prev.order || [] } : (uiTables[0] || null);
         });
-        // Checar se existe sessão de caixa aberta para refletir no botão
         try {
-          const sessao = await ensureCaixaAberto({ saldoInicial: 0 });
+          const sessao = await ensureCaixaAberto({ saldoInicial: 0, codigoEmpresa });
           if (sessao?.status === 'open') setIsCashierOpen(true);
-        } catch {
-          // Se falhar por RLS/sem permissão, manter UI silenciosa
-        }
-        // Carregar produtos do catálogo
+        } catch {}
         try {
           const prods = await listProducts({ includeInactive: false });
           setProducts(prods);
-        } catch (e) {
-          console.warn('Falha ao carregar produtos:', e?.message || e);
-        }
+        } catch (e) { console.warn('Falha ao carregar produtos:', e?.message || e); }
+        try { console.log('ok', { tables: uiTables.length, openComandas: (openComandas || []).length }); } catch {}
+        try { console.groupEnd(); } catch {}
       } catch (e) {
         console.error('Erro ao carregar mesas:', e);
       }
     };
-    load();
-    // Removido refresh automático de 15s para evitar flicker e travamentos.
-    // Caso necessário, utilize o botão de recarregar ou eventos direcionados.
+
+    // hydrate cache first (fast show)
+    hydrateFromCache();
+    if (authReady && codigoEmpresa) load();
     return () => {};
-  }, []);
+  }, [authReady, userProfile?.codigo_empresa]);
 
   const handleNotImplemented = () => {
     toast({
@@ -165,8 +183,8 @@ function VendasPage() {
       }
       setPayLoading(true);
       // garante sessão de caixa aberta
-      await ensureCaixaAberto({});
-      const fins = await listarFinalizadoras({ somenteAtivas: true });
+      await ensureCaixaAberto({ codigoEmpresa: userProfile?.codigo_empresa });
+      const fins = await listarFinalizadoras({ somenteAtivas: true, codigoEmpresa: userProfile?.codigo_empresa });
       setPayMethods(fins);
       setSelectedPayId(fins?.[0]?.id || null);
       setIsPayOpen(true);
@@ -185,7 +203,7 @@ function VendasPage() {
     setTables(items);
     toast({ title: "Layout das mesas atualizado!", description: "As posições foram salvas temporariamente." });
   };
-  
+
   const calculateTotal = (order) => order.reduce((acc, item) => acc + item.price * item.quantity, 0);
 
   const handleSelectTable = async (table) => {
@@ -193,12 +211,12 @@ function VendasPage() {
       setLoading(true);
       if (table.comandaId) {
         // já há comanda aberta, apenas carregar itens
-        const itens = await listarItensDaComanda({ comandaId: table.comandaId });
+        const itens = await listarItensDaComanda({ comandaId: table.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
         const order = (itens || []).map((it) => ({ id: it.id, name: it.descricao || 'Item', price: Number(it.preco_unitario || 0), quantity: Number(it.quantidade || 1) }));
         // carregar clientes vinculados para exibir no cabeçalho e cards
         let customer = null;
         try {
-          const vinculos = await listarClientesDaComanda({ comandaId: table.comandaId });
+          const vinculos = await listarClientesDaComanda({ comandaId: table.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
           const nomes = (vinculos || []).map(v => v?.nome).filter(Boolean);
           customer = nomes.length ? nomes.join(', ') : null;
         } catch {}
@@ -241,7 +259,7 @@ function VendasPage() {
         onClick={() => handleSelectTable(table)}
       >
         <div {...provided.dragHandleProps} className="absolute top-2 right-2 text-text-muted opacity-60 hover:opacity-100">
-           <GripVertical size={14} />
+          <GripVertical size={14} />
         </div>
         <Icon className="w-5 h-5 mb-1 text-text-secondary" />
         <span className="text-lg font-semibold text-text-primary">Mesa {table.number}</span>
@@ -271,9 +289,9 @@ function VendasPage() {
         // registra pagamento do total
         const fin = payMethods.find((m) => m.id === selectedPayId);
         const metodo = fin?.tipo || fin?.nome || 'outros';
-        await registrarPagamento({ comandaId: selectedTable.comandaId, finalizadoraId: selectedPayId, metodo, valor: total, status: 'Pago' });
+        await registrarPagamento({ comandaId: selectedTable.comandaId, finalizadoraId: selectedPayId, metodo, valor: total, status: 'Pago', codigoEmpresa: userProfile?.codigo_empresa });
         // fecha comanda e libera mesa
-        await fecharComandaEMesa({ comandaId: selectedTable.comandaId });
+        await fecharComandaEMesa({ comandaId: selectedTable.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
         // atualizar UI: mesa disponível, limpa comanda
         setTables((prev) => prev.map((t) => (t.id === selectedTable.id ? { ...t, status: 'available', order: [], comandaId: null, customer: null } : t)));
         setSelectedTable((prev) => prev ? { ...prev, status: 'available', order: [], comandaId: null, customer: null } : prev);
@@ -400,7 +418,7 @@ function VendasPage() {
     const total = calculateTotal(table.order);
     const reloadItems = async () => {
       if (!table?.comandaId) return;
-      const itens = await listarItensDaComanda({ comandaId: table.comandaId });
+      const itens = await listarItensDaComanda({ comandaId: table.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
       const order = (itens || []).map((it) => ({ id: it.id, name: it.descricao || 'Item', price: Number(it.preco_unitario || 0), quantity: Number(it.quantidade || 1) }));
       const updated = { ...table, order };
       setSelectedTable(updated);
@@ -412,12 +430,12 @@ function VendasPage() {
         const current = Number(item.quantity || 1);
         const next = current + delta;
         if (next <= 0) {
-          await removerItem({ itemId: item.id });
+          await removerItem({ itemId: item.id, codigoEmpresa: userProfile?.codigo_empresa });
           await reloadItems();
           toast({ title: 'Item removido', description: item.name, variant: 'warning' });
           return;
         }
-        await atualizarQuantidadeItem({ itemId: item.id, quantidade: next });
+        await atualizarQuantidadeItem({ itemId: item.id, quantidade: next, codigoEmpresa: userProfile?.codigo_empresa });
         await reloadItems();
         toast({ title: 'Quantidade atualizada', description: `${item.name}: ${next}`, variant: 'info' });
       } catch (e) {
@@ -427,7 +445,7 @@ function VendasPage() {
 
     const removeLine = async (item) => {
       try {
-        await removerItem({ itemId: item.id });
+        await removerItem({ itemId: item.id, codigoEmpresa: userProfile?.codigo_empresa });
         await reloadItems();
         toast({ title: 'Item removido', description: item.name, variant: 'warning' });
       } catch (e) {
@@ -436,34 +454,34 @@ function VendasPage() {
     };
     return (
       <>
-      <div className="flex flex-col h-full min-h-0">
-        <div className="p-3 border-b border-border flex items-center justify-between gap-2">
-          <div className="text-sm font-medium text-text-primary leading-none truncate">{table.customer || '—'}</div>
-          <div className="flex items-center gap-2">
-            {table.comandaId ? (
-              <>
-                <Button size="sm" variant="secondary" className="h-7 px-2.5 rounded-full text-[12px] font-medium leading-none whitespace-nowrap" onClick={() => setIsOrderDetailsOpen(true)}>
-                  <FileText size={12} className="mr-1.5 shrink-0" /> Comanda
-                </Button>
-                <Button size="sm" variant="destructive" className="h-7 px-2.5 rounded-full text-[12px] font-medium leading-none whitespace-nowrap" onClick={async () => {
-                  try {
-                    await fecharComandaEMesa({ comandaId: table.comandaId });
-                    const updated = { ...table, status: 'available', order: [], comandaId: null, customer: null };
-                    setSelectedTable(updated);
-                    setTables((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
-                    toast({ title: 'Mesa liberada', variant: 'success' });
-                  } catch(e) {
-                    toast({ title: 'Falha ao liberar mesa', description: e?.message || 'Tente novamente', variant: 'destructive' });
-                  }
-                }}>
-                  <X size={12} className="mr-1.5 shrink-0" /> Liberar
-                </Button>
-              </>
-            ) : (
-              <Button size="sm" className="h-7 px-2.5 rounded-full text-[12px] font-medium leading-none whitespace-nowrap" onClick={() => { setPendingTable(table); setIsOpenTableDialog(true); }}>Abrir Mesa</Button>
-            )}
+        <div className="flex flex-col h-full">
+          <div className="p-3 border-b border-border flex items-center justify-between gap-2">
+            <div className="text-sm font-medium text-text-primary leading-none truncate">{table.customer || '—'}</div>
+            <div className="flex items-center gap-2">
+              {table.comandaId ? (
+                <>
+                  <Button size="sm" variant="secondary" className="h-7 px-2.5 rounded-full text-[12px] font-medium leading-none whitespace-nowrap" onClick={() => setIsOrderDetailsOpen(true)}>
+                    <FileText size={12} className="mr-1.5" /> Comanda
+                  </Button>
+                  <Button size="sm" variant="destructive" className="h-7 px-2.5 rounded-full text-[12px] font-medium leading-none whitespace-nowrap" onClick={async () => {
+                    try {
+                      await fecharComandaEMesa({ comandaId: table.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
+                      const updated = { ...table, status: 'available', order: [], comandaId: null, customer: null };
+                      setSelectedTable(updated);
+                      setTables((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
+                      toast({ title: 'Mesa liberada', variant: 'success' });
+                    } catch (e) {
+                      toast({ title: 'Falha ao liberar mesa', description: e?.message || 'Tente novamente', variant: 'destructive' });
+                    }
+                  }}>
+                    <X size={12} className="mr-1.5" /> Liberar
+                  </Button>
+                </>
+              ) : (
+                <Button size="sm" className="h-7 px-2.5 rounded-full text-[12px] font-medium leading-none whitespace-nowrap" onClick={() => { setPendingTable(table); setIsOpenTableDialog(true); }}>Abrir Mesa</Button>
+              )}
+            </div>
           </div>
-        </div>
         <div className="flex-1 min-h-0 overflow-y-auto p-4 thin-scroll">
           {table.order.length === 0 ? (
             <div className="text-center text-text-muted pt-16">
