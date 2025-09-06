@@ -6537,10 +6537,107 @@ begin
     cliente_id uuid not null references public.clientes(id) on delete restrict,
     created_at timestamptz default now()
   )$$;
-
-  -- garantir índice por comanda
   begin execute $$create index if not exists idx_comanda_clientes_comanda on public.comanda_clientes (comanda_id)$$; exception when others then null; end;
 
   -- garantir índice por cliente
   begin execute $$create index if not exists idx_comanda_clientes_cliente on public.comanda_clientes (cliente_id)$$; exception when others then null; end;
 end$$;
+
+-- ============================
+-- CLIENTES (v4) - Estrutura atualizada por codigo_empresa
+-- Data: 2025-09-06
+-- Motivo: Alinhar schema ao novo modal de clientes (PF/PJ, contatos, endereço, financeiro, adicionais)
+-- Observação: Bloco idempotente (safe to run multiple times). NÃO usa empresa_id.
+-- ============================
+
+-- 0) Garantir tabela
+create table if not exists public.clientes (
+  id uuid primary key default gen_random_uuid()
+);
+
+-- 1) Coluna multi-empresa
+alter table public.clientes add column if not exists codigo_empresa text;
+
+-- 2) Dados básicos
+alter table public.clientes add column if not exists tipo_pessoa text;               -- 'PF' | 'PJ'
+alter table public.clientes add column if not exists nome text;
+alter table public.clientes add column if not exists apelido text;
+alter table public.clientes add column if not exists cpf text;
+alter table public.clientes add column if not exists cnpj text;
+alter table public.clientes add column if not exists rg text;
+alter table public.clientes add column if not exists ie text;
+alter table public.clientes add column if not exists email text;
+
+-- 3) Classificações
+alter table public.clientes add column if not exists flag_cliente boolean default true;
+alter table public.clientes add column if not exists flag_fornecedor boolean default false;
+alter table public.clientes add column if not exists flag_funcionario boolean default false;
+alter table public.clientes add column if not exists flag_administradora boolean default false;
+alter table public.clientes add column if not exists flag_parceiro boolean default false;
+alter table public.clientes add column if not exists flag_ccf_spc boolean default false;
+
+-- 4) Contatos
+alter table public.clientes add column if not exists telefone text;
+alter table public.clientes add column if not exists fone2 text;
+alter table public.clientes add column if not exists celular1 text;
+alter table public.clientes add column if not exists celular2 text;
+alter table public.clientes add column if not exists whatsapp text;
+
+-- 5) Endereço
+alter table public.clientes add column if not exists cep text;
+alter table public.clientes add column if not exists endereco text;
+alter table public.clientes add column if not exists numero text;
+alter table public.clientes add column if not exists complemento text;
+alter table public.clientes add column if not exists bairro text;
+alter table public.clientes add column if not exists cidade text;
+alter table public.clientes add column if not exists uf text;
+alter table public.clientes add column if not exists cidade_ibge text;
+
+-- 6) Financeiro
+alter table public.clientes add column if not exists limite_credito numeric(12,2) default 0;
+alter table public.clientes add column if not exists tipo_recebimento text;
+alter table public.clientes add column if not exists regime_tributario text;
+alter table public.clientes add column if not exists tipo_contribuinte text;
+alter table public.clientes add column if not exists saldo numeric(12,2) default 0;
+
+-- 7) Adicionais
+alter table public.clientes add column if not exists aniversario date;
+alter table public.clientes add column if not exists sexo text;
+alter table public.clientes add column if not exists estado_civil text;
+alter table public.clientes add column if not exists nome_mae text;
+alter table public.clientes add column if not exists nome_pai text;
+alter table public.clientes add column if not exists observacoes text;
+
+-- 8) Código e status
+alter table public.clientes add column if not exists codigo integer;
+alter table public.clientes add column if not exists status text default 'active';
+
+-- 9) Timestamps
+alter table public.clientes add column if not exists criado_em timestamptz default now();
+alter table public.clientes add column if not exists atualizado_em timestamptz default now();
+
+-- 10) Índices/unicidades por codigo_empresa
+create index if not exists idx_clientes_empresa_nome on public.clientes (codigo_empresa, nome);
+create index if not exists idx_clientes_empresa_telefone on public.clientes (codigo_empresa, telefone);
+create index if not exists idx_clientes_empresa_aniversario on public.clientes (codigo_empresa, aniversario);
+create unique index if not exists uq_clientes_empresa_codigo on public.clientes (codigo_empresa, codigo);
+create unique index if not exists uq_clientes_empresa_cpf on public.clientes (codigo_empresa, cpf) where cpf is not null;
+create unique index if not exists uq_clientes_empresa_email_lower on public.clientes (codigo_empresa, lower(email)) where email is not null;
+
+-- 11) Trigger de updated_at
+drop trigger if exists trg_clientes_set_timestamp on public.clientes;
+create or replace function public.tg_set_timestamp() returns trigger language plpgsql as $$
+begin new.atualizado_em := now(); return new; end $$;
+create trigger trg_clientes_set_timestamp before update on public.clientes for each row execute function public.tg_set_timestamp();
+
+-- 12) Trigger opcional para sequenciar 'codigo' por empresa
+drop trigger if exists trg_clientes_set_codigo on public.clientes;
+create or replace function public.clientes_next_codigo() returns trigger language plpgsql as $$
+declare next_codigo integer; begin
+  if new.codigo is null then
+    select coalesce(max(codigo),0)+1 into next_codigo from public.clientes where codigo_empresa = new.codigo_empresa;
+    new.codigo := next_codigo;
+  end if;
+  return new;
+end $$;
+create trigger trg_clientes_set_codigo before insert on public.clientes for each row execute function public.clientes_next_codigo();
