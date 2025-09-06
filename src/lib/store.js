@@ -316,12 +316,48 @@ export async function removerItem({ itemId, codigoEmpresa }) {
 // Finalizadoras (métodos de pagamento cadastráveis)
 export async function listarFinalizadoras({ somenteAtivas = true, codigoEmpresa } = {}) {
   const codigo = codigoEmpresa || getCachedCompanyCode()
-  let q = supabase.from('finalizadoras').select('*').order('nome', { ascending: true })
-  if (codigo) q = q.eq('codigo_empresa', codigo)
-  if (somenteAtivas) q = q.eq('ativo', true)
-  const { data, error } = await q
-  if (error) throw error
-  return data || []
+  const trace = '[store.finalizadoras]'
+  try { console.group(trace); } catch {}
+  try { console.time?.(trace); } catch {}
+  try { console.log('start', { codigoEmpresa: codigo || null, somenteAtivas }); } catch {}
+  const buildQuery = () => {
+    let q = supabase.from('finalizadoras').select('*').order('nome', { ascending: true })
+    if (codigo) q = q.eq('codigo_empresa', codigo)
+    if (somenteAtivas) q = q.eq('ativo', true)
+    return q
+  }
+  const executeWithTimeout = async (ms = 6000) => {
+    const controller = new AbortController()
+    const timer = setTimeout(() => { try { controller.abort(); } catch {} }, ms)
+    try {
+      const { data, error } = await buildQuery().abortSignal(controller.signal)
+      if (error) throw error
+      return data || []
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+  const slowWarn = setTimeout(() => { try { console.warn(trace + ' still waiting...'); } catch {} }, 4000)
+  try {
+    let data = await executeWithTimeout(6000)
+    try { console.log('ok', { size: Array.isArray(data) ? data.length : (data ? 1 : 0) }); } catch {}
+    return data
+  } catch (err) {
+    try { console.warn(trace + ' first attempt failed, retrying once...', err?.message || String(err)); } catch {}
+    // Retry once quickly
+    try {
+      const data = await executeWithTimeout(6000)
+      try { console.log('ok(after-retry)', { size: Array.isArray(data) ? data.length : (data ? 1 : 0) }); } catch {}
+      return data
+    } catch (err2) {
+      try { console.error(trace + ' error', err2); } catch {}
+      throw err2
+    }
+  } finally {
+    clearTimeout(slowWarn)
+    try { console.timeEnd?.(trace); } catch {}
+    try { console.groupEnd?.(); } catch {}
+  }
 }
 
 export async function criarFinalizadora(payload, codigoEmpresa) {

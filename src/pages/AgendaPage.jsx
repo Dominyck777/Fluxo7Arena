@@ -443,11 +443,49 @@ function AgendaPage() {
 
   // Runner periódico
   const automationRunningRef = useRef(false);
+  const nextAutoTimerRef = useRef(null);
+  const clearNextAutoTimer = useCallback(() => {
+    try { if (nextAutoTimerRef.current) { clearTimeout(nextAutoTimerRef.current); nextAutoTimerRef.current = null; } } catch {}
+  }, []);
+
+  const scheduleNextAutomation = useCallback(() => {
+    if (!authReady || !userProfile?.codigo_empresa) return;
+    clearNextAutoTimer();
+    const now = Date.now();
+    let nextTs = Infinity;
+    const consider = (ts) => { if (Number.isFinite(ts) && ts > now && ts < nextTs) nextTs = ts; };
+    try {
+      for (const b of (bookings || [])) {
+        if (!b || b.auto_disabled) continue;
+        if (isOverriddenRecently(b.id)) continue;
+        const startTs = b.start instanceof Date ? b.start.getTime() : new Date(b.start).getTime();
+        const endTs = b.end instanceof Date ? b.end.getTime() : new Date(b.end).getTime();
+        if (b.status === 'scheduled' && automation.autoConfirmEnabled) {
+          const msBefore = Number(automation.autoConfirmMinutesBefore || 0) * 60000;
+          consider(startTs - msBefore);
+          if (automation.autoFinishEnabled) consider(endTs); // catch-up finish
+        }
+        if (b.status === 'confirmed') {
+          if (automation.autoStartEnabled) consider(startTs);
+          if (automation.autoFinishEnabled) consider(endTs);
+        }
+        if (b.status === 'in_progress' && automation.autoFinishEnabled) {
+          consider(endTs);
+        }
+      }
+    } catch {}
+    if (nextTs !== Infinity) {
+      const delay = Math.max(0, Math.min(nextTs - now + 250, 10 * 60 * 1000)); // pequeno buffer de 250ms
+      try { console.debug('[Auto] next schedule in ms', delay); } catch {}
+      nextAutoTimerRef.current = setTimeout(() => { try { runAutomation(); } catch {} }, delay);
+    }
+  }, [authReady, userProfile?.codigo_empresa, bookings, automation, isOverriddenRecently, runAutomation, clearNextAutoTimer]);
   const runAutomation = useCallback(async () => {
     if (!authReady || !userProfile?.codigo_empresa) return;
     if (automationRunningRef.current) return;
     automationRunningRef.current = true;
     try {
+      try { console.debug('[Auto] tick'); } catch {}
       const now = new Date();
       const nowTs = now.getTime();
       const todayStr = format(now, 'yyyy-MM-dd');
@@ -497,6 +535,7 @@ function AgendaPage() {
         }
       } catch {}
 
+      let anyChange = false;
       for (const b of candidates) {
         if (b.auto_disabled) continue; // desligado
         if (isOverriddenRecently(b.id)) continue; // override manual
@@ -505,27 +544,34 @@ function AgendaPage() {
 
         // Ordem: finalizar > iniciar > confirmar
         if (b.status === 'in_progress' && automation.autoFinishEnabled) {
-          if (nowTs >= endTs) { try { console.debug('[Auto] finish', { id: b.id }); } catch {}; await updateBookingStatus(b.id, 'finished', 'automation'); continue; }
+          if (nowTs >= endTs) { try { console.debug('[Auto] finish', { id: b.id }); } catch {}; await updateBookingStatus(b.id, 'finished', 'automation'); anyChange = true; continue; }
         }
         if (b.status === 'confirmed' && automation.autoStartEnabled) {
-          if (nowTs >= startTs) { try { console.debug('[Auto] start', { id: b.id }); } catch {}; await updateBookingStatus(b.id, 'in_progress', 'automation'); continue; }
+          if (nowTs >= startTs) { try { console.debug('[Auto] start', { id: b.id }); } catch {}; await updateBookingStatus(b.id, 'in_progress', 'automation'); anyChange = true; continue; }
         }
         if (b.status === 'scheduled' && automation.autoConfirmEnabled) {
           const msBefore = Number(automation.autoConfirmMinutesBefore || 0) * 60000;
-          if (nowTs >= (startTs - msBefore)) { try { console.debug('[Auto] confirm', { id: b.id }); } catch {}; await updateBookingStatus(b.id, 'confirmed', 'automation'); continue; }
+          if (nowTs >= (startTs - msBefore)) { try { console.debug('[Auto] confirm', { id: b.id }); } catch {}; await updateBookingStatus(b.id, 'confirmed', 'automation'); anyChange = true; continue; }
         }
         // Catch-up: se ficou agendado/confirmado e já passou do fim, finalize direto
         if ((b.status === 'scheduled' || b.status === 'confirmed') && automation.autoFinishEnabled) {
-          if (nowTs >= endTs) { try { console.debug('[Auto] catchup-finish', { id: b.id }); } catch {}; await updateBookingStatus(b.id, 'finished', 'automation'); continue; }
+          if (nowTs >= endTs) { try { console.debug('[Auto] catchup-finish', { id: b.id }); } catch {}; await updateBookingStatus(b.id, 'finished', 'automation'); anyChange = true; continue; }
         }
       }
+      // Se houve mudanças por automação, sincroniza lista com backend para refletir imediatamente
+      if (anyChange) {
+        try { await fetchBookings(); } catch {}
+      }
+      // Sempre reagenda próximo tick preciso após calcular os candidatos
+      try { scheduleNextAutomation(); } catch {}
     } finally {
       automationRunningRef.current = false;
     }
-  }, [authReady, userProfile?.codigo_empresa, bookings, automation, updateBookingStatus, isOverriddenRecently]);
+  }, [authReady, userProfile?.codigo_empresa, bookings, automation, updateBookingStatus, isOverriddenRecently, scheduleNextAutomation]);
   useEffect(() => {
-    const id = setInterval(runAutomation, 30000);
+    const id = setInterval(runAutomation, 10000);
     try { runAutomation(); } catch {}
+    try { scheduleNextAutomation(); } catch {}
     return () => clearInterval(id);
   }, [runAutomation]);
 
@@ -559,9 +605,11 @@ function AgendaPage() {
             }
           }
         } catch {}
-        // Recarrega dados frescos do backend
+        // Ao voltar, roda automação e recarrega dados frescos do backend
+        try { runAutomation(); } catch {}
         try { fetchBookings(); } catch {}
         try { loadParticipants(); } catch {}
+        try { scheduleNextAutomation(); } catch {}
       }
     };
     document.addEventListener('visibilitychange', onVisOrFocus);
@@ -571,6 +619,12 @@ function AgendaPage() {
       window.removeEventListener('focus', onVisOrFocus);
     };
   }, [bookingsCacheKey]);
+
+  // Reagendar quando lista de bookings ou regras mudarem
+  useEffect(() => {
+    try { scheduleNextAutomation(); } catch {}
+    return () => { try { clearNextAutoTimer(); } catch {} };
+  }, [bookings, automation, scheduleNextAutomation, clearNextAutoTimer]);
 
   // Hidrata participantes a partir do cache do dia (evita sumiço ao voltar para a aba)
   useEffect(() => {

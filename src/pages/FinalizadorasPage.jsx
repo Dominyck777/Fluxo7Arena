@@ -38,6 +38,7 @@ export default function FinalizadorasPage() {
   const loadsCountRef = useRef(0);
   const lastDataSizeRef = useRef(0);
   const retryOnceRef = useRef(false);
+  const mountedRef = useRef(true);
   // Modal: criar
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [formFin, setFormFin] = useState({ nome: '', tipo: 'outros', ativo: true, taxa_percentual: '' });
@@ -52,9 +53,11 @@ export default function FinalizadorasPage() {
     try {
       try { console.group(trace); } catch {}
       try { console.log('start', { t0, loadingFinsBefore: loadingFins }); } catch {}
+      if (!mountedRef.current) { try { console.warn(trace + ' skip: unmounted'); } catch {}; return; }
       setLoadingFins(true);
       const codigoEmpresa = userProfile?.codigo_empresa || null;
       const data = await listarFinalizadoras({ somenteAtivas: false, codigoEmpresa });
+      if (!mountedRef.current) { try { console.warn(trace + ' skip apply: unmounted after fetch'); } catch {}; return; }
       const size = Array.isArray(data) ? data.length : (data ? 1 : 0);
       try { console.log('loaded', { size, sample: Array.isArray(data) ? data.slice(0, 3) : data }); } catch {}
       setFinalizadoras((prev) => {
@@ -72,13 +75,14 @@ export default function FinalizadorasPage() {
       try { console.error(trace + ' error', e); } catch {}
       toast({ title: 'Falha ao carregar finalizadoras', description: e?.message || 'Tente novamente', variant: 'destructive' });
     } finally {
-      setLoadingFins(false);
+      if (mountedRef.current) setLoadingFins(false);
       try { console.log('finish', { dtMs: Date.now() - t0, loadingFinsAfter: loadingFins }); } catch {}
       try { console.groupEnd(); } catch {}
     }
   };
 
   useEffect(() => {
+    mountedRef.current = true;
     try { console.log('[Finalizadoras] mount'); } catch {}
     if (authReady && userProfile?.codigo_empresa) {
       loadFinalizadoras();
@@ -91,6 +95,7 @@ export default function FinalizadorasPage() {
     window.addEventListener('focus', onFocus);
     return () => {
       try { console.log('[Finalizadoras] unmount'); } catch {}
+      mountedRef.current = false;
       window.removeEventListener('visibilitychange', onVis);
       window.removeEventListener('focus', onFocus);
     };
