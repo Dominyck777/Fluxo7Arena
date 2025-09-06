@@ -6394,3 +6394,153 @@ create trigger trg_agenda_settings_set_updated_at
 before update on public.agenda_settings
 for each row
 execute function public.set_updated_at();
+
+-- ============================
+-- ATUALIZAÇÕES APLICADAS (v3.2)
+-- Data: 2025-09-05
+-- Motivo: Documentar a estrutura real usada no PDV (Loja/Comandas) conforme implementado no frontend
+-- Observação: Blocos idempotentes (safe to run multiple times). Estes blocos refletem o SQL já aplicado.
+-- ============================
+
+-- 1) Tabela COMANDAS (registro por mesa e status)
+--    Campos chave usados no front: id (bigint), mesa_id (uuid), status (open/awaiting-payment/closed),
+--    aberto_em, fechado_em, codigo_empresa
+create table if not exists public.comandas (
+  id bigserial primary key,
+  mesa_id uuid,
+  status text not null default 'open',
+  aberto_em timestamptz not null default now(),
+  fechado_em timestamptz,
+  codigo_empresa text
+);
+create index if not exists idx_comandas_status on public.comandas(status);
+create index if not exists idx_comandas_aberto_em on public.comandas(aberto_em desc);
+create index if not exists idx_comandas_codigo_empresa on public.comandas(codigo_empresa);
+
+-- 2) Tabela COMANDA_ITENS (itens lançados na comanda)
+--    Campos chave usados no front: comanda_id (bigint), quantidade, preco_unitario, desconto, codigo_empresa
+create table if not exists public.comanda_itens (
+  id uuid default gen_random_uuid() primary key,
+  comanda_id bigint not null references public.comandas(id) on delete cascade,
+  produto_id uuid,
+  descricao text,
+  quantidade numeric not null default 1,
+  preco_unitario numeric not null default 0,
+  desconto numeric not null default 0,
+  created_at timestamptz not null default now(),
+  codigo_empresa text
+);
+create index if not exists idx_comanda_itens_comanda_id on public.comanda_itens(comanda_id);
+create index if not exists idx_comanda_itens_codigo_empresa on public.comanda_itens(codigo_empresa);
+
+-- 3) Tabela PAGAMENTOS (registros de recebimento por comanda)
+--    Campos chave usados no front: comanda_id (bigint), caixa_id (sessão), finalizadora_id, metodo, valor, status, recebido_em, codigo_empresa
+create table if not exists public.pagamentos (
+  id uuid default gen_random_uuid() primary key,
+  comanda_id bigint not null references public.comandas(id) on delete cascade,
+  caixa_id bigint,
+  finalizadora_id uuid,
+  metodo text,
+  valor numeric not null default 0,
+  status text not null default 'Pago',
+  recebido_em timestamptz not null default now(),
+  codigo_empresa text
+);
+create index if not exists idx_pagamentos_comanda_id on public.pagamentos(comanda_id);
+create index if not exists idx_pagamentos_codigo_empresa on public.pagamentos(codigo_empresa);
+
+-- 4) Tabela COMANDA_CLIENTES (vínculo com clientes e/ou nomes livres)
+create table if not exists public.comanda_clientes (
+  id uuid default gen_random_uuid() primary key,
+  comanda_id bigint not null references public.comandas(id) on delete cascade,
+  cliente_id uuid,
+  nome_livre text,
+  created_at timestamptz not null default now(),
+  codigo_empresa text
+);
+create index if not exists idx_comanda_clientes_comanda_id on public.comanda_clientes(comanda_id);
+create index if not exists idx_comanda_clientes_codigo_empresa on public.comanda_clientes(codigo_empresa);
+
+-- 5) FINALIZADORAS (métodos de pagamento)
+create table if not exists public.finalizadoras (
+  id uuid primary key default gen_random_uuid(),
+  codigo_empresa text not null,
+  nome text not null,
+  tipo text,
+  ativo boolean not null default true,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+create index if not exists idx_finalizadoras_empresa on public.finalizadoras(codigo_empresa);
+create unique index if not exists ux_finalizadoras_empresa_nome on public.finalizadoras(codigo_empresa, lower(nome));
+
+-- ============================
+-- ATUALIZAÇÕES APLICADAS (v3)
+-- Data: 2025-09-03
+-- Motivo: PDV/Comandas: estrutura das tabelas de comandas, itens, pagamentos e clientes
+-- Observação: Blocos idempotentes (safe to run multiple times)
+-- ============================
+
+-- 1) COMANDAS
+do $$
+begin
+  -- criar tabela caso não exista (idempotente)
+  execute $$create table if not exists public.comandas (
+    id uuid primary key default gen_random_uuid(),
+    codigo_empresa text not null default public.get_my_company_code(),
+    numero integer not null,
+    status text not null,
+    created_at timestamptz default now(),
+    updated_at timestamptz default now()
+  )$$;
+
+  -- garantir índice por empresa
+  begin execute $$create index if not exists idx_comandas_empresa on public.comandas (codigo_empresa)$$; exception when others then null; end;
+
+  -- trigger para updated_at
+  execute $$create or replace function public.comandas_set_updated_at() returns trigger language plpgsql as $$
+  begin
+    new.updated_at := now();
+    return new;
+  end $$;$$;
+  begin execute $$drop trigger if exists zz_comandas_touch on public.comandas$$; exception when others then null; end;
+  begin execute $$create trigger zz_comandas_touch before update on public.comandas for each row execute function public.comandas_set_updated_at()$$; exception when others then null; end;
+end$$;
+
+-- 2) COMANDA_ITENS
+do $$
+begin
+  -- criar tabela caso não exista (idempotente)
+  execute $$create table if not exists public.comanda_itens (
+    id uuid primary key default gen_random_uuid(),
+    comanda_id uuid not null references public.comandas(id) on delete cascade,
+    produto_id uuid not null references public.produtos(id) on delete restrict,
+    quantidade integer not null,
+    valor_unitario numeric(12,2) not null,
+    created_at timestamptz default now()
+  )$$;
+
+  -- garantir índice por comanda
+  begin execute $$create index if not exists idx_comanda_itens_comanda on public.comanda_itens (comanda_id)$$; exception when others then null; end;
+
+  -- garantir índice por produto
+  begin execute $$create index if not exists idx_comanda_itens_produto on public.comanda_itens (produto_id)$$; exception when others then null; end;
+end$$;
+
+-- 3) COMANDA_CLIENTES
+do $$
+begin
+  -- criar tabela caso não exista (idempotente)
+  execute $$create table if not exists public.comanda_clientes (
+    id uuid primary key default gen_random_uuid(),
+    comanda_id uuid not null references public.comandas(id) on delete cascade,
+    cliente_id uuid not null references public.clientes(id) on delete restrict,
+    created_at timestamptz default now()
+  )$$;
+
+  -- garantir índice por comanda
+  begin execute $$create index if not exists idx_comanda_clientes_comanda on public.comanda_clientes (comanda_id)$$; exception when others then null; end;
+
+  -- garantir índice por cliente
+  begin execute $$create index if not exists idx_comanda_clientes_cliente on public.comanda_clientes (cliente_id)$$; exception when others then null; end;
+end$$;
