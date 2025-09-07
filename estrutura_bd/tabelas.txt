@@ -6641,3 +6641,25 @@ declare next_codigo integer; begin
   return new;
 end $$;
 create trigger trg_clientes_set_codigo before insert on public.clientes for each row execute function public.clientes_next_codigo();
+
+-- ============================
+-- ATUALIZAÇÕES APLICADAS (v3.0)
+-- Data: 2025-09-07
+-- Motivo: Loja/PDV – adicionar nome de mesa e flexibilizar método de pagamento
+-- ============================
+
+-- 1) Mesas: coluna opcional 'nome'
+alter table public.mesas
+  add column if not exists nome text;
+
+comment on column public.mesas.nome is 'Nome amigável da mesa (ex.: Pátio 1)';
+
+-- índice opcional para busca por nome (mantém idempotência)
+create index if not exists idx_mesas_nome on public.mesas using gin (to_tsvector('simple', coalesce(nome, '')));
+
+-- 2) Pagamentos: tornar 'metodo' flexível
+-- Caso anteriormente fosse um enum/NOT NULL, converte para text e permite nulo.
+alter table public.pagamentos
+  alter column metodo drop default,
+  alter column metodo type text using metodo::text,
+  alter column metodo drop not null;
