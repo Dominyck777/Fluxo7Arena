@@ -340,6 +340,10 @@ function AgendaPage() {
     });
   }, []);
 
+  // Proteção contra regressão por consistência eventual:
+  // guarda mudanças locais recentes de status, para que um fetch logo em seguida não volte o status antigo
+  const recentStatusUpdatesRef = useRef(new Map()); // id -> { status, ts }
+
   // Salvar no banco (upsert)
   const handleSaveSettings = useCallback(async () => {
     if (!authReady || !company?.id) {
@@ -409,9 +413,11 @@ function AgendaPage() {
         else if (reactivate) next.auto_disabled = false;
         return next;
       }));
+      try { recentStatusUpdatesRef.current.set(bookingId, { status: newStatus, ts: Date.now() }); } catch {}
+      // Atualiza cache local (se existir)
       try {
-        if (bookingsCacheKey) {
-          const cached = JSON.parse(localStorage.getItem(bookingsCacheKey) || '[]');
+        const cached = JSON.parse(localStorage.getItem(bookingsCacheKey) || '[]');
+        if (Array.isArray(cached) && cached.length > 0) {
           const updated = Array.isArray(cached)
             ? cached.map(b => {
                 if (b.id !== bookingId) return b;
@@ -561,7 +567,10 @@ function AgendaPage() {
       }
       // Se houve mudanças por automação, sincroniza lista com backend para refletir imediatamente
       if (anyChange) {
-        try { await fetchBookings(); } catch {}
+        // pequeno atraso para dar tempo de propagação no banco antes do re-carregamento
+        try {
+          setTimeout(() => { try { fetchBookings(); } catch {} }, 800);
+        } catch {}
       }
       // Sempre reagenda próximo tick preciso após calcular os candidatos
       try { scheduleNextAutomation(); } catch {}
@@ -644,82 +653,85 @@ function AgendaPage() {
     } catch {}
   }, [participantsCacheKey]);
 
-  // Carrega agendamentos do dia atual a partir do banco
-  useEffect(() => {
-    const fetchBookings = async () => {
-      if (!userProfile?.codigo_empresa) return;
-      const dayStart = startOfDay(currentDate);
-      const dayEnd = addDays(dayStart, 1);
-      const { data, error } = await supabase
-        .from('agendamentos')
-        .select(`
-          id, codigo_empresa, quadra_id, cliente_id, clientes, inicio, fim, modalidade, status, auto_disabled,
-          quadra:quadra_id ( nome ),
-          cliente:cliente_id ( nome )
-        `)
-        .eq('codigo_empresa', userProfile.codigo_empresa)
-        .gte('inicio', dayStart.toISOString())
-        .lt('inicio', dayEnd.toISOString())
-        .eq('codigo_empresa', userProfile.codigo_empresa)
-        .gte('inicio', dayStart.toISOString())
-        .lt('inicio', dayEnd.toISOString())
-        .order('inicio', { ascending: true });
-      if (error) {
-        toast({ title: 'Erro ao carregar agendamentos', description: error.message, variant: 'destructive' });
-        // Não sobrescrever com vazio; tentar uma vez novamente (token/rls pode estar atrasado)
-        if (!bookingsRetryRef.current) {
-          bookingsRetryRef.current = true;
-          setTimeout(fetchBookings, 900);
-        }
-        return;
+  // Carrega agendamentos do dia atual a partir do banco (extraído para useCallback para reuso)
+  const fetchBookings = useCallback(async () => {
+    if (!authReady || !userProfile?.codigo_empresa) return;
+    const dayStart = startOfDay(currentDate);
+    const dayEnd = addDays(dayStart, 1);
+    const { data, error } = await supabase
+      .from('agendamentos')
+      .select(`
+        id, codigo_empresa, quadra_id, cliente_id, clientes, inicio, fim, modalidade, status, auto_disabled,
+        quadra:quadra_id ( nome ),
+        cliente:cliente_id ( nome )
+      `)
+      .eq('codigo_empresa', userProfile.codigo_empresa)
+      .gte('inicio', dayStart.toISOString())
+      .lt('inicio', dayEnd.toISOString())
+      .order('inicio', { ascending: true });
+    if (error) {
+      toast({ title: 'Erro ao carregar agendamentos', description: error.message, variant: 'destructive' });
+      // Não sobrescrever com vazio; tentar uma vez novamente (token/rls pode estar atrasado)
+      if (!bookingsRetryRef.current) {
+        bookingsRetryRef.current = true;
+        setTimeout(fetchBookings, 900);
       }
-      // Em alguns casos no Vercel o retorno vem 200 mas vazio na primeira batida (RLS/propagação)
-      if (!data || data.length === 0) {
-        // Só tentar novamente se temos cache para manter UI preenchida
-        let hasCache = false;
-        try {
-          const cached = bookingsCacheKey ? JSON.parse(localStorage.getItem(bookingsCacheKey) || '[]') : [];
-          hasCache = Array.isArray(cached) && cached.length > 0;
-        } catch {}
-        if (!bookingsRetryRef.current) {
-          bookingsRetryRef.current = true;
-          if (hasCache) {
-            setTimeout(fetchBookings, 700);
-            return; // não sobrescrever UI com vazio na primeira tentativa
-          }
-        }
-      }
-      bookingsRetryRef.current = false; // sucesso (ou segunda tentativa), libera novos retries futuros
-      const mapped = (data || []).map(row => {
-        const start = new Date(row.inicio);
-        const end = new Date(row.fim);
-        // Nome da quadra
-        const courtName = row.quadra?.[0]?.nome || row.quadra?.nome || Object.values(courtsMap).find(c => c.id === row.quadra_id)?.nome || '';
-        // Nome do cliente: usar apenas o cliente relacionado real; não usar fallback do array "clientes"
-        const customerName = (row.cliente?.[0]?.nome || row.cliente?.nome || '');
-        return {
-          id: row.id,
-          court: courtName,
-          customer: customerName,
-          start,
-          end,
-          status: row.status || 'scheduled',
-          modality: row.modalidade || '',
-          auto_disabled: !!row.auto_disabled,
-        };
-      });
-      setBookings(mapped);
-      // Persistir no cache (serializando datas)
+      return;
+    }
+    // Em alguns casos no Vercel o retorno vem 200 mas vazio na primeira batida (RLS/propagação)
+    if (!data || data.length === 0) {
+      // Só tentar novamente se temos cache para manter UI preenchida
+      let hasCache = false;
       try {
-        if (bookingsCacheKey) {
-          const serializable = mapped.map(b => ({ ...b, start: b.start.toISOString(), end: b.end.toISOString() }));
-          localStorage.setItem(bookingsCacheKey, JSON.stringify(serializable));
-        }
+        const cached = bookingsCacheKey ? JSON.parse(localStorage.getItem(bookingsCacheKey) || '[]') : [];
+        hasCache = Array.isArray(cached) && cached.length > 0;
       } catch {}
-    };
+      if (!bookingsRetryRef.current) {
+        bookingsRetryRef.current = true;
+        if (hasCache) {
+          setTimeout(fetchBookings, 700);
+          return; // não sobrescrever UI com vazio na primeira tentativa
+        }
+      }
+    }
+    bookingsRetryRef.current = false; // sucesso (ou segunda tentativa), libera novos retries futuros
+    const nowTs = Date.now();
+    const mapped = (data || []).map(row => {
+      const start = new Date(row.inicio);
+      const end = new Date(row.fim);
+      // Nome da quadra
+      const courtName = row.quadra?.[0]?.nome || row.quadra?.nome || Object.values(courtsMap).find(c => c.id === row.quadra_id)?.nome || '';
+      // Nome do cliente: usar apenas o cliente relacionado real; não usar fallback do array "clientes"
+      const customerName = (row.cliente?.[0]?.nome || row.cliente?.nome || '');
+      // Proteção: se mudamos localmente há pouco, preferir o status local por alguns segundos para evitar regressão visual
+      const recent = recentStatusUpdatesRef.current.get(row.id);
+      const preferLocal = recent && (nowTs - recent.ts) < 4000; // 4s de janela
+      return {
+        id: row.id,
+        court: courtName,
+        customer: customerName,
+        start,
+        end,
+        status: preferLocal ? recent.status : (row.status || 'scheduled'),
+        modality: row.modalidade || '',
+        auto_disabled: !!row.auto_disabled,
+      };
+    });
+    setBookings(mapped);
+    // Persistir no cache (serializando datas)
+    try {
+      if (bookingsCacheKey) {
+        const serializable = mapped.map(b => ({ ...b, start: b.start.toISOString(), end: b.end.toISOString() }));
+        localStorage.setItem(bookingsCacheKey, JSON.stringify(serializable));
+      }
+    } catch {}
+  }, [authReady, userProfile?.codigo_empresa, currentDate, courtsMap, bookingsCacheKey, toast]);
+
+  useEffect(() => {
     if (authReady && userProfile?.codigo_empresa) {
       fetchBookings();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authReady, userProfile?.codigo_empresa, currentDate, courtsMap, bookingsCacheKey]);
 
   // Carrega participantes para os agendamentos listados (batch por dia)
@@ -2552,30 +2564,54 @@ function AgendaPage() {
                   className="bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-60 disabled:cursor-not-allowed"
                   disabled={isSavingPayments}
                   onClick={async () => {
-                    const clickTs = Date.now();
-                    const traceId = `[Click:SavePayments ${clickTs}]`;
-                    try { console.group(traceId); } catch {}
+                    const tClick = Date.now();
+                    const traceId = `[PaymentsSave Trace ${tClick}]`;
+                    try { console.groupCollapsed(traceId); } catch {}
                     try {
-                      try { console.log('Start', { isSavingPayments, participantsCount, selectedClients: (form?.selectedClients || []).map(c => c?.id), paymentTotal }); } catch {}
+                      const snap = {
+                        modalOpen: isPaymentModalOpen,
+                        isSavingPayments,
+                        bookingId: editingBooking?.id,
+                        company: userProfile?.codigo_empresa,
+                        participantsCount,
+                        selectedClientIds: (form?.selectedClients || []).map(c => c?.id),
+                        hiddenIds: [...(paymentHiddenIds || [])],
+                        paymentTotal,
+                      };
+                      try { console.info('[PaymentsSave] click', snap); } catch {}
                       if (isSavingPayments) {
-                        try { console.warn('Ignored click: already saving payments'); } catch {}
+                        try { console.warn('[PaymentsSave] ignored: already saving'); } catch {}
                         return;
                       }
                       setIsSavingPayments(true);
-                      const agendamentoId = editingBooking.id;
-                      const codigo = userProfile.codigo_empresa;
+                      try { console.debug('[PaymentsSave] state set: isSavingPayments=true'); } catch {}
+                      const agendamentoId = editingBooking?.id;
+                      const codigo = userProfile?.codigo_empresa;
+                      if (!agendamentoId || !codigo) {
+                        try { console.error('[PaymentsSave] missing identifiers', { agendamentoId, codigo }); } catch {}
+                        toast({ title: 'Erro ao salvar pagamentos', description: 'Agendamento ou empresa indisponível.', variant: 'destructive' });
+                        return;
+                      }
                       const t0 = Date.now();
 
                       // Verificação: pendentes (somente notificação; não exibir banner bloqueante)
-                      const mapForm = new Map((participantsForm || []).map(p => [p.cliente_id, p]));
-                      const effectiveSelected = (form.selectedClients || []).filter(c => !paymentHiddenIds.includes(c.id));
-                      const pendingCount = effectiveSelected.reduce((acc, c) => {
-                        const st = (mapForm.get(c.id)?.status_pagamento) || 'Pendente';
-                        return acc + (st !== 'Pago' ? 1 : 0);
-                      }, 0);
-                      if (pendingCount > 0) {
-                        // manter apenas toast mais abaixo; sem logs
+                      let mapForm, effectiveSelected, pendingCount;
+                      try {
+                        mapForm = new Map((participantsForm || []).map(p => [p.cliente_id, p]));
+                        effectiveSelected = (form.selectedClients || []).filter(c => !paymentHiddenIds.includes(c.id));
+                        pendingCount = effectiveSelected.reduce((acc, c) => {
+                          const st = (mapForm.get(c.id)?.status_pagamento) || 'Pendente';
+                          return acc + (st !== 'Pago' ? 1 : 0);
+                        }, 0);
+                      } catch (calcErr) {
+                        try { console.error('[PaymentsSave] calc error', calcErr, { participantsForm, formSelected: form?.selectedClients, paymentHiddenIds }); } catch {}
+                        toast({ title: 'Erro ao processar participantes', description: 'Tente novamente.', variant: 'destructive' });
+                        return;
                       }
+                      try { console.debug('[PaymentsSave] pendingCount', { pendingCount, effectiveSelected: effectiveSelected.map(c => c.id) }); } catch {}
+                      // manter apenas toast para usuário mais abaixo; sem logs adicionais
+
+                      const tDel0 = Date.now();
                       const { error: delErr } = await supabase
                         .from('agendamento_participantes')
                         .delete()
@@ -2586,6 +2622,7 @@ function AgendaPage() {
                         toast({ title: 'Erro ao salvar pagamentos', description: 'Falha ao limpar registros anteriores.', variant: 'destructive' });
                         throw delErr;
                       }
+                      try { console.debug('[PaymentsSave] delete ok', { ms: Date.now() - tDel0 }); } catch {}
                       
                       const rows = effectiveSelected.map((c) => {
                         const pf = participantsForm.find(p => p.cliente_id === c.id) || { valor_cota: null, status_pagamento: 'Pendente' };
@@ -2598,8 +2635,10 @@ function AgendaPage() {
                           status_pagamento: pf.status_pagamento || 'Pendente',
                         };
                       });
+                      try { console.debug('[PaymentsSave] rows prepared', { count: rows.length, sample: rows.slice(0,3) }); } catch {}
                       
                       if (rows.length > 0) {
+                        const tIns0 = Date.now();
                         const { data: inserted, error } = await supabase
                           .from('agendamento_participantes')
                           .insert(rows)
@@ -2609,9 +2648,11 @@ function AgendaPage() {
                           toast({ title: 'Erro ao salvar pagamentos', description: 'Falha ao inserir pagamentos.', variant: 'destructive' });
                           throw error;
                         }
+                        try { console.debug('[PaymentsSave] insert ok', { insertedCount: inserted?.length || 0, ms: Date.now() - tIns0 }); } catch {}
                         
                       } else {
                         // nenhum participante selecionado
+                        try { console.warn('[PaymentsSave] no rows to insert'); } catch {}
                       }
                       // Se houve remoções na UI (paymentHiddenIds), persistir também nos dados do agendamento (cliente_id e clientes)
                       try {
@@ -2619,6 +2660,7 @@ function AgendaPage() {
                           const newSelected = effectiveSelected;
                           const primary = newSelected[0] || null;
                           const clientesArr = newSelected.map(c => c?.nome).filter(Boolean);
+                          const tUpd0 = Date.now();
                           await supabase
                             .from('agendamentos')
                             .update({
@@ -2627,6 +2669,7 @@ function AgendaPage() {
                             })
                             .eq('codigo_empresa', codigo)
                             .eq('id', agendamentoId);
+                          try { console.debug('[PaymentsSave] booking updated after removals', { primaryId: primary?.id || null, count: newSelected.length, ms: Date.now() - tUpd0 }); } catch {}
                           // Reflete imediatamente no formulário/modais
                           setForm(f => ({ ...f, selectedClients: newSelected }));
                           // Atualiza o cartão na agenda (nome do cliente primário)
@@ -2639,6 +2682,7 @@ function AgendaPage() {
 
                       // Recarrega participantes deste agendamento para atualizar o indicador "pagos/total" na agenda
                       try {
+                        const tRf0 = Date.now();
                         const { data: freshParts, error: freshErr } = await supabase
                           .from('v_agendamento_participantes')
                           .select('id, agendamento_id, codigo_empresa, cliente_id, nome, valor_cota, status_pagamento_text')
@@ -2650,9 +2694,11 @@ function AgendaPage() {
                             try { if (participantsCacheKey) localStorage.setItem(participantsCacheKey, JSON.stringify(next)); } catch {}
                             return next;
                           });
+                          try { console.debug('[PaymentsSave] refresh participants ok', { count: freshParts?.length || 0, ms: Date.now() - tRf0 }); } catch {}
                         }
                       } catch (rfErr) {
                         // falha silenciosa; indicador pode não atualizar imediatamente
+                        try { console.warn('[PaymentsSave] refresh participants failed', rfErr); } catch {}
                       }
                       
                       // Avalia total atribuído vs total alvo e pendências (notificações; salvamento não é bloqueado)
@@ -2663,6 +2709,7 @@ function AgendaPage() {
                         const v = parseBRL(pf?.valor_cota);
                         return sum + (Number.isFinite(v) ? v : 0);
                       }, 0);
+                      try { console.info('[PaymentsSave] totals', { totalTarget, totalAssigned, pendingCount }); } catch {}
                       if (totalTarget > 0 && totalAssigned < totalTarget - 0.005) {
                         toast({
                           title: 'Pagamentos salvos',
@@ -2679,14 +2726,14 @@ function AgendaPage() {
                         toast({ title: 'Pagamentos salvos', variant: 'success' });
                       }
                       setPaymentWarning(null);
-                      try { console.log('Payments saved successfully in ms', Date.now() - t0); } catch {}
+                      try { console.info('[PaymentsSave] done', { ms: Date.now() - t0 }); } catch {}
                       // Fecha o modal de pagamentos e, em seguida, o modal principal
                       setIsPaymentModalOpen(false);
                       setIsModalOpen(false);
                     } catch (e) {
                       toast({ title: 'Erro ao salvar pagamentos', description: 'Tente novamente.', variant: 'destructive' });
                       // eslint-disable-next-line no-console
-                      console.error('Salvar pagamentos:', e);
+                      console.error('[PaymentsSave] error', e);
                     } finally {
                       setIsSavingPayments(false);
                       try { console.groupEnd(); } catch {}
