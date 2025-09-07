@@ -6,6 +6,7 @@ import ProtectedRoute from '@/components/ProtectedRoute';
 import DashboardPage from '@/pages/DashboardPage';
 import AgendaPage from '@/pages/AgendaPage';
 import VendasPage from '@/pages/VendasPage';
+import BalcaoPage from '@/pages/BalcaoPage';
 import ProdutosPage from '@/pages/ProdutosPage';
 import ClientesPage from '@/pages/ClientesPage';
 import EquipePage from '@/pages/EquipePage';
@@ -37,6 +38,7 @@ function PrivateApp() {
             <Route path="/" element={<DashboardPage />} />
             <Route path="/agenda" element={<AgendaPage />} />
             <Route path="/vendas" element={<VendasPage />} />
+            <Route path="/balcao" element={<BalcaoPage />} />
             <Route path="/produtos" element={<ProdutosPage />} />
             <Route path="/clientes" element={<ClientesPage />} />
             <Route path="/equipe" element={<EquipePage />} />

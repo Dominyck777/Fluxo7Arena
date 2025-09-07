@@ -11,6 +11,42 @@ function getCachedCompanyCode() {
     return null
   }
 }
+// Balcão (comanda sem mesa)
+export async function listarComandaBalcaoAberta({ codigoEmpresa } = {}) {
+  const codigo = codigoEmpresa || getCachedCompanyCode()
+  let q = supabase
+    .from('comandas')
+    .select('id,status,aberto_em')
+    .is('mesa_id', null)
+    .in('status', ['open','awaiting-payment'])
+    .order('aberto_em', { ascending: false })
+    .limit(1)
+  if (codigo) q = q.eq('codigo_empresa', codigo)
+  const { data, error } = await q
+  if (error) throw error
+  return data?.[0] || null
+}
+
+export async function getOrCreateComandaBalcao({ codigoEmpresa } = {}) {
+  const codigo = codigoEmpresa || getCachedCompanyCode()
+  const atual = await listarComandaBalcaoAberta({ codigoEmpresa: codigo })
+  if (atual) return atual
+  const payload = { status: 'open', mesa_id: null, aberto_em: new Date().toISOString() }
+  if (codigo) payload.codigo_empresa = codigo
+  const { data, error } = await supabase.from('comandas').insert(payload).select('id,status,aberto_em').single()
+  if (error) throw error
+  return data
+}
+
+// Cria SEMPRE uma nova comanda de balcão (sem mesa)
+export async function criarComandaBalcao({ codigoEmpresa } = {}) {
+  const codigo = codigoEmpresa || getCachedCompanyCode()
+  const payload = { status: 'open', mesa_id: null, aberto_em: new Date().toISOString() }
+  if (codigo) payload.codigo_empresa = codigo
+  const { data, error } = await supabase.from('comandas').insert(payload).select('id,status,aberto_em').single()
+  if (error) throw error
+  return data
+}
 
 // Histórico / Relatórios
 export async function listarComandas({ status, from, to, search = '', limit = 50, offset = 0, codigoEmpresa } = {}) {
@@ -26,8 +62,26 @@ export async function listarComandas({ status, from, to, search = '', limit = 50
   if (status && Array.isArray(status) && status.length) q = q.in('status', status)
   else if (typeof status === 'string') q = q.eq('status', status)
 
-  if (from) q = q.gte('aberto_em', new Date(from).toISOString())
-  if (to) q = q.lte('aberto_em', new Date(to).toISOString())
+  const mkStart = (d) => {
+    if (!d) return null
+    if (typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d)) {
+      const [y,m,day] = d.split('-').map(Number)
+      return new Date(y, m - 1, day, 0, 0, 0, 0)
+    }
+    return new Date(d)
+  }
+  const mkEnd = (d) => {
+    if (!d) return null
+    if (typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d)) {
+      const [y,m,day] = d.split('-').map(Number)
+      return new Date(y, m - 1, day, 23, 59, 59, 999)
+    }
+    return new Date(d)
+  }
+  const fromDt = mkStart(from)
+  const toDt = mkEnd(to)
+  if (fromDt) q = q.gte('aberto_em', fromDt.toISOString())
+  if (toDt) q = q.lte('aberto_em', toDt.toISOString())
 
   const s = (search || '').trim()
   if (s) {
@@ -119,7 +173,7 @@ export async function listMesas(codigoEmpresa) {
 }
 
 // Cria uma nova mesa com o próximo número disponível (ou número específico)
-export async function criarMesa({ numero, codigoEmpresa } = {}) {
+export async function criarMesa({ numero, nome, codigoEmpresa } = {}) {
   const codigo = codigoEmpresa || getCachedCompanyCode()
   let nextNumero = numero
   if (!nextNumero) {
@@ -131,10 +185,24 @@ export async function criarMesa({ numero, codigoEmpresa } = {}) {
     nextNumero = (maxRow?.[0]?.numero || 0) + 1
   }
   const payload = { numero: nextNumero, status: 'available' }
+  if (nome && typeof nome === 'string' && nome.trim()) payload.nome = nome.trim()
   if (codigo) payload.codigo_empresa = codigo
-  const { data, error } = await supabase.from('mesas').insert(payload).select('*').single()
-  if (error) throw error
-  return data
+  try {
+    const { data, error } = await supabase.from('mesas').insert(payload).select('*').single()
+    if (error) throw error
+    return data
+  } catch (e) {
+    const msg = String(e?.message || e || '')
+    // Se coluna nome não existir no banco, tenta novamente sem o campo
+    if (/column\s+\"?nome\"?\s+of\s+relation/i.test(msg) || /column\s+\"?nome\"?\s+does not exist/i.test(msg)) {
+      const fallback = { numero: nextNumero, status: 'available' }
+      if (codigo) fallback.codigo_empresa = codigo
+      const { data, error } = await supabase.from('mesas').insert(fallback).select('*').single()
+      if (error) throw error
+      return data
+    }
+    throw e
+  }
 }
 
 // Obtém ou cria uma mesa especial para o Modo Balcão (numero = 0)
@@ -199,7 +267,7 @@ export async function abrirComandaParaMesa({ mesaId, codigoEmpresa } = {}) {
     return abertas[0]
   }
 
-  const payload = { mesa_id: mesaId, status: 'open' }
+  const payload = { mesa_id: mesaId, status: 'open', aberto_em: new Date().toISOString() }
   if (codigo) payload.codigo_empresa = codigo
   const { data, error } = await supabase.from('comandas').insert(payload).select('id,status').single()
   if (error) throw error

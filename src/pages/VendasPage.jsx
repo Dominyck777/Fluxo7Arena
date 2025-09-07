@@ -16,6 +16,7 @@ import { listMesas, ensureCaixaAberto, fecharCaixa, getOrCreateComandaForMesa, l
 import { useAuth } from '@/contexts/AuthContext';
 
 import { listProducts } from '@/lib/products';
+import { useNavigate } from 'react-router-dom';
 
 // Mock Data
 const initialTablesData = [
@@ -49,6 +50,8 @@ const itemVariants = { hidden: { opacity: 0, y: 20 }, visible: { opacity: 1, y: 
 function VendasPage() {
   const { toast } = useToast();
   const { userProfile, authReady } = useAuth();
+  const navigate = useNavigate();
+
   const [tables, setTables] = useState([]);
 
   const [selectedTable, setSelectedTable] = useState(null);
@@ -63,7 +66,6 @@ function VendasPage() {
   const [isOpenTableDialog, setIsOpenTableDialog] = useState(false);
   // Criar mesa (modal)
   const [isCreateMesaOpen, setIsCreateMesaOpen] = useState(false);
-  const [novaMesaNumero, setNovaMesaNumero] = useState('');
   const [pendingTable, setPendingTable] = useState(null);
   const [clienteNome, setClienteNome] = useState('');
   // Pagamento
@@ -137,7 +139,7 @@ function VendasPage() {
             comandaId = c.id;
             totalHint = Number(totals[c.id] || 0);
           }
-          return { id: m.id, number: m.numero, status, order: [], customer: null, comandaId, totalHint };
+          return { id: m.id, number: m.numero, name: m.nome || null, status, order: [], customer: null, comandaId, totalHint };
         });
         if (!mountedRef.current) return;
         setTables(uiTables);
@@ -239,6 +241,7 @@ function VendasPage() {
     const config = statusConfig[table.status];
     const Icon = config.icon;
     const total = calculateTotal(table.order);
+
     const displayTotal = (table.status === 'in-use' || table.status === 'awaiting-payment')
       ? (total > 0 ? total : Number(table.totalHint || 0))
       : 0;
@@ -252,7 +255,7 @@ function VendasPage() {
         ref={provided.innerRef}
         {...provided.draggableProps}
         className={cn(
-          "p-4 rounded-lg border bg-surface flex flex-col items-center justify-center cursor-pointer transition-colors duration-150 relative h-40 shadow-sm min-w-[220px]",
+          "p-4 rounded-lg border bg-surface flex flex-col cursor-pointer transition-colors duration-150 relative h-44 shadow-sm min-w-[240px]",
           isDragging && 'shadow-md',
           selectedTable?.id === table.id && 'ring-2 ring-brand/60 bg-surface-2'
         )}
@@ -261,15 +264,24 @@ function VendasPage() {
         <div {...provided.dragHandleProps} className="absolute top-2 right-2 text-text-muted opacity-60 hover:opacity-100">
           <GripVertical size={14} />
         </div>
-        <Icon className="w-5 h-5 mb-1 text-text-secondary" />
-        <span className="text-lg font-semibold text-text-primary">Mesa {table.number}</span>
-        <span className={cn("mt-2 text-[11px] font-medium px-2 py-0.5 rounded-full border", badgeClass)}>
-          {config.label}
-        </span>
-        {(table.status === 'in-use' || table.status === 'awaiting-payment') && (
-          <span className="mt-1 text-xs text-text-secondary truncate max-w-[90%]">
-            {table.customer ? `${table.customer}` : `R$ ${displayTotal.toFixed(2)}`}
+        <div className="flex items-center gap-2 mb-1">
+          <Icon className="w-5 h-5 text-text-secondary" />
+          <span className="text-lg font-semibold text-text-primary truncate">{table.name ? table.name : `Mesa ${table.number}`}</span>
+        </div>
+        <div className="mb-2">
+          <span className={cn("text-[11px] font-medium px-2 py-0.5 rounded-full border", badgeClass)}>
+            {config.label}
           </span>
+        </div>
+        {(table.status === 'in-use' || table.status === 'awaiting-payment') ? (
+          <div className="w-full mt-auto">
+            <div className="text-xs text-text-secondary truncate" title={table.customer || ''}>{table.customer || '—'}</div>
+            <div className="text-sm font-bold text-text-primary">R$ {displayTotal.toFixed(2)}</div>
+          </div>
+        ) : (
+          <div className="w-full mt-auto">
+            <div className="text-xs text-text-muted">Sem comanda</div>
+          </div>
         )}
       </div>
     )
@@ -418,7 +430,7 @@ function VendasPage() {
     const total = calculateTotal(table.order);
     const reloadItems = async () => {
       if (!table?.comandaId) return;
-      const itens = await listarItensDaComanda({ comandaId: table.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
+      const itens = await listarItensDaComanda({ comandaId: table.comandaId });
       const order = (itens || []).map((it) => ({ id: it.id, name: it.descricao || 'Item', price: Number(it.preco_unitario || 0), quantity: Number(it.quantidade || 1) }));
       const updated = { ...table, order };
       setSelectedTable(updated);
@@ -521,16 +533,19 @@ function VendasPage() {
 };
 
   const CreateMesaDialog = () => {
+    const [numeroVal, setNumeroVal] = useState('');
+    const [nomeVal, setNomeVal] = useState('');
     const confirmCreate = async () => {
       try {
         setLoading(true);
-        const raw = (novaMesaNumero ?? '').toString().trim();
+        const raw = (numeroVal ?? '').toString().trim();
         const numero = raw ? Number(raw) : undefined;
         if (numero !== undefined && (Number.isNaN(numero) || numero <= 0)) {
           toast({ title: 'Número inválido', description: 'Informe um número positivo.', variant: 'warning' });
           return;
         }
-        const mesa = await criarMesa({ numero });
+        const mesa = await criarMesa({ numero, nome: (nomeVal || '').trim() || undefined });
+
         const newTable = {
           id: mesa.id,
           number: mesa.numero,
@@ -548,7 +563,8 @@ function VendasPage() {
         setSelectedTable(newTable);
         toast({ title: 'Mesa criada', description: `Mesa ${mesa.numero} adicionada`, variant: 'success' });
         setIsCreateMesaOpen(false);
-        setNovaMesaNumero('');
+        setNumeroVal('');
+        setNomeVal('');
       } catch (e) {
         toast({ title: 'Falha ao criar mesa', description: e?.message || 'Tente novamente', variant: 'destructive' });
       } finally {
@@ -556,7 +572,7 @@ function VendasPage() {
       }
     };
     return (
-      <Dialog open={isCreateMesaOpen} onOpenChange={(open) => { setIsCreateMesaOpen(open); if (!open) setNovaMesaNumero(''); }}>
+      <Dialog open={isCreateMesaOpen} onOpenChange={(open) => { setIsCreateMesaOpen(open); if (!open) { setNumeroVal(''); setNomeVal(''); } }}>
         <DialogContent className="max-w-md w-[400px]" onKeyDown={(e) => e.stopPropagation()} onKeyDownCapture={(e) => e.stopPropagation()}>
           <DialogHeader>
             <DialogTitle className="text-2xl font-bold">Nova Mesa</DialogTitle>
@@ -569,12 +585,23 @@ function VendasPage() {
               type="text"
               inputMode="numeric"
               placeholder="Ex.: 12"
-              value={novaMesaNumero}
-              onChange={(e) => setNovaMesaNumero(e.target.value)}
+              value={numeroVal}
+              onChange={(e) => setNumeroVal(e.target.value)}
               onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Enter') e.preventDefault(); }}
               onKeyUp={(e) => e.stopPropagation()}
               onKeyPress={(e) => e.stopPropagation()}
               autoFocus
+            />
+            <Label htmlFor="nova-mesa-nome">Nome da mesa (opcional)</Label>
+            <Input
+              id="nova-mesa-nome"
+              type="text"
+              placeholder="Ex.: Pátio 1"
+              value={nomeVal}
+              onChange={(e) => setNomeVal(e.target.value)}
+              onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Enter') e.preventDefault(); }}
+              onKeyUp={(e) => e.stopPropagation()}
+              onKeyPress={(e) => e.stopPropagation()}
             />
           </div>
           <DialogFooter>
@@ -893,10 +920,10 @@ function VendasPage() {
               <Banknote className="mr-2 h-4 w-4" /> Detalhes do Caixa
             </Button>
             <div className="w-px h-6 bg-border mx-2"></div>
-            <Button variant="outline" onClick={() => { window.location.href = '/historico'; }}>
+            <Button variant="outline" onClick={() => { navigate('/historico'); }}>
               <FileText className="mr-2 h-4 w-4" /> Histórico
             </Button>
-            <Button variant="outline" onClick={() => setIsCounterModeOpen(true)}><Store className="mr-2 h-4 w-4" /> Modo Balcão</Button>
+            <Button variant="outline" onClick={() => navigate('/balcao')}><Store className="mr-2 h-4 w-4" /> Modo Balcão</Button>
             <Button onClick={() => setIsCreateMesaOpen(true)}><Plus className="mr-2 h-4 w-4" /> Nova Mesa</Button>
           </div>
         </motion.div>

@@ -7,9 +7,10 @@ import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/components/ui/use-toast';
-import { CalendarDays, FileText, Search, Loader2 } from 'lucide-react';
-import { listarComandas, listarItensDaComanda, listarTotaisPorComanda, listarPagamentos, listMesas } from '@/lib/store';
+import { CalendarDays, FileText, Search, ArrowLeft, Loader2 } from 'lucide-react';
+import { listarComandas, listarItensDaComanda, listarTotaisPorComanda, listarPagamentos, listMesas, listarClientesDaComanda } from '@/lib/store';
 import { cn } from '@/lib/utils';
+import { useNavigate } from 'react-router-dom';
 
 const pageVariants = { hidden: { opacity: 0 }, visible: { opacity: 1, transition: { staggerChildren: 0.1 } } };
 const itemVariants = { hidden: { opacity: 0, y: 20 }, visible: { opacity: 1, y: 0, transition: { duration: 0.5 } } };
@@ -22,6 +23,7 @@ function useDebounced(value, delay = 300) {
 
 export default function HistoricoComandasPage() {
   const { toast } = useToast();
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [rows, setRows] = useState([]);
   const [from, setFrom] = useState(() => new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString().slice(0,10));
@@ -29,6 +31,7 @@ export default function HistoricoComandasPage() {
   const [status, setStatus] = useState('closed');
   const [search, setSearch] = useState('');
   const debouncedSearch = useDebounced(search, 350);
+  const [tipo, setTipo] = useState('all'); // all | comanda | balcao
 
   const [detailId, setDetailId] = useState(null);
   const [detail, setDetail] = useState({ loading: false, itens: [], pagamentos: [] });
@@ -36,7 +39,8 @@ export default function HistoricoComandasPage() {
   const load = async () => {
     try {
       setLoading(true);
-      const list = await listarComandas({ status, from, to, search: debouncedSearch, limit: 100, offset: 0 });
+      // Busca base de comandas (sem depender do id no filtro de busca)
+      const list = await listarComandas({ status, from, to, search: '', limit: 100, offset: 0 });
       // Carrega totais em lote
       const ids = (list || []).map(r => r.id);
       let totals = {};
@@ -45,7 +49,35 @@ export default function HistoricoComandasPage() {
       let mesas = [];
       try { mesas = await listMesas(); } catch { mesas = []; }
       const mapMesaNumero = new Map((mesas || []).map(m => [m.id, m.numero]));
-      const withTotals = (list || []).map(r => ({ ...r, total: Number(totals[r.id] || 0), mesaNumero: mapMesaNumero.get(r.mesa_id) }));
+      // Nomes de clientes (consulta individual por comanda, agregando em string)
+      const namesByComanda = {};
+      try {
+        await Promise.all((ids || []).map(async (id) => {
+          try {
+            const vincs = await listarClientesDaComanda({ comandaId: id });
+            const nomes = (vincs || []).map(v => v?.nome).filter(Boolean);
+            namesByComanda[id] = nomes.join(', ');
+          } catch { namesByComanda[id] = ''; }
+        }));
+      } catch {}
+      // Finalizadoras (rótulos) a partir dos pagamentos
+      const finsByComanda = {};
+      try {
+        await Promise.all((ids || []).map(async (id) => {
+          try {
+            const pgs = await listarPagamentos({ comandaId: id });
+            const labels = Array.from(new Set((pgs || []).map(pg => pg?.metodo).filter(Boolean)));
+            finsByComanda[id] = labels.join(', ');
+          } catch { finsByComanda[id] = ''; }
+        }));
+      } catch {}
+      const withTotals = (list || []).map(r => ({
+        ...r,
+        total: Number(totals[r.id] || 0),
+        mesaNumero: mapMesaNumero.get(r.mesa_id),
+        clientesStr: namesByComanda[r.id] || '',
+        finalizadorasStr: finsByComanda[r.id] || ''
+      }));
       setRows(withTotals);
     } catch (e) {
       toast({ title: 'Falha ao carregar histórico', description: e?.message || 'Tente novamente', variant: 'destructive' });
@@ -75,6 +107,27 @@ export default function HistoricoComandasPage() {
     const sum = rows.reduce((acc, r) => acc + Number(r.total || 0), 0);
     return { sum };
   }, [rows]);
+
+  const filtered = useMemo(() => {
+    const term = (debouncedSearch || '').trim().toLowerCase();
+    // 1) Sempre aplica filtro por Tipo
+    const byTipo = rows.filter(r => {
+      const isBalcao = (r.mesa_id == null);
+      if (tipo === 'balcao' && !isBalcao) return false;
+      if (tipo === 'comanda' && isBalcao) return false;
+      return true;
+    });
+    // 2) Se não houver termo, retorna somente por Tipo
+    if (!term) return byTipo;
+    // 3) Aplica busca textual adicional
+    return byTipo.filter(r => {
+      const mesaTxt = (r.mesaNumero != null ? String(r.mesaNumero) : '').toLowerCase();
+      const statusTxt = (r.status || '').toLowerCase();
+      const clientesTxt = (r.clientesStr || '').toLowerCase();
+      const tipoTxt = (r.mesa_id == null) ? 'balcao' : 'comanda';
+      return mesaTxt.includes(term) || statusTxt.includes(term) || clientesTxt.includes(term) || tipoTxt.includes(term);
+    });
+  }, [rows, debouncedSearch, tipo]);
 
   const statusPt = (s) => {
     if (s === 'open') return 'Aberta';
@@ -108,15 +161,17 @@ export default function HistoricoComandasPage() {
       </Helmet>
 
       <motion.div variants={itemVariants} className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-3xl font-black text-text-primary tracking-tighter">Histórico de Comandas</h1>
-          <p className="text-text-secondary">Consulte comandas por período, status e busca.</p>
+        <div className="flex items-center gap-3">
+          <button onClick={() => { try { navigate(-1); } catch { navigate('/vendas'); } }} className="inline-flex items-center justify-center h-8 w-8 rounded-md border border-border hover:bg-surface-2 transition-colors" aria-label="Voltar">
+            <ArrowLeft className="h-4 w-4 text-text-secondary" />
+          </button>
+          <div>
+            <h1 className="text-3xl font-black text-text-primary tracking-tighter">Histórico de Comandas</h1>
+            <p className="text-text-secondary">Consulte por período, status, mesa e cliente.</p>
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <div className="text-sm text-text-secondary">Total do período: <span className="font-semibold text-text-primary">R$ {totals.sum.toFixed(2)}</span></div>
-          <Button variant="outline" onClick={load} disabled={loading}>
-            {loading ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Atualizando</> : 'Atualizar'}
-          </Button>
         </div>
       </motion.div>
 
@@ -125,14 +180,14 @@ export default function HistoricoComandasPage() {
           <div>
             <Label className="mb-1 block">Período Inicial</Label>
             <div className="relative">
-              <CalendarDays className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted" />
+              <CalendarDays className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-white/70" />
               <Input type="date" className="pl-9" value={from} onChange={(e) => setFrom(e.target.value)} />
             </div>
           </div>
           <div>
             <Label className="mb-1 block">Período Final</Label>
             <div className="relative">
-              <CalendarDays className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted" />
+              <CalendarDays className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-white/70" />
               <Input type="date" className="pl-9" value={to} onChange={(e) => setTo(e.target.value)} />
             </div>
           </div>
@@ -140,7 +195,7 @@ export default function HistoricoComandasPage() {
             <Label className="mb-1 block">Busca</Label>
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted" />
-              <Input placeholder="ID da comanda, status..." className="pl-9" value={search} onChange={(e) => setSearch(e.target.value)} />
+              <Input placeholder="Mesa, status (fechada/aberta) ou cliente" className="pl-9" value={search} onChange={(e) => setSearch(e.target.value)} />
             </div>
           </div>
           <div>
@@ -153,6 +208,16 @@ export default function HistoricoComandasPage() {
               </TabsList>
             </Tabs>
           </div>
+          <div>
+            <Label className="mb-1 block">Tipo</Label>
+            <Tabs value={tipo} onValueChange={setTipo} className="w-full">
+              <TabsList className="grid grid-cols-3">
+                <TabsTrigger value="all">Todos</TabsTrigger>
+                <TabsTrigger value="comanda">Comandas</TabsTrigger>
+                <TabsTrigger value="balcao">Balcão</TabsTrigger>
+              </TabsList>
+            </Tabs>
+          </div>
         </div>
       </motion.div>
 
@@ -162,7 +227,10 @@ export default function HistoricoComandasPage() {
             <thead className="bg-surface-2 text-text-secondary">
               <tr>
                 <th className="text-left px-4 py-3">Mesa</th>
+                <th className="text-left px-4 py-3">Tipo</th>
+                <th className="text-left px-4 py-3">Clientes</th>
                 <th className="text-left px-4 py-3">Status</th>
+                <th className="text-left px-4 py-3">Finalizadora</th>
                 <th className="text-left px-4 py-3">Abertura</th>
                 <th className="text-left px-4 py-3">Fechamento</th>
                 <th className="text-right px-4 py-3">Total</th>
@@ -170,17 +238,20 @@ export default function HistoricoComandasPage() {
               </tr>
             </thead>
             <tbody>
-              {rows.length === 0 && (
-                <tr><td colSpan={6} className="px-4 py-6 text-center text-text-muted">Nenhuma comanda encontrada no período.</td></tr>
+              {filtered.length === 0 && (
+                <tr><td colSpan={8} className="px-4 py-6 text-center text-text-muted">Nenhuma comanda encontrada no período.</td></tr>
               )}
-              {rows.map(r => (
-                <tr key={r.id} className="border-t border-border/70 hover:bg-surface-2">
-                  <td className="px-4 py-2">{r.mesaNumero != null ? `Mesa ${r.mesaNumero}` : '—'}</td>
+              {filtered.map(r => (
+                <tr key={r.id} className="border-t border-border/70 hover:bg-warning/10">
+                  <td className="px-4 py-2">{r.mesa_id == null ? 'Balcão' : (r.mesaNumero != null ? `Mesa ${r.mesaNumero}` : '—')}</td>
+                  <td className="px-4 py-2">{r.mesa_id == null ? 'Balcão' : 'Comanda'}</td>
+                  <td className="px-4 py-2 truncate max-w-[260px]">{r.clientesStr || '—'}</td>
                   <td className="px-4 py-2">
                     <span className={cn("inline-flex items-center text-[11px] font-medium px-2 py-0.5 rounded-full border", statusBadgeClass(r.status))}>
                       {statusPt(r.status)}
                     </span>
                   </td>
+                  <td className="px-4 py-2 truncate max-w-[220px]">{r.finalizadorasStr || '—'}</td>
                   <td className="px-4 py-2">{fmtDate(r.aberto_em)}</td>
                   <td className="px-4 py-2">{fmtDate(r.fechado_em)}</td>
                   <td className="px-4 py-2 text-right font-semibold whitespace-nowrap">{fmtMoney(r.total)}</td>
