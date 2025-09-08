@@ -6663,3 +6663,207 @@ alter table public.pagamentos
   alter column metodo drop default,
   alter column metodo type text using metodo::text,
   alter column metodo drop not null;
+
+-- ============================
+-- ATUALIZAÇÕES APLICADAS (Loja/Comandas)
+-- Data: 2025-09-08
+-- Motivo: Loja/Comandas – consolidar estrutura (mesas, comandas, itens, clientes da comanda,
+--          pagamentos, finalizadoras, sessões de caixa) e índices/uniques por empresa.
+-- Observação: DDL idempotente (SAFE to run multiple times)
+-- ============================
+
+set search_path = public;
+
+-- 1) MESAS
+create table if not exists public.mesas (
+  id uuid primary key default gen_random_uuid(),
+  codigo_empresa varchar(10) not null,
+  numero integer not null,
+  nome text,
+  status text not null default 'available', -- available | in_use | awaiting_payment
+  criado_em timestamptz default now(),
+  atualizado_em timestamptz default now()
+);
+alter table public.mesas add column if not exists codigo_empresa varchar(10) not null;
+alter table public.mesas add column if not exists numero integer not null;
+alter table public.mesas add column if not exists nome text;
+alter table public.mesas add column if not exists status text not null default 'available';
+create index if not exists idx_mesas_codigo_empresa on public.mesas(codigo_empresa);
+create unique index if not exists uq_mesas_empresa_numero on public.mesas(codigo_empresa, numero);
+
+-- 2) COMANDAS
+create table if not exists public.comandas (
+  id uuid primary key default gen_random_uuid(),
+  codigo_empresa varchar(10) not null,
+  mesa_id uuid,
+  status text not null default 'open', -- open | awaiting-payment | closed
+  aberto_em timestamptz not null default now(),
+  fechado_em timestamptz
+);
+alter table public.comandas add column if not exists codigo_empresa varchar(10) not null;
+alter table public.comandas add column if not exists mesa_id uuid;
+alter table public.comandas add column if not exists status text not null default 'open';
+alter table public.comandas add column if not exists aberto_em timestamptz not null default now();
+alter table public.comandas add column if not exists fechado_em timestamptz;
+create index if not exists idx_comandas_codigo_empresa on public.comandas(codigo_empresa);
+create index if not exists idx_comandas_mesa on public.comandas(mesa_id);
+do $$
+begin
+  if exists (select 1 from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relname='mesas') then
+    begin
+      alter table public.comandas
+        add constraint fk_comandas_mesa foreign key (mesa_id) references public.mesas(id) on delete set null;
+    exception when duplicate_object then null; end;
+  end if;
+end$$;
+create unique index if not exists uq_comanda_mesa_aberta
+  on public.comandas(mesa_id)
+  where (mesa_id is not null and status in ('open','awaiting-payment'));
+
+-- 3) COMANDA_ITENS
+create table if not exists public.comanda_itens (
+  id uuid primary key default gen_random_uuid(),
+  codigo_empresa varchar(10) not null,
+  comanda_id uuid not null,
+  produto_id uuid,
+  descricao text,
+  quantidade integer not null default 1,
+  preco_unitario numeric(12,2) not null default 0,
+  desconto numeric(12,2) not null default 0,
+  created_at timestamptz not null default now()
+);
+alter table public.comanda_itens add column if not exists codigo_empresa varchar(10) not null;
+alter table public.comanda_itens add column if not exists comanda_id uuid not null;
+alter table public.comanda_itens add column if not exists produto_id uuid;
+alter table public.comanda_itens add column if not exists descricao text;
+alter table public.comanda_itens add column if not exists quantidade integer not null default 1;
+alter table public.comanda_itens add column if not exists preco_unitario numeric(12,2) not null default 0;
+alter table public.comanda_itens add column if not exists desconto numeric(12,2) not null default 0;
+alter table public.comanda_itens add column if not exists created_at timestamptz not null default now();
+create index if not exists idx_comanda_itens_empresa on public.comanda_itens(codigo_empresa);
+create index if not exists idx_comanda_itens_comanda on public.comanda_itens(comanda_id);
+create index if not exists idx_comanda_itens_produto on public.comanda_itens(produto_id);
+do $$
+begin
+  begin
+    alter table public.comanda_itens
+      add constraint fk_comanda_itens_comanda foreign key (comanda_id) references public.comandas(id) on delete cascade;
+  exception when duplicate_object then null; end;
+  if exists (select 1 from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relname='produtos') then
+    begin
+      alter table public.comanda_itens
+        add constraint fk_comanda_itens_produto foreign key (produto_id) references public.produtos(id) on delete set null;
+    exception when duplicate_object then null; end;
+  end if;
+end$$;
+
+-- 4) COMANDA_CLIENTES
+create table if not exists public.comanda_clientes (
+  id uuid primary key default gen_random_uuid(),
+  codigo_empresa varchar(10) not null,
+  comanda_id uuid not null,
+  cliente_id uuid,
+  nome_livre text,
+  created_at timestamptz not null default now()
+);
+alter table public.comanda_clientes add column if not exists codigo_empresa varchar(10) not null;
+alter table public.comanda_clientes add column if not exists comanda_id uuid not null;
+alter table public.comanda_clientes add column if not exists cliente_id uuid;
+alter table public.comanda_clientes add column if not exists nome_livre text;
+alter table public.comanda_clientes add column if not exists created_at timestamptz not null default now();
+create index if not exists idx_comanda_clientes_empresa on public.comanda_clientes(codigo_empresa);
+create index if not exists idx_comanda_clientes_comanda on public.comanda_clientes(comanda_id);
+create index if not exists idx_comanda_clientes_cliente on public.comanda_clientes(cliente_id);
+do $$
+begin
+  begin
+    alter table public.comanda_clientes
+      add constraint fk_comanda_clientes_comanda foreign key (comanda_id) references public.comandas(id) on delete cascade;
+  exception when duplicate_object then null; end;
+  if exists (select 1 from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relname='clientes') then
+    begin
+      alter table public.comanda_clientes
+        add constraint fk_comanda_clientes_cliente foreign key (cliente_id) references public.clientes(id) on delete set null;
+    exception when duplicate_object then null; end;
+  end if;
+end$$;
+
+-- 5) FINALIZADORAS
+create table if not exists public.finalizadoras (
+  id uuid primary key default gen_random_uuid(),
+  codigo_empresa varchar(10) not null,
+  nome text not null,
+  tipo text not null default 'outros',
+  ativo boolean not null default true,
+  taxa_percentual numeric(6,2)
+);
+alter table public.finalizadoras add column if not exists codigo_empresa varchar(10) not null;
+alter table public.finalizadoras add column if not exists nome text not null;
+alter table public.finalizadoras add column if not exists tipo text not null default 'outros';
+alter table public.finalizadoras add column if not exists ativo boolean not null default true;
+alter table public.finalizadoras add column if not exists taxa_percentual numeric(6,2);
+create index if not exists idx_finalizadoras_empresa on public.finalizadoras(codigo_empresa);
+create unique index if not exists uq_finalizadoras_empresa_nome on public.finalizadoras(codigo_empresa, lower(nome));
+
+-- 6) CAIXA_SESSOES
+create table if not exists public.caixa_sessoes (
+  id uuid primary key default gen_random_uuid(),
+  codigo_empresa varchar(10) not null,
+  status text not null default 'open',
+  aberto_em timestamptz not null default now(),
+  fechado_em timestamptz,
+  saldo_inicial numeric(12,2) not null default 0,
+  saldo_final numeric(12,2)
+);
+alter table public.caixa_sessoes add column if not exists codigo_empresa varchar(10) not null;
+alter table public.caixa_sessoes add column if not exists status text not null default 'open';
+alter table public.caixa_sessoes add column if not exists aberto_em timestamptz not null default now();
+alter table public.caixa_sessoes add column if not exists fechado_em timestamptz;
+alter table public.caixa_sessoes add column if not exists saldo_inicial numeric(12,2) not null default 0;
+alter table public.caixa_sessoes add column if not exists saldo_final numeric(12,2);
+create index if not exists idx_caixa_empresa on public.caixa_sessoes(codigo_empresa);
+create unique index if not exists uq_caixa_aberto_por_empresa on public.caixa_sessoes(codigo_empresa) where (status = 'open');
+
+-- 7) PAGAMENTOS
+create table if not exists public.pagamentos (
+  id uuid primary key default gen_random_uuid(),
+  codigo_empresa varchar(10) not null,
+  comanda_id uuid not null,
+  caixa_id uuid,
+  finalizadora_id uuid,
+  metodo text,
+  valor numeric(12,2) not null default 0,
+  status text not null default 'Pago',
+  recebido_em timestamptz not null default now()
+);
+alter table public.pagamentos add column if not exists codigo_empresa varchar(10) not null;
+alter table public.pagamentos add column if not exists comanda_id uuid not null;
+alter table public.pagamentos add column if not exists caixa_id uuid;
+alter table public.pagamentos add column if not exists finalizadora_id uuid;
+alter table public.pagamentos add column if not exists metodo text;
+alter table public.pagamentos add column if not exists valor numeric(12,2) not null default 0;
+alter table public.pagamentos add column if not exists status text not null default 'Pago';
+alter table public.pagamentos add column if not exists recebido_em timestamptz not null default now();
+create index if not exists idx_pagamentos_empresa on public.pagamentos(codigo_empresa);
+create index if not exists idx_pagamentos_comanda on public.pagamentos(comanda_id);
+create index if not exists idx_pagamentos_caixa on public.pagamentos(caixa_id);
+create index if not exists idx_pagamentos_finalizadora on public.pagamentos(finalizadora_id);
+do $$
+begin
+  begin
+    alter table public.pagamentos
+      add constraint fk_pagamentos_comanda foreign key (comanda_id) references public.comandas(id) on delete cascade;
+  exception when duplicate_object then null; end;
+  if exists (select 1 from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relname='caixa_sessoes') then
+    begin
+      alter table public.pagamentos
+        add constraint fk_pagamentos_caixa foreign key (caixa_id) references public.caixa_sessoes(id) on delete set null;
+    exception when duplicate_object then null; end;
+  end if;
+  if exists (select 1 from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relname='finalizadoras') then
+    begin
+      alter table public.pagamentos
+        add constraint fk_pagamentos_finalizadora foreign key (finalizadora_id) references public.finalizadoras(id) on delete set null;
+    exception when duplicate_object then null; end;
+  end if;
+end$$;

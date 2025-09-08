@@ -430,7 +430,7 @@ function VendasPage() {
     const total = calculateTotal(table.order);
     const reloadItems = async () => {
       if (!table?.comandaId) return;
-      const itens = await listarItensDaComanda({ comandaId: table.comandaId });
+      const itens = await listarItensDaComanda({ comandaId: table.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
       const order = (itens || []).map((it) => ({ id: it.id, name: it.descricao || 'Item', price: Number(it.preco_unitario || 0), quantity: Number(it.quantidade || 1) }));
       const updated = { ...table, order };
       setSelectedTable(updated);
@@ -494,43 +494,43 @@ function VendasPage() {
               )}
             </div>
           </div>
-        <div className="flex-1 min-h-0 overflow-y-auto p-4 thin-scroll">
-          {table.order.length === 0 ? (
-            <div className="text-center text-text-muted pt-16">
-              <p>Comanda vazia. Adicione produtos na aba ao lado.</p>
-            </div>
-          ) : (
-            <ul className="space-y-4">
-              {table.order.map(item => (
-                <li key={item.id} className="flex items-center gap-2">
-                  <div className="flex-1">
-                    <p className="text-sm font-semibold text-text-primary">{item.name}</p>
-                    <p className="text-xs text-text-muted">{item.quantity} x R$ {item.price.toFixed(2)}</p>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => changeQty(item, -1)}><Minus size={14} /></Button>
-                    <span className="w-8 text-center font-semibold">{item.quantity}</span>
-                    <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => changeQty(item, +1)}><Plus size={14} /></Button>
-                  </div>
-                  <p className="font-bold text-text-primary w-24 text-right">R$ {(item.price * item.quantity).toFixed(2)}</p>
-                  <Button variant="ghost" size="icon" className="ml-1 text-danger/80 hover:text-danger h-8 w-8" onClick={() => removeLine(item)}><Trash2 size={16}/></Button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-        <div className="p-4 border-t border-border mt-auto">
-          <div className="flex justify-between items-center text-sm font-semibold text-text-secondary mb-2">
-            <span>Total</span>
-            <span>R$ {total.toFixed(2)}</span>
+          <div className="flex-1 min-h-0 overflow-y-auto p-4 thin-scroll">
+            {table.order.length === 0 ? (
+              <div className="text-center text-text-muted pt-16">
+                <p>Comanda vazia. Adicione produtos na aba ao lado.</p>
+              </div>
+            ) : (
+              <ul className="space-y-4">
+                {table.order.map(item => (
+                  <li key={item.id} className="flex items-center gap-2">
+                    <div className="flex-1">
+                      <p className="text-sm font-semibold text-text-primary">{item.name}</p>
+                      <p className="text-xs text-text-muted">{item.quantity} x R$ {item.price.toFixed(2)}</p>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => changeQty(item, -1)}><Minus size={14} /></Button>
+                      <span className="w-8 text-center font-semibold">{item.quantity}</span>
+                      <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => changeQty(item, +1)}><Plus size={14} /></Button>
+                    </div>
+                    <p className="font-bold text-text-primary w-24 text-right">R$ {(item.price * item.quantity).toFixed(2)}</p>
+                    <Button variant="ghost" size="icon" className="ml-1 text-danger/80 hover:text-danger h-8 w-8" onClick={() => removeLine(item)}><Trash2 size={16}/></Button>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
-          <Button size="lg" className="w-full" onClick={openPayDialog}><DollarSign className="mr-2" /> Fechar Conta</Button>
+          <div className="p-4 border-t border-border mt-auto">
+            <div className="flex justify-between items-center text-sm font-semibold text-text-secondary mb-2">
+              <span>Total</span>
+              <span>R$ {total.toFixed(2)}</span>
+            </div>
+            <Button size="lg" className="w-full" onClick={openPayDialog}><DollarSign className="mr-2" /> Fechar Conta</Button>
+          </div>
         </div>
-      </div>
-      <PayDialog />
-      </>
+        <PayDialog />
+        </>
     );
-};
+  };
 
   const CreateMesaDialog = () => {
     const [numeroVal, setNumeroVal] = useState('');
@@ -544,7 +544,7 @@ function VendasPage() {
           toast({ title: 'Número inválido', description: 'Informe um número positivo.', variant: 'warning' });
           return;
         }
-        const mesa = await criarMesa({ numero, nome: (nomeVal || '').trim() || undefined });
+        const mesa = await criarMesa({ numero, nome: (nomeVal || '').trim() || undefined, codigoEmpresa: userProfile?.codigo_empresa });
 
         const newTable = {
           id: mesa.id,
@@ -626,9 +626,10 @@ function VendasPage() {
         descricao: prod.name,
         quantidade: 1,
         precoUnitario: price,
+        codigoEmpresa: userProfile?.codigo_empresa,
       });
       // Reload items
-      const itens = await listarItensDaComanda({ comandaId: selectedTable.comandaId });
+      const itens = await listarItensDaComanda({ comandaId: selectedTable.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
       const order = (itens || []).map((it) => ({ id: it.id, name: it.descricao || 'Item', price: Number(it.preco_unitario || 0), quantity: Number(it.quantidade || 1) }));
       const updated = { ...selectedTable, order };
       setSelectedTable(updated);
