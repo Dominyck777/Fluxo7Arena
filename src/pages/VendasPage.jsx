@@ -70,6 +70,7 @@ function VendasPage() {
   const [clienteNome, setClienteNome] = useState('');
   // Pagamento
   const [isPayOpen, setIsPayOpen] = useState(false);
+  const [isSelectingTable, setIsSelectingTable] = useState(false);
   const [payMethods, setPayMethods] = useState([]);
   const [selectedPayId, setSelectedPayId] = useState(null);
   const [payLoading, setPayLoading] = useState(false);
@@ -127,6 +128,19 @@ function VendasPage() {
         const totals = await (async () => {
           try { return await listarTotaisPorComanda((openComandas || []).map(c => c.id), codigoEmpresa); } catch { return {}; }
         })();
+        // Carregar nomes de clientes por comanda para exibir no card
+        const namesByComanda = await (async () => {
+          try {
+            const entries = await Promise.all((openComandas || []).map(async (c) => {
+              try {
+                const vincs = await listarClientesDaComanda({ comandaId: c.id, codigoEmpresa });
+                const nomes = (vincs || []).map(v => v?.nome).filter(Boolean);
+                return [c.id, nomes.length ? nomes.join(', ') : null];
+              } catch { return [c.id, null]; }
+            }));
+            return Object.fromEntries(entries);
+          } catch { return {}; }
+        })();
         const byMesa = new Map();
         (openComandas || []).forEach(c => byMesa.set(c.mesa_id, c));
         const uiTables = (mesas || []).map((m) => {
@@ -134,20 +148,39 @@ function VendasPage() {
           let status = mapStatus(m.status);
           let comandaId = null;
           let totalHint = 0;
+          let customer = null;
           if (c) {
             status = (c.status === 'awaiting-payment' || c.status === 'awaiting_payment') ? 'awaiting-payment' : 'in-use';
             comandaId = c.id;
             totalHint = Number(totals[c.id] || 0);
+            customer = namesByComanda[c.id] || null;
           }
-          return { id: m.id, number: m.numero, name: m.nome || null, status, order: [], customer: null, comandaId, totalHint };
+          return { id: m.id, number: m.numero, name: m.nome || null, status, order: [], customer, comandaId, totalHint };
         });
         if (!mountedRef.current) return;
-        setTables(uiTables);
-        try { if (cacheKey) localStorage.setItem(cacheKey, JSON.stringify(uiTables)); } catch {}
+        // Mescla com estado anterior para não perder o customer exibido no card
+        let mergedForCache = uiTables;
+        setTables((prev) => {
+          if (!Array.isArray(prev) || prev.length === 0) return uiTables;
+          const byIdPrev = new Map(prev.map(t => [t.id, t]));
+          const merged = uiTables.map(nt => {
+            const old = byIdPrev.get(nt.id);
+            if (!old) return nt;
+            return {
+              ...nt,
+              // preserva somente se ainda há comanda
+              customer: nt.comandaId ? (nt.customer != null ? nt.customer : old.customer || null) : null,
+              order: nt.comandaId ? (old.order || nt.order || []) : [],
+            };
+          });
+          mergedForCache = merged;
+          return merged;
+        });
+        try { if (cacheKey) localStorage.setItem(cacheKey, JSON.stringify(mergedForCache)); } catch {}
         setSelectedTable((prev) => {
           if (!prev) return uiTables[0] || null;
           const found = uiTables.find(t => t.id === prev.id);
-          return found ? { ...found, order: prev.order || [] } : (uiTables[0] || null);
+          return found ? { ...found, order: prev.order || [], customer: prev.customer || found.customer || null } : (uiTables[0] || null);
         });
         try {
           const sessao = await ensureCaixaAberto({ saldoInicial: 0, codigoEmpresa });
@@ -208,14 +241,43 @@ function VendasPage() {
 
   const calculateTotal = (order) => order.reduce((acc, item) => acc + item.price * item.quantity, 0);
 
-  const handleSelectTable = async (table) => {
+  // Recarrega rapidamente o status das mesas (sem todos os detalhes), para refletir fechamento/liberação
+  const refreshTablesLight = async () => {
     try {
+      const codigoEmpresa = userProfile?.codigo_empresa;
+      if (!codigoEmpresa) return;
+      const mesas = await listMesas(codigoEmpresa);
+      let openComandas = [];
+      try { openComandas = await listarComandasAbertas({ codigoEmpresa }); } catch {}
+      const byMesa = new Map();
+      (openComandas || []).forEach(c => byMesa.set(c.mesa_id, c));
+      const uiTables = (mesas || []).map((m) => {
+        const c = byMesa.get(m.id);
+        let status = mapStatus(m.status);
+        let comandaId = null;
+        if (c) { status = (c.status === 'awaiting-payment' || c.status === 'awaiting_payment') ? 'awaiting-payment' : 'in-use'; comandaId = c.id; }
+        return { id: m.id, number: m.numero, name: m.nome || null, status, order: [], customer: null, comandaId, totalHint: 0 };
+      });
+      setTables((prev) => {
+        const byIdPrev = new Map((prev||[]).map(t => [t.id, t]));
+        return uiTables.map(nt => {
+          const old = byIdPrev.get(nt.id);
+          return old ? { ...nt, customer: old.customer || nt.customer, order: old.order || [] } : nt;
+        });
+      });
+    } catch {}
+  };
+
+  const handleSelectTable = async (table) => {
+    if (isSelectingTable) return;
+    setIsSelectingTable(true);
+    try {
+      const previous = selectedTable;
       setLoading(true);
       if (table.comandaId) {
-        // já há comanda aberta, apenas carregar itens
+        // carregar itens e clientes
         const itens = await listarItensDaComanda({ comandaId: table.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
         const order = (itens || []).map((it) => ({ id: it.id, name: it.descricao || 'Item', price: Number(it.preco_unitario || 0), quantity: Number(it.quantidade || 1) }));
-        // carregar clientes vinculados para exibir no cabeçalho e cards
         let customer = null;
         try {
           const vinculos = await listarClientesDaComanda({ comandaId: table.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
@@ -232,8 +294,11 @@ function VendasPage() {
       }
     } catch (e) {
       toast({ title: 'Falha ao carregar comanda da mesa', description: e?.message || 'Tente novamente', variant: 'destructive' });
+      // restaura seleção anterior em caso de erro
+      setSelectedTable((prev) => prev || previous || null);
     } finally {
       setLoading(false);
+      setIsSelectingTable(false);
     }
   };
 
@@ -275,8 +340,8 @@ function VendasPage() {
         </div>
         {(table.status === 'in-use' || table.status === 'awaiting-payment') ? (
           <div className="w-full mt-auto">
-            <div className="text-xs text-text-secondary truncate" title={table.customer || ''}>{table.customer || '—'}</div>
-            <div className="text-sm font-bold text-text-primary">R$ {displayTotal.toFixed(2)}</div>
+            <div className="text-sm sm:text-base font-medium text-text-primary truncate" title={table.customer || ''}>{table.customer || '—'}</div>
+            <div className="text-sm font-bold text-text-secondary">R$ {displayTotal.toFixed(2)}</div>
           </div>
         ) : (
           <div className="w-full mt-auto">
@@ -301,12 +366,14 @@ function VendasPage() {
         // registra pagamento do total
         const fin = payMethods.find((m) => m.id === selectedPayId);
         const metodo = fin?.tipo || fin?.nome || 'outros';
-        await registrarPagamento({ comandaId: selectedTable.comandaId, finalizadoraId: selectedPayId, metodo, valor: total, status: 'Pago', codigoEmpresa: userProfile?.codigo_empresa });
+        await registrarPagamento({ comandaId: selectedTable.comandaId, finalizadoraId: selectedPayId, metodo, valor: total, codigoEmpresa: userProfile?.codigo_empresa });
         // fecha comanda e libera mesa
         await fecharComandaEMesa({ comandaId: selectedTable.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
         // atualizar UI: mesa disponível, limpa comanda
         setTables((prev) => prev.map((t) => (t.id === selectedTable.id ? { ...t, status: 'available', order: [], comandaId: null, customer: null } : t)));
         setSelectedTable((prev) => prev ? { ...prev, status: 'available', order: [], comandaId: null, customer: null } : prev);
+        // força refresh leve para evitar que mesa volte a 'em uso' por cache antigo
+        await refreshTablesLight();
         toast({ title: 'Pagamento registrado', description: `Total R$ ${total.toFixed(2)}`, variant: 'success' });
         setIsPayOpen(false);
       } catch (e) {
@@ -432,7 +499,14 @@ function VendasPage() {
       if (!table?.comandaId) return;
       const itens = await listarItensDaComanda({ comandaId: table.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
       const order = (itens || []).map((it) => ({ id: it.id, name: it.descricao || 'Item', price: Number(it.preco_unitario || 0), quantity: Number(it.quantidade || 1) }));
-      const updated = { ...table, order };
+      // refresh customer names to avoid disappearing labels
+      let customerName = table.customer || null;
+      try {
+        const vinculos = await listarClientesDaComanda({ comandaId: table.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
+        const nomes = (vinculos || []).map(v => v?.nome).filter(Boolean);
+        customerName = nomes.length ? nomes.join(', ') : null;
+      } catch {}
+      const updated = { ...table, order, customer: customerName };
       setSelectedTable(updated);
       setTables((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
     };
@@ -664,51 +738,247 @@ function VendasPage() {
     </div>
   );
 
-  const CounterModeModal = () => (
-    <Dialog open={isCounterModeOpen} onOpenChange={setIsCounterModeOpen}>
+  // Estado e lógica do Modo Balcão (comanda sem mesa)
+  const [counterComandaId, setCounterComandaId] = useState(null);
+  const [counterItems, setCounterItems] = useState([]);
+  const [counterLoading, setCounterLoading] = useState(false);
+  const [counterSearch, setCounterSearch] = useState('');
+  const [showCounterClientPicker, setShowCounterClientPicker] = useState(false);
+  const [counterClients, setCounterClients] = useState([]);
+  const [counterClientsLoading, setCounterClientsLoading] = useState(false);
+  const [counterSelectedClientId, setCounterSelectedClientId] = useState(null);
+
+  const counterReloadItems = async (comandaId) => {
+    if (!comandaId) return;
+    const itens = await listarItensDaComanda({ comandaId, codigoEmpresa: userProfile?.codigo_empresa });
+    const order = (itens || []).map((it) => ({ id: it.id, name: it.descricao || 'Item', price: Number(it.preco_unitario || 0), quantity: Number(it.quantidade || 1) }));
+    setCounterItems(order);
+  };
+
+  const addProductToCounter = async (prod) => {
+    if (!counterComandaId) return;
+    const price = Number(prod.salePrice ?? prod.price ?? 0);
+    await adicionarItem({ comandaId: counterComandaId, produtoId: prod.id, descricao: prod.name, quantidade: 1, precoUnitario: price, codigoEmpresa: userProfile?.codigo_empresa });
+    await counterReloadItems(counterComandaId);
+    toast({ title: 'Produto adicionado', description: prod.name, variant: 'success' });
+  };
+
+  const addClientToCounter = async (clientId) => {
+    if (!counterComandaId || !clientId) return;
+    // fecha imediatamente (UX) e tenta associar; se falhar, reabre com alerta
+    setShowCounterClientPicker(false);
+    try {
+      await adicionarClientesAComanda({ comandaId: counterComandaId, clienteIds: [clientId], nomesLivres: [], codigoEmpresa: userProfile?.codigo_empresa });
+      setCounterSelectedClientId(clientId);
+      setCounterSearch('');
+      setCounterClients([]);
+      toast({ title: 'Cliente associado', variant: 'success' });
+    } catch (e) {
+      toast({ title: 'Falha ao associar cliente', description: e?.message || 'Tente novamente', variant: 'destructive' });
+      setShowCounterClientPicker(true);
+    }
+  };
+
+  const payCounter = async () => {
+    if (!counterComandaId) return;
+    try {
+      const total = calculateTotal(counterItems);
+      if (total <= 0) {
+        toast({ title: 'Sem itens', description: 'Adicione itens antes de pagar.', variant: 'warning' });
+        return;
+      }
+      setCounterLoading(true);
+      // Garante caixa aberto
+      await ensureCaixaAberto({ codigoEmpresa: userProfile?.codigo_empresa });
+      // Busca finalizadoras se necessário
+      let fins = payMethods;
+      if (!Array.isArray(fins) || fins.length === 0) {
+        try { fins = await listarFinalizadoras({ somenteAtivas: true, codigoEmpresa: userProfile?.codigo_empresa }); setPayMethods(fins); } catch {}
+      }
+      const fin = fins?.[0];
+      const metodo = fin?.tipo || fin?.nome || 'outros';
+      await registrarPagamento({ comandaId: counterComandaId, finalizadoraId: fin?.id, metodo, valor: total, codigoEmpresa: userProfile?.codigo_empresa });
+      await fecharComandaEMesa({ comandaId: counterComandaId, codigoEmpresa: userProfile?.codigo_empresa });
+      toast({ title: 'Pagamento registrado (balcão)', description: `R$ ${total.toFixed(2)}`, variant: 'success' });
+      // reset ciclo
+      setCounterItems([]);
+      setCounterComandaId(null);
+      setIsCounterModeOpen(false);
+    } catch (e) {
+      toast({ title: 'Falha no pagamento (balcão)', description: e?.message || 'Tente novamente', variant: 'destructive' });
+    } finally {
+      setCounterLoading(false);
+    }
+  };
+
+  const CounterModeModal = () => {
+    useEffect(() => {
+      let active = true;
+      const boot = async () => {
+        if (!isCounterModeOpen) return;
+        try {
+          setCounterLoading(true);
+          const cmd = await getOrCreateComandaBalcao({ codigoEmpresa: userProfile?.codigo_empresa });
+          if (!active) return;
+          setCounterComandaId(cmd.id);
+          await counterReloadItems(cmd.id);
+        } catch (e) {
+          if (active) toast({ title: 'Falha ao abrir comanda de balcão', description: e?.message || 'Tente novamente', variant: 'destructive' });
+        } finally {
+          if (active) setCounterLoading(false);
+        }
+      };
+      boot();
+      return () => { active = false; };
+    }, [isCounterModeOpen]);
+
+    useEffect(() => {
+      if (!showCounterClientPicker) return;
+      let active = true;
+      const load = async () => {
+        try {
+          setCounterClientsLoading(true);
+          const rows = await listarClientes({ searchTerm: counterSearch, limit: 20, codigoEmpresa: userProfile?.codigo_empresa });
+          if (active) setCounterClients(rows || []);
+        } catch {
+          if (active) setCounterClients([]);
+        } finally {
+          if (active) setCounterClientsLoading(false);
+        }
+      };
+      const t = setTimeout(load, 250);
+      return () => { active = false; clearTimeout(t); };
+    }, [showCounterClientPicker, counterSearch]);
+
+    const total = calculateTotal(counterItems);
+    return (
+      <Dialog open={isCounterModeOpen} onOpenChange={setIsCounterModeOpen}>
         <DialogContent className="max-w-4xl h-[90vh]">
-            <DialogHeader>
-                <DialogTitle className="text-2xl font-bold">Modo Balcão</DialogTitle>
-                <DialogDescription>Venda rápida para clientes sem mesa.</DialogDescription>
-            </DialogHeader>
-            <div className="grid grid-cols-2 gap-6 h-full overflow-hidden pt-4">
-                <div className="col-span-1 flex flex-col border-r border-border pr-6">
-                    <h3 className="text-lg font-semibold mb-4">Catálogo de Produtos</h3>
-                    <div className="relative mb-4">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted" />
-                        <Input placeholder="Buscar produto..." className="pl-9" />
-                    </div>
-                    <div className="flex-1 overflow-y-auto -mr-4 pr-4 thin-scroll">
-                        <ul className="space-y-2">
-                        {productsData.map(prod => (
-                            <li key={prod.id} className="flex items-center p-3 rounded-md bg-surface-2">
-                                <div className="flex-1">
-                                    <p className="font-semibold">{prod.name}</p>
-                                    <p className="text-sm text-text-muted">R$ {prod.price.toFixed(2)}</p>
-                                </div>
-                                <Button size="sm" onClick={handleNotImplemented}><Plus size={16} className="mr-1"/> Adicionar</Button>
-                            </li>
-                        ))}
-                        </ul>
-                    </div>
-                </div>
-                <div className="col-span-1 flex flex-col">
-                    <h3 className="text-lg font-semibold mb-4">Comanda do Balcão</h3>
-                    <div className="flex-1 overflow-y-auto bg-surface-2 rounded-lg p-4 thin-scroll">
-                      {counterOrder.length === 0 ? <p className="text-center text-text-muted pt-16">Adicione produtos à comanda.</p> : <p>...</p>}
-                    </div>
-                     <div className="p-4 border-t border-border mt-auto">
-                        <div className="flex justify-between items-center text-xl font-bold mb-4">
-                            <span>Total</span>
-                            <span>R$ {calculateTotal(counterOrder).toFixed(2)}</span>
-                        </div>
-                        <Button size="lg" className="w-full" onClick={handleNotImplemented}><DollarSign className="mr-2" /> Finalizar Pagamento</Button>
-                    </div>
-                </div>
+          <DialogHeader>
+            <DialogTitle className="text-2xl font-bold">Modo Balcão</DialogTitle>
+            <DialogDescription>Venda rápida para clientes sem mesa.</DialogDescription>
+          </DialogHeader>
+          <div className="grid grid-cols-2 gap-6 h-full overflow-hidden pt-4">
+            <div className="col-span-1 flex flex-col border-r border-border pr-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold">Catálogo de Produtos</h3>
+                <Button variant="outline" size="sm" onClick={() => setShowCounterClientPicker(true)}>
+                  {counterSelectedClientId ? <><CheckCircle className="mr-1 h-4 w-4 text-success"/> Cliente</> : 'Cliente'}
+                </Button>
+              </div>
+              <div className="relative mb-4">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted" />
+                <Input placeholder="Buscar produto..." className="pl-9" value={counterSearch} onChange={(e) => setCounterSearch(e.target.value)} />
+              </div>
+              <div className="flex-1 overflow-y-auto -mr-4 pr-4 thin-scroll">
+                <ul className="space-y-2">
+                  {(products.length ? products : productsData).filter(p => {
+                    const s = counterSearch.trim().toLowerCase();
+                    if (!s) return true;
+                    return (p.name?.toLowerCase()?.includes(s) || String(p.code||'').toLowerCase().includes(s));
+                  }).map(prod => (
+                    <li key={prod.id} className="flex items-center p-3 rounded-md bg-surface-2">
+                      <div className="flex-1">
+                        <p className="font-semibold">{prod.name}</p>
+                        <p className="text-sm text-text-muted">R$ {(Number(prod.salePrice ?? prod.price ?? 0)).toFixed(2)}</p>
+                      </div>
+                      <Button size="sm" onClick={() => addProductToCounter(prod)} disabled={!counterComandaId || counterLoading}>
+                        <Plus size={16} className="mr-1"/> Adicionar
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
             </div>
+            <div className="col-span-1 flex flex-col">
+              <h3 className="text-lg font-semibold mb-4">Comanda do Balcão</h3>
+              <div className="flex-1 overflow-y-auto bg-surface-2 rounded-lg p-4 thin-scroll">
+                {counterItems.length === 0 ? (
+                  <p className="text-center text-text-muted pt-16">Adicione produtos à comanda.</p>
+                ) : (
+                  <ul className="divide-y divide-border">
+                    {counterItems.map((it) => (
+                      <li key={it.id} className="py-2 flex items-center justify-between gap-4">
+                        <div className="min-w-0">
+                          <div className="font-medium truncate">{it.name}</div>
+                          <div className="text-xs text-text-muted">Qtd: {it.quantity} • Unit: R$ {Number(it.price || 0).toFixed(2)}</div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div className="font-semibold mr-2">R$ {(Number(it.price || 0) * Number(it.quantity || 0)).toFixed(2)}</div>
+                          <Button variant="outline" size="icon" className="h-8 w-8" onClick={async () => {
+                            const next = Number(it.quantity||1) - 1;
+                            try {
+                              if (next <= 0) {
+                                await removerItem({ itemId: it.id, codigoEmpresa: userProfile?.codigo_empresa });
+                              } else {
+                                await atualizarQuantidadeItem({ itemId: it.id, quantidade: next, codigoEmpresa: userProfile?.codigo_empresa });
+                              }
+                              await counterReloadItems(counterComandaId);
+                            } catch (e) { toast({ title: 'Falha ao atualizar', description: e?.message || 'Tente novamente', variant: 'destructive' }); }
+                          }}><Minus size={14} /></Button>
+                          <span className="w-8 text-center font-semibold">{it.quantity}</span>
+                          <Button variant="outline" size="icon" className="h-8 w-8" onClick={async () => {
+                            try {
+                              await atualizarQuantidadeItem({ itemId: it.id, quantidade: Number(it.quantity||1) + 1, codigoEmpresa: userProfile?.codigo_empresa });
+                              await counterReloadItems(counterComandaId);
+                            } catch (e) { toast({ title: 'Falha ao atualizar', description: e?.message || 'Tente novamente', variant: 'destructive' }); }
+                          }}><Plus size={14} /></Button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+              <div className="p-4 border-t border-border mt-auto">
+                <div className="flex justify-between items-center text-xl font-bold mb-4">
+                  <span>Total</span>
+                  <span>R$ {total.toFixed(2)}</span>
+                </div>
+                <Button size="lg" className="w-full" onClick={payCounter} disabled={counterLoading || total <= 0}>
+                  <DollarSign className="mr-2" /> Finalizar Pagamento
+                </Button>
+              </div>
+            </div>
+          </div>
+
+          {/* Seletor de cliente (inline dentro do modal) */}
+          {showCounterClientPicker && (
+            <div className="absolute inset-0 bg-background/80 backdrop-blur-sm flex items-center justify-center" onClick={(e) => { if (e.target === e.currentTarget) setShowCounterClientPicker(false); }} onKeyDown={(e) => { if (e.key === 'Escape') setShowCounterClientPicker(false); }}>
+              <div className="bg-surface rounded-lg border border-border shadow-lg w-full max-w-md p-4" role="dialog" aria-modal="true">
+                <div className="flex items-center justify-between mb-2">
+                  <h4 className="text-lg font-semibold">Selecionar Cliente</h4>
+                  <Button variant="ghost" size="sm" onClick={() => setShowCounterClientPicker(false)}>Fechar</Button>
+                </div>
+                <div className="relative mb-2">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted" />
+                  <Input placeholder="Nome, e-mail, telefone ou código" className="pl-9" value={counterSearch} onChange={(e) => setCounterSearch(e.target.value)} />
+                </div>
+                <div className="max-h-64 overflow-auto thin-scroll border rounded-md">
+                  {counterClientsLoading ? (
+                    <div className="p-3 text-sm text-text-muted">Carregando clientes...</div>
+                  ) : (counterClients.length > 0 ? (
+                    <ul>
+                      {counterClients.map(c => (
+                        <li key={c.id} className={cn('p-2 flex items-center justify-between cursor-pointer hover:bg-surface-2', counterSelectedClientId === c.id && 'bg-surface-2')} onClick={() => addClientToCounter(c.id)}>
+                          <div>
+                            <div className="font-medium">{c.nome}</div>
+                            <div className="text-xs text-text-muted">{c.email || '—'} {c.telefone ? `• ${c.telefone}` : ''}</div>
+                          </div>
+                          {counterSelectedClientId === c.id && <CheckCircle size={16} className="text-success" />}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <div className="p-3 text-sm text-text-muted">Nenhum cliente encontrado.</div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
         </DialogContent>
-    </Dialog>
-  )
+      </Dialog>
+    );
+  };
 
   const OpenTableDialog = () => {
     const [search, setSearch] = useState('');
@@ -741,16 +1011,25 @@ function VendasPage() {
       try {
         if (!pendingTable) return;
         // 1) abre (ou obtém) a comanda para a mesa
-        const comanda = await getOrCreateComandaForMesa({ mesaId: pendingTable.id });
+        const comanda = await getOrCreateComandaForMesa({ mesaId: pendingTable.id, codigoEmpresa: userProfile?.codigo_empresa });
         // 2) associa somente 1 cliente cadastrado OU 1 nome comum
         const clienteIds = mode === 'registered' ? Array.from(new Set(selectedClientIds || [])) : [];
         const nomesLivres = mode === 'common' && commonName?.trim() ? [commonName.trim()] : [];
         if (clienteIds.length > 0 || nomesLivres.length > 0) {
-          await adicionarClientesAComanda({ comandaId: comanda.id, clienteIds, nomesLivres });
+          await adicionarClientesAComanda({ comandaId: comanda.id, clienteIds, nomesLivres, codigoEmpresa: userProfile?.codigo_empresa });
         }
-        const displayName = clienteIds.length
-          ? clienteIds.map(cid => clients.find(c => c.id === cid)?.nome).filter(Boolean).join(', ')
-          : (nomesLivres[0] || '');
+        // Pega nomes confirmados do backend para garantir persistência
+        let displayName = null;
+        try {
+          const vincs = await listarClientesDaComanda({ comandaId: comanda.id, codigoEmpresa: userProfile?.codigo_empresa });
+          const nomes = (vincs || []).map(v => v?.nome).filter(Boolean);
+          displayName = nomes.length ? nomes.join(', ') : null;
+        } catch {}
+        if (!displayName) {
+          displayName = clienteIds.length
+            ? clienteIds.map(cid => clients.find(c => c.id === cid)?.nome).filter(Boolean).join(', ')
+            : (nomesLivres[0] || '');
+        }
         const enriched = { ...pendingTable, comandaId: comanda.id, status: 'in-use', customer: displayName || null, order: [] };
         setSelectedTable(enriched);
         setTables(prev => prev.map(t => t.id === enriched.id ? enriched : t));

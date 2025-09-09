@@ -11,6 +11,14 @@ function getCachedCompanyCode() {
     return null
   }
 }
+
+// Detecta erro de NOT NULL em coluna status
+function isNotNullStatusError(err) {
+  if (!err) return false;
+  const code = err.code ? String(err.code) : '';
+  const msg = [err.message, err.details, err.hint].filter(Boolean).join(' ').toLowerCase();
+  return code === '23502' || (msg.includes('null value in column') && msg.includes('status'));
+}
 // Balcão (comanda sem mesa)
 export async function listarComandaBalcaoAberta({ codigoEmpresa } = {}) {
   const codigo = codigoEmpresa || getCachedCompanyCode()
@@ -453,7 +461,15 @@ export async function ativarDesativarFinalizadora(id, ativo, codigoEmpresa) {
 }
 
 // Pagamentos
-export async function registrarPagamento({ comandaId, finalizadoraId, metodo, valor, status = 'Pago', codigoEmpresa }) {
+// Helper: detect enum cast error (e.g., invalid input value for enum ...)
+function isEnumError(err) {
+  if (!err) return false;
+  const code = err.code ? String(err.code) : '';
+  const msg = [err.message, err.details, err.hint].filter(Boolean).join(' ').toLowerCase();
+  return code === '22P02' || msg.includes('invalid input value for enum');
+}
+
+export async function registrarPagamento({ comandaId, finalizadoraId, metodo, valor, status, codigoEmpresa }) {
   const codigo = codigoEmpresa || getCachedCompanyCode()
   // localizar caixa aberto
   let q = supabase.from('caixa_sessoes').select('id').eq('status','open').order('aberto_em', { ascending: false }).limit(1)
@@ -462,13 +478,33 @@ export async function registrarPagamento({ comandaId, finalizadoraId, metodo, va
   if (errS) throw errS
   const caixaId = sess?.[0]?.id || null
 
-  const payload = { comanda_id: comandaId, caixa_id: caixaId, valor, status, recebido_em: new Date().toISOString() }
-  if (finalizadoraId) payload.finalizadora_id = finalizadoraId
-  if (metodo) payload.metodo = metodo
-  if (codigo) payload.codigo_empresa = codigo
-  const { data, error } = await supabase.from('pagamentos').insert(payload).select('*').single()
-  if (error) throw error
-  return data
+  // Monta payload sem status por padrão para evitar conflitos com enums na base
+  const makePayload = (withStatus, statusOverride) => {
+    const base = { comanda_id: comandaId, caixa_id: caixaId, valor, recebido_em: new Date().toISOString() }
+    if (finalizadoraId) base.finalizadora_id = finalizadoraId
+    if (metodo) base.metodo = metodo
+    if (codigo) base.codigo_empresa = codigo
+    const s = statusOverride !== undefined ? statusOverride : status
+    if (withStatus && s) base.status = s
+    return base
+  }
+  // 1ª tentativa: sem status
+  let { data, error } = await supabase.from('pagamentos').insert(makePayload(false)).select('*').single()
+  if (!error) return data
+  // 2ª tentativa: se NOT NULL em status, tenta com 'Pago'
+  if (isNotNullStatusError(error)) {
+    const fallbackStatus = status || 'Pago';
+    const res2 = await supabase.from('pagamentos').insert(makePayload(true, fallbackStatus)).select('*').single()
+    if (res2.error) throw res2.error
+    return res2.data
+  }
+  // 3ª tentativa: se houve erro que não é enum e temos status definido, tenta com status informado
+  if (!isEnumError(error) && status) {
+    const res3 = await supabase.from('pagamentos').insert(makePayload(true, status)).select('*').single()
+    if (res3.error) throw res3.error
+    return res3.data
+  }
+  throw error
 }
 
 // Fecha comanda e marca mesa como disponível
@@ -482,11 +518,15 @@ export async function fecharComandaEMesa({ comandaId, codigoEmpresa }) {
   const comanda = cmd?.[0]
   if (!comanda) throw new Error('Comanda não encontrada')
 
-  // Fechar comanda
-  let qClose = supabase.from('comandas').update({ status: 'closed', fechado_em: new Date().toISOString() }).eq('id', comandaId)
-  if (codigo) qClose = qClose.eq('codigo_empresa', codigo)
-  const { error: errClose } = await qClose.select('id').single()
-  if (errClose) throw errClose
+  // HOTFIX: há uma trigger no banco que volta a escrever status inválido ("") ao atualizar comandas.
+  // Para não quebrar a UI, não alteramos mais o status aqui; apenas tentamos registrar o fechado_em
+  // e, em caso de erro, ignoramos e seguimos para liberar a mesa.
+  try {
+    let qClose = supabase.from('comandas').update({ fechado_em: new Date().toISOString() }).eq('id', comandaId)
+    if (codigo) qClose = qClose.eq('codigo_empresa', codigo)
+    const { error: errClose } = await qClose.select('id').single()
+    if (errClose) { /* eslint-disable-next-line no-console */ try { console.warn('[fecharComandaEMesa] fechamento parcial (ignorado):', errClose); } catch {} }
+  } catch (e) { /* eslint-disable-next-line no-console */ try { console.warn('[fecharComandaEMesa] exceção ao fechar (ignorado):', e); } catch {} }
 
   // Marcar mesa como disponível
   if (comanda.mesa_id) {
