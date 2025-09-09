@@ -251,12 +251,29 @@ function VendasPage() {
       try { openComandas = await listarComandasAbertas({ codigoEmpresa }); } catch {}
       const byMesa = new Map();
       (openComandas || []).forEach(c => byMesa.set(c.mesa_id, c));
+      // Buscar nomes dos clientes das comandas abertas
+      const namesByComanda = {};
+      try {
+        const ids = (openComandas || []).map(c => c.id);
+        await Promise.all(ids.map(async (id) => {
+          try {
+            const vincs = await listarClientesDaComanda({ comandaId: id, codigoEmpresa });
+            const nomes = (vincs || []).map(v => v?.nome).filter(Boolean);
+            namesByComanda[id] = nomes.join(', ');
+          } catch { namesByComanda[id] = ''; }
+        }));
+      } catch {}
       const uiTables = (mesas || []).map((m) => {
         const c = byMesa.get(m.id);
         let status = mapStatus(m.status);
         let comandaId = null;
-        if (c) { status = (c.status === 'awaiting-payment' || c.status === 'awaiting_payment') ? 'awaiting-payment' : 'in-use'; comandaId = c.id; }
-        return { id: m.id, number: m.numero, name: m.nome || null, status, order: [], customer: null, comandaId, totalHint: 0 };
+        let customer = null;
+        if (c) {
+          status = (c.status === 'awaiting-payment' || c.status === 'awaiting_payment') ? 'awaiting-payment' : 'in-use';
+          comandaId = c.id;
+          customer = namesByComanda[c.id] || null;
+        }
+        return { id: m.id, number: m.numero, name: m.nome || null, status, order: [], customer, comandaId, totalHint: 0 };
       });
       setTables((prev) => {
         const byIdPrev = new Map((prev||[]).map(t => [t.id, t]));
