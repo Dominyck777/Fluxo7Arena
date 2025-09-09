@@ -543,6 +543,7 @@ function AgendaPage() {
       // 2) Revalida Realtime/ticks (não bloqueante)
       try { scheduleNextAutomation(); } catch {}
       // 3) Busca a versão mais recente do agendamento no banco e atualiza estado local se necessário
+      let updatedForReturn = null;
       if (booking?.id && userProfile?.codigo_empresa) {
         const { data: row } = await supabase
           .from('agendamentos')
@@ -551,23 +552,52 @@ function AgendaPage() {
           .eq('id', booking.id)
           .single();
         if (row) {
-          setBookings(prev => prev.map(b => b.id === booking.id ? ({
-            ...b,
+          const mapped = {
+            ...booking,
             start: new Date(row.inicio),
             end: new Date(row.fim),
-            status: row.status || b.status,
-            modality: row.modalidade || b.modality,
+            status: row.status || booking.status,
+            modality: row.modalidade || booking.modality,
             auto_disabled: !!row.auto_disabled,
-          }) : b));
+          };
+          updatedForReturn = mapped;
+          setBookings(prev => prev.map(b => b.id === booking.id ? mapped : b));
         }
       }
-      // 4) Opcional: roda automação uma vez para garantir compatibilidade com horários
+      // 4) Aplicar automação pontual neste agendamento (sem depender do ciclo global)
+      try {
+        const cand = updatedForReturn || booking;
+        if (cand && cand.id) {
+          const nowTs = getNowMs();
+          const startTs = cand.start instanceof Date ? cand.start.getTime() : new Date(cand.start).getTime();
+          const endTs = cand.end instanceof Date ? cand.end.getTime() : new Date(cand.end).getTime();
+          const canAuto = !cand.auto_disabled && !isOverriddenRecently(cand.id);
+          if (canAuto) {
+            // Ordem: finalizar > iniciar > confirmar > catch-up finish
+            if (cand.status === 'in_progress' && automation.autoFinishEnabled && Number.isFinite(endTs) && nowTs >= endTs) {
+              await updateBookingStatus(cand.id, 'finished', 'automation');
+            } else if (cand.status === 'confirmed' && automation.autoStartEnabled && Number.isFinite(startTs) && nowTs >= startTs) {
+              await updateBookingStatus(cand.id, 'in_progress', 'automation');
+            } else if (cand.status === 'scheduled' && automation.autoConfirmEnabled && Number.isFinite(startTs)) {
+              const msBefore = Number(automation.autoConfirmMinutesBefore || 0) * 60000;
+              if (nowTs >= (startTs - msBefore)) {
+                await updateBookingStatus(cand.id, 'confirmed', 'automation');
+              }
+            } else if ((cand.status === 'scheduled' || cand.status === 'confirmed') && automation.autoFinishEnabled && Number.isFinite(endTs) && nowTs >= endTs) {
+              await updateBookingStatus(cand.id, 'finished', 'automation');
+            }
+          }
+        }
+      } catch {}
+      // 5) Opcional: roda automação global em background
       try { runAutomationRef.current && runAutomationRef.current(); } catch {}
       try { console.log('🛡️ EditGuard | ok | tempo=', (typeof lastTimeSyncAtMs==='number'?'Servidor':'Local')); } catch {}
+      return { booking: updatedForReturn };
     } catch (e) {
       try { console.warn('🛡️ EditGuard | falha leve', e?.message || e); } catch {}
+      return { booking: null };
     }
-  }, [lastTimeSyncAtMs, supabase, userProfile, setBookings, scheduleNextAutomation]);
+  }, [lastTimeSyncAtMs, supabase, userProfile, setBookings, scheduleNextAutomation, getNowMs, automation, isOverriddenRecently, updateBookingStatus]);
   const runAutomation = useCallback(async () => {
     if (!authReady || !userProfile?.codigo_empresa) return;
     if (automationRunningRef.current) return;
@@ -1166,8 +1196,11 @@ function AgendaPage() {
           // Executa o vigia com pequena janela de até 600ms; não bloqueia por muito tempo a UX
           const guard = ensureFreshOnEdit(booking);
           const timeout = new Promise((resolve) => setTimeout(resolve, 600));
-          await Promise.race([guard, timeout]);
-          setEditingBooking(booking);
+          let result = null;
+          try { result = await Promise.race([guard, timeout]); } catch {}
+          // Prefira o booking atualizado retornado; senão busque do estado; fallback para o original
+          const picked = (result && result.booking) || (bookings.find(b => b.id === booking.id) || booking);
+          setEditingBooking(picked);
           openBookingModal();
         }}
       >
@@ -1416,6 +1449,18 @@ function AgendaPage() {
         try { console.log('[AgendamentoSave] Computed dates', { inicio: inicio.toISOString(), fim: fim.toISOString() }); } catch {}
         const primaryClient = (form.selectedClients || [])[0];
         const clientesArr = (form.selectedClients || []).map(getCustomerName).filter(Boolean);
+
+        // Validação: para NOVO agendamento é obrigatório selecionar pelo menos 1 cliente
+        if (!editingBooking?.id) {
+          if (!primaryClient?.id) {
+            toast({
+              title: 'Selecione um cliente',
+              description: 'Para criar um agendamento, selecione pelo menos um cliente.',
+              variant: 'destructive',
+            });
+            return;
+          }
+        }
 
         if (editingBooking?.id) {
           try { console.log('[AgendamentoSave] Path: UPDATE', { id: editingBooking.id }); } catch {}
