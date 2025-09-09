@@ -262,6 +262,8 @@ function AgendaPage() {
   const [serverOffsetMs, setServerOffsetMs] = useState(0);
   // Função utilitária para obter o "agora" corrigido por offset (Brasília)
   const getNowMs = useCallback(() => Date.now() + (Number.isFinite(serverOffsetMs) ? serverOffsetMs : 0), [serverOffsetMs]);
+  // Debug/status: última sincronização bem-sucedida de horário
+  const [lastTimeSyncAtMs, setLastTimeSyncAtMs] = useState(null);
   // Carrega regras salvas quando empresa está disponível
   useEffect(() => {
     if (!userProfile?.codigo_empresa) return;
@@ -317,22 +319,26 @@ function AgendaPage() {
     loadSettings();
   }, [authReady, company?.id]);
 
-  // Sincroniza periodicamente o horário de Brasília para corrigir o relógio do cliente
+  // Sincroniza periodicamente o horário de Brasília usando Supabase Edge Function (time-br)
   useEffect(() => {
     let active = true;
     let timer = null;
+    let warnedOnce = false;
     const syncNow = async () => {
       try {
-        // Usa WorldTimeAPI (retorna datetime em ISO já na timezone America/Sao_Paulo)
-        const res = await fetch('https://worldtimeapi.org/api/timezone/America/Sao_Paulo', { cache: 'no-store' });
-        if (!res.ok) throw new Error('worldtimeapi response not ok');
-        const data = await res.json();
-        // Ex.: "datetime": "2025-09-09T13:45:00.123456-03:00"
-        const serverDate = new Date(data.datetime);
-        const offset = serverDate.getTime() - Date.now();
-        if (active && Number.isFinite(offset)) setServerOffsetMs(offset);
+        const { data, error } = await supabase.functions.invoke('time-br', { body: {} });
+        if (!error && data && active) {
+          const serverMs = Number(data.nowMs);
+          if (Number.isFinite(serverMs)) {
+            const offset = serverMs - Date.now();
+            setServerOffsetMs(offset);
+            setLastTimeSyncAtMs(Date.now());
+            return;
+          }
+        }
+        if (!warnedOnce) { warnedOnce = true; try { console.warn('[TimeSync] time-br sem dados válidos; usando relógio local.'); } catch {} }
       } catch (e) {
-        try { console.warn('[TimeSync] Falha ao sincronizar horário de Brasília; usando relógio local.', e?.message || e); } catch {}
+        if (!warnedOnce) { warnedOnce = true; try { console.warn('[TimeSync] time-br falhou; usando relógio local.'); } catch {} }
       }
     };
     // Sincroniza agora e depois a cada 5 minutos
@@ -340,6 +346,8 @@ function AgendaPage() {
     timer = setInterval(syncNow, 5 * 60 * 1000);
     return () => { active = false; if (timer) clearInterval(timer); };
   }, []);
+
+  
 
   // Manual override tracking: user actions take precedence over automation
   const [manualOverrides, setManualOverrides] = useState({});
@@ -512,9 +520,54 @@ function AgendaPage() {
     if (nextTs !== Infinity) {
       const delay = Math.max(0, Math.min(nextTs - now + 250, 10 * 60 * 1000)); // pequeno buffer de 250ms
       try { console.debug('[Auto] next schedule in ms', delay); } catch {}
+      try { setNextAutoAtMs(nextTs); } catch {}
       nextAutoTimerRef.current = setTimeout(() => { try { runAutomationRef.current && runAutomationRef.current(); } catch {} }, delay);
     }
   }, [authReady, userProfile?.codigo_empresa, bookings, automation, isOverriddenRecently, clearNextAutoTimer, getNowMs]);
+  
+  // Vigia ao clicar em editar: garante dados frescos antes de abrir o modal
+  const ensureFreshOnEdit = useCallback(async (booking) => {
+    try {
+      // 1) Sincroniza horário se última sync tiver sido há mais de 10 minutos
+      const needTimeSync = !(typeof lastTimeSyncAtMs === 'number' && (Date.now() - lastTimeSyncAtMs) < (10 * 60 * 1000));
+      if (needTimeSync) {
+        try {
+          const { data } = await supabase.functions.invoke('time-br', { body: {} });
+          const serverMs = Number(data?.nowMs);
+          if (Number.isFinite(serverMs)) {
+            setServerOffsetMs(serverMs - Date.now());
+            setLastTimeSyncAtMs(Date.now());
+          }
+        } catch {}
+      }
+      // 2) Revalida Realtime/ticks (não bloqueante)
+      try { scheduleNextAutomation(); } catch {}
+      // 3) Busca a versão mais recente do agendamento no banco e atualiza estado local se necessário
+      if (booking?.id && userProfile?.codigo_empresa) {
+        const { data: row } = await supabase
+          .from('agendamentos')
+          .select('id, inicio, fim, status, modalidade, quadra_id, cliente_id, auto_disabled')
+          .eq('codigo_empresa', userProfile.codigo_empresa)
+          .eq('id', booking.id)
+          .single();
+        if (row) {
+          setBookings(prev => prev.map(b => b.id === booking.id ? ({
+            ...b,
+            start: new Date(row.inicio),
+            end: new Date(row.fim),
+            status: row.status || b.status,
+            modality: row.modalidade || b.modality,
+            auto_disabled: !!row.auto_disabled,
+          }) : b));
+        }
+      }
+      // 4) Opcional: roda automação uma vez para garantir compatibilidade com horários
+      try { runAutomationRef.current && runAutomationRef.current(); } catch {}
+      try { console.log('🛡️ EditGuard | ok | tempo=', (typeof lastTimeSyncAtMs==='number'?'Servidor':'Local')); } catch {}
+    } catch (e) {
+      try { console.warn('🛡️ EditGuard | falha leve', e?.message || e); } catch {}
+    }
+  }, [lastTimeSyncAtMs, supabase, userProfile, setBookings, scheduleNextAutomation]);
   const runAutomation = useCallback(async () => {
     if (!authReady || !userProfile?.codigo_empresa) return;
     if (automationRunningRef.current) return;
@@ -617,6 +670,24 @@ function AgendaPage() {
     try { scheduleNextAutomation(); } catch {}
     return () => clearInterval(id);
   }, [runAutomation]);
+
+  // Watchdog: a cada 30 minutos força uma reavaliação completa se automação estiver ligada
+  useEffect(() => {
+    const watchdog = setInterval(() => {
+      try {
+        const enabled = !!(automation?.autoConfirmEnabled || automation?.autoStartEnabled || automation?.autoFinishEnabled);
+        if (!enabled) return;
+        if (runAutomationRef.current) {
+          console.debug('[Auto][Watchdog] forcing periodic automation run');
+          runAutomationRef.current();
+        }
+      } catch {}
+    }, 30 * 60 * 1000);
+    return () => clearInterval(watchdog);
+  }, [automation]);
+
+  
+
 
   // Hidrata agendamentos a partir do cache antes da busca
   useEffect(() => {
@@ -761,6 +832,91 @@ function AgendaPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authReady, userProfile?.codigo_empresa, currentDate, courtsMap, bookingsCacheKey]);
+
+  // Realtime: escuta mudanças em 'agendamentos' para a empresa atual e atualiza a lista sem reload
+  const realtimeDebounceRef = useRef(null);
+  const [realtimeStatus, setRealtimeStatus] = useState('idle');
+  const [lastRealtimeEventAtMs, setLastRealtimeEventAtMs] = useState(null);
+  useEffect(() => {
+    if (!authReady || !userProfile?.codigo_empresa) return;
+    const dayStart = startOfDay(currentDate);
+    const dayEnd = addDays(dayStart, 1);
+    const inCurrentDay = (iso) => {
+      try {
+        const d = new Date(iso);
+        return d >= dayStart && d < dayEnd;
+      } catch { return false; }
+    };
+    const onChange = (payload) => {
+      const row = payload?.new || payload?.old;
+      if (!row) return;
+      if (row.codigo_empresa !== userProfile.codigo_empresa) return;
+      // Apenas reagir a registros do dia visível para evitar recargas desnecessárias
+      if (!(inCurrentDay(row.inicio) || inCurrentDay(row.fim))) return;
+      try { console.debug('[Realtime] agendamentos change', { event: payload.eventType, id: row.id }); } catch {}
+      if (realtimeDebounceRef.current) clearTimeout(realtimeDebounceRef.current);
+      try { setLastRealtimeEventAtMs(Date.now()); } catch {}
+      realtimeDebounceRef.current = setTimeout(() => {
+        try { fetchBookings(); } catch {}
+      }, 400);
+    };
+    const channel = supabase
+      .channel(`agendamentos:${userProfile.codigo_empresa}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'agendamentos', filter: `codigo_empresa=eq.${userProfile.codigo_empresa}` }, onChange)
+      .subscribe((status) => { try { console.debug('[Realtime] channel status', status); } catch {}; try { setRealtimeStatus(String(status || 'unknown')); } catch {} });
+    return () => {
+      try { if (realtimeDebounceRef.current) clearTimeout(realtimeDebounceRef.current); } catch {}
+      try { supabase.removeChannel(channel); } catch {}
+      try { setRealtimeStatus('unsubscribed'); } catch {}
+    };
+  }, [authReady, userProfile?.codigo_empresa, currentDate, fetchBookings]);
+
+  // Próximo tick de automação (para debug)
+  const [nextAutoAtMs, setNextAutoAtMs] = useState(null);
+  // Evita logs repetidos no console
+  const lastConnLineRef = useRef('');
+
+  // Console fixo simples de status (conexão) ao entrar na Agenda e quando algo chave mudar
+  useEffect(() => {
+    try {
+      const usingServer = typeof lastTimeSyncAtMs === 'number' && (Date.now() - lastTimeSyncAtMs) < (10 * 60 * 1000);
+      const fmtHms = (ms) => (typeof ms === 'number' ? format(new Date(ms), 'HH:mm:ss', { locale: ptBR }) : '—');
+      const fmtHm = (ms) => (typeof ms === 'number' ? format(new Date(ms), 'HH:mm', { locale: ptBR }) : '—');
+      const timeEmoji = usingServer ? '🕒🇧🇷' : '🖥️';
+      const rtOk = String(realtimeStatus).toUpperCase() === 'SUBSCRIBED';
+      const rtEmoji = rtOk ? '✅' : '⚠️';
+      const nextEmoji = typeof nextAutoAtMs === 'number' ? '⏭️' : '⏸️';
+      const count = Array.isArray(bookings) ? bookings.length : 0;
+      const line = `📊 Agenda | ${timeEmoji} Tempo=${usingServer ? 'Servidor' : 'Local'} (Δ${Math.round(serverOffsetMs)}ms, sync ${fmtHms(lastTimeSyncAtMs)}) | 🔌 Realtime=${rtEmoji} ${realtimeStatus}${lastRealtimeEventAtMs ? ` (${fmtHms(lastRealtimeEventAtMs)})` : ''} | ${nextEmoji} Próximo=${fmtHm(nextAutoAtMs)} | 📦 Agendamentos=${count}`;
+      if (lastConnLineRef.current !== line) {
+        lastConnLineRef.current = line;
+        console.log(line);
+      }
+      if (typeof window !== 'undefined') {
+        window.__AgendaConn = { usingServer, serverOffsetMs, lastTimeSyncAtMs, realtimeStatus, lastRealtimeEventAtMs, nextAutoAtMs };
+      }
+    } catch {}
+  }, [serverOffsetMs, lastTimeSyncAtMs, realtimeStatus, lastRealtimeEventAtMs, automation, nextAutoAtMs, userProfile?.codigo_empresa, currentDate, Array.isArray(bookings) ? bookings.length : 0]);
+
+  // Reconciliador: a cada 5 minutos, se o Realtime estiver parado por muito tempo
+  // ou se o próximo tick já deveria ter ocorrido, força um fetchBookings e reprograma automação
+  useEffect(() => {
+    const id = setInterval(() => {
+      try {
+        const now = Date.now();
+        const rtOk = String(realtimeStatus || '').toUpperCase() === 'SUBSCRIBED';
+        const lastEvtAge = typeof lastRealtimeEventAtMs === 'number' ? (now - lastRealtimeEventAtMs) : Infinity;
+        const realtimeStale = !rtOk || lastEvtAge > (7 * 60 * 1000); // 7 min sem evento
+        const tickDue = typeof nextAutoAtMs === 'number' ? (now > (nextAutoAtMs + 60 * 1000)) : false; // 1 min de tolerância
+        if (realtimeStale || tickDue) {
+          console.debug('[Reconcile] forcing fetchBookings (stale=', realtimeStale, ' tickDue=', tickDue, ')');
+          fetchBookings();
+          try { scheduleNextAutomation(); } catch {}
+        }
+      } catch {}
+    }, 5 * 60 * 1000);
+    return () => clearInterval(id);
+  }, [realtimeStatus, lastRealtimeEventAtMs, nextAutoAtMs, fetchBookings, scheduleNextAutomation]);
 
   // Carrega participantes para os agendamentos listados (batch por dia)
   useEffect(() => {
@@ -1006,7 +1162,14 @@ function AgendaPage() {
           "overflow-hidden transition-all duration-150 hover:bg-surface-2 hover:shadow-md"
         )}
         style={{ top: `${adjTop}px`, height: `${adjHeight}px` }}
-        onClick={() => { setEditingBooking(booking); openBookingModal(); }}
+        onClick={async () => {
+          // Executa o vigia com pequena janela de até 600ms; não bloqueia por muito tempo a UX
+          const guard = ensureFreshOnEdit(booking);
+          const timeout = new Promise((resolve) => setTimeout(resolve, 600));
+          await Promise.race([guard, timeout]);
+          setEditingBooking(booking);
+          openBookingModal();
+        }}
       >
         {/* Acento de status à esquerda */}
         <div className={cn("absolute left-0 top-0 h-full w-[6px] rounded-l-md", config.accent)} />
