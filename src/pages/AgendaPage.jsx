@@ -258,6 +258,10 @@ function AgendaPage() {
   }), []);
   const [automation, setAutomation] = useState(defaultAutomation);
   const [savingSettings, setSavingSettings] = useState(false);
+  // Offset de horário do servidor (Brasília) em relação ao relógio local do dispositivo, em ms
+  const [serverOffsetMs, setServerOffsetMs] = useState(0);
+  // Função utilitária para obter o "agora" corrigido por offset (Brasília)
+  const getNowMs = useCallback(() => Date.now() + (Number.isFinite(serverOffsetMs) ? serverOffsetMs : 0), [serverOffsetMs]);
   // Carrega regras salvas quando empresa está disponível
   useEffect(() => {
     if (!userProfile?.codigo_empresa) return;
@@ -312,6 +316,30 @@ function AgendaPage() {
     };
     loadSettings();
   }, [authReady, company?.id]);
+
+  // Sincroniza periodicamente o horário de Brasília para corrigir o relógio do cliente
+  useEffect(() => {
+    let active = true;
+    let timer = null;
+    const syncNow = async () => {
+      try {
+        // Usa WorldTimeAPI (retorna datetime em ISO já na timezone America/Sao_Paulo)
+        const res = await fetch('https://worldtimeapi.org/api/timezone/America/Sao_Paulo', { cache: 'no-store' });
+        if (!res.ok) throw new Error('worldtimeapi response not ok');
+        const data = await res.json();
+        // Ex.: "datetime": "2025-09-09T13:45:00.123456-03:00"
+        const serverDate = new Date(data.datetime);
+        const offset = serverDate.getTime() - Date.now();
+        if (active && Number.isFinite(offset)) setServerOffsetMs(offset);
+      } catch (e) {
+        try { console.warn('[TimeSync] Falha ao sincronizar horário de Brasília; usando relógio local.', e?.message || e); } catch {}
+      }
+    };
+    // Sincroniza agora e depois a cada 5 minutos
+    syncNow();
+    timer = setInterval(syncNow, 5 * 60 * 1000);
+    return () => { active = false; if (timer) clearInterval(timer); };
+  }, []);
 
   // Manual override tracking: user actions take precedence over automation
   const [manualOverrides, setManualOverrides] = useState({});
@@ -458,7 +486,7 @@ function AgendaPage() {
   const scheduleNextAutomation = useCallback(() => {
     if (!authReady || !userProfile?.codigo_empresa) return;
     clearNextAutoTimer();
-    const now = Date.now();
+    const now = getNowMs();
     let nextTs = Infinity;
     const consider = (ts) => { if (Number.isFinite(ts) && ts > now && ts < nextTs) nextTs = ts; };
     try {
@@ -486,15 +514,15 @@ function AgendaPage() {
       try { console.debug('[Auto] next schedule in ms', delay); } catch {}
       nextAutoTimerRef.current = setTimeout(() => { try { runAutomationRef.current && runAutomationRef.current(); } catch {} }, delay);
     }
-  }, [authReady, userProfile?.codigo_empresa, bookings, automation, isOverriddenRecently, clearNextAutoTimer]);
+  }, [authReady, userProfile?.codigo_empresa, bookings, automation, isOverriddenRecently, clearNextAutoTimer, getNowMs]);
   const runAutomation = useCallback(async () => {
     if (!authReady || !userProfile?.codigo_empresa) return;
     if (automationRunningRef.current) return;
     automationRunningRef.current = true;
     try {
       try { console.debug('[Auto] tick'); } catch {}
-      const now = new Date();
-      const nowTs = now.getTime();
+      const nowTs = getNowMs();
+      const now = new Date(nowTs);
       const todayStr = format(now, 'yyyy-MM-dd');
       // Candidatos do dia atual (da UI ou DB fallback)
       let candidates = (bookings || []).filter(b => format(b.start, 'yyyy-MM-dd') === todayStr);
@@ -577,7 +605,7 @@ function AgendaPage() {
     } finally {
       automationRunningRef.current = false;
     }
-  }, [authReady, userProfile?.codigo_empresa, bookings, automation, updateBookingStatus, isOverriddenRecently, scheduleNextAutomation]);
+  }, [authReady, userProfile?.codigo_empresa, bookings, automation, updateBookingStatus, isOverriddenRecently, scheduleNextAutomation, getNowMs]);
 
   // Keep a callable reference to avoid TDZ issues when scheduling before runAutomation is initialized
   useEffect(() => {
@@ -1243,7 +1271,7 @@ function AgendaPage() {
           if (!statusChanged) {
             let nextStatus = form.status;
             try {
-              const nowTs = Date.now();
+              const nowTs = getNowMs();
               const startTs = inicio.getTime();
               const canAutoConfirm = !!automation?.autoConfirmEnabled && Number.isFinite(Number(automation?.autoConfirmMinutesBefore));
               if (canAutoConfirm) {
