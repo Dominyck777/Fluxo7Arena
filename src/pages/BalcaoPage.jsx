@@ -6,11 +6,11 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useToast } from '@/components/ui/use-toast';
-import { Search, ArrowLeft, Store, FileText, DollarSign } from 'lucide-react';
+import { Search, ArrowLeft, Store, FileText, DollarSign, CheckCircle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { listProducts } from '@/lib/products';
 import { useAuth } from '@/contexts/AuthContext';
-import { getOrCreateComandaBalcao, criarComandaBalcao, listarItensDaComanda, adicionarItem, listarFinalizadoras, registrarPagamento, fecharComandaEMesa, listarClientes, adicionarClientesAComanda, atualizarQuantidadeItem, removerItem } from '@/lib/store';
+import { getOrCreateComandaBalcao, criarComandaBalcao, listarItensDaComanda, adicionarItem, listarFinalizadoras, registrarPagamento, fecharComandaEMesa, listarClientes, adicionarClientesAComanda, atualizarQuantidadeItem, removerItem, listarClientesDaComanda } from '@/lib/store';
 
 const pageVariants = { hidden: { opacity: 0 }, visible: { opacity: 1, transition: { staggerChildren: 0.1 } } };
 const itemVariants = { hidden: { opacity: 0, y: 20 }, visible: { opacity: 1, y: 0, transition: { duration: 0.5 } } };
@@ -24,6 +24,7 @@ export default function BalcaoPage() {
   const [products, setProducts] = useState([]);
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [customerName, setCustomerName] = useState('');
 
   // Pagamento
   const [isPayOpen, setIsPayOpen] = useState(false);
@@ -37,6 +38,7 @@ export default function BalcaoPage() {
   const [clients, setClients] = useState([]);
   const [selectedClientIds, setSelectedClientIds] = useState([]);
   const [linking, setLinking] = useState(false);
+  const [showClientBox, setShowClientBox] = useState(true);
 
   const loadAll = async () => {
     try {
@@ -46,6 +48,12 @@ export default function BalcaoPage() {
       setComandaId(c.id);
       const itens = await listarItensDaComanda({ comandaId: c.id, codigoEmpresa: userProfile?.codigo_empresa });
       setItems((itens || []).map((it) => ({ id: it.id, name: it.descricao || 'Item', price: Number(it.preco_unitario || 0), quantity: Number(it.quantidade || 1) })));
+      // Carrega cliente(s) vinculados
+      try {
+        const vincs = await listarClientesDaComanda({ comandaId: c.id, codigoEmpresa: userProfile?.codigo_empresa });
+        const nomes = (vincs || []).map(v => v?.nome).filter(Boolean);
+        setCustomerName(nomes.length ? nomes.join(', ') : '');
+      } catch { setCustomerName(''); }
       try { const prods = await listProducts({ includeInactive: false }); setProducts(prods || []); } catch { setProducts([]); }
     } catch (e) {
       toast({ title: 'Falha ao carregar Modo Balcão', description: e?.message || 'Tente novamente', variant: 'destructive' });
@@ -61,7 +69,7 @@ export default function BalcaoPage() {
     const t = setTimeout(async () => {
       if (clientMode !== 'cadastrado') { setClients([]); return; }
       try {
-        const rows = await listarClientes({ searchTerm: clientSearch, limit: 20 });
+        const rows = await listarClientes({ searchTerm: clientSearch, limit: 20, codigoEmpresa: userProfile?.codigo_empresa });
         if (!active) return;
         setClients(rows || []);
       } catch { if (active) setClients([]); }
@@ -113,7 +121,7 @@ export default function BalcaoPage() {
       }
       const fin = payMethods.find(m => m.id === selectedPayId);
       const metodo = fin?.tipo || null; // enum esperado pelo banco
-      await registrarPagamento({ comandaId, finalizadoraId: selectedPayId, metodo, valor: total, status: 'Pago', codigoEmpresa: userProfile?.codigo_empresa });
+      await registrarPagamento({ comandaId, finalizadoraId: selectedPayId, metodo, valor: total, codigoEmpresa: userProfile?.codigo_empresa });
       await fecharComandaEMesa({ comandaId, codigoEmpresa: userProfile?.codigo_empresa });
       // Abre nova comanda de balcão para próxima venda
       const c = await getOrCreateComandaBalcao({ codigoEmpresa: userProfile?.codigo_empresa });
@@ -174,14 +182,17 @@ export default function BalcaoPage() {
           <div className="p-4 border-b border-border flex items-center justify-between">
             <div>
               <div className="text-sm text-text-secondary">Comanda</div>
-              <div className="text-lg font-bold">Balcão</div>
+              <div className="text-lg font-bold">Balcão{customerName ? ` • ${customerName}` : ''}</div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button size="sm" variant="outline" onClick={() => setShowClientBox((v) => !v)}>{showClientBox ? 'Ocultar Cliente' : 'Mostrar Cliente'}</Button>
             </div>
           </div>
           <div className="flex-1 overflow-y-auto p-4 thin-scroll">
             {items.length === 0 ? (
               <div className="text-center text-text-muted pt-16">Comanda vazia. Adicione produtos ao lado.</div>
             ) : (
-              <ul className="space-y-2">
+              <ul className="space-y-2 pr-1">
                 {items.map(it => (
                   <li key={it.id} className="flex items-center justify-between gap-3">
                     <div className="min-w-0 flex-1">
@@ -214,53 +225,57 @@ export default function BalcaoPage() {
             )}
           </div>
           <div className="p-4 border-t border-border">
-            <div className="mb-3">
-              <div className="flex gap-2 mb-2">
-                <Button type="button" variant={clientMode === 'cadastrado' ? 'default' : 'outline'} onClick={() => setClientMode('cadastrado')}>Cliente cadastrado</Button>
-                <Button type="button" variant={clientMode === 'consumidor' ? 'default' : 'outline'} onClick={() => setClientMode('consumidor')}>Consumidor</Button>
-              </div>
-              {clientMode === 'cadastrado' && (
-                <div>
-                  <Label className="mb-1 block">Buscar cliente</Label>
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted" />
-                    <Input placeholder="Nome, e-mail, telefone ou código" className="pl-9" value={clientSearch} onChange={(e) => setClientSearch(e.target.value)} />
-                  </div>
-                  <div className="mt-2 max-h-36 overflow-auto border rounded-md thin-scroll">
-                    <ul>
-                      {(clients || []).map(c => {
-                        const active = selectedClientIds.includes(c.id);
-                        return (
-                          <li key={c.id} className={`p-2 flex items-center justify-between cursor-pointer hover:bg-surface-2 ${active ? 'bg-surface-2' : ''}`} onClick={() => setSelectedClientIds(prev => prev.includes(c.id) ? prev.filter(id => id !== c.id) : [...prev, c.id])}>
+            {showClientBox && (
+              <div className="mb-3">
+                <div className="flex gap-2 mb-2">
+                  <Button type="button" variant={clientMode === 'cadastrado' ? 'default' : 'outline'} onClick={() => setClientMode('cadastrado')}>Cliente cadastrado</Button>
+                  <Button type="button" variant={clientMode === 'consumidor' ? 'default' : 'outline'} onClick={() => setClientMode('consumidor')}>Consumidor</Button>
+                </div>
+                {clientMode === 'cadastrado' && (
+                  <div>
+                    <Label className="mb-1 block">Buscar cliente</Label>
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted" />
+                      <Input placeholder="Nome, e-mail, telefone ou código" className="pl-9" value={clientSearch} onChange={(e) => setClientSearch(e.target.value)} />
+                    </div>
+                    <div className="mt-2 max-h-36 overflow-auto border rounded-md thin-scroll">
+                      <ul>
+                        {(clients || []).map(c => (
+                          <li key={c.id} className="p-2 flex items-center justify-between cursor-pointer hover:bg-surface-2" onClick={async () => {
+                            try {
+                              setLinking(true);
+                              await adicionarClientesAComanda({ comandaId, clienteIds: [c.id], nomesLivres: [], codigoEmpresa: userProfile?.codigo_empresa });
+                              setSelectedClientIds([]);
+                              setClientSearch('');
+                              setClients([]); // fecha visualmente a lista
+                              try {
+                                const vincs = await listarClientesDaComanda({ comandaId, codigoEmpresa: userProfile?.codigo_empresa });
+                                const nomes = (vincs || []).map(v => v?.nome).filter(Boolean);
+                                setCustomerName(nomes.length ? nomes.join(', ') : '');
+                              } catch { setCustomerName(''); }
+                              toast({ title: 'Cliente associado', variant: 'success' });
+                            } catch (e) {
+                              toast({ title: 'Falha ao associar cliente', description: e?.message || 'Tente novamente', variant: 'destructive' });
+                            } finally {
+                              setLinking(false);
+                            }
+                          }}>
                             <div>
                               <div className="font-medium">{c.nome}</div>
                               <div className="text-xs text-text-muted">{c.email || '—'} {c.telefone ? `• ${c.telefone}` : ''}</div>
                             </div>
-                            {active && <span className="text-xs text-success">Selecionado</span>}
+                            <CheckCircle size={16} className="text-success opacity-0 group-hover:opacity-100" />
                           </li>
-                        );
-                      })}
-                      {(!clients || clients.length === 0) && (
-                        <li className="p-2 text-sm text-text-muted">Nenhum cliente encontrado.</li>
-                      )}
-                    </ul>
+                        ))}
+                        {(!clients || clients.length === 0) && (
+                          <li className="p-2 text-sm text-text-muted">Nenhum cliente encontrado.</li>
+                        )}
+                      </ul>
+                    </div>
                   </div>
-                </div>
-              )}
-              <div className="mt-2 flex justify-end">
-                <Button variant="secondary" disabled={linking || !comandaId} onClick={async () => {
-                  try {
-                    setLinking(true);
-                    const clienteIds = clientMode === 'cadastrado' ? Array.from(new Set(selectedClientIds || [])) : [];
-                    await adicionarClientesAComanda({ comandaId, clienteIds, nomesLivres: [], codigoEmpresa: userProfile?.codigo_empresa });
-                    setSelectedClientIds([]);
-                    toast({ title: 'Cliente associado', variant: 'success' });
-                  } catch (e) {
-                    toast({ title: 'Falha ao associar cliente', description: e?.message || 'Tente novamente', variant: 'destructive' });
-                  } finally { setLinking(false); }
-                }}>Associar Cliente</Button>
+                )}
               </div>
-            </div>
+            )}
             <div className="flex justify-between items-center text-lg font-bold mb-3">
               <span>Total</span>
               <span>R$ {total.toFixed(2)}</span>
