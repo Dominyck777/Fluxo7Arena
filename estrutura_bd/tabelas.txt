@@ -6507,6 +6507,124 @@ begin
   begin execute $$create trigger zz_comandas_touch before update on public.comandas for each row execute function public.comandas_set_updated_at()$$; exception when others then null; end;
 end$$;
 
+-- ============================
+-- ATUALIZAÇÕES APLICADAS (v2.2)
+-- Data: 2025-09-10
+-- Motivo: Padronizar colunas de status e corrigir baixa de estoque idempotente
+-- Observação: Blocos idempotentes (safe to run multiple times)
+
+-- 1) Padronização de status em public.comandas
+--    - Usar TEXT e default 'open'
+--    - Impedir valor vazio
+do $$
+begin
+  -- Se a coluna existir, garantir tipo TEXT e default 'open'
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema='public' and table_name='comandas' and column_name='status'
+  ) then
+    alter table public.comandas alter column status drop default;
+    alter table public.comandas alter column status type text using status::text;
+    update public.comandas set status = 'open' where status is null or btrim(status) = '';
+    alter table public.comandas alter column status set default 'open';
+    -- CHECK para evitar string vazia
+    begin
+      alter table public.comandas add constraint chk_comandas_status_not_empty check (btrim(status) <> '');
+    exception when duplicate_object then null; end;
+  end if;
+end$$;
+
+-- 2) Padronização de status em public.pagamentos
+--    - Usar TEXT NOT NULL default 'Pago'
+do $$
+begin
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema='public' and table_name='pagamentos' and column_name='status'
+  ) then
+    alter table public.pagamentos alter column status drop default;
+    alter table public.pagamentos alter column status type text using status::text;
+    update public.pagamentos set status = 'Pago' where status is null or btrim(status) = '';
+    alter table public.pagamentos alter column status set default 'Pago';
+    alter table public.pagamentos alter column status set not null;
+    begin
+      alter table public.pagamentos add constraint chk_pagamentos_status_not_empty check (btrim(status) <> '');
+    exception when duplicate_object then null; end;
+  end if;
+end$$;
+
+-- 3) Log de baixa de estoque para idempotência
+--    Impede a mesma comanda/item de baixar estoque mais de uma vez
+create table if not exists public.comanda_baixa_estoque_log (
+  id uuid primary key default gen_random_uuid(),
+  codigo_empresa varchar(10) not null,
+  comanda_id uuid not null,
+  item_id uuid not null,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_baixa_log_empresa on public.comanda_baixa_estoque_log(codigo_empresa);
+create unique index if not exists uq_baixa_log_empresa_comanda_item on public.comanda_baixa_estoque_log(codigo_empresa, comanda_id, item_id);
+
+-- 4) Função de baixa de estoque (idempotente) e trigger
+--    - Dispara APÓS UPDATE em public.comandas
+--    - Condição: quando fechado_em muda de null -> não-null
+--    - Não altera NEW.status
+create or replace function public.trg_comandas_baixar_estoque()
+returns trigger
+language plpgsql
+as $$
+declare
+  v_codigo varchar(10);
+begin
+  -- roda apenas quando fechando a comanda
+  if (TG_OP = 'UPDATE') and (OLD.fechado_em is null) and (NEW.fechado_em is not null) then
+    -- tentar obter codigo_empresa a partir dos itens (ou da própria comanda, se existir a coluna)
+    begin
+      select ci.codigo_empresa into v_codigo
+      from public.comanda_itens ci
+      where ci.comanda_id = NEW.id
+      limit 1;
+    exception when others then v_codigo := null; end;
+
+    -- percorre itens e baixa estoque somente se não existir log
+    for record in (
+      select ci.id as item_id, ci.produto_id, coalesce(ci.quantidade,0) as qty, ci.codigo_empresa as cod
+      from public.comanda_itens ci
+      where ci.comanda_id = NEW.id
+    ) loop
+      begin
+        insert into public.comanda_baixa_estoque_log (codigo_empresa, comanda_id, item_id)
+        values (coalesce(record.cod, v_codigo), NEW.id, record.item_id)
+        on conflict (codigo_empresa, comanda_id, item_id) do nothing;
+
+        if found then
+          -- só baixa estoque na primeira vez
+          update public.produtos
+            set estoque = coalesce(estoque,0) - coalesce(record.qty,0)
+          where id = record.produto_id;
+        end if;
+      exception when others then
+        -- não interrompe o fechamento se algum produto não existir
+        null;
+      end;
+    end loop;
+  end if;
+  return NEW;
+end$$;
+
+do $$
+begin
+  -- re-criar trigger de forma idempotente
+  begin
+    drop trigger if exists trg_baixa_estoque_on_close on public.comandas;
+  exception when others then null; end;
+  create trigger trg_baixa_estoque_on_close
+  after update on public.comandas
+  for each row
+  execute function public.trg_comandas_baixar_estoque();
+end$$;
+
+
 -- 2) COMANDA_ITENS
 do $$
 begin
