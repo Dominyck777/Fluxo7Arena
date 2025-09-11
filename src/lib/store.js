@@ -67,8 +67,17 @@ export async function listarComandas({ status, from, to, search = '', limit = 50
 
   if (codigo) q = q.eq('codigo_empresa', codigo)
 
-  if (status && Array.isArray(status) && status.length) q = q.in('status', status)
-  else if (typeof status === 'string') q = q.eq('status', status)
+  if (status && Array.isArray(status) && status.length) {
+    q = q.in('status', status)
+  } else if (typeof status === 'string') {
+    if (status === 'closed') {
+      // Considera como fechadas tanto as com status 'closed' quanto as que possuem fechado_em preenchido
+      // PostgREST OR syntax
+      q = q.or('status.eq.closed,fechado_em.not.is.null')
+    } else {
+      q = q.eq('status', status)
+    }
+  }
 
   const mkStart = (d) => {
     if (!d) return null
@@ -346,7 +355,6 @@ export async function listarClientesDaComanda({ comandaId, codigoEmpresa } = {})
     .select('id, cliente_id, nome_livre, clientes:cliente_id(id, nome, email, telefone)')
     .eq('comanda_id', comandaId)
     .order('created_at', { ascending: true })
-  if (codigo) q = q.eq('codigo_empresa', codigo)
   const { data, error } = await q
   if (error) throw error
   return (data || []).map(r => ({ id: r.id, tipo: r.cliente_id ? 'cadastrado' : 'comum', nome: r.clientes?.nome || r.nome_livre, cliente_id: r.cliente_id }))
@@ -512,26 +520,29 @@ export async function fecharComandaEMesa({ comandaId, codigoEmpresa }) {
   const codigo = codigoEmpresa || getCachedCompanyCode()
   // Obter mesa da comanda
   let q = supabase.from('comandas').select('id, mesa_id, status').eq('id', comandaId).limit(1)
-  if (codigo) q = q.eq('codigo_empresa', codigo)
   const { data: cmd, error: errCmd } = await q
   if (errCmd) throw errCmd
   const comanda = cmd?.[0]
   if (!comanda) throw new Error('Comanda não encontrada')
 
-  // HOTFIX: há uma trigger no banco que volta a escrever status inválido ("") ao atualizar comandas.
-  // Para não quebrar a UI, não alteramos mais o status aqui; apenas tentamos registrar o fechado_em
-  // e, em caso de erro, ignoramos e seguimos para liberar a mesa.
+  // Tenta fechar marcando status='closed' e registrando fechado_em. Se der erro (ex.: trigger conflitante),
+  // faz fallback para atualizar somente fechado_em para que entre no histórico.
   try {
-    let qClose = supabase.from('comandas').update({ fechado_em: new Date().toISOString() }).eq('id', comandaId)
-    if (codigo) qClose = qClose.eq('codigo_empresa', codigo)
-    const { error: errClose } = await qClose.select('id').single()
-    if (errClose) { /* eslint-disable-next-line no-console */ try { console.warn('[fecharComandaEMesa] fechamento parcial (ignorado):', errClose); } catch {} }
+    const nowIso = new Date().toISOString()
+    // 1) tentar fechar com status + fechado_em (sem filtrar por codigo_empresa; RLS garante segurança)
+    let qClose = supabase.from('comandas').update({ status: 'closed', fechado_em: nowIso }).eq('id', comandaId)
+    const { error: errCloseFull } = await qClose.select('id').single()
+    if (errCloseFull) {
+      // 2) fallback: somente fechado_em
+      let qClosePartial = supabase.from('comandas').update({ fechado_em: nowIso }).eq('id', comandaId)
+      const { error: errClosePartial } = await qClosePartial.select('id').single()
+      if (errClosePartial) { /* eslint-disable-next-line no-console */ try { console.warn('[fecharComandaEMesa] fechamento parcial falhou:', errClosePartial); } catch {} }
+    }
   } catch (e) { /* eslint-disable-next-line no-console */ try { console.warn('[fecharComandaEMesa] exceção ao fechar (ignorado):', e); } catch {} }
 
   // Marcar mesa como disponível
   if (comanda.mesa_id) {
     let qm = supabase.from('mesas').update({ status: 'available' }).eq('id', comanda.mesa_id)
-    if (codigo) qm = qm.eq('codigo_empresa', codigo)
     const { error: errMesa } = await qm.select('id').single()
     if (errMesa) throw errMesa
   }

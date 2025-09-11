@@ -73,6 +73,8 @@ export default function HistoricoComandasPage() {
       } catch {}
       const withTotals = (list || []).map(r => ({
         ...r,
+        // status derivado: se existe fechado_em, considerar 'closed' para exibição/filtragem
+        statusDerived: r.fechado_em ? 'closed' : (r.status || 'open'),
         total: Number(totals[r.id] || 0),
         mesaNumero: mapMesaNumero.get(r.mesa_id),
         clientesStr: namesByComanda[r.id] || '',
@@ -122,7 +124,7 @@ export default function HistoricoComandasPage() {
     // 3) Aplica busca textual adicional
     return byTipo.filter(r => {
       const mesaTxt = (r.mesaNumero != null ? String(r.mesaNumero) : '').toLowerCase();
-      const statusTxt = (r.status || '').toLowerCase();
+      const statusTxt = (r.statusDerived || r.status || '').toLowerCase();
       const clientesTxt = (r.clientesStr || '').toLowerCase();
       const tipoTxt = (r.mesa_id == null) ? 'balcao' : 'comanda';
       return mesaTxt.includes(term) || statusTxt.includes(term) || clientesTxt.includes(term) || tipoTxt.includes(term);
@@ -247,8 +249,8 @@ export default function HistoricoComandasPage() {
                   <td className="px-4 py-2">{r.mesa_id == null ? 'Balcão' : 'Comanda'}</td>
                   <td className="px-4 py-2 truncate max-w-[260px]">{r.clientesStr || '—'}</td>
                   <td className="px-4 py-2">
-                    <span className={cn("inline-flex items-center text-[11px] font-medium px-2 py-0.5 rounded-full border", statusBadgeClass(r.status))}>
-                      {statusPt(r.status)}
+                    <span className={cn("inline-flex items-center text-[11px] font-medium px-2 py-0.5 rounded-full border", statusBadgeClass(r.statusDerived || r.status))}>
+                      {statusPt(r.statusDerived || r.status)}
                     </span>
                   </td>
                   <td className="px-4 py-2 truncate max-w-[220px]">{r.finalizadorasStr || '—'}</td>
