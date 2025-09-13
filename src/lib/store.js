@@ -339,6 +339,13 @@ export async function getOrCreateComandaForMesa({ mesaId, codigoEmpresa } = {}) 
 export async function adicionarClientesAComanda({ comandaId, clienteIds = [], nomesLivres = [], codigoEmpresa } = {}) {
   const codigo = codigoEmpresa || getCachedCompanyCode()
   if (!comandaId) throw new Error('comandaId é obrigatório')
+  
+  // Primeiro, limpar clientes existentes da comanda para evitar duplicatas
+  let deleteQuery = supabase.from('comanda_clientes').delete().eq('comanda_id', comandaId)
+  if (codigo) deleteQuery = deleteQuery.eq('codigo_empresa', codigo)
+  const { error: deleteError } = await deleteQuery
+  if (deleteError) throw deleteError
+  
   const rows = []
   for (const id of (clienteIds || [])) rows.push({ comanda_id: comandaId, cliente_id: id })
   for (const nome of (nomesLivres || [])) {

@@ -158,29 +158,13 @@ function VendasPage() {
           return { id: m.id, number: m.numero, name: m.nome || null, status, order: [], customer, comandaId, totalHint };
         });
         if (!mountedRef.current) return;
-        // Mescla com estado anterior para não perder o customer exibido no card
-        let mergedForCache = uiTables;
-        setTables((prev) => {
-          if (!Array.isArray(prev) || prev.length === 0) return uiTables;
-          const byIdPrev = new Map(prev.map(t => [t.id, t]));
-          const merged = uiTables.map(nt => {
-            const old = byIdPrev.get(nt.id);
-            if (!old) return nt;
-            return {
-              ...nt,
-              // preserva somente se ainda há comanda
-              customer: nt.comandaId ? (nt.customer != null ? nt.customer : old.customer || null) : null,
-              order: nt.comandaId ? (old.order || nt.order || []) : [],
-            };
-          });
-          mergedForCache = merged;
-          return merged;
-        });
-        try { if (cacheKey) localStorage.setItem(cacheKey, JSON.stringify(mergedForCache)); } catch {}
+        // Usar dados frescos do banco sem mesclar com estado anterior
+        setTables(uiTables);
+        try { if (cacheKey) localStorage.setItem(cacheKey, JSON.stringify(uiTables)); } catch {}
         setSelectedTable((prev) => {
           if (!prev) return uiTables[0] || null;
           const found = uiTables.find(t => t.id === prev.id);
-          return found ? { ...found, order: prev.order || [], customer: prev.customer || found.customer || null } : (uiTables[0] || null);
+          return found || (uiTables[0] || null);
         });
         try {
           const sessao = await ensureCaixaAberto({ saldoInicial: 0, codigoEmpresa });
@@ -384,7 +368,12 @@ function VendasPage() {
         setTables((prev) => prev.map((t) => (t.id === selectedTable.id ? { ...t, status: 'available', order: [], comandaId: null, customer: null, totalHint: 0 } : t)));
         setSelectedTable((prev) => prev ? { ...prev, status: 'available', order: [], comandaId: null, customer: null, totalHint: 0 } : prev);
         // força refresh leve para evitar que mesa volte a 'em uso' por cache antigo
-        try { if (userProfile?.codigo_empresa) localStorage.removeItem(`vendas:tables:${userProfile.codigo_empresa}`); } catch {}
+        try { 
+          if (userProfile?.codigo_empresa) {
+            localStorage.removeItem(`vendas:tables:${userProfile.codigo_empresa}`);
+            localStorage.clear(); // Limpa todo o localStorage para evitar dados antigos
+          }
+        } catch {}
         await refreshTablesLight();
         toast({ title: 'Pagamento registrado', description: `Total R$ ${total.toFixed(2)}`, variant: 'success' });
         setIsPayOpen(false);
@@ -567,7 +556,12 @@ function VendasPage() {
                       const updated = { ...table, status: 'available', order: [], comandaId: null, customer: null, totalHint: 0 };
                       setSelectedTable(updated);
                       setTables((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
-                      try { if (userProfile?.codigo_empresa) localStorage.removeItem(`vendas:tables:${userProfile.codigo_empresa}`); } catch {}
+                      try { 
+                        if (userProfile?.codigo_empresa) {
+                          localStorage.removeItem(`vendas:tables:${userProfile.codigo_empresa}`);
+                          localStorage.clear(); // Limpa todo o localStorage para evitar dados antigos
+                        }
+                      } catch {}
                       await refreshTablesLight();
                       toast({ title: 'Mesa liberada', variant: 'success' });
                     } catch (e) {
