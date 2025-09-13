@@ -1389,31 +1389,99 @@ create policy finalizadoras_delete_company on public.finalizadoras
 
 grant select, insert, update, delete on table public.finalizadoras to authenticated;
 
--- 2) PAGAMENTOS
+-- 4) PAGAMENTOS
 alter table if exists public.pagamentos enable row level security;
 
 drop policy if exists pagamentos_select_company on public.pagamentos;
 create policy pagamentos_select_company on public.pagamentos
   as permissive for select to authenticated
-  using (codigo_empresa = public.get_my_company_code());
+  using (codigo_empresa = public.get_my_company_code() or
+         exists (select 1 from public.comandas c where c.id = comanda_id and c.codigo_empresa = public.get_my_company_code()));
 
 drop policy if exists pagamentos_insert_company on public.pagamentos;
 create policy pagamentos_insert_company on public.pagamentos
   as permissive for insert to authenticated
-  with check (codigo_empresa = public.get_my_company_code());
+  with check (codigo_empresa = public.get_my_company_code() or
+              exists (select 1 from public.comandas c where c.id = comanda_id and c.codigo_empresa = public.get_my_company_code()));
 
 drop policy if exists pagamentos_update_company on public.pagamentos;
 create policy pagamentos_update_company on public.pagamentos
   as permissive for update to authenticated
-  using (codigo_empresa = public.get_my_company_code())
-  with check (codigo_empresa = public.get_my_company_code());
+  using (codigo_empresa = public.get_my_company_code() or
+         exists (select 1 from public.comandas c where c.id = comanda_id and c.codigo_empresa = public.get_my_company_code()))
+  with check (codigo_empresa = public.get_my_company_code() or
+              exists (select 1 from public.comandas c where c.id = comanda_id and c.codigo_empresa = public.get_my_company_code()));
 
 drop policy if exists pagamentos_delete_company on public.pagamentos;
 create policy pagamentos_delete_company on public.pagamentos
   as permissive for delete to authenticated
-  using (codigo_empresa = public.get_my_company_code());
+  using (codigo_empresa = public.get_my_company_code() or
+         exists (select 1 from public.comandas c where c.id = comanda_id and c.codigo_empresa = public.get_my_company_code()));
 
 grant select, insert, update, delete on table public.pagamentos to authenticated;
+
+-- ============================
+-- FUNÇÃO E TRIGGERS PARA GARANTIR CÓDIGO_EMPRESA
+-- Data: 2025-09-12
+-- Descrição: Função e triggers para garantir que o código da empresa seja sempre definido
+-- ============================
+
+-- Função para definir o código da empresa se não estiver definido
+create or replace function public.set_codigo_empresa()
+returns trigger as $$
+begin
+  if new.codigo_empresa is null or new.codigo_empresa = '' then
+    new.codigo_empresa := public.get_my_company_code();
+  end if;
+  return new;
+end;
+$$ language plpgsql security definer;
+
+-- Aplicar a trigger às tabelas relevantes
+create or replace trigger trg_set_codigo_empresa_comandas
+before insert or update on public.comandas
+for each row execute function public.set_codigo_empresa();
+
+create or replace trigger trg_set_codigo_empresa_comanda_itens
+before insert or update on public.comanda_itens
+for each row execute function public.set_codigo_empresa();
+
+create or replace trigger trg_set_codigo_empresa_pagamentos
+before insert or update on public.pagamentos
+for each row execute function public.set_codigo_empresa();
+
+create or replace trigger trg_set_codigo_empresa_finalizadoras
+before insert or update on public.finalizadoras
+for each row execute function public.set_codigo_empresa();
+
+-- ============================
+-- CONSTRAINTS DE INTEGRIDADE
+-- Data: 2025-09-12
+-- Descrição: Garantir consistência referencial entre tabelas relacionadas
+-- ============================
+
+alter table public.comanda_itens
+  add constraint fk_comanda_itens_empresa
+  foreign key (comanda_id, codigo_empresa)
+  references public.comandas(id, codigo_empresa)
+  on delete cascade;
+
+alter table public.pagamentos
+  add constraint fk_pagamentos_empresa
+  foreign key (comanda_id, codigo_empresa)
+  references public.comandas(id, codigo_empresa)
+  on delete cascade;
+
+-- ============================
+-- PERMISSÕES ADICIONAIS
+-- Data: 2025-09-12
+-- Descrição: Garantir permissões mínimas necessárias
+-- ============================
+
+grant select on public.finalizadoras to anon;
+grant select on public.comandas to anon;
+grant select on public.comanda_itens to anon;
+grant select on public.pagamentos to anon;
 
 -- ============================
 -- POLÍTICAS RLS (v3.7)
@@ -1480,23 +1548,28 @@ alter table if exists public.comanda_itens enable row level security;
 drop policy if exists comanda_itens_select_company on public.comanda_itens;
 create policy comanda_itens_select_company on public.comanda_itens
   as permissive for select to authenticated
-  using (codigo_empresa = public.get_my_company_code());
+  using (codigo_empresa = public.get_my_company_code() or
+         exists (select 1 from public.comandas c where c.id = comanda_id and c.codigo_empresa = public.get_my_company_code()));
 
 drop policy if exists comanda_itens_insert_company on public.comanda_itens;
 create policy comanda_itens_insert_company on public.comanda_itens
   as permissive for insert to authenticated
-  with check (codigo_empresa = public.get_my_company_code());
+  with check (codigo_empresa = public.get_my_company_code() or
+              exists (select 1 from public.comandas c where c.id = comanda_id and c.codigo_empresa = public.get_my_company_code()));
 
 drop policy if exists comanda_itens_update_company on public.comanda_itens;
 create policy comanda_itens_update_company on public.comanda_itens
   as permissive for update to authenticated
-  using (codigo_empresa = public.get_my_company_code())
-  with check (codigo_empresa = public.get_my_company_code());
+  using (codigo_empresa = public.get_my_company_code() or
+         exists (select 1 from public.comandas c where c.id = comanda_id and c.codigo_empresa = public.get_my_company_code()))
+  with check (codigo_empresa = public.get_my_company_code() or
+              exists (select 1 from public.comandas c where c.id = comanda_id and c.codigo_empresa = public.get_my_company_code()));
 
 drop policy if exists comanda_itens_delete_company on public.comanda_itens;
 create policy comanda_itens_delete_company on public.comanda_itens
   as permissive for delete to authenticated
-  using (codigo_empresa = public.get_my_company_code());
+  using (codigo_empresa = public.get_my_company_code() or
+         exists (select 1 from public.comandas c where c.id = comanda_id and c.codigo_empresa = public.get_my_company_code()));
 
 grant select, insert, update, delete on table public.comanda_itens to authenticated;
 

@@ -6645,6 +6645,56 @@ begin
   begin execute $$create index if not exists idx_comanda_itens_produto on public.comanda_itens (produto_id)$$; exception when others then null; end;
 end$$;
 
+-- 9) PERMISSÕES ADICIONAIS
+-- Garantir permissões para o usuário anônimo (se aplicável)
+grant select on public.finalizadoras to anon;
+grant select on public.comandas to anon;
+grant select on public.comanda_itens to anon;
+grant select on public.pagamentos to anon;
+
+-- 10) CORREÇÃO DEFINITIVA PARA STATUS INVÁLIDOS (ENUM)
+-- Abordagem simples: remover enum e usar TEXT com constraint
+drop table if exists comandas_backup;
+create table comandas_backup as select * from public.comandas;
+
+-- Remover a coluna status problemática
+alter table public.comandas drop column if exists status cascade;
+
+-- Recriar como TEXT com default
+alter table public.comandas add column status text not null default 'open';
+
+-- Restaurar dados com status válido
+update public.comandas 
+set status = coalesce(
+  case 
+    when b.status::text in ('open', 'closed', 'cancelled') then b.status::text
+    else 'open'
+  end, 
+  'open'
+)
+from comandas_backup b 
+where comandas.id = b.id;
+
+-- Adicionar constraint para valores válidos
+alter table public.comandas add constraint chk_comandas_status_valid 
+check (status in ('open', 'closed', 'cancelled'));
+
+-- Função RPC para corrigir status inválidos individualmente
+create or replace function public.fix_invalid_comanda_status(target_comanda_id uuid)
+returns void as $$
+begin
+  update public.comandas 
+  set status = 'open'
+  where id = target_comanda_id 
+    and (status is null or status = '' or status not in ('open', 'closed', 'cancelled'));
+end;
+$$ language plpgsql security definer;
+
+grant execute on function public.fix_invalid_comanda_status(uuid) to authenticated;
+
+-- Limpar backup
+drop table if exists comandas_backup;
+
 -- 3) COMANDA_CLIENTES
 do $$
 begin

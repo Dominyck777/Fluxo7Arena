@@ -155,7 +155,11 @@ export async function listarClientes({ searchTerm = '', limit = 20, codigoEmpres
 // Lista comandas abertas (open/awaiting-payment)
 export async function listarComandasAbertas({ codigoEmpresa } = {}) {
   const codigo = codigoEmpresa || getCachedCompanyCode()
-  let q = supabase.from('comandas').select('id, mesa_id, status, aberto_em').in('status', ['open','awaiting-payment'])
+  let q = supabase
+    .from('comandas')
+    .select('id, mesa_id, status, aberto_em, fechado_em')
+    .in('status', ['open','awaiting-payment'])
+    .is('fechado_em', null)
   if (codigo) q = q.eq('codigo_empresa', codigo)
   const { data, error } = await q
   if (error) throw error
@@ -295,8 +299,9 @@ export async function listarComandaDaMesa({ mesaId, codigoEmpresa }) {
   const codigo = codigoEmpresa || getCachedCompanyCode()
   let q = supabase
     .from('comandas')
-    .select('id,status,aberto_em')
+    .select('id,status,aberto_em,fechado_em')
     .eq('mesa_id', mesaId)
+    .is('fechado_em', null)
     .in('status', ['open','awaiting-payment'])
     .order('aberto_em', { ascending: false })
     .limit(1)
@@ -350,14 +355,36 @@ export async function adicionarClientesAComanda({ comandaId, clienteIds = [], no
 export async function listarClientesDaComanda({ comandaId, codigoEmpresa } = {}) {
   const codigo = codigoEmpresa || getCachedCompanyCode()
   if (!comandaId) throw new Error('comandaId é obrigatório')
-  let q = supabase
-    .from('comanda_clientes')
-    .select('id, cliente_id, nome_livre, clientes:cliente_id(id, nome, email, telefone)')
-    .eq('comanda_id', comandaId)
-    .order('created_at', { ascending: true })
-  const { data, error } = await q
-  if (error) throw error
-  return (data || []).map(r => ({ id: r.id, tipo: r.cliente_id ? 'cadastrado' : 'comum', nome: r.clientes?.nome || r.nome_livre, cliente_id: r.cliente_id }))
+  // Tentativa 1: relação qualificada pelo nome padrão gerado (comanda_clientes_cliente_id_fkey)
+  try {
+    const { data, error } = await supabase
+      .from('comanda_clientes')
+      .select('id, cliente_id, nome_livre, clientes:clientes!comanda_clientes_cliente_id_fkey(id, nome, email, telefone)')
+      .eq('comanda_id', comandaId)
+      .order('created_at', { ascending: true })
+    if (error) throw error
+    return (data || []).map(r => ({ id: r.id, tipo: r.cliente_id ? 'cadastrado' : 'comum', nome: r.clientes?.nome || r.nome_livre, cliente_id: r.cliente_id }))
+  } catch (e1) {
+    // Se for ambiguidade (PGRST201) ou relação não encontrada, tenta relacionamento alternativo
+    try {
+      const { data, error } = await supabase
+        .from('comanda_clientes')
+        .select('id, cliente_id, nome_livre, clientes:clientes!fk_comanda_clientes_cliente(id, nome, email, telefone)')
+        .eq('comanda_id', comandaId)
+        .order('created_at', { ascending: true })
+      if (error) throw error
+      return (data || []).map(r => ({ id: r.id, tipo: r.cliente_id ? 'cadastrado' : 'comum', nome: r.clientes?.nome || r.nome_livre, cliente_id: r.cliente_id }))
+    } catch (e2) {
+      // Último fallback: retornar sem embed (evita quebrar UI)
+      const { data, error } = await supabase
+        .from('comanda_clientes')
+        .select('id, cliente_id, nome_livre')
+        .eq('comanda_id', comandaId)
+        .order('created_at', { ascending: true })
+      if (error) throw error
+      return (data || []).map(r => ({ id: r.id, tipo: r.cliente_id ? 'cadastrado' : 'comum', nome: r.nome_livre || '', cliente_id: r.cliente_id }))
+    }
+  }
 }
 
 // Itens (depende de tabela 'produtos' existir)
@@ -404,24 +431,67 @@ export async function listarFinalizadoras({ somenteAtivas = true, codigoEmpresa 
   try { console.group(trace); } catch {}
   try { console.time?.(trace); } catch {}
   try { console.log('start', { codigoEmpresa: codigo || null, somenteAtivas }); } catch {}
-  const buildQuery = () => {
-    let q = supabase.from('finalizadoras').select('*').order('nome', { ascending: true })
-    if (codigo) q = q.eq('codigo_empresa', codigo)
-    if (somenteAtivas) q = q.eq('ativo', true)
-    return q
+  
+  // Debug: verificar se há finalizadoras sem filtros primeiro
+  try {
+    const { data: allFins, error: allError } = await supabase
+      .from('finalizadoras')
+      .select('*')
+      .limit(5)
+    console.log('[DEBUG] Finalizadoras sem filtros:', { count: allFins?.length || 0, error: allError, data: allFins })
+  } catch (debugErr) {
+    console.error('[DEBUG] Erro ao buscar finalizadoras sem filtros:', debugErr)
   }
+  
+  const buildQuery = () => {
+    try {
+      let q = supabase.from('finalizadoras').select('*').order('nome', { ascending: true })
+      if (codigo) q = q.eq('codigo_empresa', codigo)
+      if (somenteAtivas) q = q.eq('ativo', true)
+      return q
+    } catch (err) {
+      console.error('[listarFinalizadoras] Error building query:', err)
+      throw err
+    }
+  }
+
   const executeWithTimeout = async (ms = 6000) => {
     const controller = new AbortController()
-    const timer = setTimeout(() => { try { controller.abort(); } catch {} }, ms)
+    const timer = setTimeout(() => { 
+      try { controller.abort(); } catch {} 
+    }, ms)
+    
     try {
-      const { data, error } = await buildQuery().abortSignal(controller.signal)
-      if (error) throw error
-      return data || []
+      const query = buildQuery()
+      console.log('[listarFinalizadoras] Executing query:', { 
+        table: 'finalizadoras',
+        filters: {
+          codigo_empresa: codigo,
+          ativo: somenteAtivas ? true : undefined
+        }
+      })
+      
+      const { data, error, status, statusText } = await query.abortSignal(controller.signal)
+      
+      if (error) {
+        console.error('[listarFinalizadoras] Query error:', { 
+          error,
+          status,
+          statusText,
+          message: error.message
+        })
+        throw error
+      }
+      
+      console.log('[listarFinalizadoras] Query successful, items found:', Array.isArray(data) ? data.length : 0)
+      return Array.isArray(data) ? data : []
+    } catch (err) {
+      console.error('[listarFinalizadoras] Error in executeWithTimeout:', err)
+      throw err
     } finally {
       clearTimeout(timer)
     }
   }
-  const slowWarn = setTimeout(() => { try { console.warn(trace + ' still waiting...'); } catch {} }, 4000)
   try {
     let data = await executeWithTimeout(6000)
     try { console.log('ok', { size: Array.isArray(data) ? data.length : (data ? 1 : 0) }); } catch {}
@@ -438,7 +508,6 @@ export async function listarFinalizadoras({ somenteAtivas = true, codigoEmpresa 
       throw err2
     }
   } finally {
-    clearTimeout(slowWarn)
     try { console.timeEnd?.(trace); } catch {}
     try { console.groupEnd?.(); } catch {}
   }
@@ -477,74 +546,169 @@ function isEnumError(err) {
   return code === '22P02' || msg.includes('invalid input value for enum');
 }
 
-export async function registrarPagamento({ comandaId, finalizadoraId, metodo, valor, status, codigoEmpresa }) {
+export async function registrarPagamento({ comandaId, finalizadoraId, metodo, valor, status = 'Pago', codigoEmpresa }) {
   const codigo = codigoEmpresa || getCachedCompanyCode()
-  // localizar caixa aberto
-  let q = supabase.from('caixa_sessoes').select('id').eq('status','open').order('aberto_em', { ascending: false }).limit(1)
-  if (codigo) q = q.eq('codigo_empresa', codigo)
-  const { data: sess, error: errS } = await q
-  if (errS) throw errS
-  const caixaId = sess?.[0]?.id || null
-
-  // Monta payload sem status por padrão para evitar conflitos com enums na base
-  const makePayload = (withStatus, statusOverride) => {
-    const base = { comanda_id: comandaId, caixa_id: caixaId, valor, recebido_em: new Date().toISOString() }
-    if (finalizadoraId) base.finalizadora_id = finalizadoraId
-    if (metodo) base.metodo = metodo
-    if (codigo) base.codigo_empresa = codigo
-    const s = statusOverride !== undefined ? statusOverride : status
-    if (withStatus && s) base.status = s
-    return base
+  if (!codigo) throw new Error('Empresa não identificada (codigo_empresa ausente).')
+  
+  // Garante que o status seja válido ou usa 'Pago' como padrão
+  const statusValido = (status && ['Pendente', 'Pago', 'Estornado', 'Cancelado'].includes(status)) 
+    ? status 
+    : 'Pago'
+  
+  const payload = {
+    comanda_id: comandaId,
+    finalizadora_id: finalizadoraId,
+    metodo: (metodo && typeof metodo === 'string' && metodo.trim()) ? metodo.trim() : 'outros',
+    valor: Math.max(0, Number(valor) || 0),
+    status: statusValido,
+    recebido_em: new Date().toISOString(),
+    codigo_empresa: codigo // Sempre inclui o código da empresa
   }
-  // 1ª tentativa: sem status
-  let { data, error } = await supabase.from('pagamentos').insert(makePayload(false)).select('*').single()
-  if (!error) return data
-  // 2ª tentativa: se NOT NULL em status, tenta com 'Pago'
-  if (isNotNullStatusError(error)) {
-    const fallbackStatus = status || 'Pago';
-    const res2 = await supabase.from('pagamentos').insert(makePayload(true, fallbackStatus)).select('*').single()
-    if (res2.error) throw res2.error
-    return res2.data
+  
+  console.log('[registrarPagamento] Iniciando registro de pagamento:', {
+    comandaId,
+    finalizadoraId,
+    valor: payload.valor,
+    status: payload.status,
+    codigoEmpresa: codigo
+  })
+  
+  try {
+    // Tenta inserir o pagamento diretamente primeiro
+    const { data, error } = await supabase
+      .from('pagamentos')
+      .insert(payload)
+      .select()
+      .single()
+    
+    if (error) throw error
+    return data
+  } catch (error) {
+    console.error('[registrarPagamento] Erro ao registrar pagamento:', {
+      error: {
+        message: error.message,
+        code: error.code,
+        details: error.details,
+        hint: error.hint
+      },
+      comandaId,
+      finalizadoraId,
+      valor: payload.valor,
+      status: payload.status,
+      codigoEmpresa: codigo
+    })
+    
+    // Se falhar, tenta uma abordagem mais simples sem o status
+    if (error.code === '22P02' || error.message?.includes('invalid input value for enum')) {
+      console.log('[registrarPagamento] Tentando abordagem alternativa sem status...')
+      try {
+        const simplePayload = { ...payload }
+        delete simplePayload.status // Remove o status para evitar problemas com o enum
+        
+        const { data, error: simpleError } = await supabase
+          .from('pagamentos')
+          .insert(simplePayload)
+          .select()
+          .single()
+        
+        if (simpleError) throw simpleError
+        console.log('[registrarPagamento] Pagamento registrado com sucesso (abordagem alternativa)')
+        return data
+      } catch (fallbackError) {
+        console.error('[registrarPagamento] Falha na abordagem alternativa:', fallbackError)
+        throw new Error(`Falha ao processar pagamento: ${fallbackError.message}`)
+      }
+    }
+    
+    throw error
   }
-  // 3ª tentativa: se houve erro que não é enum e temos status definido, tenta com status informado
-  if (!isEnumError(error) && status) {
-    const res3 = await supabase.from('pagamentos').insert(makePayload(true, status)).select('*').single()
-    if (res3.error) throw res3.error
-    return res3.data
-  }
-  throw error
 }
 
 // Fecha comanda e marca mesa como disponível
 export async function fecharComandaEMesa({ comandaId, codigoEmpresa }) {
   const codigo = codigoEmpresa || getCachedCompanyCode()
-  // Obter mesa da comanda
-  let q = supabase.from('comandas').select('id, mesa_id, status').eq('id', comandaId).limit(1)
-  const { data: cmd, error: errCmd } = await q
-  if (errCmd) throw errCmd
-  const comanda = cmd?.[0]
-  if (!comanda) throw new Error('Comanda não encontrada')
-
-  // Tenta fechar marcando status='closed' e registrando fechado_em. Se der erro (ex.: trigger conflitante),
-  // faz fallback para atualizar somente fechado_em para que entre no histórico.
+  const trace = '[fecharComandaEMesa]'
+  
+  try { console.group(trace); } catch {}
+  try { console.time?.(trace); } catch {}
+  
   try {
-    const nowIso = new Date().toISOString()
-    // 1) tentar fechar com status + fechado_em (sem filtrar por codigo_empresa; RLS garante segurança)
-    let qClose = supabase.from('comandas').update({ status: 'closed', fechado_em: nowIso }).eq('id', comandaId)
-    const { error: errCloseFull } = await qClose.select('id').single()
-    if (errCloseFull) {
-      // 2) fallback: somente fechado_em
-      let qClosePartial = supabase.from('comandas').update({ fechado_em: nowIso }).eq('id', comandaId)
-      const { error: errClosePartial } = await qClosePartial.select('id').single()
-      if (errClosePartial) { /* eslint-disable-next-line no-console */ try { console.warn('[fecharComandaEMesa] fechamento parcial falhou:', errClosePartial); } catch {} }
+    console.log(`${trace} Iniciando fechamento da comanda ${comandaId}`)
+    
+    // 1. Primeiro, obter dados atuais da comanda
+    console.log(`${trace} Obtendo dados da comanda...`)
+    const { data: comanda, error: errComanda } = await supabase
+      .from('comandas')
+      .select('id, mesa_id, status, fechado_em')
+      .eq('id', comandaId)
+      .single()
+    
+    if (errComanda || !comanda) {
+      console.error(`${trace} Erro ao buscar comanda:`, errComanda?.message || 'Comanda não encontrada')
+      throw errComanda || new Error('Comanda não encontrada')
     }
-  } catch (e) { /* eslint-disable-next-line no-console */ try { console.warn('[fecharComandaEMesa] exceção ao fechar (ignorado):', e); } catch {} }
-
-  // Marcar mesa como disponível
-  if (comanda.mesa_id) {
-    let qm = supabase.from('mesas').update({ status: 'available' }).eq('id', comanda.mesa_id)
-    const { error: errMesa } = await qm.select('id').single()
-    if (errMesa) throw errMesa
+    
+    // 2. Se já estiver fechada, apenas retorna sucesso
+    if (comanda.fechado_em) {
+      console.log(`${trace} Comanda ${comandaId} já está fechada em ${comanda.fechado_em}`)
+      return true
+    }
+    
+    const nowIso = new Date().toISOString()
+    
+    // 3. Estratégia para fechar a comanda
+    console.log(`${trace} Atualizando comanda...`)
+    
+    // Estratégia simples: apenas marcar como fechada sem alterar status
+    console.log(`${trace} Fechando comanda apenas com fechado_em...`)
+    const { error } = await supabase
+      .from('comandas')
+      .update({ fechado_em: nowIso })
+      .eq('id', comandaId)
+    
+    if (error) {
+      console.error(`${trace} Erro ao fechar comanda:`, error)
+      throw error
+    }
+    
+    console.log(`${trace} Comanda ${comandaId} fechada com sucesso`)
+    
+    // 4. Se tiver mesa associada, marca como disponível
+    if (comanda.mesa_id) {
+      console.log(`${trace} Atualizando status da mesa ${comanda.mesa_id} para disponível...`)
+      
+      try {
+        const { error: errMesa } = await supabase
+          .from('mesas')
+          .update({ 
+            status: 'available'
+          })
+          .eq('id', comanda.mesa_id)
+          .select('id')
+          .single()
+        
+        if (errMesa) {
+          console.error(`${trace} Erro ao atualizar status da mesa:`, errMesa)
+          // Não interrompe o fluxo se falhar a atualização da mesa
+        } else {
+          console.log(`${trace} Mesa ${comanda.mesa_id} marcada como disponível`)
+        }
+      } catch (err) {
+        console.error(`${trace} Exceção ao atualizar mesa:`, err)
+        // Continua mesmo com erro na mesa
+      }
+    } else {
+      console.log(`${trace} Nenhuma mesa associada para liberar`)
+    }
+    
+    console.log(`${trace} Fechamento da comanda ${comandaId} concluído com sucesso`)
+    return true
+    
+  } catch (error) {
+    console.error(`${trace} Erro fatal ao fechar comanda:`, error)
+    throw error
+  } finally {
+    try { console.timeEnd?.(trace); } catch {}
+    try { console.groupEnd?.(); } catch {}
   }
-  return true
 }

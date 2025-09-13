@@ -275,13 +275,7 @@ function VendasPage() {
         }
         return { id: m.id, number: m.numero, name: m.nome || null, status, order: [], customer, comandaId, totalHint: 0 };
       });
-      setTables((prev) => {
-        const byIdPrev = new Map((prev||[]).map(t => [t.id, t]));
-        return uiTables.map(nt => {
-          const old = byIdPrev.get(nt.id);
-          return old ? { ...nt, customer: old.customer || nt.customer, order: old.order || [] } : nt;
-        });
-      });
+      setTables(uiTables);
     } catch {}
   };
 
@@ -387,9 +381,10 @@ function VendasPage() {
         // fecha comanda e libera mesa
         await fecharComandaEMesa({ comandaId: selectedTable.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
         // atualizar UI: mesa disponível, limpa comanda
-        setTables((prev) => prev.map((t) => (t.id === selectedTable.id ? { ...t, status: 'available', order: [], comandaId: null, customer: null } : t)));
-        setSelectedTable((prev) => prev ? { ...prev, status: 'available', order: [], comandaId: null, customer: null } : prev);
+        setTables((prev) => prev.map((t) => (t.id === selectedTable.id ? { ...t, status: 'available', order: [], comandaId: null, customer: null, totalHint: 0 } : t)));
+        setSelectedTable((prev) => prev ? { ...prev, status: 'available', order: [], comandaId: null, customer: null, totalHint: 0 } : prev);
         // força refresh leve para evitar que mesa volte a 'em uso' por cache antigo
+        try { if (userProfile?.codigo_empresa) localStorage.removeItem(`vendas:tables:${userProfile.codigo_empresa}`); } catch {}
         await refreshTablesLight();
         toast({ title: 'Pagamento registrado', description: `Total R$ ${total.toFixed(2)}`, variant: 'success' });
         setIsPayOpen(false);
@@ -569,9 +564,11 @@ function VendasPage() {
                   <Button size="sm" variant="destructive" className="h-7 px-2.5 rounded-full text-[12px] font-medium leading-none whitespace-nowrap" onClick={async () => {
                     try {
                       await fecharComandaEMesa({ comandaId: table.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
-                      const updated = { ...table, status: 'available', order: [], comandaId: null, customer: null };
+                      const updated = { ...table, status: 'available', order: [], comandaId: null, customer: null, totalHint: 0 };
                       setSelectedTable(updated);
                       setTables((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
+                      try { if (userProfile?.codigo_empresa) localStorage.removeItem(`vendas:tables:${userProfile.codigo_empresa}`); } catch {}
+                      await refreshTablesLight();
                       toast({ title: 'Mesa liberada', variant: 'success' });
                     } catch (e) {
                       toast({ title: 'Falha ao liberar mesa', description: e?.message || 'Tente novamente', variant: 'destructive' });
@@ -640,6 +637,7 @@ function VendasPage() {
         const newTable = {
           id: mesa.id,
           number: mesa.numero,
+          name: mesa.nome,
           status: 'available',
           order: [],
           customer: null,
@@ -1232,11 +1230,27 @@ function VendasPage() {
                     <Droppable droppableId="tables">
                         {(provided) => (
                              <div {...provided.droppableProps} ref={provided.innerRef} className="grid gap-5 grid-cols-[repeat(auto-fit,minmax(240px,1fr))]">
-                                {tables.map((table, index) => (
+                                {tables.length === 0 ? (
+                                  <div className="col-span-full flex flex-col items-center justify-center py-12 text-center">
+                                    <div className="text-text-muted mb-4">
+                                      <svg className="w-16 h-16 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                                      </svg>
+                                    </div>
+                                    <h3 className="text-lg font-semibold text-text-primary mb-2">Nenhuma mesa encontrada</h3>
+                                    <p className="text-text-muted mb-4">Crie sua primeira mesa para começar a receber pedidos</p>
+                                    <Button onClick={() => setIsCreateMesaOpen(true)} className="flex items-center gap-2">
+                                      <Plus size={16} />
+                                      Criar Nova Mesa
+                                    </Button>
+                                  </div>
+                                ) : (
+                                  tables.map((table, index) => (
                                     <Draggable key={table.id} draggableId={table.id} index={index}>
                                         {(provided, snapshot) => <TableCard table={table} provided={provided} isDragging={snapshot.isDragging} />}
                                     </Draggable>
-                                ))}
+                                  ))
+                                )}
                                 {provided.placeholder}
                             </div>
                         )}
