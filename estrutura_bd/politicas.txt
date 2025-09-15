@@ -1799,3 +1799,83 @@ drop policy if exists pagamentos_delete_company on public.pagamentos;
 create policy pagamentos_delete_company on public.pagamentos
   as permissive for delete to authenticated
   using (codigo_empresa = public.get_my_company_code());
+
+-- ============================
+-- ATUALIZAÇÕES DE POLÍTICAS (v4.0)
+-- Data: 2025-09-13
+-- Motivo: Correções aplicadas durante resolução de bugs de enum validation e persistência
+-- Observação: Políticas já estavam corretas, mantendo estrutura existente
+-- ============================
+
+-- TRIGGERS PARA GARANTIR codigo_empresa
+-- Trigger para comandas
+create or replace function public.trg_set_codigo_empresa_comandas()
+returns trigger as $$
+begin
+  if new.codigo_empresa is null then
+    new.codigo_empresa := public.get_my_company_code();
+  end if;
+  return new;
+end;
+$$ language plpgsql security definer;
+
+drop trigger if exists trg_comandas_set_empresa on public.comandas;
+create trigger trg_comandas_set_empresa
+  before insert or update on public.comandas
+  for each row execute function public.trg_set_codigo_empresa_comandas();
+
+-- Trigger para comanda_itens
+create or replace function public.trg_set_codigo_empresa_comanda_itens()
+returns trigger as $$
+begin
+  if new.codigo_empresa is null then
+    new.codigo_empresa := public.get_my_company_code();
+  end if;
+  return new;
+end;
+$$ language plpgsql security definer;
+
+drop trigger if exists trg_comanda_itens_set_empresa on public.comanda_itens;
+create trigger trg_comanda_itens_set_empresa
+  before insert or update on public.comanda_itens
+  for each row execute function public.trg_set_codigo_empresa_comanda_itens();
+
+-- Trigger para pagamentos
+create or replace function public.trg_set_codigo_empresa_pagamentos()
+returns trigger as $$
+begin
+  if new.codigo_empresa is null then
+    new.codigo_empresa := public.get_my_company_code();
+  end if;
+  return new;
+end;
+$$ language plpgsql security definer;
+
+drop trigger if exists trg_pagamentos_set_empresa on public.pagamentos;
+create trigger trg_pagamentos_set_empresa
+  before insert or update on public.pagamentos
+  for each row execute function public.trg_set_codigo_empresa_pagamentos();
+
+-- Trigger para comanda_clientes
+create or replace function public.trg_set_codigo_empresa_comanda_clientes()
+returns trigger as $$
+begin
+  if new.codigo_empresa is null then
+    new.codigo_empresa := public.get_my_company_code();
+  end if;
+  return new;
+end;
+$$ language plpgsql security definer;
+
+drop trigger if exists trg_comanda_clientes_set_empresa on public.comanda_clientes;
+create trigger trg_comanda_clientes_set_empresa
+  before insert or update on public.comanda_clientes
+  for each row execute function public.trg_set_codigo_empresa_comanda_clientes();
+
+-- GRANTS ADICIONAIS PARA FUNÇÕES RPC
+grant execute on function public.fix_invalid_comanda_status(uuid) to authenticated;
+grant execute on function public.trg_comandas_baixar_estoque() to authenticated;
+
+-- ============================
+-- FIM DAS ATUALIZAÇÕES v4.0
+-- ============================

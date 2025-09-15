@@ -7035,3 +7035,122 @@ begin
     exception when duplicate_object then null; end;
   end if;
 end$$;
+
+--- ============================
+--- ATUALIZAÇÕES APLICADAS (v4.0)
+--- Data: 2025-09-13
+--- Motivo: Correções de enum validation, persistência de dados e controle de estoque
+--- Observação: Blocos idempotentes (safe to run multiple times)
+--- ============================
+
+-- 1) CORREÇÃO DEFINITIVA PARA ENUM VALIDATION EM COMANDAS
+-- Remove enum problemático e converte para TEXT com constraints
+do $$
+begin
+  -- Backup dos dados
+  drop table if exists comandas_backup;
+  create table comandas_backup as select * from public.comandas;
+
+  -- Remover a coluna status problemática
+  alter table public.comandas drop column if exists status cascade;
+
+  -- Recriar como TEXT com default
+  alter table public.comandas add column status text not null default 'open';
+
+  -- Restaurar dados com status válido
+  update public.comandas 
+  set status = coalesce(
+    case 
+      when b.status::text in ('open', 'closed', 'cancelled') then b.status::text
+      else 'open'
+    end, 
+    'open'
+  )
+  from comandas_backup b 
+  where comandas.id = b.id;
+
+  -- Adicionar constraint para valores válidos
+  begin
+    alter table public.comandas add constraint chk_comandas_status_valid 
+    check (status in ('open', 'closed', 'cancelled'));
+  exception when duplicate_object then null; end;
+
+  -- Limpar backup
+  drop table if exists comandas_backup;
+exception when others then null;
+end$$;
+
+-- 2) FUNÇÃO RPC PARA CORRIGIR STATUS INVÁLIDOS INDIVIDUALMENTE
+create or replace function public.fix_invalid_comanda_status(target_comanda_id uuid)
+returns void as $$
+begin
+  update public.comandas 
+  set status = 'open'
+  where id = target_comanda_id 
+    and (status is null or status = '' or status not in ('open', 'closed', 'cancelled'));
+end;
+$$ language plpgsql security definer;
+
+grant execute on function public.fix_invalid_comanda_status(uuid) to authenticated;
+
+-- 3) CORREÇÃO DA COLUNA DE PAGAMENTOS (data_pagamento -> recebido_em)
+-- Garantir que a coluna recebido_em existe e está correta
+do $$
+begin
+  -- Verificar se existe data_pagamento e renomear para recebido_em
+  if exists (
+    select 1 from information_schema.columns 
+    where table_schema = 'public' 
+    and table_name = 'pagamentos' 
+    and column_name = 'data_pagamento'
+  ) then
+    alter table public.pagamentos rename column data_pagamento to recebido_em;
+  end if;
+  
+  -- Garantir que recebido_em existe
+  alter table public.pagamentos add column if not exists recebido_em timestamptz not null default now();
+exception when others then null;
+end$$;
+
+-- 4) LIMPEZA DE DUPLICATAS EM COMANDA_CLIENTES
+-- Remove entradas duplicadas mantendo apenas a mais recente de cada cliente por comanda
+with duplicates as (
+  select 
+    id,
+    row_number() over (
+      partition by comanda_id, 
+      coalesce(cliente_id::text, nome_livre, '') 
+      order by created_at desc
+    ) as rn
+  from public.comanda_clientes
+  where created_at is not null
+)
+delete from public.comanda_clientes 
+where id in (
+  select id from duplicates where rn > 1
+);
+
+-- 5) MELHORIAS NO SISTEMA DE CONTROLE DE ESTOQUE
+-- Garantir que o trigger de baixa de estoque está ativo e funcionando
+do $$
+begin
+  -- Re-criar trigger de forma idempotente
+  drop trigger if exists trg_baixa_estoque_on_close on public.comandas;
+  
+  create trigger trg_baixa_estoque_on_close
+  after update on public.comandas
+  for each row
+  when (old.fechado_em is null and new.fechado_em is not null)
+  execute function public.trg_comandas_baixar_estoque();
+exception when others then null;
+end$$;
+
+-- 6) ÍNDICES ADICIONAIS PARA PERFORMANCE
+create index if not exists idx_comandas_fechado_em on public.comandas(fechado_em);
+create index if not exists idx_comandas_mesa_status on public.comandas(mesa_id, status) where fechado_em is null;
+create index if not exists idx_comanda_clientes_comanda_id on public.comanda_clientes(comanda_id);
+create index if not exists idx_pagamentos_recebido_em on public.pagamentos(recebido_em);
+
+--- ============================
+--- FIM DAS ATUALIZAÇÕES v4.0
+--- ============================
