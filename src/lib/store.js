@@ -155,10 +155,11 @@ export async function listarClientes({ searchTerm = '', limit = 20, codigoEmpres
 // Lista comandas abertas (open/awaiting-payment)
 export async function listarComandasAbertas({ codigoEmpresa } = {}) {
   const codigo = codigoEmpresa || getCachedCompanyCode()
+  
+  // CONSULTA MAIS AMPLA: buscar todas as comandas sem fechado_em, independente do status
   let q = supabase
     .from('comandas')
     .select('id, mesa_id, status, aberto_em, fechado_em')
-    .in('status', ['open','awaiting-payment'])
     .is('fechado_em', null)
     .order('aberto_em', { ascending: false })
   if (codigo) q = q.eq('codigo_empresa', codigo)
@@ -166,9 +167,16 @@ export async function listarComandasAbertas({ codigoEmpresa } = {}) {
   if (error) throw error
   
   // Debug: log para verificar comandas encontradas
-  console.log(`[listarComandasAbertas] Encontradas ${(data || []).length} comandas abertas:`, data)
+  console.log(`[listarComandasAbertas] Consulta ampla encontrou ${(data || []).length} comandas:`, data)
   
-  return data || []
+  // Filtrar apenas as que realmente estão abertas
+  const abertas = (data || []).filter(c => 
+    c.status === 'open' || c.status === 'awaiting-payment'
+  )
+  
+  console.log(`[listarComandasAbertas] Após filtro: ${abertas.length} comandas abertas:`, abertas)
+  
+  return abertas
 }
 
 // Carrega itens de várias comandas e retorna um mapa { comanda_id: total }
