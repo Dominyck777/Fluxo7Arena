@@ -160,9 +160,14 @@ export async function listarComandasAbertas({ codigoEmpresa } = {}) {
     .select('id, mesa_id, status, aberto_em, fechado_em')
     .in('status', ['open','awaiting-payment'])
     .is('fechado_em', null)
+    .order('aberto_em', { ascending: false })
   if (codigo) q = q.eq('codigo_empresa', codigo)
   const { data, error } = await q
   if (error) throw error
+  
+  // Debug: log para verificar comandas encontradas
+  console.log(`[listarComandasAbertas] Encontradas ${(data || []).length} comandas abertas:`, data)
+  
   return data || []
 }
 
@@ -279,19 +284,35 @@ export async function fecharCaixa({ saldoFinal = 0, codigoEmpresa } = {}) {
 export async function abrirComandaParaMesa({ mesaId, codigoEmpresa } = {}) {
   const codigo = codigoEmpresa || getCachedCompanyCode()
   if (!mesaId) throw new Error('mesaId é obrigatório')
+  
+  console.log(`[abrirComandaParaMesa] Iniciando criação de comanda para mesa ${mesaId}, empresa ${codigo}`)
+  
   // Evitar duplicar se já houver aberta
   let q = supabase.from('comandas').select('id,status').eq('mesa_id', mesaId).in('status', ['open','awaiting-payment']).limit(1)
   if (codigo) q = q.eq('codigo_empresa', codigo)
   const { data: abertas, error: errA } = await q
-  if (errA) throw errA
+  if (errA) {
+    console.error(`[abrirComandaParaMesa] Erro ao verificar comandas existentes:`, errA)
+    throw errA
+  }
+  
   if (abertas && abertas.length > 0) {
+    console.log(`[abrirComandaParaMesa] Comanda existente encontrada:`, abertas[0])
     return abertas[0]
   }
 
   const payload = { mesa_id: mesaId, status: 'open', aberto_em: new Date().toISOString() }
   if (codigo) payload.codigo_empresa = codigo
-  const { data, error } = await supabase.from('comandas').insert(payload).select('id,status').single()
-  if (error) throw error
+  
+  console.log(`[abrirComandaParaMesa] Criando nova comanda com payload:`, payload)
+  
+  const { data, error } = await supabase.from('comandas').insert(payload).select('id,status,mesa_id,codigo_empresa').single()
+  if (error) {
+    console.error(`[abrirComandaParaMesa] ERRO ao criar comanda:`, error)
+    throw error
+  }
+  
+  console.log(`[abrirComandaParaMesa] Comanda criada com sucesso:`, data)
   return data
 }
 
@@ -325,13 +346,43 @@ export async function listarItensDaComanda({ comandaId, codigoEmpresa }) {
   return data || []
 }
 
-// Conveniência: obter ou abrir comanda para mesa (sem tocar em clientes)
+// Conveniência: SEMPRE criar nova comanda para mesa (nunca reutilizar)
 export async function getOrCreateComandaForMesa({ mesaId, codigoEmpresa } = {}) {
   const codigo = codigoEmpresa || getCachedCompanyCode()
+  
+  console.log(`[getOrCreateComandaForMesa] SEMPRE criando nova comanda para mesa ${mesaId}`)
+  
+  // Buscar comanda existente para fechar se necessário
   const atual = await listarComandaDaMesa({ mesaId, codigoEmpresa: codigo })
+  
   if (atual) {
-    return atual
+    console.log(`[getOrCreateComandaForMesa] Fechando comanda existente ${atual.id} para criar nova`)
+    
+    try {
+      // Fechar comanda antiga automaticamente
+      await supabase
+        .from('comandas')
+        .update({ 
+          status: 'closed', 
+          fechado_em: new Date().toISOString()
+        })
+        .eq('id', atual.id)
+        .eq('codigo_empresa', codigo)
+        
+      // Limpar também os vínculos de clientes da comanda antiga
+      await supabase
+        .from('comanda_clientes')
+        .delete()
+        .eq('comanda_id', atual.id)
+        .eq('codigo_empresa', codigo)
+        
+    } catch (error) {
+      console.error('Erro ao fechar comanda antiga:', error)
+    }
   }
+  
+  // SEMPRE criar nova comanda zerada
+  console.log(`[getOrCreateComandaForMesa] Criando nova comanda zerada para mesa ${mesaId}`)
   return abrirComandaParaMesa({ mesaId, codigoEmpresa: codigo })
 }
 
@@ -340,7 +391,11 @@ export async function adicionarClientesAComanda({ comandaId, clienteIds = [], no
   const codigo = codigoEmpresa || getCachedCompanyCode()
   if (!comandaId) throw new Error('comandaId é obrigatório')
   
-  // Primeiro, limpar clientes existentes da comanda para evitar duplicatas
+  // DESABILITADO: Não fechar comandas antigas automaticamente
+  // Isso estava causando o fechamento de comandas ativas
+  console.log(`[adicionarClientesAComanda] Fechamento automático de comandas antigas DESABILITADO para evitar perda de dados`)
+  
+  // SEGUNDO: Limpar clientes existentes da comanda atual para evitar duplicatas
   let deleteQuery = supabase.from('comanda_clientes').delete().eq('comanda_id', comandaId)
   if (codigo) deleteQuery = deleteQuery.eq('codigo_empresa', codigo)
   const { error: deleteError } = await deleteQuery
@@ -666,12 +721,16 @@ export async function fecharComandaEMesa({ comandaId, codigoEmpresa }) {
     // 3. Estratégia para fechar a comanda
     console.log(`${trace} Atualizando comanda...`)
     
-    // Estratégia simples: apenas marcar como fechada sem alterar status
-    console.log(`${trace} Fechando comanda apenas com fechado_em...`)
+    // Fechar comanda corretamente: status closed + fechado_em + codigo_empresa
+    console.log(`${trace} Fechando comanda com status closed + fechado_em...`)
     const { error } = await supabase
       .from('comandas')
-      .update({ fechado_em: nowIso })
+      .update({ 
+        status: 'closed', 
+        fechado_em: nowIso 
+      })
       .eq('id', comandaId)
+      .eq('codigo_empresa', codigo)
     
     if (error) {
       console.error(`${trace} Erro ao fechar comanda:`, error)
@@ -716,6 +775,6 @@ export async function fecharComandaEMesa({ comandaId, codigoEmpresa }) {
     throw error
   } finally {
     try { console.timeEnd?.(trace); } catch {}
-    try { console.groupEnd?.(); } catch {}
+    try { console.groupEnd(); } catch {}
   }
 }
