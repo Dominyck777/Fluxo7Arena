@@ -6507,6 +6507,124 @@ begin
   begin execute $$create trigger zz_comandas_touch before update on public.comandas for each row execute function public.comandas_set_updated_at()$$; exception when others then null; end;
 end$$;
 
+-- ============================
+-- ATUALIZAÇÕES APLICADAS (v2.2)
+-- Data: 2025-09-10
+-- Motivo: Padronizar colunas de status e corrigir baixa de estoque idempotente
+-- Observação: Blocos idempotentes (safe to run multiple times)
+
+-- 1) Padronização de status em public.comandas
+--    - Usar TEXT e default 'open'
+--    - Impedir valor vazio
+do $$
+begin
+  -- Se a coluna existir, garantir tipo TEXT e default 'open'
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema='public' and table_name='comandas' and column_name='status'
+  ) then
+    alter table public.comandas alter column status drop default;
+    alter table public.comandas alter column status type text using status::text;
+    update public.comandas set status = 'open' where status is null or btrim(status) = '';
+    alter table public.comandas alter column status set default 'open';
+    -- CHECK para evitar string vazia
+    begin
+      alter table public.comandas add constraint chk_comandas_status_not_empty check (btrim(status) <> '');
+    exception when duplicate_object then null; end;
+  end if;
+end$$;
+
+-- 2) Padronização de status em public.pagamentos
+--    - Usar TEXT NOT NULL default 'Pago'
+do $$
+begin
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema='public' and table_name='pagamentos' and column_name='status'
+  ) then
+    alter table public.pagamentos alter column status drop default;
+    alter table public.pagamentos alter column status type text using status::text;
+    update public.pagamentos set status = 'Pago' where status is null or btrim(status) = '';
+    alter table public.pagamentos alter column status set default 'Pago';
+    alter table public.pagamentos alter column status set not null;
+    begin
+      alter table public.pagamentos add constraint chk_pagamentos_status_not_empty check (btrim(status) <> '');
+    exception when duplicate_object then null; end;
+  end if;
+end$$;
+
+-- 3) Log de baixa de estoque para idempotência
+--    Impede a mesma comanda/item de baixar estoque mais de uma vez
+create table if not exists public.comanda_baixa_estoque_log (
+  id uuid primary key default gen_random_uuid(),
+  codigo_empresa varchar(10) not null,
+  comanda_id uuid not null,
+  item_id uuid not null,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_baixa_log_empresa on public.comanda_baixa_estoque_log(codigo_empresa);
+create unique index if not exists uq_baixa_log_empresa_comanda_item on public.comanda_baixa_estoque_log(codigo_empresa, comanda_id, item_id);
+
+-- 4) Função de baixa de estoque (idempotente) e trigger
+--    - Dispara APÓS UPDATE em public.comandas
+--    - Condição: quando fechado_em muda de null -> não-null
+--    - Não altera NEW.status
+create or replace function public.trg_comandas_baixar_estoque()
+returns trigger
+language plpgsql
+as $$
+declare
+  v_codigo varchar(10);
+begin
+  -- roda apenas quando fechando a comanda
+  if (TG_OP = 'UPDATE') and (OLD.fechado_em is null) and (NEW.fechado_em is not null) then
+    -- tentar obter codigo_empresa a partir dos itens (ou da própria comanda, se existir a coluna)
+    begin
+      select ci.codigo_empresa into v_codigo
+      from public.comanda_itens ci
+      where ci.comanda_id = NEW.id
+      limit 1;
+    exception when others then v_codigo := null; end;
+
+    -- percorre itens e baixa estoque somente se não existir log
+    for record in (
+      select ci.id as item_id, ci.produto_id, coalesce(ci.quantidade,0) as qty, ci.codigo_empresa as cod
+      from public.comanda_itens ci
+      where ci.comanda_id = NEW.id
+    ) loop
+      begin
+        insert into public.comanda_baixa_estoque_log (codigo_empresa, comanda_id, item_id)
+        values (coalesce(record.cod, v_codigo), NEW.id, record.item_id)
+        on conflict (codigo_empresa, comanda_id, item_id) do nothing;
+
+        if found then
+          -- só baixa estoque na primeira vez
+          update public.produtos
+            set estoque = coalesce(estoque,0) - coalesce(record.qty,0)
+          where id = record.produto_id;
+        end if;
+      exception when others then
+        -- não interrompe o fechamento se algum produto não existir
+        null;
+      end;
+    end loop;
+  end if;
+  return NEW;
+end$$;
+
+do $$
+begin
+  -- re-criar trigger de forma idempotente
+  begin
+    drop trigger if exists trg_baixa_estoque_on_close on public.comandas;
+  exception when others then null; end;
+  create trigger trg_baixa_estoque_on_close
+  after update on public.comandas
+  for each row
+  execute function public.trg_comandas_baixar_estoque();
+end$$;
+
+
 -- 2) COMANDA_ITENS
 do $$
 begin
@@ -6526,6 +6644,56 @@ begin
   -- garantir índice por produto
   begin execute $$create index if not exists idx_comanda_itens_produto on public.comanda_itens (produto_id)$$; exception when others then null; end;
 end$$;
+
+-- 9) PERMISSÕES ADICIONAIS
+-- Garantir permissões para o usuário anônimo (se aplicável)
+grant select on public.finalizadoras to anon;
+grant select on public.comandas to anon;
+grant select on public.comanda_itens to anon;
+grant select on public.pagamentos to anon;
+
+-- 10) CORREÇÃO DEFINITIVA PARA STATUS INVÁLIDOS (ENUM)
+-- Abordagem simples: remover enum e usar TEXT com constraint
+drop table if exists comandas_backup;
+create table comandas_backup as select * from public.comandas;
+
+-- Remover a coluna status problemática
+alter table public.comandas drop column if exists status cascade;
+
+-- Recriar como TEXT com default
+alter table public.comandas add column status text not null default 'open';
+
+-- Restaurar dados com status válido
+update public.comandas 
+set status = coalesce(
+  case 
+    when b.status::text in ('open', 'closed', 'cancelled') then b.status::text
+    else 'open'
+  end, 
+  'open'
+)
+from comandas_backup b 
+where comandas.id = b.id;
+
+-- Adicionar constraint para valores válidos
+alter table public.comandas add constraint chk_comandas_status_valid 
+check (status in ('open', 'closed', 'cancelled'));
+
+-- Função RPC para corrigir status inválidos individualmente
+create or replace function public.fix_invalid_comanda_status(target_comanda_id uuid)
+returns void as $$
+begin
+  update public.comandas 
+  set status = 'open'
+  where id = target_comanda_id 
+    and (status is null or status = '' or status not in ('open', 'closed', 'cancelled'));
+end;
+$$ language plpgsql security definer;
+
+grant execute on function public.fix_invalid_comanda_status(uuid) to authenticated;
+
+-- Limpar backup
+drop table if exists comandas_backup;
 
 -- 3) COMANDA_CLIENTES
 do $$
@@ -6867,3 +7035,122 @@ begin
     exception when duplicate_object then null; end;
   end if;
 end$$;
+
+--- ============================
+--- ATUALIZAÇÕES APLICADAS (v4.0)
+--- Data: 2025-09-13
+--- Motivo: Correções de enum validation, persistência de dados e controle de estoque
+--- Observação: Blocos idempotentes (safe to run multiple times)
+--- ============================
+
+-- 1) CORREÇÃO DEFINITIVA PARA ENUM VALIDATION EM COMANDAS
+-- Remove enum problemático e converte para TEXT com constraints
+do $$
+begin
+  -- Backup dos dados
+  drop table if exists comandas_backup;
+  create table comandas_backup as select * from public.comandas;
+
+  -- Remover a coluna status problemática
+  alter table public.comandas drop column if exists status cascade;
+
+  -- Recriar como TEXT com default
+  alter table public.comandas add column status text not null default 'open';
+
+  -- Restaurar dados com status válido
+  update public.comandas 
+  set status = coalesce(
+    case 
+      when b.status::text in ('open', 'closed', 'cancelled') then b.status::text
+      else 'open'
+    end, 
+    'open'
+  )
+  from comandas_backup b 
+  where comandas.id = b.id;
+
+  -- Adicionar constraint para valores válidos
+  begin
+    alter table public.comandas add constraint chk_comandas_status_valid 
+    check (status in ('open', 'closed', 'cancelled'));
+  exception when duplicate_object then null; end;
+
+  -- Limpar backup
+  drop table if exists comandas_backup;
+exception when others then null;
+end$$;
+
+-- 2) FUNÇÃO RPC PARA CORRIGIR STATUS INVÁLIDOS INDIVIDUALMENTE
+create or replace function public.fix_invalid_comanda_status(target_comanda_id uuid)
+returns void as $$
+begin
+  update public.comandas 
+  set status = 'open'
+  where id = target_comanda_id 
+    and (status is null or status = '' or status not in ('open', 'closed', 'cancelled'));
+end;
+$$ language plpgsql security definer;
+
+grant execute on function public.fix_invalid_comanda_status(uuid) to authenticated;
+
+-- 3) CORREÇÃO DA COLUNA DE PAGAMENTOS (data_pagamento -> recebido_em)
+-- Garantir que a coluna recebido_em existe e está correta
+do $$
+begin
+  -- Verificar se existe data_pagamento e renomear para recebido_em
+  if exists (
+    select 1 from information_schema.columns 
+    where table_schema = 'public' 
+    and table_name = 'pagamentos' 
+    and column_name = 'data_pagamento'
+  ) then
+    alter table public.pagamentos rename column data_pagamento to recebido_em;
+  end if;
+  
+  -- Garantir que recebido_em existe
+  alter table public.pagamentos add column if not exists recebido_em timestamptz not null default now();
+exception when others then null;
+end$$;
+
+-- 4) LIMPEZA DE DUPLICATAS EM COMANDA_CLIENTES
+-- Remove entradas duplicadas mantendo apenas a mais recente de cada cliente por comanda
+with duplicates as (
+  select 
+    id,
+    row_number() over (
+      partition by comanda_id, 
+      coalesce(cliente_id::text, nome_livre, '') 
+      order by created_at desc
+    ) as rn
+  from public.comanda_clientes
+  where created_at is not null
+)
+delete from public.comanda_clientes 
+where id in (
+  select id from duplicates where rn > 1
+);
+
+-- 5) MELHORIAS NO SISTEMA DE CONTROLE DE ESTOQUE
+-- Garantir que o trigger de baixa de estoque está ativo e funcionando
+do $$
+begin
+  -- Re-criar trigger de forma idempotente
+  drop trigger if exists trg_baixa_estoque_on_close on public.comandas;
+  
+  create trigger trg_baixa_estoque_on_close
+  after update on public.comandas
+  for each row
+  when (old.fechado_em is null and new.fechado_em is not null)
+  execute function public.trg_comandas_baixar_estoque();
+exception when others then null;
+end$$;
+
+-- 6) ÍNDICES ADICIONAIS PARA PERFORMANCE
+create index if not exists idx_comandas_fechado_em on public.comandas(fechado_em);
+create index if not exists idx_comandas_mesa_status on public.comandas(mesa_id, status) where fechado_em is null;
+create index if not exists idx_comanda_clientes_comanda_id on public.comanda_clientes(comanda_id);
+create index if not exists idx_pagamentos_recebido_em on public.pagamentos(recebido_em);
+
+--- ============================
+--- FIM DAS ATUALIZAÇÕES v4.0
+--- ============================

@@ -13,6 +13,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger, } from "@/components/ui/alert-dialog"
 import { Label } from '@/components/ui/label';
 import { listMesas, ensureCaixaAberto, fecharCaixa, getOrCreateComandaForMesa, listarItensDaComanda, adicionarItem, atualizarQuantidadeItem, removerItem, listarFinalizadoras, registrarPagamento, fecharComandaEMesa, listarComandasAbertas, listarTotaisPorComanda, criarMesa, listarClientes, adicionarClientesAComanda, listarClientesDaComanda } from '@/lib/store';
+import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
 
 import { listProducts } from '@/lib/products';
@@ -124,7 +125,12 @@ function VendasPage() {
         }, 5000);
         const mesas = await listMesas(codigoEmpresa);
         let openComandas = [];
-        try { openComandas = await listarComandasAbertas({ codigoEmpresa }); } catch {}
+        try { 
+          openComandas = await listarComandasAbertas({ codigoEmpresa }); 
+          console.log(`[VendasPage:load] Comandas abertas carregadas:`, openComandas);
+        } catch (err) {
+          console.error(`[VendasPage:load] Erro ao carregar comandas abertas:`, err);
+        }
         const totals = await (async () => {
           try { return await listarTotaisPorComanda((openComandas || []).map(c => c.id), codigoEmpresa); } catch { return {}; }
         })();
@@ -158,29 +164,13 @@ function VendasPage() {
           return { id: m.id, number: m.numero, name: m.nome || null, status, order: [], customer, comandaId, totalHint };
         });
         if (!mountedRef.current) return;
-        // Mescla com estado anterior para não perder o customer exibido no card
-        let mergedForCache = uiTables;
-        setTables((prev) => {
-          if (!Array.isArray(prev) || prev.length === 0) return uiTables;
-          const byIdPrev = new Map(prev.map(t => [t.id, t]));
-          const merged = uiTables.map(nt => {
-            const old = byIdPrev.get(nt.id);
-            if (!old) return nt;
-            return {
-              ...nt,
-              // preserva somente se ainda há comanda
-              customer: nt.comandaId ? (nt.customer != null ? nt.customer : old.customer || null) : null,
-              order: nt.comandaId ? (old.order || nt.order || []) : [],
-            };
-          });
-          mergedForCache = merged;
-          return merged;
-        });
-        try { if (cacheKey) localStorage.setItem(cacheKey, JSON.stringify(mergedForCache)); } catch {}
+        // Usar dados frescos do banco sem mesclar com estado anterior
+        setTables(uiTables);
+        try { if (cacheKey) localStorage.setItem(cacheKey, JSON.stringify(uiTables)); } catch {}
         setSelectedTable((prev) => {
           if (!prev) return uiTables[0] || null;
           const found = uiTables.find(t => t.id === prev.id);
-          return found ? { ...found, order: prev.order || [], customer: prev.customer || found.customer || null } : (uiTables[0] || null);
+          return found || (uiTables[0] || null);
         });
         try {
           const sessao = await ensureCaixaAberto({ saldoInicial: 0, codigoEmpresa });
@@ -275,13 +265,7 @@ function VendasPage() {
         }
         return { id: m.id, number: m.numero, name: m.nome || null, status, order: [], customer, comandaId, totalHint: 0 };
       });
-      setTables((prev) => {
-        const byIdPrev = new Map((prev||[]).map(t => [t.id, t]));
-        return uiTables.map(nt => {
-          const old = byIdPrev.get(nt.id);
-          return old ? { ...nt, customer: old.customer || nt.customer, order: old.order || [] } : nt;
-        });
-      });
+      setTables(uiTables);
     } catch {}
   };
 
@@ -292,18 +276,55 @@ function VendasPage() {
       const previous = selectedTable;
       setLoading(true);
       if (table.comandaId) {
-        // carregar itens e clientes
-        const itens = await listarItensDaComanda({ comandaId: table.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
-        const order = (itens || []).map((it) => ({ id: it.id, name: it.descricao || 'Item', price: Number(it.preco_unitario || 0), quantity: Number(it.quantidade || 1) }));
-        let customer = null;
+        // VERIFICAR se a comanda ainda está ativa antes de carregar dados
+        console.log(`[handleSelectTable] Verificando status da comanda ${table.comandaId}`);
+        
         try {
-          const vinculos = await listarClientesDaComanda({ comandaId: table.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
-          const nomes = (vinculos || []).map(v => v?.nome).filter(Boolean);
-          customer = nomes.length ? nomes.join(', ') : null;
-        } catch {}
-        const enriched = { ...table, status: 'in-use', order, customer };
-        setSelectedTable(enriched);
-        setTables((prev) => prev.map((t) => (t.id === table.id ? enriched : t)));
+          const { data: comandaAtual, error } = await supabase
+            .from('comandas')
+            .select('id, status, fechado_em')
+            .eq('id', table.comandaId)
+            .eq('codigo_empresa', userProfile?.codigo_empresa)
+            .single();
+            
+          if (error || !comandaAtual) {
+            console.log(`[handleSelectTable] Comanda ${table.comandaId} não encontrada, criando nova`);
+            setPendingTable(table);
+            setIsOpenTableDialog(true);
+            return;
+          }
+          
+          if (comandaAtual.fechado_em || comandaAtual.status === 'closed') {
+            console.log(`[handleSelectTable] Comanda ${table.comandaId} está fechada, criando nova`);
+            setPendingTable(table);
+            setIsOpenTableDialog(true);
+            return;
+          }
+          
+          // Só carregar dados se comanda estiver realmente ativa
+          console.log(`[handleSelectTable] Comanda ${table.comandaId} ativa, carregando dados`);
+          const itens = await listarItensDaComanda({ comandaId: table.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
+          const order = (itens || []).map((it) => ({ id: it.id, name: it.descricao || 'Item', price: Number(it.preco_unitario || 0), quantity: Number(it.quantidade || 1) }));
+          
+          let customer = null;
+          try {
+            const vinculos = await listarClientesDaComanda({ comandaId: table.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
+            const nomes = (vinculos || []).map(v => v?.nome).filter(Boolean);
+            customer = nomes.length ? nomes.join(', ') : null;
+            console.log(`[handleSelectTable] Clientes da comanda ativa ${table.comandaId}:`, nomes);
+          } catch (err) {
+            console.error(`[handleSelectTable] Erro ao carregar clientes:`, err);
+          }
+          
+          const enriched = { ...table, status: 'in-use', order, customer };
+          setSelectedTable(enriched);
+          setTables((prev) => prev.map((t) => (t.id === table.id ? enriched : t)));
+          
+        } catch (err) {
+          console.error(`[handleSelectTable] Erro ao verificar comanda:`, err);
+          setPendingTable(table);
+          setIsOpenTableDialog(true);
+        }
       } else {
         // não abrir automaticamente; solicitar abertura
         setPendingTable(table);
@@ -387,10 +408,49 @@ function VendasPage() {
         // fecha comanda e libera mesa
         await fecharComandaEMesa({ comandaId: selectedTable.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
         // atualizar UI: mesa disponível, limpa comanda
-        setTables((prev) => prev.map((t) => (t.id === selectedTable.id ? { ...t, status: 'available', order: [], comandaId: null, customer: null } : t)));
-        setSelectedTable((prev) => prev ? { ...prev, status: 'available', order: [], comandaId: null, customer: null } : prev);
-        // força refresh leve para evitar que mesa volte a 'em uso' por cache antigo
-        await refreshTablesLight();
+        setTables((prev) => prev.map((t) => (t.id === selectedTable.id ? { ...t, status: 'available', order: [], comandaId: null, customer: null, totalHint: 0 } : t)));
+        setSelectedTable((prev) => prev ? { ...prev, status: 'available', order: [], comandaId: null, customer: null, totalHint: 0 } : prev);
+        
+        // FORÇAR RECARREGAMENTO COMPLETO das mesas para evitar bugs
+        console.log('[VendasPage] Forçando recarregamento completo após finalizar comanda');
+        try { 
+          if (userProfile?.codigo_empresa) {
+            localStorage.removeItem(`vendas:tables:${userProfile.codigo_empresa}`);
+          }
+        } catch {}
+        
+        // Recarregar mesas do servidor
+        try {
+          const mesas = await listMesas(userProfile?.codigo_empresa);
+          const openComandas = await listarComandasAbertas({ codigoEmpresa: userProfile?.codigo_empresa });
+          
+          const namesByComanda = {};
+          await Promise.all((openComandas || []).map(async (c) => {
+            try {
+              const vincs = await listarClientesDaComanda({ comandaId: c.id, codigoEmpresa: userProfile?.codigo_empresa });
+              const nomes = (vincs || []).map(v => v?.nome).filter(Boolean);
+              namesByComanda[c.id] = nomes.length ? nomes.join(', ') : null;
+            } catch { namesByComanda[c.id] = null; }
+          }));
+          
+          const enrichedTables = (mesas || []).map((mesa) => {
+            const comanda = (openComandas || []).find((c) => c.mesa_id === mesa.id);
+            return {
+              id: mesa.id,
+              name: mesa.nome || `Mesa ${mesa.numero}`,
+              status: comanda ? 'in-use' : 'available',
+              comandaId: comanda?.id || null,
+              customer: comanda ? namesByComanda[comanda.id] : null,
+              order: [],
+              totalHint: 0,
+            };
+          });
+          
+          setTables(enrichedTables);
+          console.log('[VendasPage] Mesas recarregadas com sucesso:', enrichedTables.length);
+        } catch (err) {
+          console.error('[VendasPage] Erro ao recarregar mesas:', err);
+        }
         toast({ title: 'Pagamento registrado', description: `Total R$ ${total.toFixed(2)}`, variant: 'success' });
         setIsPayOpen(false);
       } catch (e) {
@@ -569,9 +629,16 @@ function VendasPage() {
                   <Button size="sm" variant="destructive" className="h-7 px-2.5 rounded-full text-[12px] font-medium leading-none whitespace-nowrap" onClick={async () => {
                     try {
                       await fecharComandaEMesa({ comandaId: table.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
-                      const updated = { ...table, status: 'available', order: [], comandaId: null, customer: null };
+                      const updated = { ...table, status: 'available', order: [], comandaId: null, customer: null, totalHint: 0 };
                       setSelectedTable(updated);
                       setTables((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
+                      try { 
+                        if (userProfile?.codigo_empresa) {
+                          localStorage.removeItem(`vendas:tables:${userProfile.codigo_empresa}`);
+                          localStorage.clear(); // Limpa todo o localStorage para evitar dados antigos
+                        }
+                      } catch {}
+                      await refreshTablesLight();
                       toast({ title: 'Mesa liberada', variant: 'success' });
                     } catch (e) {
                       toast({ title: 'Falha ao liberar mesa', description: e?.message || 'Tente novamente', variant: 'destructive' });
@@ -640,6 +707,7 @@ function VendasPage() {
         const newTable = {
           id: mesa.id,
           number: mesa.numero,
+          name: mesa.nome,
           status: 'available',
           order: [],
           customer: null,
@@ -1032,10 +1100,11 @@ function VendasPage() {
         // 2) associa somente 1 cliente cadastrado OU 1 nome comum
         const clienteIds = mode === 'registered' ? Array.from(new Set(selectedClientIds || [])) : [];
         const nomesLivres = mode === 'common' && commonName?.trim() ? [commonName.trim()] : [];
-        if (clienteIds.length > 0 || nomesLivres.length > 0) {
-          await adicionarClientesAComanda({ comandaId: comanda.id, clienteIds, nomesLivres, codigoEmpresa: userProfile?.codigo_empresa });
-        }
-        // Pega nomes confirmados do backend para garantir persistência
+        
+        // SEMPRE limpar clientes antigos da comanda, mesmo se não adicionar novos
+        await adicionarClientesAComanda({ comandaId: comanda.id, clienteIds, nomesLivres, codigoEmpresa: userProfile?.codigo_empresa });
+        
+        // Pega nomes confirmados do backend APÓS limpar e adicionar novos
         let displayName = null;
         try {
           const vincs = await listarClientesDaComanda({ comandaId: comanda.id, codigoEmpresa: userProfile?.codigo_empresa });
@@ -1050,6 +1119,44 @@ function VendasPage() {
         const enriched = { ...pendingTable, comandaId: comanda.id, status: 'in-use', customer: displayName || null, order: [] };
         setSelectedTable(enriched);
         setTables(prev => prev.map(t => t.id === enriched.id ? enriched : t));
+        
+        // AGUARDAR um pouco antes de recarregar para garantir que a comanda foi persistida
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        // FORÇAR atualização do estado da mesa no carregamento principal
+        try {
+          const mesas = await listMesas(userProfile?.codigo_empresa);
+          const openComandas = await listarComandasAbertas({ codigoEmpresa: userProfile?.codigo_empresa });
+          
+          console.log(`[confirmOpen] Após aguardar: ${openComandas.length} comandas abertas encontradas`);
+          
+          const namesByComanda = {};
+          await Promise.all((openComandas || []).map(async (c) => {
+            try {
+              const vincs = await listarClientesDaComanda({ comandaId: c.id, codigoEmpresa: userProfile?.codigo_empresa });
+              const nomes = (vincs || []).map(v => v?.nome).filter(Boolean);
+              namesByComanda[c.id] = nomes.length ? nomes.join(', ') : null;
+            } catch { namesByComanda[c.id] = null; }
+          }));
+          
+          const enrichedTables = (mesas || []).map((mesa) => {
+            const comanda = (openComandas || []).find((c) => c.mesa_id === mesa.id);
+            return {
+              id: mesa.id,
+              name: mesa.nome || `Mesa ${mesa.numero}`,
+              status: comanda ? 'in-use' : 'available',
+              comandaId: comanda?.id || null,
+              customer: comanda ? namesByComanda[comanda.id] : null,
+              order: [],
+              totalHint: 0,
+            };
+          });
+          
+          setTables(enrichedTables);
+          console.log('[confirmOpen] Estado das mesas atualizado após abertura');
+        } catch (err) {
+          console.error('[confirmOpen] Erro ao atualizar mesas:', err);
+        }
         setIsOpenTableDialog(false);
         setPendingTable(null);
         setClienteNome('');
@@ -1232,11 +1339,27 @@ function VendasPage() {
                     <Droppable droppableId="tables">
                         {(provided) => (
                              <div {...provided.droppableProps} ref={provided.innerRef} className="grid gap-5 grid-cols-[repeat(auto-fit,minmax(240px,1fr))]">
-                                {tables.map((table, index) => (
+                                {tables.length === 0 ? (
+                                  <div className="col-span-full flex flex-col items-center justify-center py-12 text-center">
+                                    <div className="text-text-muted mb-4">
+                                      <svg className="w-16 h-16 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                                      </svg>
+                                    </div>
+                                    <h3 className="text-lg font-semibold text-text-primary mb-2">Nenhuma mesa encontrada</h3>
+                                    <p className="text-text-muted mb-4">Crie sua primeira mesa para começar a receber pedidos</p>
+                                    <Button onClick={() => setIsCreateMesaOpen(true)} className="flex items-center gap-2">
+                                      <Plus size={16} />
+                                      Criar Nova Mesa
+                                    </Button>
+                                  </div>
+                                ) : (
+                                  tables.map((table, index) => (
                                     <Draggable key={table.id} draggableId={table.id} index={index}>
                                         {(provided, snapshot) => <TableCard table={table} provided={provided} isDragging={snapshot.isDragging} />}
                                     </Draggable>
-                                ))}
+                                  ))
+                                )}
                                 {provided.placeholder}
                             </div>
                         )}
