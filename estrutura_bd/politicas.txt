@@ -1877,14 +1877,136 @@ grant execute on function public.fix_invalid_comanda_status(uuid) to authenticat
 grant execute on function public.trg_comandas_baixar_estoque() to authenticated;
 
 -- ============================
--- FIM DAS ATUALIZAÇÕES v4.0
+-- FIM DAS ATUALIZAÇÕES v4.1
 -- ============================
+
+-- ============================
+-- ATUALIZAÇÕES APLICADAS (v4.2)
+-- Data: 2025-09-15
+-- Motivo: Regras de fechamento de caixa e recomendações RLS pendentes
+-- ============================
+
+-- 1) FECHAMENTO DE CAIXA COM COMANDAS ABERTAS
+-- - Nova regra de aplicação (frontend/backend):
+--   * Antes de fechar o caixa, o sistema verifica comandas abertas.
+--   * Comandas de balcão (mesa_id IS NULL) SEM itens são auto-fechadas
+--     para não bloquear o fechamento do caixa.
+--   * Se restarem comandas com itens (mesas ou balcão), o fechamento é BLOQUEADO
+--     e uma mensagem é exibida ao usuário com a quantidade de comandas a finalizar.
+-- - Observação: Não há alteração de DDL/políticas RLS para essa regra; é lógica de aplicação.
+
+-- 2) RECOMENDAÇÕES RLS (PENDENTES) PARA VENDAS/ITENS/PAGAMENTOS/CLIENTES
+-- - Permanecem PENDENTES as políticas abaixo em produção multi-tenant.
+-- - Exemplos idempotentes (ajustar nomes conforme o schema real):
+
+-- COMANDAS (tabela: public.comandas)
+do $$
+begin
+  execute $$drop policy if exists comandas_select_company on public.comandas$$;
+  execute $$create policy comandas_select_company on public.comandas
+    as permissive for select to authenticated
+    using (codigo_empresa = public.get_my_company_code())$$;
+
+  execute $$drop policy if exists comandas_insert_company on public.comandas$$;
+  execute $$create policy comandas_insert_company on public.comandas
+    as permissive for insert to authenticated
+    with check (codigo_empresa = public.get_my_company_code())$$;
+
+  execute $$drop policy if exists comandas_update_company on public.comandas$$;
+  execute $$create policy comandas_update_company on public.comandas
+    as permissive for update to authenticated
+    using (codigo_empresa = public.get_my_company_code())
+    with check (codigo_empresa = public.get_my_company_code())$$;
+
+  execute $$drop policy if exists comandas_delete_company on public.comandas$$;
+  execute $$create policy comandas_delete_company on public.comandas
+    as permissive for delete to authenticated
+    using (codigo_empresa = public.get_my_company_code())$$;
+end$$;
+
+-- ITENS DA COMANDA (tabela: public.comanda_itens)
+do $$
+begin
+  execute $$drop policy if exists comanda_itens_select_company on public.comanda_itens$$;
+  execute $$create policy comanda_itens_select_company on public.comanda_itens
+    as permissive for select to authenticated
+    using (codigo_empresa = public.get_my_company_code())$$;
+
+  execute $$drop policy if exists comanda_itens_insert_company on public.comanda_itens$$;
+  execute $$create policy comanda_itens_insert_company on public.comanda_itens
+    as permissive for insert to authenticated
+    with check (codigo_empresa = public.get_my_company_code())$$;
+
+  execute $$drop policy if exists comanda_itens_update_company on public.comanda_itens$$;
+  execute $$create policy comanda_itens_update_company on public.comanda_itens
+    as permissive for update to authenticated
+    using (codigo_empresa = public.get_my_company_code())
+    with check (codigo_empresa = public.get_my_company_code())$$;
+
+  execute $$drop policy if exists comanda_itens_delete_company on public.comanda_itens$$;
+  execute $$create policy comanda_itens_delete_company on public.comanda_itens
+    as permissive for delete to authenticated
+    using (codigo_empresa = public.get_my_company_code())$$;
+end$$;
+
+-- PAGAMENTOS (tabela: public.pagamentos)
+do $$
+begin
+  execute $$drop policy if exists pagamentos_select_company on public.pagamentos$$;
+  execute $$create policy pagamentos_select_company on public.pagamentos
+    as permissive for select to authenticated
+    using (codigo_empresa = public.get_my_company_code())$$;
+
+  execute $$drop policy if exists pagamentos_insert_company on public.pagamentos$$;
+  execute $$create policy pagamentos_insert_company on public.pagamentos
+    as permissive for insert to authenticated
+    with check (codigo_empresa = public.get_my_company_code())$$;
+
+  execute $$drop policy if exists pagamentos_update_company on public.pagamentos$$;
+  execute $$create policy pagamentos_update_company on public.pagamentos
+    as permissive for update to authenticated
+    using (codigo_empresa = public.get_my_company_code())
+    with check (codigo_empresa = public.get_my_company_code())$$;
+
+  execute $$drop policy if exists pagamentos_delete_company on public.pagamentos$$;
+  execute $$create policy pagamentos_delete_company on public.pagamentos
+    as permissive for delete to authenticated
+    using (codigo_empresa = public.get_my_company_code())$$;
+end$$;
+
+-- CLIENTES VINCULADOS À COMANDA (tabela: public.comanda_clientes)
+do $$
+begin
+  execute $$drop policy if exists comanda_clientes_select_company on public.comanda_clientes$$;
+  execute $$create policy comanda_clientes_select_company on public.comanda_clientes
+    as permissive for select to authenticated
+    using (codigo_empresa = public.get_my_company_code())$$;
+
+  execute $$drop policy if exists comanda_clientes_insert_company on public.comanda_clientes$$;
+  execute $$create policy comanda_clientes_insert_company on public.comanda_clientes
+    as permissive for insert to authenticated
+    with check (codigo_empresa = public.get_my_company_code())$$;
+
+  execute $$drop policy if exists comanda_clientes_update_company on public.comanda_clientes$$;
+  execute $$create policy comanda_clientes_update_company on public.comanda_clientes
+    as permissive for update to authenticated
+    using (codigo_empresa = public.get_my_company_code())
+    with check (codigo_empresa = public.get_my_company_code())$$;
+
+  execute $$drop policy if exists comanda_clientes_delete_company on public.comanda_clientes$$;
+  execute $$create policy comanda_clientes_delete_company on public.comanda_clientes
+    as permissive for delete to authenticated
+    using (codigo_empresa = public.get_my_company_code())$$;
+end$$;
+
+-- 3) NOTA
+-- Estas instruções são um snapshot de referência e devem ser aplicadas no banco antes de atualizar este arquivo.
+-- Não houve mudanças de DDL nesta versão; apenas regras de aplicação e recomendações RLS.
 
 -- ============================
 -- ATUALIZAÇÕES APLICADAS (v4.1)
 -- Data: 2025-09-15
 -- Motivo: Melhorias de estabilidade e correções de bugs críticos
--- Observação: Correções no frontend para problemas de carregamento e sincronização
 -- ============================
 
 -- CONTEXTO DAS CORREÇÕES APLICADAS:
