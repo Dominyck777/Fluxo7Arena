@@ -6860,8 +6860,9 @@ create index if not exists idx_mesas_codigo_empresa on public.mesas(codigo_empre
 create unique index if not exists uq_mesas_empresa_numero on public.mesas(codigo_empresa, numero);
 
 -- 2) COMANDAS
+-- IMPORTANTE: Estrutura corrigida em 2025-09-15 - ID deve ser BIGSERIAL para compatibilidade
 create table if not exists public.comandas (
-  id uuid primary key default gen_random_uuid(),
+  id bigserial primary key,
   codigo_empresa varchar(10) not null,
   mesa_id uuid,
   status text not null default 'open', -- open | awaiting-payment | closed
@@ -6889,10 +6890,11 @@ create unique index if not exists uq_comanda_mesa_aberta
   where (mesa_id is not null and status in ('open','awaiting-payment'));
 
 -- 3) COMANDA_ITENS
+-- IMPORTANTE: comanda_id alterado para BIGINT para referenciar comandas.id (bigserial)
 create table if not exists public.comanda_itens (
   id uuid primary key default gen_random_uuid(),
   codigo_empresa varchar(10) not null,
-  comanda_id uuid not null,
+  comanda_id bigint not null,
   produto_id uuid,
   descricao text,
   quantidade integer not null default 1,
@@ -6901,7 +6903,7 @@ create table if not exists public.comanda_itens (
   created_at timestamptz not null default now()
 );
 alter table public.comanda_itens add column if not exists codigo_empresa varchar(10) not null;
-alter table public.comanda_itens add column if not exists comanda_id uuid not null;
+alter table public.comanda_itens add column if not exists comanda_id bigint not null;
 alter table public.comanda_itens add column if not exists produto_id uuid;
 alter table public.comanda_itens add column if not exists descricao text;
 alter table public.comanda_itens add column if not exists quantidade integer not null default 1;
@@ -7152,5 +7154,22 @@ create index if not exists idx_comanda_clientes_comanda_id on public.comanda_cli
 create index if not exists idx_pagamentos_recebido_em on public.pagamentos(recebido_em);
 
 --- ============================
---- FIM DAS ATUALIZAÇÕES v4.0
+--- ATUALIZAÇÕES APLICADAS (v4.1)
+--- Data: 2025-09-15
+--- Motivo: Correção crítica - ID da tabela comandas deve ser BIGSERIAL
+--- Observação: Problema identificado e corrigido - incompatibilidade entre UUID e BIGSERIAL
+--- ============================
+
+-- CORREÇÃO APLICADA EM 2025-09-15:
+-- Problema: Código JavaScript tentava inserir UUIDs numa coluna BIGSERIAL
+-- Solução: Padronizada estrutura da tabela comandas para usar BIGSERIAL
+-- Impacto: Tabelas relacionadas (comanda_itens, pagamentos, comanda_clientes) 
+--          também precisam referenciar BIGINT ao invés de UUID
+
+-- Estrutura corrigida da tabela comandas:
+-- id: bigserial primary key (números sequenciais)
+-- comanda_id em tabelas relacionadas: bigint (para referenciar comandas.id)
+
+--- ============================
+--- FIM DAS ATUALIZAÇÕES v4.1
 --- ============================

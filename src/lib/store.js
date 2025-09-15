@@ -291,38 +291,66 @@ export async function fecharCaixa({ saldoFinal = 0, codigoEmpresa } = {}) {
 // Comandas
 export async function abrirComandaParaMesa({ mesaId, codigoEmpresa } = {}) {
   const codigo = codigoEmpresa || getCachedCompanyCode()
-  if (!mesaId) throw new Error('mesaId é obrigatório')
   
-  console.log(`[abrirComandaParaMesa] Iniciando criação de comanda para mesa ${mesaId}, empresa ${codigo}`)
+  console.log(`[abrirComandaParaMesa] Iniciando para mesaId: ${mesaId}, codigo_empresa: ${codigo}`)
   
-  // Evitar duplicar se já houver aberta
-  let q = supabase.from('comandas').select('id,status').eq('mesa_id', mesaId).in('status', ['open','awaiting-payment']).limit(1)
-  if (codigo) q = q.eq('codigo_empresa', codigo)
-  const { data: abertas, error: errA } = await q
-  if (errA) {
-    console.error(`[abrirComandaParaMesa] Erro ao verificar comandas existentes:`, errA)
-    throw errA
+  // PRIMEIRO: Testar se conseguimos inserir algo simples na tabela comandas
+  console.log(`[abrirComandaParaMesa] TESTE: Verificando se conseguimos inserir na tabela comandas...`)
+  
+  try {
+    // Teste básico de inserção - payload mínimo
+    const testePayload = { 
+      status: 'open', 
+      aberto_em: new Date().toISOString()
+    }
+    
+    // Se temos código da empresa, adicionar
+    if (codigo) {
+      testePayload.codigo_empresa = codigo
+    }
+    
+    // Se temos mesa, adicionar
+    if (mesaId) {
+      testePayload.mesa_id = mesaId
+    }
+    
+    console.log(`[abrirComandaParaMesa] TESTE: Payload para inserção:`, testePayload)
+    
+    const { data, error } = await supabase
+      .from('comandas')
+      .insert(testePayload)
+      .select('*')
+      .single()
+    
+    if (error) {
+      console.error(`[abrirComandaParaMesa] ERRO CRÍTICO na inserção:`, {
+        error,
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+        code: error.code,
+        payload: testePayload
+      })
+      
+      // Vamos tentar descobrir o que está acontecendo
+      console.log(`[abrirComandaParaMesa] Tentando consultar estrutura da tabela...`)
+      const { data: estrutura, error: erroEstrutura } = await supabase
+        .from('comandas')
+        .select('*')
+        .limit(1)
+      
+      console.log(`[abrirComandaParaMesa] Resultado consulta estrutura:`, { estrutura, erroEstrutura })
+      
+      throw error
+    }
+    
+    console.log(`[abrirComandaParaMesa] ✅ SUCESSO! Comanda criada:`, data)
+    return data
+    
+  } catch (err) {
+    console.error(`[abrirComandaParaMesa] ERRO GERAL:`, err)
+    throw err
   }
-  
-  if (abertas && abertas.length > 0) {
-    console.log(`[abrirComandaParaMesa] Comanda existente encontrada:`, abertas[0])
-    return abertas[0]
-  }
-
-  const payload = { mesa_id: mesaId, status: 'open', aberto_em: new Date().toISOString() }
-  if (codigo) payload.codigo_empresa = codigo
-  
-  console.log(`[abrirComandaParaMesa] Criando nova comanda com payload:`, payload)
-  
-  // IMPORTANTE: Não incluir 'id' no payload - deixar o banco gerar o BIGSERIAL
-  const { data, error } = await supabase.from('comandas').insert(payload).select('id,status,mesa_id,codigo_empresa,aberto_em').single()
-  if (error) {
-    console.error(`[abrirComandaParaMesa] ERRO ao criar comanda:`, error)
-    throw error
-  }
-  
-  console.log(`[abrirComandaParaMesa] Comanda criada com sucesso:`, data)
-  return data
 }
 
 export async function listarComandaDaMesa({ mesaId, codigoEmpresa }) {
