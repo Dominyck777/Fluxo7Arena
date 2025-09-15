@@ -102,7 +102,6 @@ function VendasPage() {
     const codigoEmpresa = userProfile?.codigo_empresa || null;
     const cacheKey = codigoEmpresa ? `vendas:tables:${codigoEmpresa}` : null;
     const trace = '[Vendas:loadTables]';
-
     const hydrateFromCache = () => {
       try {
         if (!cacheKey) return;
@@ -112,7 +111,12 @@ function VendasPage() {
         }
       } catch {}
     };
-
+    
+    // Carregar cache imediatamente se disponível
+    if (codigoEmpresa) {
+      hydrateFromCache();
+    }
+    
     const load = async () => {
       try {
         if (!authReady || !codigoEmpresa) return;
@@ -122,7 +126,7 @@ function VendasPage() {
           if (!mountedRef.current) return;
           try { console.warn(trace + ' still waiting... (showing cached tables if any)'); } catch {}
           hydrateFromCache();
-        }, 5000);
+        }, 2000);
         const mesas = await listMesas(codigoEmpresa);
         let openComandas = [];
         try { 
@@ -167,11 +171,25 @@ function VendasPage() {
         // Usar dados frescos do banco sem mesclar com estado anterior
         setTables(uiTables);
         try { if (cacheKey) localStorage.setItem(cacheKey, JSON.stringify(uiTables)); } catch {}
-        setSelectedTable((prev) => {
-          if (!prev) return uiTables[0] || null;
-          const found = uiTables.find(t => t.id === prev.id);
-          return found || (uiTables[0] || null);
-        });
+        // Restaurar seleção anterior pelo cache (se houver)
+        let nextSelected = null;
+        try {
+          const selKey = codigoEmpresa ? `vendas:selected:${codigoEmpresa}` : null;
+          const cachedSel = selKey ? localStorage.getItem(selKey) : null;
+          if (cachedSel) {
+            const foundByCache = uiTables.find(t => String(t.id) === String(cachedSel));
+            if (foundByCache) nextSelected = foundByCache;
+          }
+        } catch {}
+        if (!nextSelected) {
+          // fallback: manter anterior se existir na lista, senão a primeira
+          setSelectedTable((prev) => {
+            const found = prev ? uiTables.find(t => t.id === prev.id) : null;
+            return found || (uiTables[0] || null);
+          });
+        } else {
+          setSelectedTable(nextSelected);
+        }
         try {
           const sessao = await ensureCaixaAberto({ saldoInicial: 0, codigoEmpresa });
           if (sessao?.status === 'open') setIsCashierOpen(true);
@@ -192,6 +210,31 @@ function VendasPage() {
     if (authReady && codigoEmpresa) load();
     return () => {};
   }, [authReady, userProfile?.codigo_empresa]);
+
+  // Persistir selectedTable no cache e, quando mudar para uma comanda, hidratar itens se necessário
+  useEffect(() => {
+    const codigoEmpresa = userProfile?.codigo_empresa || null;
+    const selKey = codigoEmpresa ? `vendas:selected:${codigoEmpresa}` : null;
+    try { if (selKey && selectedTable?.id) localStorage.setItem(selKey, String(selectedTable.id)); } catch {}
+    // Auto-hidratar detalhes da comanda se a seleção foi aplicada por cache/F5 e ainda não temos itens
+    if (selectedTable?.comandaId && (!selectedTable.order || selectedTable.order.length === 0)) {
+      refetchSelectedTableDetails(selectedTable);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedTable?.id, selectedTable?.comandaId]);
+
+  // Recarregar detalhes da mesa selecionada quando a janela ganhar foco ou a página voltar a ficar visível
+  useEffect(() => {
+    const onFocus = () => { if (selectedTable?.comandaId) refetchSelectedTableDetails(selectedTable); };
+    const onVisibility = () => { if (document.visibilityState === 'visible' && selectedTable?.comandaId) refetchSelectedTableDetails(selectedTable); };
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedTable?.comandaId]);
 
   const handleNotImplemented = () => {
     toast({
@@ -231,42 +274,119 @@ function VendasPage() {
 
   const calculateTotal = (order) => order.reduce((acc, item) => acc + item.price * item.quantity, 0);
 
+  // Utilitário: recarrega os detalhes (itens e clientes) da 'selectedTable'
+  const refetchSelectedTableDetails = async (target) => {
+    try {
+      if (!target?.comandaId) return;
+      const itens = await listarItensDaComanda({ comandaId: target.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
+      const order = (itens || []).map((it) => ({ id: it.id, name: it.descricao || 'Item', price: Number(it.preco_unitario || 0), quantity: Number(it.quantidade || 1) }));
+      let customer = target.customer || null;
+      try {
+        const vinculos = await listarClientesDaComanda({ comandaId: target.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
+        const nomes = (vinculos || []).map(v => v?.nome).filter(Boolean);
+        customer = nomes.length ? nomes.join(', ') : null;
+      } catch {}
+      const enriched = { ...target, status: target.status === 'awaiting-payment' ? 'awaiting-payment' : 'in-use', order, customer };
+      setSelectedTable(enriched);
+      setTables((prev) => prev.map((t) => (t.id === enriched.id ? enriched : t)));
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.warn('[VendasPage] Falha ao recarregar detalhes da mesa selecionada:', e);
+    }
+  };
+
   // Recarrega rapidamente o status das mesas (sem todos os detalhes), para refletir fechamento/liberação
   const refreshTablesLight = async () => {
     try {
       const codigoEmpresa = userProfile?.codigo_empresa;
-      if (!codigoEmpresa) return;
+      if (!codigoEmpresa) {
+        console.warn('[refreshTablesLight] Código da empresa não disponível');
+        return;
+      }
+      
+      console.log('[refreshTablesLight] Iniciando atualização das mesas...');
+      
       const mesas = await listMesas(codigoEmpresa);
+      console.log('[refreshTablesLight] Mesas carregadas:', mesas?.length || 0);
+      
       let openComandas = [];
-      try { openComandas = await listarComandasAbertas({ codigoEmpresa }); } catch {}
+      try { 
+        openComandas = await listarComandasAbertas({ codigoEmpresa }); 
+        console.log('[refreshTablesLight] Comandas abertas:', openComandas?.length || 0);
+      } catch (err) {
+        console.error('[refreshTablesLight] Erro ao carregar comandas:', err);
+      }
+      
       const byMesa = new Map();
       (openComandas || []).forEach(c => byMesa.set(c.mesa_id, c));
-      // Buscar nomes dos clientes das comandas abertas
+      
+      // Buscar nomes dos clientes e totais das comandas abertas
       const namesByComanda = {};
+      const totalsByComanda = {};
       try {
-        const ids = (openComandas || []).map(c => c.id);
-        await Promise.all(ids.map(async (id) => {
-          try {
-            const vincs = await listarClientesDaComanda({ comandaId: id, codigoEmpresa });
-            const nomes = (vincs || []).map(v => v?.nome).filter(Boolean);
-            namesByComanda[id] = nomes.join(', ');
-          } catch { namesByComanda[id] = ''; }
+        const allComandaIds = (openComandas || []).map(c => c.id);
+        
+        // Buscar clientes
+        const vinculos = await Promise.all(allComandaIds.map(async (id) => {
+          try { return { id, vinculos: await listarClientesDaComanda({ comandaId: id, codigoEmpresa }) }; } catch { return { id, vinculos: [] }; }
         }));
-      } catch {}
+        vinculos.forEach(({ id, vinculos: v }) => {
+          const nomes = (v || []).map(vv => vv?.nome).filter(Boolean);
+          namesByComanda[id] = nomes.length ? nomes.join(', ') : null;
+        });
+        
+        // Buscar totais das comandas
+        const totais = await Promise.all(allComandaIds.map(async (comandaId) => {
+          try {
+            const itens = await listarItensDaComanda({ comandaId, codigoEmpresa });
+            const total = (itens || []).reduce((acc, item) => {
+              // Calcular total do item: quantidade * preço unitário - desconto
+              const itemTotal = (item.quantidade || 0) * (item.preco_unitario || 0) - (item.desconto || 0);
+              return acc + itemTotal;
+            }, 0);
+            console.log(`[refreshTablesLight] Comanda ${comandaId}: ${itens?.length || 0} itens, total: R$ ${total.toFixed(2)}`);
+            return { comandaId, total };
+          } catch (err) {
+            console.error(`[refreshTablesLight] Erro ao buscar itens da comanda ${comandaId}:`, err);
+            return { comandaId, total: 0 };
+          }
+        }));
+        totais.forEach(({ comandaId, total }) => {
+          totalsByComanda[comandaId] = total;
+        });
+        
+      } catch (err) {
+        console.error('[refreshTablesLight] Erro ao carregar clientes/totais:', err);
+      }
+      
       const uiTables = (mesas || []).map((m) => {
         const c = byMesa.get(m.id);
         let status = mapStatus(m.status);
         let comandaId = null;
         let customer = null;
+        let totalHint = 0;
+        
         if (c) {
           status = (c.status === 'awaiting-payment' || c.status === 'awaiting_payment') ? 'awaiting-payment' : 'in-use';
           comandaId = c.id;
           customer = namesByComanda[c.id] || null;
+          totalHint = totalsByComanda[c.id] || 0;
         }
-        return { id: m.id, number: m.numero, name: m.nome || null, status, order: [], customer, comandaId, totalHint: 0 };
+        
+        return { id: m.id, number: m.numero, name: m.nome || null, status, order: [], customer, comandaId, totalHint };
       });
+      
       setTables(uiTables);
-    } catch {}
+      console.log('[refreshTablesLight] Mesas atualizadas com sucesso:', uiTables.length);
+      
+    } catch (err) {
+      console.error('[refreshTablesLight] Erro fatal:', err);
+      toast({ 
+        title: 'Erro ao atualizar mesas', 
+        description: 'Recarregue a página se o problema persistir', 
+        variant: 'destructive' 
+      });
+    }
   };
 
   const handleSelectTable = async (table) => {
@@ -628,20 +748,34 @@ function VendasPage() {
                   </Button>
                   <Button size="sm" variant="destructive" className="h-7 px-2.5 rounded-full text-[12px] font-medium leading-none whitespace-nowrap" onClick={async () => {
                     try {
+                      console.log('[Liberar Mesa] Iniciando liberação da mesa:', table.number);
+                      
+                      // Fechar comanda e mesa
                       await fecharComandaEMesa({ comandaId: table.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
-                      const updated = { ...table, status: 'available', order: [], comandaId: null, customer: null, totalHint: 0 };
-                      setSelectedTable(updated);
-                      setTables((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
-                      try { 
-                        if (userProfile?.codigo_empresa) {
-                          localStorage.removeItem(`vendas:tables:${userProfile.codigo_empresa}`);
-                          localStorage.clear(); // Limpa todo o localStorage para evitar dados antigos
-                        }
-                      } catch {}
+                      console.log('[Liberar Mesa] Comanda fechada com sucesso');
+                      
+                      // Atualizar estado local imediatamente
+                      setSelectedTable(null);
+                      
+                      // Recarregar mesas
                       await refreshTablesLight();
+                      console.log('[Liberar Mesa] Mesas atualizadas');
+                      
                       toast({ title: 'Mesa liberada', variant: 'success' });
                     } catch (e) {
-                      toast({ title: 'Falha ao liberar mesa', description: e?.message || 'Tente novamente', variant: 'destructive' });
+                      console.error('[Liberar Mesa] Erro:', e);
+                      toast({ 
+                        title: 'Falha ao liberar mesa', 
+                        description: e?.message || 'Tente novamente', 
+                        variant: 'destructive' 
+                      });
+                      
+                      // Em caso de erro, tentar recarregar as mesas para sincronizar
+                      try {
+                        await refreshTablesLight();
+                      } catch (refreshErr) {
+                        console.error('[Liberar Mesa] Erro ao recarregar após falha:', refreshErr);
+                      }
                     }
                   }}>
                     <X size={12} className="mr-1.5" /> Liberar
@@ -1131,12 +1265,27 @@ function VendasPage() {
           console.log(`[confirmOpen] Após aguardar: ${openComandas.length} comandas abertas encontradas`);
           
           const namesByComanda = {};
+          const totalsByComanda = {};
+          
+          // Buscar clientes e totais das comandas
           await Promise.all((openComandas || []).map(async (c) => {
             try {
               const vincs = await listarClientesDaComanda({ comandaId: c.id, codigoEmpresa: userProfile?.codigo_empresa });
               const nomes = (vincs || []).map(v => v?.nome).filter(Boolean);
               namesByComanda[c.id] = nomes.length ? nomes.join(', ') : null;
-            } catch { namesByComanda[c.id] = null; }
+              
+              // Calcular total da comanda
+              const itens = await listarItensDaComanda({ comandaId: c.id, codigoEmpresa: userProfile?.codigo_empresa });
+              const total = (itens || []).reduce((acc, item) => {
+                const itemTotal = (item.quantidade || 0) * (item.preco_unitario || 0) - (item.desconto || 0);
+                return acc + itemTotal;
+              }, 0);
+              totalsByComanda[c.id] = total;
+              
+            } catch { 
+              namesByComanda[c.id] = null;
+              totalsByComanda[c.id] = 0;
+            }
           }));
           
           const enrichedTables = (mesas || []).map((mesa) => {
@@ -1148,7 +1297,7 @@ function VendasPage() {
               comandaId: comanda?.id || null,
               customer: comanda ? namesByComanda[comanda.id] : null,
               order: [],
-              totalHint: 0,
+              totalHint: comanda ? totalsByComanda[comanda.id] || 0 : 0,
             };
           });
           
@@ -1293,10 +1442,20 @@ function VendasPage() {
                 <AlertDialogCancel>Cancelar</AlertDialogCancel>
                 <AlertDialogAction onClick={async () => {
                   try {
+                    // Pré-checagem: bloquear se houver comandas abertas
+                    try {
+                      const abertas = await listarComandasAbertas({ codigoEmpresa: userProfile?.codigo_empresa });
+                      if (abertas && abertas.length > 0) {
+                        toast({ title: 'Fechamento bloqueado', description: `Existem ${abertas.length} comandas abertas (inclui balcão). Finalize-as antes de fechar o caixa.`, variant: 'warning' });
+                        return;
+                      }
+                    } catch {}
+
                     await fecharCaixa({ saldoFinal: 0 });
                     setIsCashierOpen(false);
                     toast({ title: 'Caixa fechado!', description: 'O relatório de fechamento foi gerado.' });
                   } catch (e) {
+                    console.error(e);
                     toast({ title: 'Falha ao fechar caixa', description: e?.message || 'Tente novamente', variant: 'destructive' });
                   }
                 }}>Confirmar Fechamento</AlertDialogAction>

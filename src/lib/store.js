@@ -269,8 +269,85 @@ export async function ensureCaixaAberto({ saldoInicial = 0, codigoEmpresa } = {}
   return data
 }
 
+// Lista fechamentos de caixa (histórico)
+export async function listarFechamentosCaixa({ from, to, limit = 50, offset = 0, codigoEmpresa } = {}) {
+  const codigo = codigoEmpresa || getCachedCompanyCode()
+  let q = supabase
+    .from('caixa_sessoes')
+    .select('id, status, aberto_em, fechado_em, saldo_inicial, saldo_final')
+    .order('aberto_em', { ascending: false })
+    .range(offset, offset + limit - 1)
+  if (codigo) q = q.eq('codigo_empresa', codigo)
+  const mkStart = (d) => {
+    if (!d) return null
+    if (typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d)) {
+      const [y,m,day] = d.split('-').map(Number)
+      return new Date(y, m - 1, day, 0, 0, 0, 0)
+    }
+    return new Date(d)
+  }
+  const mkEnd = (d) => {
+    if (!d) return null
+    if (typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d)) {
+      const [y,m,day] = d.split('-').map(Number)
+      return new Date(y, m - 1, day, 23, 59, 59, 999)
+    }
+    return new Date(d)
+  }
+  const fromDt = mkStart(from)
+  const toDt = mkEnd(to)
+  if (fromDt) q = q.gte('aberto_em', fromDt.toISOString())
+  if (toDt) q = q.lte('aberto_em', toDt.toISOString())
+  const { data, error } = await q
+  if (error) throw error
+  return data || []
+}
+
 export async function fecharCaixa({ saldoFinal = 0, codigoEmpresa } = {}) {
   const codigo = codigoEmpresa || getCachedCompanyCode()
+  // Bloqueio: não permitir fechamento com comandas abertas (inclui balcão e mesas)
+  try {
+    let abertas = await listarComandasAbertas({ codigoEmpresa: codigo })
+    abertas = abertas || []
+
+    // 1) Auto-fechar comandas de balcão vazias (mesa_id null e sem itens)
+    const possiveisBalcao = abertas.filter(c => !c.mesa_id)
+    for (const c of possiveisBalcao) {
+      try {
+        const itens = await listarItensDaComanda({ comandaId: c.id, codigoEmpresa: codigo })
+        const qtd = (itens || []).length
+        if (qtd === 0) {
+          // auto-fecha comanda balcão vazia
+          await fecharComandaEMesa({ comandaId: c.id, codigoEmpresa: codigo })
+        }
+      } catch (e) {
+        // se falhar aqui, não bloqueia o fluxo; será tratado no próximo passo
+      }
+    }
+
+    // 2) Recarregar a lista e bloquear somente se ainda restarem abertas com itens
+    abertas = await listarComandasAbertas({ codigoEmpresa: codigo })
+    if (abertas && abertas.length > 0) {
+      // Verificar se são todas balcão vazias (fallback super seguro): se alguma tiver item, bloqueia
+      let restantesComItens = 0
+      for (const c of abertas) {
+        try {
+          const itens = await listarItensDaComanda({ comandaId: c.id, codigoEmpresa: codigo })
+          if ((itens || []).length > 0) restantesComItens++
+        } catch {
+          // assumimos que possui itens para evitar fechar indevido
+          restantesComItens++
+        }
+      }
+      if (restantesComItens > 0) {
+        throw new Error(`Existem ${restantesComItens} comandas com itens em aberto. Finalize-as antes de fechar o caixa.`)
+      }
+    }
+  } catch (chkErr) {
+    // Se a verificação de abertas falhar por erro de rede, segue para evitar bloqueios falsos
+    // Porém, se for nosso erro de regra (mensagem acima), propaga
+    if (chkErr && /Existem \d+ comandas/.test(chkErr.message || '')) throw chkErr
+  }
   // pegar sessão aberta
   let q = supabase.from('caixa_sessoes').select('id').eq('status','open').order('aberto_em', { ascending: false }).limit(1)
   if (codigo) q = q.eq('codigo_empresa', codigo)

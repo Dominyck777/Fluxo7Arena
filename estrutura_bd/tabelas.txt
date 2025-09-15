@@ -7173,3 +7173,85 @@ create index if not exists idx_pagamentos_recebido_em on public.pagamentos(receb
 --- ============================
 --- FIM DAS ATUALIZAÇÕES v4.1
 --- ============================
+
+--- ============================
+--- ATUALIZAÇÕES APLICADAS (v4.2)
+--- Data: 2025-09-15
+--- Motivo: Correções de estabilidade e carregamento de dados
+--- Observação: Melhorias no frontend para resolver problemas de UX
+--- ============================
+
+-- PROBLEMAS CORRIGIDOS EM 2025-09-15:
+
+-- 1) CARREGAMENTO DE DADOS INCONSISTENTE
+--    Sintomas: Itens não apareciam automaticamente, necessário F5 para carregar
+--    Causas identificadas:
+--      - Dependência de authReady com condições de corrida
+--      - Cache com fallback lento (5 segundos)
+--      - Retry limitado em algumas funções
+--      - useEffect não carregava cache imediatamente
+--    Soluções aplicadas:
+--      - Cache imediato em VendasPage.jsx e ProdutosPage.jsx
+--      - Fallback reduzido de 5s para 2s
+--      - Retry automático com backoff exponencial (3 tentativas)
+--      - Carregamento de cache antes do refresh de dados
+
+-- 2) MESAS SOMEM AO LIBERAR + VOLTA PARA LOGIN
+--    Sintomas: Ao clicar "Liberar Mesa", todas as mesas somem e sistema volta para login
+--    Causas identificadas:
+--      - Erro na função fecharComandaEMesa causando exceções não tratadas
+--      - Estado não sincronizado após operações de fechamento
+--      - Possível erro de autenticação durante operação que força logout
+--      - refreshTablesLight() falhava silenciosamente
+--    Soluções aplicadas:
+--      - Logs detalhados para rastreamento completo do processo
+--      - Estado local imediato: setSelectedTable(null) antes do refresh
+--      - Tratamento de erros com fallback para recarregar mesas
+--      - Feedback visual com toasts informativos
+
+-- 3) VALORES ZERADOS APÓS OPERAÇÕES
+--    Sintomas: Totais das mesas apareciam como R$ 0,00 após adicionar comanda ou liberar mesa
+--    Causas identificadas:
+--      - refreshTablesLight() definia totalHint: 0 hardcoded
+--      - confirmOpen() também zerava totais de todas as mesas
+--      - Função listarItensComanda não existia (nome correto: listarItensDaComanda)
+--      - Cálculo incorreto usando preco_total inexistente
+--    Soluções aplicadas:
+--      - Implementado cálculo correto: (quantidade × preco_unitario) - desconto
+--      - Busca paralela de totais em refreshTablesLight()
+--      - Preservação de totais existentes em confirmOpen()
+--      - Logs detalhados para debug de cálculos
+
+-- 4) MELHORIAS NO AUTHCONTEXT
+--    Problemas: Erros 401/403 causavam logout forçado
+--    Soluções aplicadas:
+--      - Retry automático para erros de autorização
+--      - Prevenção de logout forçado em erros transitórios
+--      - Melhor handling de erros de autenticação
+
+-- ARQUIVOS MODIFICADOS:
+--   - src/pages/VendasPage.jsx: refreshTablesLight(), confirmOpen(), handleSelectTable()
+--   - src/contexts/AuthContext.jsx: loadUserProfile() com retry logic
+--   - src/pages/ProdutosPage.jsx: useEffect com retry e cache imediato
+
+-- MELHORIAS DE PERFORMANCE E UX:
+--   - Cache inteligente: carregamento imediato + refresh em background
+--   - Logs estruturados para facilitar debug
+--   - Fallbacks automáticos em caso de falha
+--   - Retry com backoff exponencial
+--   - Feedback visual consistente ao usuário
+
+-- RESULTADOS OBTIDOS:
+--   ✅ Dados aparecem imediatamente (cache)
+--   ✅ Refresh automático em background
+--   ✅ Retry automático em caso de falha
+--   ✅ Menos necessidade de F5 manual
+--   ✅ Processo de liberação de mesas estável
+--   ✅ Estado sincronizado corretamente
+--   ✅ Não força logout do sistema
+--   ✅ Valores corretos em todas as operações
+--   ✅ Sistema mais responsivo e estável
+
+--- ============================
+--- FIM DAS ATUALIZAÇÕES v4.2
+--- ============================

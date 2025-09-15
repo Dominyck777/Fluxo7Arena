@@ -1013,24 +1013,48 @@ function ProdutosPage() {
     useEffect(() => {
       const codigoEmpresa = userProfile?.codigo_empresa || null;
       if (!codigoEmpresa) return;
-      // hydrate cache products
-      try {
-        const cached = JSON.parse(localStorage.getItem(`produtos:list:${codigoEmpresa}`) || '[]');
-        if (Array.isArray(cached) && cached.length > 0) {
-          const mapped = cached.map(p => ({
-            ...p,
-            validade: p?.validade ? (p.validade instanceof Date ? p.validade : new Date(p.validade)) : null,
-          }));
-          setProducts(mapped);
+      
+      // hydrate cache products imediatamente
+      const cached = (() => {
+        try {
+          return JSON.parse(localStorage.getItem('products:list') || '[]');
+        } catch {
+          return [];
         }
-      } catch {}
-      // hydrate cache categories
+      })();
+      if (Array.isArray(cached) && cached.length > 0) {
+        setProducts(cached);
+      }
+      
+      // load fresh data in background com retry
+      const loadWithRetry = async (attempts = 3) => {
+        for (let i = 0; i < attempts; i++) {
+          try {
+            if (mountedRef.current) {
+              await refetchProducts();
+              break;
+            }
+          } catch (err) {
+            console.warn(`[ProdutosPage] Tentativa ${i + 1} falhou:`, err);
+            if (i === attempts - 1) {
+              console.error('[ProdutosPage] Todas as tentativas falharam');
+            } else {
+              await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)));
+            }
+          }
+        }
+      };
+      
+      // Carregar categorias em cache
       try {
         const cachedCats = JSON.parse(localStorage.getItem(`produtos:cats:${codigoEmpresa}`) || '[]');
         if (Array.isArray(cachedCats) && cachedCats.length > 0) setCategories(cachedCats);
       } catch {}
+      
       if (authReady) {
-        refetchProducts();
+        const t = setTimeout(() => loadWithRetry(), 100);
+        
+        // Carregar categorias
         (async () => {
           try {
             const cats = await listCategories({ codigoEmpresa });
@@ -1038,10 +1062,11 @@ function ProdutosPage() {
             setCategories(cats);
             try { localStorage.setItem(`produtos:cats:${codigoEmpresa}`, JSON.stringify(cats)); } catch {}
           } catch (err) {
-            // eslint-disable-next-line no-console
             console.error('[Categorias] load on mount:error', err);
           }
         })();
+        
+        return () => clearTimeout(t);
       }
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [authReady, userProfile?.codigo_empresa]);
