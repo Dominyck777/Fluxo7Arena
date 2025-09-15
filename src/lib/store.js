@@ -314,7 +314,8 @@ export async function abrirComandaParaMesa({ mesaId, codigoEmpresa } = {}) {
   
   console.log(`[abrirComandaParaMesa] Criando nova comanda com payload:`, payload)
   
-  const { data, error } = await supabase.from('comandas').insert(payload).select('id,status,mesa_id,codigo_empresa').single()
+  // IMPORTANTE: Não incluir 'id' no payload - deixar o banco gerar o BIGSERIAL
+  const { data, error } = await supabase.from('comandas').insert(payload).select('id,status,mesa_id,codigo_empresa,aberto_em').single()
   if (error) {
     console.error(`[abrirComandaParaMesa] ERRO ao criar comanda:`, error)
     throw error
