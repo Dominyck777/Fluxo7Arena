@@ -150,6 +150,43 @@ const itemVariants = {
 
 function AgendaPage() {
   const { toast } = useToast();
+  // Debug toggle via localStorage: set localStorage.setItem('debug:agenda','1') to enable
+  const debugOn = useMemo(() => {
+    try { return typeof window !== 'undefined' && localStorage.getItem('debug:agenda') === '1'; } catch { return false; }
+  }, []);
+  const dbg = useCallback((...args) => { if (debugOn) { try { console.log('[AgendaDbg]', ...args); } catch {} } }, [debugOn]);
+  // Pulse tracker: collect a short timeline of events to diagnose popover close pulses
+  const pulseRef = useRef({ active: false, tag: '', start: 0, timer: null, events: [] });
+  const pulseLog = useCallback((event, data) => {
+    if (!debugOn) return;
+    try {
+      const now = Date.now();
+      const rel = pulseRef.current && pulseRef.current.active ? (now - (pulseRef.current.start || now)) : 0;
+      pulseRef.current.events.push({ t: now, ms: rel, event, data });
+    } catch {}
+  }, [debugOn]);
+  const pulseDump = useCallback((reason) => {
+    if (!debugOn) return;
+    try {
+      if (!pulseRef.current.active) return;
+      const { tag, start, events } = pulseRef.current;
+      const header = `[PulseDump] tag=${tag} dur=${Date.now()-start}ms reason=${reason}`;
+      console.groupCollapsed(header);
+      for (const e of events) {
+        console.log(` +${String(e.ms).padStart(4,' ')}ms`, e.event, e.data || {});
+      }
+      console.groupEnd();
+    } catch {}
+    try { if (pulseRef.current.timer) clearTimeout(pulseRef.current.timer); } catch {}
+    pulseRef.current = { active: false, tag: '', start: 0, timer: null, events: [] };
+  }, [debugOn]);
+  const pulseStart = useCallback((tag, timeoutMs = 5000) => {
+    if (!debugOn) return;
+    try { if (pulseRef.current.timer) clearTimeout(pulseRef.current.timer); } catch {}
+    pulseRef.current = { active: true, tag, start: Date.now(), timer: null, events: [] };
+    pulseRef.current.timer = setTimeout(() => pulseDump('timeout'), timeoutMs);
+    dbg('PulseStart', { tag, timeoutMs });
+  }, [debugOn, pulseDump, dbg]);
   const { userProfile, authReady, company } = useAuth();
   const [currentDate, setCurrentDate] = useState(new Date());
   const [bookings, setBookings] = useState([]);
@@ -160,6 +197,26 @@ function AgendaPage() {
   // Controle de concorrência e limpeza segura
   const participantsReqIdRef = useRef(0);
   const lastParticipantsDateKeyRef = useRef('');
+  // Evitar re-renders que fechem selects quando modal está aberto
+  const modalOpenRef = useRef(false);
+  useEffect(() => {
+    modalOpenRef.current = isModalOpen;
+    dbg('Modal state change:', { isModalOpen });
+    pulseLog('modal', { open: isModalOpen });
+  }, [isModalOpen, dbg]);
+  // Debug instrumentation for Client picker popover
+  const customerPickerIntentRef = useRef('init'); // 'open' | 'close' | 'outside' | 'escape' | 'focusOutside' | 'code'
+  const customerPickerLastChangeAtRef = useRef(0);
+  const customerPickerOpenRef = useRef(false);
+  const suppressPickerCloseRef = useRef(0);
+  const customerPickerDesiredOpenRef = useRef(false);
+  const lastAutoReopenAtRef = useRef(0);
+  const [effectiveCustomerPickerOpen, setEffectiveCustomerPickerOpen] = useState(false);
+  // Short-lived UI busy window (e.g., right after fetch/realtime) to avoid popover unintended close
+  const uiBusyUntilRef = useRef(0);
+  const setUiBusy = useCallback((ms = 800) => { uiBusyUntilRef.current = Date.now() + ms; dbg('UI:busy set', { ms }); }, [dbg]);
+  const isUiBusy = useCallback(() => Date.now() < uiBusyUntilRef.current, []);
+  // (moved) CustomerPicker state logging effect is added later, after isCustomerPickerOpen is declared
 
   // Evita duplo disparo de abertura em dev/StrictMode ou por eventos sobrepostos
   const lastOpenRef = useRef(0);
@@ -493,6 +550,9 @@ function AgendaPage() {
 
   const scheduleNextAutomation = useCallback(() => {
     if (!authReady || !userProfile?.codigo_empresa) return;
+    // Evita re-renders e timers enquanto o modal estiver aberto (melhora UX de selects)
+    if (modalOpenRef.current) { dbg('scheduleNextAutomation:skipped (modal open)'); return; }
+    pulseLog('auto:schedule');
     clearNextAutoTimer();
     const now = getNowMs();
     let nextTs = Infinity;
@@ -600,10 +660,13 @@ function AgendaPage() {
   }, [lastTimeSyncAtMs, supabase, userProfile, setBookings, scheduleNextAutomation, getNowMs, automation, isOverriddenRecently, updateBookingStatus]);
   const runAutomation = useCallback(async () => {
     if (!authReady || !userProfile?.codigo_empresa) return;
+    // Pausa automação enquanto o modal estiver aberto para reduzir "pulsos" na UI
+    if (modalOpenRef.current) { dbg('runAutomation:skipped (modal open)'); return; }
     if (automationRunningRef.current) return;
     automationRunningRef.current = true;
     try {
       try { console.debug('[Auto] tick'); } catch {}
+      pulseLog('auto:tick');
       const nowTs = getNowMs();
       const now = new Date(nowTs);
       const todayStr = format(now, 'yyyy-MM-dd');
@@ -719,22 +782,20 @@ function AgendaPage() {
   
 
 
-  // Hidrata agendamentos a partir do cache antes da busca
+  // Hidrata agendamentos a partir do cache antes da busca (simplificado)
   useEffect(() => {
     if (!bookingsCacheKey) return;
     try {
       const cached = JSON.parse(localStorage.getItem(bookingsCacheKey) || '[]');
       if (Array.isArray(cached) && cached.length > 0) {
-        // Converte datas serializadas de volta para Date
-        const mapped = cached.map((b) => ({
-          ...b,
-          start: new Date(b.start),
-          end: new Date(b.end),
-        }));
-        setBookings(mapped);
+        const mapped = cached.map((b) => ({ ...b, start: new Date(b.start), end: new Date(b.end) }));
+        dbg('cache:bookings:hydrate', { count: mapped.length });
+        pulseLog('cache:hydrate', { count: mapped.length });
+        setBookings((prev) => (prev && prev.length > 0 ? prev : mapped));
+        setUiBusy(1200);
       }
     } catch {}
-  }, [bookingsCacheKey]);
+  }, [bookingsCacheKey, dbg]);
 
   // Recuperação resiliente ao voltar foco/visibilidade da aba: reidrata cache e refaz fetch
   useEffect(() => {
@@ -752,7 +813,6 @@ function AgendaPage() {
         // Ao voltar, roda automação e recarrega dados frescos do backend
         try { runAutomationRef.current && runAutomationRef.current(); } catch {}
         try { fetchBookings(); } catch {}
-        try { loadParticipants(); } catch {}
         try { scheduleNextAutomation(); } catch {}
       }
     };
@@ -785,6 +845,8 @@ function AgendaPage() {
   // Carrega agendamentos do dia atual a partir do banco (extraído para useCallback para reuso)
   const fetchBookings = useCallback(async () => {
     if (!authReady || !userProfile?.codigo_empresa) return;
+    dbg('fetchBookings:start', { date: format(currentDate, 'yyyy-MM-dd'), empresa: userProfile?.codigo_empresa });
+    pulseLog('fetch:start', { day: format(currentDate, 'yyyy-MM-dd') });
     const dayStart = startOfDay(currentDate);
     const dayEnd = addDays(dayStart, 1);
     const { data, error } = await supabase
@@ -799,6 +861,8 @@ function AgendaPage() {
       .lt('inicio', dayEnd.toISOString())
       .order('inicio', { ascending: true });
     if (error) {
+      dbg('fetchBookings:error', { message: error?.message, code: error?.code, status: error?.status });
+      pulseLog('fetch:error', { message: error?.message, code: error?.code, status: error?.status });
       toast({ title: 'Erro ao carregar agendamentos', description: error.message, variant: 'destructive' });
       // Não sobrescrever com vazio; tentar uma vez novamente (token/rls pode estar atrasado)
       if (!bookingsRetryRef.current) {
@@ -809,6 +873,8 @@ function AgendaPage() {
     }
     // Em alguns casos no Vercel o retorno vem 200 mas vazio na primeira batida (RLS/propagação)
     if (!data || data.length === 0) {
+      dbg('fetchBookings:empty-first-hit');
+       pulseLog('fetch:empty-first');
       // Só tentar novamente se temos cache para manter UI preenchida
       let hasCache = false;
       try {
@@ -854,7 +920,24 @@ function AgendaPage() {
         localStorage.setItem(bookingsCacheKey, JSON.stringify(serializable));
       }
     } catch {}
-  }, [authReady, userProfile?.codigo_empresa, currentDate, courtsMap, bookingsCacheKey, toast]);
+  }, [authReady, userProfile?.codigo_empresa, currentDate, courtsMap, bookingsCacheKey, toast, dbg, debugOn]);
+
+  // Log watcher: whenever bookings changes (after set), log a compact summary
+  useEffect(() => {
+    if (!debugOn) return;
+    try {
+      const summary = (bookings || []).map(b => `${b.id}:${format(b.start, 'HH:mm')}-${format(b.end, 'HH:mm')}:${b.status}`).join(' | ');
+      console.log('[AgendaDbg] bookings:changed', { count: Array.isArray(bookings) ? bookings.length : 0, summary });
+    } catch {}
+  }, [bookings, debugOn]);
+  // After bookings change, suppress picker auto-close for a short window
+  useEffect(() => {
+    try {
+      const until = Date.now() + 1800;
+      suppressPickerCloseRef.current = until;
+      dbg('Picker:suppressClose window set', { until });
+    } catch {}
+  }, [bookings]);
 
   useEffect(() => {
     if (authReady && userProfile?.codigo_empresa) {
@@ -867,6 +950,8 @@ function AgendaPage() {
   const realtimeDebounceRef = useRef(null);
   const [realtimeStatus, setRealtimeStatus] = useState('idle');
   const [lastRealtimeEventAtMs, setLastRealtimeEventAtMs] = useState(null);
+  // Se o modal estiver aberto, acumula uma atualização pendente para executar após o fechamento
+  const pendingRealtimeRefreshRef = useRef(false);
   useEffect(() => {
     if (!authReady || !userProfile?.codigo_empresa) return;
     const dayStart = startOfDay(currentDate);
@@ -886,8 +971,17 @@ function AgendaPage() {
       try { console.debug('[Realtime] agendamentos change', { event: payload.eventType, id: row.id }); } catch {}
       if (realtimeDebounceRef.current) clearTimeout(realtimeDebounceRef.current);
       try { setLastRealtimeEventAtMs(Date.now()); } catch {}
+      // Se o modal está aberto, adiar refresh para não fechar selects dentro do modal
+      if (modalOpenRef.current) {
+        dbg('Realtime:onChange deferred due to modal open');
+        pendingRealtimeRefreshRef.current = true;
+        pulseLog('rt:change:deferred', { id: row.id, event: payload.eventType });
+        return;
+      }
+      dbg('Realtime:onChange scheduling fetchBookings');
+      pulseLog('rt:change', { id: row.id, event: payload.eventType });
       realtimeDebounceRef.current = setTimeout(() => {
-        try { fetchBookings(); } catch {}
+        try { dbg('Realtime:debounced fetchBookings fire'); pulseLog('rt:debounced:fire'); setUiBusy(1200); fetchBookings(); } catch {}
       }, 400);
     };
     const channel = supabase
@@ -900,6 +994,14 @@ function AgendaPage() {
       try { setRealtimeStatus('unsubscribed'); } catch {}
     };
   }, [authReady, userProfile?.codigo_empresa, currentDate, fetchBookings]);
+
+  // Ao fechar o modal, se houver refresh pendente devido a eventos realtime, executa agora
+  useEffect(() => {
+    if (!isModalOpen && pendingRealtimeRefreshRef.current) {
+      pendingRealtimeRefreshRef.current = false;
+      try { dbg('Modal closed: flushing pending realtime refresh'); pulseLog('rt:flushAfterModalClose'); fetchBookings(); } catch {}
+    }
+  }, [isModalOpen, fetchBookings, dbg]);
 
   // Próximo tick de automação (para debug)
   const [nextAutoAtMs, setNextAutoAtMs] = useState(null);
@@ -952,6 +1054,9 @@ function AgendaPage() {
   useEffect(() => {
     const loadParticipants = async () => {
       if (!authReady || !userProfile?.codigo_empresa) return;
+      // Evitar re-renders do modal enquanto o usuário está interagindo com selects
+      if (modalOpenRef.current) { dbg('Participants:skipped (modal open)'); return; }
+      dbg('Participants:load start'); pulseLog('parts:start');
       const ids = (bookings || []).map(b => b.id).filter(Boolean);
       const dateKey = format(currentDate, 'yyyy-MM-dd');
       // Evita wipe em estados transitórios de carregamento de bookings
@@ -961,6 +1066,7 @@ function AgendaPage() {
           try { if (participantsCacheKey) localStorage.setItem(participantsCacheKey, '{}'); } catch {}
           lastParticipantsDateKeyRef.current = dateKey;
         }
+        dbg('Participants:skip empty ids'); pulseLog('parts:skip');
         return;
       }
       const reqId = ++participantsReqIdRef.current;
@@ -972,6 +1078,7 @@ function AgendaPage() {
       if (participantsReqIdRef.current !== reqId) return;
       if (error) {
         console.warn('[Participants] load error', error);
+        dbg('Participants:error', { message: error?.message, code: error?.code, status: error?.status }); pulseLog('parts:error', { code: error?.code });
         return; // mantém estado anterior
       }
       const map = {};
@@ -980,6 +1087,7 @@ function AgendaPage() {
         if (!map[k]) map[k] = [];
         map[k].push(row);
       }
+      dbg('Participants:loaded', { bookings: ids.length, rows: (data || []).length }); pulseLog('parts:loaded', { rows: (data||[]).length });
       lastParticipantsDateKeyRef.current = dateKey;
       // Atualiza apenas os IDs consultados, preservando outros e persiste em cache
       setParticipantsByAgendamento(prev => {
@@ -988,11 +1096,12 @@ function AgendaPage() {
           next[id] = map[id] || [];
         }
         try { if (participantsCacheKey) localStorage.setItem(participantsCacheKey, JSON.stringify(next)); } catch {}
+        dbg('Participants:set state for ids', { ids }); pulseLog('parts:set', { idsCount: ids.length });
         return next;
       });
     };
     loadParticipants();
-  }, [authReady, userProfile?.codigo_empresa, bookings, currentDate, participantsCacheKey]);
+  }, [authReady, userProfile?.codigo_empresa, bookings, currentDate, participantsCacheKey, dbg]);
 
   // Carregar quadras do banco por empresa (inclui modalidades e horários)
   useEffect(() => {
@@ -1307,6 +1416,30 @@ function AgendaPage() {
     // Destaque sutil no trigger ao fechar por clique fora
     const [highlightCustomerTrigger, setHighlightCustomerTrigger] = useState(false);
     const closedByOutsideRef = useRef(false);
+    // Guarda a última seleção não vazia para proteção contra limpezas indevidas
+    const lastNonEmptySelectionRef = useRef([]);
+    const persistLastKey = useMemo(() => {
+      try {
+        const emp = userProfile?.codigo_empresa || 'no-company';
+        return `agenda:lastSelection:${emp}`;
+      } catch { return 'agenda:lastSelection:no-company'; }
+    }, [userProfile?.codigo_empresa]);
+    const persistLastNonEmpty = useCallback((arr) => {
+      try { sessionStorage.setItem(persistLastKey, JSON.stringify(arr || [])); } catch {}
+    }, [persistLastKey]);
+    const hydrateLastNonEmpty = useCallback(() => {
+      try {
+        const raw = sessionStorage.getItem(persistLastKey);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) {
+            lastNonEmptySelectionRef.current = parsed;
+          }
+        }
+      } catch {}
+    }, [persistLastKey]);
+    // Marca se o usuário limpou intencionalmente todas as seleções durante o picker
+    const clearedByUserRef = useRef(false);
     // Ref para o input de busca (para focar após limpar)
     const customerQueryInputRef = useRef(null);
     // Participantes (apenas no modo edição): { cliente_id, nome, valor_cota, status_pagamento }
@@ -1314,11 +1447,144 @@ function AgendaPage() {
     const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
     const [isCancelConfirmOpen, setIsCancelConfirmOpen] = useState(false);
     const [clientsLoading, setClientsLoading] = useState(false);
+    // Saving flags
     const [isSavingPayments, setIsSavingPayments] = useState(false);
     const [isSavingBooking, setIsSavingBooking] = useState(false);
-    // Busca de participantes no modal de pagamentos
+    // Pagamentos: busca por participante
     const [paymentSearch, setPaymentSearch] = useState('');
     const paymentSearchRef = useRef(null);
+    // Logging effect placed after clientsLoading is declared
+    useEffect(() => {
+      try {
+        const ts = Date.now();
+        const since = ts - (customerPickerLastChangeAtRef.current || 0);
+        customerPickerLastChangeAtRef.current = ts;
+        dbg('CustomerPicker:state', { open: isCustomerPickerOpen, intent: customerPickerIntentRef.current, sinceLastMs: since, clientsLoading, uiBusy: isUiBusy() });
+        customerPickerIntentRef.current = 'code';
+      } catch {}
+    }, [isCustomerPickerOpen, clientsLoading, dbg]);
+    // Start/End pulse timeline around the Customer Picker lifecycle
+    useEffect(() => {
+      if (!debugOn) return;
+      customerPickerOpenRef.current = isCustomerPickerOpen;
+      if (isCustomerPickerOpen) {
+        pulseStart('customer-picker', 6000);
+        pulseLog('picker:open');
+        customerPickerDesiredOpenRef.current = true;
+        setEffectiveCustomerPickerOpen(true);
+      } else {
+        pulseLog('picker:close');
+        pulseDump('picker-close');
+        // Se havia refresh pendente (por termos adiado durante o picker), executar agora
+        if (pendingRealtimeRefreshRef.current) {
+          pendingRealtimeRefreshRef.current = false;
+          try { dbg('Picker closed: flushing pending refresh'); pulseLog('picker:flush'); fetchBookings(); } catch {}
+        }
+        // Não baixar effectiveOpen aqui; só baixamos em fechamento explícito
+      }
+    }, [isCustomerPickerOpen]);
+
+    // Watchdog: se o picker fechou sem intenção explícita e o usuário deseja mantê-lo aberto, reabre automaticamente
+    useEffect(() => {
+      if (!isModalOpen) return;
+      // Persisted desire in localStorage (survive remounts)
+      let desired = customerPickerDesiredOpenRef.current;
+      try {
+        const v = localStorage.getItem('agenda:customerPicker:desiredAt');
+        if (v) {
+          const ts = Number(v);
+          if (Number.isFinite(ts) && Date.now() - ts < 3000) desired = true;
+        }
+      } catch {}
+      if (!desired) return; // usuário não deseja aberto
+      if (isCustomerPickerOpen) return; // já aberto
+      // Não tentar reabrir durante busy/supressão
+      if (Date.now() < suppressPickerCloseRef.current || isUiBusy()) return;
+      // Debounce reabertura para evitar loops
+      const now = Date.now();
+      if (now - lastAutoReopenAtRef.current < 800) return;
+      lastAutoReopenAtRef.current = now;
+      dbg('CustomerPicker:auto-reopen (persisted)');
+      customerPickerIntentRef.current = 'open';
+      setIsCustomerPickerOpen(true);
+      setEffectiveCustomerPickerOpen(true);
+    }, [isCustomerPickerOpen, isModalOpen]);
+
+    // Mantém a última seleção não vazia em memória
+    useEffect(() => {
+      const arr = Array.isArray(form.selectedClients) ? form.selectedClients : [];
+      if (arr.length > 0) {
+        lastNonEmptySelectionRef.current = arr;
+        persistLastNonEmpty(arr);
+        setChipsSnapshot(arr);
+      }
+    }, [form.selectedClients, persistLastNonEmpty]);
+
+    // Ao fechar o picker, se a seleção ficou vazia de forma inesperada, restaura
+    useEffect(() => {
+      if (!isModalOpen) return;
+      // hydrate last non-empty selection from sessionStorage on open
+      hydrateLastNonEmpty();
+      if (effectiveCustomerPickerOpen) return;
+      // Apenas considera restauração quando o usuário não deseja o picker aberto
+      if (customerPickerDesiredOpenRef.current) return;
+      const arr = Array.isArray(form.selectedClients) ? form.selectedClients : [];
+      const last = (() => {
+        const mem = Array.isArray(lastNonEmptySelectionRef.current) ? lastNonEmptySelectionRef.current : [];
+        if (mem && mem.length > 0) return mem;
+        try {
+          const raw = sessionStorage.getItem(persistLastKey);
+          const parsed = raw ? JSON.parse(raw) : [];
+          return Array.isArray(parsed) ? parsed : [];
+        } catch { return []; }
+      })();
+      if (arr.length === 0 && last.length > 0 && !clearedByUserRef.current) {
+        // Restaura de forma silenciosa; evita perder seleção feita pelo usuário
+        setForm(f => ({ ...f, selectedClients: last }));
+        // Limpa o flag de clique fora para não reentrar
+        closedByOutsideRef.current = false;
+      }
+    }, [effectiveCustomerPickerOpen, isModalOpen, hydrateLastNonEmpty, persistLastKey]);
+
+    // Diagnostics: log any change to selectedClients and attempt delayed restore if it becomes empty unexpectedly
+    const lastLoggedAtRef = useRef(0);
+    useEffect(() => {
+      try {
+        const now = Date.now();
+        const arr = Array.isArray(form.selectedClients) ? form.selectedClients : [];
+        const last = Array.isArray(lastNonEmptySelectionRef.current) ? lastNonEmptySelectionRef.current : [];
+        if (now - lastLoggedAtRef.current > 300) {
+          console.groupCollapsed('[CustomerPicker][selectedClients changed]');
+          console.log('len', arr.length, arr);
+          console.log('lastNonEmpty(len)', last.length, last);
+          console.log('flags', { isModalOpen, effectiveCustomerPickerOpen, isCustomerPickerOpen, clearedByUser: !!clearedByUserRef.current });
+          console.trace('change-trace');
+          console.groupEnd();
+          lastLoggedAtRef.current = now;
+        }
+        if (isModalOpen && !effectiveCustomerPickerOpen && arr.length === 0 && last.length > 0 && !clearedByUserRef.current) {
+          // attempt immediate restore and after short delays to beat concurrent effects
+          setForm(f => ({ ...f, selectedClients: [...last] }));
+          setTimeout(() => {
+            const arr2 = Array.isArray(form.selectedClients) ? form.selectedClients : [];
+            const last2 = Array.isArray(lastNonEmptySelectionRef.current) ? lastNonEmptySelectionRef.current : [];
+            if (arr2.length === 0 && last2.length > 0) {
+              try { console.warn('[CustomerPicker] delayed restore applied (25ms)'); } catch {}
+              setForm(f => ({ ...f, selectedClients: [...last2] }));
+            }
+          }, 25);
+          setTimeout(() => {
+            const arr3 = Array.isArray(form.selectedClients) ? form.selectedClients : [];
+            const last3 = Array.isArray(lastNonEmptySelectionRef.current) ? lastNonEmptySelectionRef.current : [];
+            if (arr3.length === 0 && last3.length > 0) {
+              try { console.warn('[CustomerPicker] delayed restore applied (120ms)'); } catch {}
+              setForm(f => ({ ...f, selectedClients: [...last3] }));
+            }
+          }, 120);
+        }
+      } catch {}
+    }, [form.selectedClients, effectiveCustomerPickerOpen, isModalOpen]);
+    // (removed erroneous stray return block)
     // Ocultar participantes apenas na UI de Pagamentos (não altera o agendamento até salvar pagamentos)
     const [paymentHiddenIds, setPaymentHiddenIds] = useState([]);
     useEffect(() => {
@@ -1330,21 +1596,82 @@ function AgendaPage() {
     const pendingSaveRef = useRef(false);
     const completedSaveRef = useRef(false);
     const [paymentSelectedId, setPaymentSelectedId] = useState(null);
+    // Snapshot para render dos chips, desacoplado de flutuações do form
+    const [chipsSnapshot, setChipsSnapshot] = useState([]);
     // Aviso de pendências no modal de pagamento
     const [paymentWarning, setPaymentWarning] = useState(null);
     const participantsPrefillOnceRef = useRef(false);
     // Evita que a auto-correção de horários rode imediatamente após aplicar um prefill
     const suppressAutoAdjustRef = useRef(false);
+    // Garante que a inicialização do formulário ocorra apenas uma vez por abertura do modal
+    const initializedRef = useRef(false);
     // Lista local de clientes para evitar re-render do componente pai durante a 1ª abertura
     const [localCustomers, setLocalCustomers] = useState(customerOptions);
+    // Lista efetiva de clientes selecionados
+    // Regra: em NOVO agendamento (sem edição), NÃO usar fallbacks (snapshot/último); manter vazio se o form estiver vazio
+    const effectiveSelectedClients = useMemo(() => {
+      const arr = Array.isArray(form.selectedClients) ? form.selectedClients : [];
+      if (!editingBooking) {
+        return arr; // novo agendamento deve começar limpo
+      }
+      if (arr.length > 0) return arr;
+      const last = Array.isArray(lastNonEmptySelectionRef.current) ? lastNonEmptySelectionRef.current : [];
+      return (!effectiveCustomerPickerOpen && last.length > 0) ? last : arr;
+    }, [form.selectedClients, effectiveCustomerPickerOpen, editingBooking]);
+
     // Rótulo resumido para o seletor de clientes (ex.: "Daniel +3")
     const selectedClientsLabel = useMemo(() => {
-      const arr = form.selectedClients || [];
+      const arr = effectiveSelectedClients || [];
       if (arr.length === 0) return 'Adicionar clientes';
       const first = arr[0]?.nome || 'Cliente';
       const extra = arr.length - 1;
       return extra > 0 ? `${first} +${extra}` : first;
-    }, [form.selectedClients]);
+    }, [effectiveSelectedClients]);
+
+    // Chips source: em NOVO agendamento, renderizar somente a partir do estado atual do form (sem fallbacks)
+    const chipsClients = useMemo(() => {
+      const arr = Array.isArray(form.selectedClients) ? form.selectedClients : [];
+      if (!editingBooking) {
+        return arr; // novo agendamento: sem snapshot/último
+      }
+      const snap = Array.isArray(chipsSnapshot) ? chipsSnapshot : [];
+      if (snap.length > 0) return snap;
+      if (arr.length > 0) return arr;
+      const last = (() => {
+        const mem = Array.isArray(lastNonEmptySelectionRef.current) ? lastNonEmptySelectionRef.current : [];
+        if (mem && mem.length > 0) return mem;
+        try {
+          const raw = sessionStorage.getItem(persistLastKey);
+          const parsed = raw ? JSON.parse(raw) : [];
+          return Array.isArray(parsed) ? parsed : [];
+        } catch { return []; }
+      })();
+      return (!effectiveCustomerPickerOpen && last.length > 0) ? last : [];
+    }, [chipsSnapshot, form.selectedClients, effectiveCustomerPickerOpen, persistLastKey, editingBooking]);
+    useEffect(() => {
+      try {
+        console.groupCollapsed('[CustomerPicker][chips render]');
+        console.log('chipsClients(len)', chipsClients.length, chipsClients);
+        console.log('form.selectedClients(len)', Array.isArray(form.selectedClients) ? form.selectedClients.length : 0);
+        console.log('lastNonEmpty(len)', Array.isArray(lastNonEmptySelectionRef.current) ? lastNonEmptySelectionRef.current.length : 0);
+        console.log('openStates', { effectiveCustomerPickerOpen, isCustomerPickerOpen });
+        console.groupEnd();
+      } catch {}
+    }, [chipsClients, form.selectedClients, effectiveCustomerPickerOpen]);
+
+    // Debug: loga quando a lista efetiva muda, para diagnosticar chips
+    useEffect(() => {
+      try {
+        dbg('Chips:effective change', {
+          effectiveLen: Array.isArray(effectiveSelectedClients) ? effectiveSelectedClients.length : 0,
+          formLen: Array.isArray(form.selectedClients) ? form.selectedClients.length : 0,
+          lastLen: Array.isArray(lastNonEmptySelectionRef.current) ? lastNonEmptySelectionRef.current.length : 0,
+          pickerOpen: isCustomerPickerOpen,
+        });
+      } catch {}
+    }, [effectiveSelectedClients, form.selectedClients, isCustomerPickerOpen]);
+
+    // (removido) Efeito duplicado de restauração que podia sobrescrever seleção válida ao fechar
 
     // Evitar recarregar clientes repetidamente durante a mesma abertura do modal
     const clientsLoadedKeyRef = useRef(null);
@@ -1403,8 +1730,58 @@ function AgendaPage() {
         pendingSaveRef.current = false;
         completedSaveRef.current = false;
         setIsSavingBooking(false);
+        // Ao fechar o modal, permitir nova inicialização na próxima abertura
+        initializedRef.current = false;
       }
     }, [isModalOpen]);
+
+    // Ao abrir o modal especificamente para NOVO agendamento (não edição), zera seleção de clientes mesmo com prefill
+    const wasOpenRef = useRef(false);
+    useEffect(() => {
+      if (isModalOpen && !wasOpenRef.current) {
+        wasOpenRef.current = true;
+        // Apenas quando não está editando (novo agendamento), independentemente de haver prefill
+        if (!editingBooking) {
+          try { lastNonEmptySelectionRef.current = []; } catch {}
+          try { setChipsSnapshot([]); } catch {}
+          try { sessionStorage.removeItem(persistLastKey); } catch {}
+          // Evita qualquer restauração automática: marca limpeza intencional e fecha/neutraliza o picker
+          try { clearedByUserRef.current = true; } catch {}
+          try { customerPickerDesiredOpenRef.current = false; localStorage.removeItem('agenda:customerPicker:desiredAt'); } catch {}
+          try { setIsCustomerPickerOpen(false); setEffectiveCustomerPickerOpen(false); } catch {}
+          // Limpa imediatamente a seleção de clientes para o form começar vazio
+          setForm(f => ({ ...f, selectedClients: [] }));
+          // Defer para depois da primeira pintura do modal evitar colisão com inicialização do form
+          setTimeout(() => {
+            setForm(f => ({ ...f, selectedClients: [] }));
+          }, 0);
+        }
+      } else if (!isModalOpen && wasOpenRef.current) {
+        wasOpenRef.current = false;
+      }
+    }, [isModalOpen, editingBooking, prefill]);
+
+    // Se o modal já estiver aberto e transicionarmos para modo NOVO (editingBooking -> null),
+    // garantir limpeza de clientes mesmo sem fechar/reabrir o modal.
+    const newModeInitRef = useRef(false);
+    useEffect(() => {
+      if (!isModalOpen) { newModeInitRef.current = false; return; }
+      if (!editingBooking) {
+        if (newModeInitRef.current) return; // já limpou para este ciclo de "novo"
+        newModeInitRef.current = true;
+        try { lastNonEmptySelectionRef.current = []; } catch {}
+        try { setChipsSnapshot([]); } catch {}
+        try { sessionStorage.removeItem(persistLastKey); } catch {}
+        try { clearedByUserRef.current = true; } catch {}
+        try { customerPickerDesiredOpenRef.current = false; localStorage.removeItem('agenda:customerPicker:desiredAt'); } catch {}
+        try { setIsCustomerPickerOpen(false); setEffectiveCustomerPickerOpen(false); } catch {}
+        setForm(f => ({ ...f, selectedClients: [] }));
+        setTimeout(() => { setForm(f => ({ ...f, selectedClients: [] })); }, 0);
+      } else {
+        // Entrou em modo edição; libera reset quando voltar para novo
+        newModeInitRef.current = false;
+      }
+    }, [isModalOpen, editingBooking]);
 
     // Função idempotente para salvar uma vez; reusada em onClick e ao voltar foco da aba
     const saveBookingOnce = useCallback(async () => {
@@ -1528,6 +1905,10 @@ function AgendaPage() {
           completedSaveRef.current = true;
           pendingSaveRef.current = false;
           try { console.log('[AgendamentoSave] Success UPDATE: flags set completed=true, pending=false'); } catch {}
+          // Clear customer selection caches to avoid carryover into next new booking
+          try { lastNonEmptySelectionRef.current = []; } catch {}
+          try { setChipsSnapshot([]); } catch {}
+          try { sessionStorage.removeItem(persistLastKey); } catch {}
           setIsModalOpen(false);
           return;
         }
@@ -1627,6 +2008,10 @@ function AgendaPage() {
         completedSaveRef.current = true;
         pendingSaveRef.current = false;
         try { console.log('[AgendamentoSave] Success CREATE: flags set completed=true, pending=false'); } catch {}
+        // Clear customer selection caches to avoid carryover into next new booking
+        try { lastNonEmptySelectionRef.current = []; } catch {}
+        try { setChipsSnapshot([]); } catch {}
+        try { sessionStorage.removeItem(persistLastKey); } catch {}
         setIsModalOpen(false);
       } catch (e) {
         console.error('[AgendamentoSave] Error', e);
@@ -1734,9 +2119,11 @@ function AgendaPage() {
     }, [courtsMap, form.court, form.startMinutes, form.endMinutes]);
 
 
-    // Preencher formulário ao abrir em modo edição ou reset para novo
+    // Preencher formulário ao abrir em modo edição ou reset para novo (apenas uma vez por abertura)
     useEffect(() => {
       if (!isModalOpen) return;
+      // Evita sobrescrever escolhas do usuário devido a efeitos tardios (ex.: quadras/clientes chegando)
+      if (initializedRef.current) return;
 
       if (editingBooking) {
         const startM = getHours(editingBooking.start) * 60 + getMinutes(editingBooking.start);
@@ -1808,6 +2195,8 @@ function AgendaPage() {
             }
           })();
         }
+        // Marca como inicializado após preencher o formulário de edição
+        initializedRef.current = true;
       } else if (prefill) {
         setForm({
           selectedClients: [],
@@ -1820,6 +2209,7 @@ function AgendaPage() {
         });
         setParticipantsForm([]);
         suppressAutoAdjustRef.current = true;
+        initializedRef.current = true;
       } else {
         const initialCourt = availableCourts[0] || '';
         const allowed = courtsMap[initialCourt]?.modalidades || modalities;
@@ -1833,8 +2223,13 @@ function AgendaPage() {
           endMinutes: nearestSlot() + 60,
         });
         setParticipantsForm([]);
+        // Brand new booking: clear any previous customer selection snapshots/persisted cache
+        try { lastNonEmptySelectionRef.current = []; } catch {}
+        try { setChipsSnapshot([]); } catch {}
+        try { sessionStorage.removeItem(persistLastKey); } catch {}
         // Evita autoajuste imediato durante a animação de abertura
         suppressAutoAdjustRef.current = true;
+        initializedRef.current = true;
       }
     }, [isModalOpen, editingBooking, currentDate, prefill, availableCourts, modalities, participantsByAgendamento]);
 
@@ -2210,17 +2605,34 @@ function AgendaPage() {
               <div>
                 <Label className="font-bold">Clientes</Label>
                 <div className="flex gap-2 mt-1">
+                  {/* effective open fully controls visibility and ignores programmatic closes */}
                   <Popover
-                    open={isCustomerPickerOpen}
+                    open={effectiveCustomerPickerOpen}
                     onOpenChange={(open) => {
                       // Não fechar automaticamente enquanto o modal de novo cliente estiver aberto ou enquanto a lista estiver recarregando
                       if ((isClientFormOpen || clientsLoading) && open === false) return;
+                      // Sticky: só permite fechar quando a intenção for explícita ('close')
+                      if (!open && customerPickerIntentRef.current !== 'close') {
+                        dbg('CustomerPicker:onOpenChange prevented (sticky, no explicit close)');
+                        return;
+                      }
+                      if (open) {
+                        customerPickerDesiredOpenRef.current = true;
+                        try { localStorage.setItem('agenda:customerPicker:desiredAt', String(Date.now())); } catch {}
+                        setEffectiveCustomerPickerOpen(true);
+                      } else {
+                        customerPickerDesiredOpenRef.current = false;
+                        try { localStorage.removeItem('agenda:customerPicker:desiredAt'); } catch {}
+                        setEffectiveCustomerPickerOpen(false);
+                      }
                       // Se estiver fechando e foi por clique fora, aplica destaque temporário ao trigger
                       if (!open && closedByOutsideRef.current) {
                         setHighlightCustomerTrigger(true);
                         closedByOutsideRef.current = false;
                         setTimeout(() => setHighlightCustomerTrigger(false), 1200);
                       }
+                      customerPickerIntentRef.current = open ? 'open' : 'close';
+                      dbg('CustomerPicker:onOpenChange', { open, isClientFormOpen, clientsLoading });
                       setIsCustomerPickerOpen(open);
                     }}
                   >
@@ -2231,14 +2643,16 @@ function AgendaPage() {
                       </Button>
                     </PopoverTrigger>
                     <PopoverContent
+                      forceMount
                       className="w-[360px] p-2"
                       onPointerDownOutside={(e) => {
-                        if (clientsLoading || isClientFormOpen) { e.preventDefault(); return; }
-                        // Marca intenção de fechar por clique fora
-                        closedByOutsideRef.current = true;
+                        // Sticky: bloquear clique fora (fechamento só por intenção explícita)
+                        e.preventDefault();
+                        closedByOutsideRef.current = true; // mantém highlight feedback
+                        dbg('CustomerPicker:onPointerDownOutside prevented (sticky)');
                       }}
-                      onFocusOutside={(e) => { if (clientsLoading || isClientFormOpen) e.preventDefault(); }}
-                      onEscapeKeyDown={(e) => { if (clientsLoading || isClientFormOpen) e.preventDefault(); }}
+                      onFocusOutside={(e) => { e.preventDefault(); dbg('CustomerPicker:onFocusOutside prevented (sticky)'); }}
+                      onEscapeKeyDown={(e) => { e.preventDefault(); dbg('CustomerPicker:onEscapeKeyDown prevented (sticky)'); }}
                     >
                       <div className="space-y-2">
                         <div className="relative">
@@ -2286,21 +2700,49 @@ function AgendaPage() {
                           ).map((c) => {
                             const id = typeof c === 'object' ? c.id : null;
                             const nome = getCustomerName(c);
-                            const selected = (form.selectedClients || []).some(sc => sc.id === id || sc.nome === nome);
+                            const nameKey = String(nome || '').toLowerCase();
+                            const isSame = (sc) => (sc.id && id) ? (sc.id === id) : (String(sc.nome || '').toLowerCase() === nameKey);
+                            const selected = (form.selectedClients || []).some(isSame);
                             return (
                               <button
-                                key={id || nome}
+                                key={id || nameKey}
                                 type="button"
                                 className="w-full text-left py-2 px-3 hover:bg-white/5 flex items-center justify-between"
+                                onMouseDown={(e) => { e.stopPropagation(); }}
+                                role="option"
+                                aria-checked={selected}
                                 onClick={() => {
                                   setForm((f) => {
-                                    const exists = (f.selectedClients || []).some(sc => sc.id === id || sc.nome === nome);
+                                    const exists = (f.selectedClients || []).some(isSame);
                                     if (exists) {
-                                      return { ...f, selectedClients: (f.selectedClients || []).filter(x => (x.id || x.nome) !== (id || nome)) };
+                                      const next = { ...f, selectedClients: (f.selectedClients || []).filter(x => (x.id && id) ? (x.id !== id) : (String(x.nome || '').toLowerCase() !== nameKey)) };
+                                      // Se após remover ficou vazio, marca como limpeza intencional do usuário
+                                      try { clearedByUserRef.current = (next.selectedClients || []).length === 0; } catch {}
+                                      // Atualiza imediatamente a última seleção não-vazia para não perder chips em efeitos concorrentes
+                                      try {
+                                        if ((next.selectedClients || []).length > 0) {
+                                          lastNonEmptySelectionRef.current = next.selectedClients;
+                                        }
+                                      } catch {}
+                                      dbg('CustomerPicker:selectedClients:remove', { id, nome, nextCount: next.selectedClients.length });
+                                      return next;
                                     }
                                     const novo = { id, nome };
-                                    return { ...f, selectedClients: [...(f.selectedClients || []), novo] };
+                                    const next = { ...f, selectedClients: [...(f.selectedClients || []), novo] };
+                                    // Ao adicionar, não é limpeza intencional
+                                    try { clearedByUserRef.current = false; } catch {}
+                                    // Atualiza imediatamente a última seleção não-vazia
+                                    try {
+                                      if ((next.selectedClients || []).length > 0) {
+                                        lastNonEmptySelectionRef.current = next.selectedClients;
+                                      }
+                                    } catch {}
+                                    dbg('CustomerPicker:selectedClients:add', { id, nome, nextCount: next.selectedClients.length });
+                                    return next;
                                   });
+                                  // Garante que o picker permaneça aberto após a seleção
+                                  customerPickerDesiredOpenRef.current = true;
+                                  try { localStorage.setItem('agenda:customerPicker:desiredAt', String(Date.now())); } catch {}
                                 }}
                               >
                                 <span className={`truncate mr-2 ${selected ? 'text-text-muted' : ''}`}>{getCustomerLabel(c)}</span>
@@ -2316,12 +2758,69 @@ function AgendaPage() {
                             type="button"
                             size="sm"
                             className="bg-emerald-600 hover:bg-emerald-500 text-white shadow-md ring-2 ring-emerald-400/40 ring-offset-2 ring-offset-transparent"
-                            onClick={() => setIsCustomerPickerOpen(false)}
+                            onClick={() => {
+                              customerPickerDesiredOpenRef.current = false;
+                              try { localStorage.removeItem('agenda:customerPicker:desiredAt'); } catch {}
+                              customerPickerIntentRef.current = 'close';
+                              dbg('CustomerPicker:Concluir -> close');
+                              // Diagnostic console: capture current state before any mutation/close
+                              try {
+                                const now = new Date();
+                                const curSel = Array.isArray(form.selectedClients) ? form.selectedClients : [];
+                                const lastSel = Array.isArray(lastNonEmptySelectionRef.current) ? lastNonEmptySelectionRef.current : [];
+                                console.groupCollapsed('[CustomerPicker][Concluir] click');
+                                console.log('time', now.toISOString());
+                                console.log('cur.selectedClients(len)', curSel.length, curSel);
+                                console.log('lastNonEmpty(len)', lastSel.length, lastSel);
+                                console.log('openStates', {
+                                  effectiveCustomerPickerOpen,
+                                  isCustomerPickerOpen,
+                                  desiredOpen: customerPickerDesiredOpenRef.current,
+                                });
+                                console.log('flags', {
+                                  clientsLoading,
+                                  clearedByUser: !!clearedByUserRef.current,
+                                  uiBusy: isUiBusy(),
+                                });
+                                console.groupEnd();
+                              } catch {}
+                              // Captura a seleção atual como última não-vazia antes de fechar
+                              try {
+                                const cur = Array.isArray(form.selectedClients) ? form.selectedClients : [];
+                                if (cur.length > 0) lastNonEmptySelectionRef.current = cur;
+                              } catch {}
+                              // Grava explicitamente a última seleção não-vazia para evitar perdas por renderizações concorrentes
+                              try {
+                                const last = Array.isArray(lastNonEmptySelectionRef.current) ? lastNonEmptySelectionRef.current : [];
+                                if (last.length > 0) {
+                                  setForm((f) => ({ ...f, selectedClients: [...last] }));
+                                  setChipsSnapshot(last);
+                                }
+                              } catch {}
+                              setIsCustomerPickerOpen(false);
+                              setEffectiveCustomerPickerOpen(false);
+                              // Post-close diagnostic after a microtask
+                              try {
+                                setTimeout(() => {
+                                  const cur2 = Array.isArray(form.selectedClients) ? form.selectedClients : [];
+                                  const last2 = Array.isArray(lastNonEmptySelectionRef.current) ? lastNonEmptySelectionRef.current : [];
+                                  console.groupCollapsed('[CustomerPicker][Concluir] after-close microtask');
+                                  console.log('cur.selectedClients(len)', cur2.length, cur2);
+                                  console.log('lastNonEmpty(len)', last2.length, last2);
+                                  console.log('openStates', {
+                                    effectiveCustomerPickerOpen,
+                                    isCustomerPickerOpen,
+                                    desiredOpen: customerPickerDesiredOpenRef.current,
+                                  });
+                                  console.groupEnd();
+                                }, 0);
+                              } catch {}
+                            }}
                           >
                             Concluir
                           </Button>
                           <div className="flex items-center gap-2">
-                            <span className="text-xs text-text-muted">{(form.selectedClients || []).length} selecionado(s)</span>
+                            <span className="text-xs text-text-muted">{(effectiveSelectedClients || []).length} selecionado(s)</span>
                           </div>
                         </div>
                       </div>
@@ -2331,7 +2830,7 @@ function AgendaPage() {
                     type="button"
                     onClick={() => {
                       // Fecha o popover antes de abrir o modal para evitar flicker/fechamento tardio
-                      setIsCustomerPickerOpen(false);
+                      customerPickerDesiredOpenRef.current = false; try { localStorage.removeItem('agenda:customerPicker:desiredAt'); } catch {}; customerPickerIntentRef.current = 'close'; dbg('CustomerPicker:+Novo -> close'); setIsCustomerPickerOpen(false); setEffectiveCustomerPickerOpen(false);
                       setClientForModal(null);
                       setIsClientFormOpen(true);
                     }}
@@ -2339,25 +2838,43 @@ function AgendaPage() {
                     + Novo
                   </Button>
                 </div>
-                {(form.selectedClients || []).length > 0 && (
+                {chipsClients.length > 0 ? (
                   <div className="flex flex-wrap gap-2 mt-2">
-                    {(form.selectedClients || []).map((c) => (
-                      <span key={c.id} className="text-sm font-medium bg-white/5 border border-white/10 rounded px-2 py-1 flex items-center gap-2">
-                        {shortName(c.nome)}
-                        <button
-                          type="button"
-                          aria-label="Remover cliente"
-                          title="Remover cliente"
-                          className="text-text-muted hover:text-red-400 p-1 rounded hover:bg-red-500/10"
-                          onClick={() => setForm((f) => ({ ...f, selectedClients: (f.selectedClients || []).filter((x) => x.id !== c.id) }))}
-                        >
-                          <X className="w-5 h-5" />
-                          <span className="sr-only">Remover</span>
-                        </button>
-                      </span>
-                    ))}
+                    {chipsClients.map((c) => {
+                      const nameKey = String(c?.nome || '').toLowerCase();
+                      const key = c?.id || nameKey || Math.random().toString(36).slice(2);
+                      const token = c?.id || `__name:${nameKey}`;
+                      return (
+                        <span key={key} className="text-sm font-medium bg-white/5 border border-white/10 rounded px-2 py-1 flex items-center gap-2">
+                          {shortName(c.nome)}
+                          <button
+                            type="button"
+                            aria-label="Remover cliente"
+                            title="Remover cliente"
+                            className="text-text-muted hover:text-red-400 p-1 rounded hover:bg-red-500/10"
+                            onClick={() => {
+                              dbg('CustomerPicker:chip:remove', { token });
+                              setForm((f) => {
+                                const next = { ...f, selectedClients: (f.selectedClients || []).filter((x) => (x?.id && c?.id) ? (x.id !== c.id) : (String(x?.nome || '').toLowerCase() !== nameKey)) };
+                                try { clearedByUserRef.current = (next.selectedClients || []).length === 0; } catch {}
+                                // Atualiza imediatamente a última seleção não-vazia
+                                try {
+                                  if ((next.selectedClients || []).length > 0) {
+                                    lastNonEmptySelectionRef.current = next.selectedClients;
+                                  }
+                                } catch {}
+                                return next;
+                              });
+                            }}
+                          >
+                            <X className="w-5 h-5" />
+                            <span className="sr-only">Remover</span>
+                          </button>
+                        </span>
+                      );
+                    })}
                   </div>
-                )}
+                  ) : null}
               </div>
 
               {/* Quadra */}
@@ -3002,7 +3519,7 @@ function AgendaPage() {
                   const withoutDup = prev.filter(sc => sc.id !== saved.id);
                   return { ...f, selectedClients: [novo, ...withoutDup] };
                 });
-                setIsCustomerPickerOpen(false);
+                dbg('CustomerPicker:onSaved (ClientFormModal) — no auto-close');
               }
             } catch {}
           }}
