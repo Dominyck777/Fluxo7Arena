@@ -8,7 +8,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/components/ui/use-toast';
 import { CalendarDays, FileText, Search, ArrowLeft, Loader2 } from 'lucide-react';
-import { listarComandas, listarItensDaComanda, listarTotaisPorComanda, listarPagamentos, listMesas, listarClientesDaComanda } from '@/lib/store';
+import { listarComandas, listarItensDaComanda, listarTotaisPorComanda, listarPagamentos, listMesas, listarClientesDaComanda, listarFechamentosCaixa, listarResumoPeriodo } from '@/lib/store';
 import { cn } from '@/lib/utils';
 import { useNavigate } from 'react-router-dom';
 
@@ -32,55 +32,63 @@ export default function HistoricoComandasPage() {
   const [search, setSearch] = useState('');
   const debouncedSearch = useDebounced(search, 350);
   const [tipo, setTipo] = useState('all'); // all | comanda | balcao
+  const [tab, setTab] = useState('comandas'); // comandas | fechamentos
 
   const [detailId, setDetailId] = useState(null);
   const [detail, setDetail] = useState({ loading: false, itens: [], pagamentos: [] });
+  const [cashDetail, setCashDetail] = useState({ open: false, loading: false, resumo: null, periodo: { from: null, to: null } });
 
   const load = async () => {
     try {
       setLoading(true);
-      // Busca base de comandas (sem depender do id no filtro de busca)
-      const list = await listarComandas({ status, from, to, search: '', limit: 100, offset: 0 });
-      // Carrega totais em lote
-      const ids = (list || []).map(r => r.id);
-      let totals = {};
-      try { totals = await listarTotaisPorComanda(ids); } catch { totals = {}; }
-      // Mapa de mesas { id: numero }
-      let mesas = [];
-      try { mesas = await listMesas(); } catch { mesas = []; }
-      const mapMesaNumero = new Map((mesas || []).map(m => [m.id, m.numero]));
-      // Nomes de clientes (consulta individual por comanda, agregando em string)
-      const namesByComanda = {};
-      try {
-        await Promise.all((ids || []).map(async (id) => {
-          try {
-            const vincs = await listarClientesDaComanda({ comandaId: id });
-            const nomes = (vincs || []).map(v => v?.nome).filter(Boolean);
-            namesByComanda[id] = nomes.join(', ');
-          } catch { namesByComanda[id] = ''; }
+      if (tab === 'comandas') {
+        // Busca base de comandas (sem depender do id no filtro de busca)
+        const list = await listarComandas({ status, from, to, search: '', limit: 100, offset: 0 });
+        // Carrega totais em lote
+        const ids = (list || []).map(r => r.id);
+        let totals = {};
+        try { totals = await listarTotaisPorComanda(ids); } catch { totals = {}; }
+        // Mapa de mesas { id: numero }
+        let mesas = [];
+        try { mesas = await listMesas(); } catch { mesas = []; }
+        const mapMesaNumero = new Map((mesas || []).map(m => [m.id, m.numero]));
+        // Nomes de clientes (consulta individual por comanda, agregando em string)
+        const namesByComanda = {};
+        try {
+          await Promise.all((ids || []).map(async (id) => {
+            try {
+              const vincs = await listarClientesDaComanda({ comandaId: id });
+              const nomes = (vincs || []).map(v => v?.nome).filter(Boolean);
+              namesByComanda[id] = nomes.join(', ');
+            } catch { namesByComanda[id] = ''; }
+          }));
+        } catch {}
+        // Finalizadoras (rótulos) a partir dos pagamentos
+        const finsByComanda = {};
+        try {
+          await Promise.all((ids || []).map(async (id) => {
+            try {
+              const pgs = await listarPagamentos({ comandaId: id });
+              const labels = Array.from(new Set((pgs || []).map(pg => pg?.metodo).filter(Boolean)));
+              finsByComanda[id] = labels.join(', ');
+            } catch { finsByComanda[id] = ''; }
+          }));
+        } catch {}
+        const withTotals = (list || []).map(r => ({
+          ...r,
+          // status derivado: se existe fechado_em, considerar 'closed' para exibição/filtragem
+          statusDerived: r.fechado_em ? 'closed' : (r.status || 'open'),
+          total: Number(totals[r.id] || 0),
+          mesaNumero: mapMesaNumero.get(r.mesa_id),
+          clientesStr: namesByComanda[r.id] || '',
+          finalizadorasStr: finsByComanda[r.id] || ''
         }));
-      } catch {}
-      // Finalizadoras (rótulos) a partir dos pagamentos
-      const finsByComanda = {};
-      try {
-        await Promise.all((ids || []).map(async (id) => {
-          try {
-            const pgs = await listarPagamentos({ comandaId: id });
-            const labels = Array.from(new Set((pgs || []).map(pg => pg?.metodo).filter(Boolean)));
-            finsByComanda[id] = labels.join(', ');
-          } catch { finsByComanda[id] = ''; }
-        }));
-      } catch {}
-      const withTotals = (list || []).map(r => ({
-        ...r,
-        // status derivado: se existe fechado_em, considerar 'closed' para exibição/filtragem
-        statusDerived: r.fechado_em ? 'closed' : (r.status || 'open'),
-        total: Number(totals[r.id] || 0),
-        mesaNumero: mapMesaNumero.get(r.mesa_id),
-        clientesStr: namesByComanda[r.id] || '',
-        finalizadorasStr: finsByComanda[r.id] || ''
-      }));
-      setRows(withTotals);
+        setRows(withTotals);
+      } else {
+        // Fechamentos de caixa
+        const sess = await listarFechamentosCaixa({ from, to, limit: 100, offset: 0 });
+        setRows(sess || []);
+      }
     } catch (e) {
       toast({ title: 'Falha ao carregar histórico', description: e?.message || 'Tente novamente', variant: 'destructive' });
     } finally {
@@ -88,7 +96,7 @@ export default function HistoricoComandasPage() {
     }
   };
 
-  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [status, debouncedSearch, from, to]);
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [status, debouncedSearch, from, to, tab]);
 
   const openDetail = async (id) => {
     setDetailId(id);
@@ -158,8 +166,8 @@ export default function HistoricoComandasPage() {
   return (
     <motion.div variants={pageVariants} initial="hidden" animate="visible" className="h-full flex flex-col">
       <Helmet>
-        <title>Histórico de Comandas - Fluxo7 Arena</title>
-        <meta name="description" content="Histórico de comandas e vendas." />
+        <title>Histórico - Fluxo7 Arena</title>
+        <meta name="description" content="Histórico de vendas, comandas e fechamentos de caixa." />
       </Helmet>
 
       <motion.div variants={itemVariants} className="flex items-center justify-between mb-6">
@@ -168,15 +176,24 @@ export default function HistoricoComandasPage() {
             <ArrowLeft className="h-4 w-4 text-text-secondary" />
           </button>
           <div>
-            <h1 className="text-3xl font-black text-text-primary tracking-tighter">Histórico de Comandas</h1>
-            <p className="text-text-secondary">Consulte por período, status, mesa e cliente.</p>
+            <h1 className="text-3xl font-black text-text-primary tracking-tighter">Histórico</h1>
+            <p className="text-text-secondary">Comandas e Fechamentos de Caixa.</p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="text-sm text-text-secondary">Total do período: <span className="font-semibold text-text-primary">R$ {totals.sum.toFixed(2)}</span></div>
+        <div className="flex items-center gap-4">
+          <Tabs value={tab} onValueChange={setTab} className="w-[320px]">
+            <TabsList className="grid grid-cols-2">
+              <TabsTrigger value="comandas">Comandas</TabsTrigger>
+              <TabsTrigger value="fechamentos">Fechamentos de Caixa</TabsTrigger>
+            </TabsList>
+          </Tabs>
+          {tab === 'comandas' && (
+            <div className="text-sm text-text-secondary">Total do período: <span className="font-semibold text-text-primary">R$ {totals.sum.toFixed(2)}</span></div>
+          )}
         </div>
       </motion.div>
-
+      
+      {tab === 'comandas' && (
       <motion.div variants={itemVariants} className="bg-surface rounded-lg border border-border p-4 mb-4">
         <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
           <div>
@@ -222,7 +239,9 @@ export default function HistoricoComandasPage() {
           </div>
         </div>
       </motion.div>
+      )}
 
+      {tab === 'comandas' && (
       <motion.div variants={itemVariants} className="bg-surface rounded-lg border border-border p-0 overflow-hidden">
         <div className="overflow-x-auto">
           <table className="min-w-full text-sm">
@@ -269,6 +288,52 @@ export default function HistoricoComandasPage() {
         </div>
       </motion.div>
 
+      )}
+
+      {tab === 'fechamentos' && (
+      <motion.div variants={itemVariants} className="bg-surface rounded-lg border border-border p-0 overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-sm">
+            <thead className="bg-surface-2 text-text-secondary">
+              <tr>
+                <th className="text-left px-4 py-3">ID</th>
+                <th className="text-left px-4 py-3">Abertura</th>
+                <th className="text-left px-4 py-3">Fechamento</th>
+                <th className="text-left px-4 py-3">Status</th>
+                <th className="text-right px-4 py-3">Saldo Inicial</th>
+                <th className="text-right px-4 py-3">Saldo Final</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(!rows || rows.length === 0) && (
+                <tr><td colSpan={6} className="px-4 py-6 text-center text-text-muted">Nenhum fechamento encontrado no período.</td></tr>
+              )}
+              {(rows || []).map(r => (
+                <tr key={r.id} className="border-t border-border/70 hover:bg-success/5 cursor-pointer" onClick={async () => {
+                  // Abrir detalhes do fechamento com resumo por período
+                  try {
+                    setCashDetail({ open: true, loading: true, resumo: null, periodo: { from: r.aberto_em, to: r.fechado_em } });
+                    const res = await listarResumoPeriodo({ from: r.fechado_em ? r.fechado_em : r.aberto_em, to: r.fechado_em || new Date().toISOString() });
+                    setCashDetail({ open: true, loading: false, resumo: res || null, periodo: { from: r.aberto_em, to: r.fechado_em } });
+                  } catch (e) {
+                    setCashDetail({ open: true, loading: false, resumo: null, periodo: { from: r.aberto_em, to: r.fechado_em } });
+                  }
+                }}>
+                  <td className="px-4 py-2">{r.id}</td>
+                  <td className="px-4 py-2">{fmtDate(r.aberto_em)}</td>
+                  <td className="px-4 py-2">{fmtDate(r.fechado_em)}</td>
+                  <td className="px-4 py-2 capitalize">{r.status || '—'}</td>
+                  <td className="px-4 py-2 text-right">{fmtMoney(r.saldo_inicial)}</td>
+                  <td className="px-4 py-2 text-right">{fmtMoney(r.saldo_final)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </motion.div>
+      )}
+
+      {tab === 'comandas' && (
       <Dialog open={!!detailId} onOpenChange={(v) => { if (!v) { setDetailId(null); setDetail({ loading: false, itens: [], pagamentos: [] }); } }}>
         <DialogContent className="max-w-3xl" onKeyDown={(e) => e.stopPropagation()}>
           <DialogHeader>
@@ -316,6 +381,61 @@ export default function HistoricoComandasPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      )}
+
+      {tab === 'fechamentos' && (
+      <Dialog open={cashDetail.open} onOpenChange={(v) => { if (!v) setCashDetail({ open: false, loading: false, resumo: null, periodo: { from: null, to: null } }); }}>
+        <DialogContent className="max-w-2xl" onKeyDown={(e) => e.stopPropagation()}>
+          <DialogHeader>
+            <DialogTitle>Fechamento do Período</DialogTitle>
+            <DialogDescription>
+              {cashDetail.periodo.from ? fmtDate(cashDetail.periodo.from) : '—'}
+              {" "}até{" "}
+              {cashDetail.periodo.to ? fmtDate(cashDetail.periodo.to) : '—'}
+            </DialogDescription>
+          </DialogHeader>
+          {cashDetail.loading ? (
+            <div className="p-4 text-text-muted"><Loader2 className="inline mr-2 h-4 w-4 animate-spin"/>Carregando resumo…</div>
+          ) : (
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="bg-surface-2 rounded-lg p-3 border border-border">
+                  <p className="text-xs text-text-secondary">Vendas Brutas (itens)</p>
+                  <p className="text-xl font-bold">{fmtMoney(cashDetail.resumo?.totalVendasBrutas || 0)}</p>
+                </div>
+                <div className="bg-surface-2 rounded-lg p-3 border border-border">
+                  <p className="text-xs text-text-secondary">Descontos</p>
+                  <p className="text-xl font-bold">{fmtMoney(cashDetail.resumo?.totalDescontos || 0)}</p>
+                </div>
+                <div className="bg-surface-2 rounded-lg p-3 border border-border">
+                  <p className="text-xs text-text-secondary">Entradas (pagamentos)</p>
+                  <p className="text-xl font-bold">{fmtMoney(cashDetail.resumo?.totalEntradas || 0)}</p>
+                </div>
+              </div>
+              <div>
+                <div className="text-sm font-semibold mb-1">Por Finalizadora</div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {cashDetail.resumo?.totalPorFinalizadora && Object.keys(cashDetail.resumo.totalPorFinalizadora).length > 0 ? (
+                    Object.entries(cashDetail.resumo.totalPorFinalizadora).map(([metodo, valor]) => (
+                      <div key={metodo} className="flex items-center justify-between bg-surface-2 rounded-md p-2 border border-border">
+                        <span className="text-sm text-text-secondary">{String(metodo)}</span>
+                        <span className="text-sm font-semibold">{fmtMoney(valor)}</span>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="text-sm text-text-muted">Sem pagamentos registrados no período.</div>
+                  )}
+                </div>
+              </div>
+              <div className="text-xs text-text-muted">Observação: Sangrias, suprimentos e troco ainda não foram implementados.</div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="secondary" onClick={() => setCashDetail({ open: false, loading: false, resumo: null, periodo: { from: null, to: null } })}>Fechar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      )}
     </motion.div>
   );
 }

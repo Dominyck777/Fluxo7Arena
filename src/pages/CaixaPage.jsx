@@ -2,9 +2,10 @@ import React, { useEffect, useState } from 'react';
 import { Helmet } from 'react-helmet';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useToast } from '@/components/ui/use-toast';
 import { Banknote, Wallet, ArrowDownCircle, ArrowUpCircle, FileText, CalendarDays } from 'lucide-react';
-import { ensureCaixaAberto, fecharCaixa, listarFechamentosCaixa } from '@/lib/store';
+import { ensureCaixaAberto, fecharCaixa, listarFechamentosCaixa, getCaixaAberto, listarResumoSessaoCaixaAtual } from '@/lib/store';
 import { useAuth } from '@/contexts/AuthContext';
 import { Input } from '@/components/ui/input';
 
@@ -27,8 +28,12 @@ function CaixaPage() {
   const [loading, setLoading] = useState(false);
   const [closing, setClosing] = useState(false);
   const [history, setHistory] = useState([]);
+  const [isOpen, setIsOpen] = useState(false);
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
+  const [sessionSummary, setSessionSummary] = useState(null);
+  const [confirmCloseOpen, setConfirmCloseOpen] = useState(false);
+  const [confirmData, setConfirmData] = useState({ loading: false, resumo: null });
 
   const loadHistory = async () => {
     try {
@@ -40,7 +45,28 @@ function CaixaPage() {
     } finally { setLoading(false); }
   };
 
-  useEffect(() => { loadHistory(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [userProfile?.codigo_empresa]);
+  const loadSessionSummary = async () => {
+    try {
+      if (!isOpen) { setSessionSummary(null); return; }
+      const sum = await listarResumoSessaoCaixaAtual({ codigoEmpresa: userProfile?.codigo_empresa });
+      setSessionSummary(sum || null);
+    } catch (e) {
+      setSessionSummary(null);
+    }
+  };
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const sess = await getCaixaAberto({ codigoEmpresa: userProfile?.codigo_empresa });
+        setIsOpen(!!sess);
+      } catch { setIsOpen(false); }
+      loadHistory();
+      await loadSessionSummary();
+    };
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userProfile?.codigo_empresa]);
 
   return (
     <>
@@ -61,45 +87,69 @@ function CaixaPage() {
                   <h2 className="text-lg font-bold">Sessão do Caixa</h2>
                 </div>
                 <div className="flex gap-2">
-                  <Button onClick={async () => {
-                    try {
-                      setLoading(true);
-                      await ensureCaixaAberto({ codigoEmpresa: userProfile?.codigo_empresa });
-                      toast({ title: 'Caixa aberto', description: 'Sessão iniciada com sucesso.' });
-                    } catch (e) {
-                      toast({ title: 'Falha ao abrir caixa', description: e?.message || 'Tente novamente', variant: 'destructive' });
-                    } finally { setLoading(false); }
-                  }} size="sm" disabled={loading}>
-                    <Wallet className="h-4 w-4 mr-2" /> Abrir Caixa
-                  </Button>
-                  <Button onClick={async () => {
-                    try {
-                      setClosing(true);
-                      await fecharCaixa({ saldoFinal: 0, codigoEmpresa: userProfile?.codigo_empresa });
-                      toast({ title: 'Caixa fechado', description: 'Fechamento registrado no histórico.' });
-                      loadHistory();
-                    } catch (e) {
-                      toast({ title: 'Falha ao fechar caixa', description: e?.message || 'Verifique comandas abertas (mesas e balcão).', variant: 'destructive' });
-                    } finally { setClosing(false); }
-                  }} variant="outline" size="sm" disabled={closing}>
-                    <FileText className="h-4 w-4 mr-2" /> Fechar Caixa
-                  </Button>
+                  {!isOpen ? (
+                    <Button onClick={async () => {
+                      try {
+                        setLoading(true);
+                        await ensureCaixaAberto({ codigoEmpresa: userProfile?.codigo_empresa });
+                        setIsOpen(true);
+                        await loadSessionSummary();
+                        toast({ title: 'Caixa aberto', description: 'Sessão iniciada com sucesso.' });
+                      } catch (e) {
+                        toast({ title: 'Falha ao abrir caixa', description: e?.message || 'Tente novamente', variant: 'destructive' });
+                      } finally { setLoading(false); }
+                    }} size="sm" disabled={loading}>
+                      <Wallet className="h-4 w-4 mr-2" /> Abrir Caixa
+                    </Button>
+                  ) : (
+                    <Button onClick={async () => {
+                      // Abre modal de confirmação carregando o resumo real da sessão
+                      try {
+                        setConfirmCloseOpen(true);
+                        setConfirmData({ loading: true, resumo: null });
+                        const sum = await listarResumoSessaoCaixaAtual({ codigoEmpresa: userProfile?.codigo_empresa });
+                        setConfirmData({ loading: false, resumo: sum || null });
+                      } catch (e) {
+                        setConfirmData({ loading: false, resumo: null });
+                        toast({ title: 'Falha ao carregar resumo', description: e?.message || 'Tente novamente', variant: 'destructive' });
+                      }
+                    }} variant="outline" size="sm" disabled={closing}>
+                      <FileText className="h-4 w-4 mr-2" /> Fechar Caixa
+                    </Button>
+                  )}
                 </div>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div className="bg-surface-2 rounded-lg p-3 border border-border">
-                  <p className="text-xs text-text-secondary">Saldo Inicial</p>
-                  <p className="text-2xl font-bold tabular-nums">R$ 0,00</p>
+                  <p className="text-xs text-text-secondary">Vendas Brutas (itens)</p>
+                  <p className="text-2xl font-bold tabular-nums">R$ {(sessionSummary?.totalVendasBrutas || 0).toFixed(2)}</p>
                 </div>
                 <div className="bg-surface-2 rounded-lg p-3 border border-border">
-                  <p className="text-xs text-text-secondary">Entradas</p>
-                  <p className="text-2xl font-bold text-success tabular-nums">R$ 0,00</p>
+                  <p className="text-xs text-text-secondary">Descontos</p>
+                  <p className="text-2xl font-bold text-warning tabular-nums">R$ {(sessionSummary?.totalDescontos || 0).toFixed(2)}</p>
                 </div>
                 <div className="bg-surface-2 rounded-lg p-3 border border-border">
-                  <p className="text-xs text-text-secondary">Saídas</p>
-                  <p className="text-2xl font-bold text-danger tabular-nums">R$ 0,00</p>
+                  <p className="text-xs text-text-secondary">Entradas (pagamentos)</p>
+                  <p className="text-2xl font-bold text-success tabular-nums">R$ {(sessionSummary?.totalEntradas || 0).toFixed(2)}</p>
                 </div>
               </div>
+              {isOpen && (
+                <div className="mt-4">
+                  <h4 className="text-sm font-semibold mb-2">Por Finalizadora</h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+                    {sessionSummary && sessionSummary.totalPorFinalizadora && Object.keys(sessionSummary.totalPorFinalizadora).length > 0 ? (
+                      Object.entries(sessionSummary.totalPorFinalizadora).map(([metodo, valor]) => (
+                        <div key={metodo} className="bg-surface-2 rounded-md p-2 border border-border flex items-center justify-between">
+                          <span className="text-sm text-text-secondary truncate">{String(metodo)}</span>
+                          <span className="text-sm font-semibold">R$ {Number(valor||0).toFixed(2)}</span>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="text-sm text-text-muted">Sem pagamentos registrados na sessão.</div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
           <div className="md:col-span-4">

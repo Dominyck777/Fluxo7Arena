@@ -110,10 +110,104 @@ export async function listarComandas({ status, from, to, search = '', limit = 50
       q = q.or(`status.ilike.%${s}%`)
     }
   }
-
   const { data, error } = await q
   if (error) throw error
   return data || []
+}
+
+// ============ RESUMOS FINANCEIROS (RELATÓRIOS) ============
+
+// Retorna resumo financeiro do período [from, to]
+// - total por finalizadora (pagamentos)
+// - total de vendas brutas, descontos, vendas líquidas (comandas fechadas no período)
+export async function listarResumoPeriodo({ from, to, codigoEmpresa } = {}) {
+  const codigo = codigoEmpresa || getCachedCompanyCode()
+  // 1) Comandas fechadas no período
+  let comandasFechadas = []
+  try {
+    let q = supabase
+      .from('comandas')
+      .select('id, fechado_em')
+      .eq('status', 'closed')
+    if (codigo) q = q.eq('codigo_empresa', codigo)
+    if (from) q = q.gte('fechado_em', new Date(from).toISOString())
+    if (to) q = q.lte('fechado_em', new Date(to).toISOString())
+    const { data, error } = await q
+    if (error) throw error
+    comandasFechadas = data || []
+  } catch { comandasFechadas = [] }
+
+  const comandaIds = (comandasFechadas || []).map(c => c.id)
+
+  // 2) Somar itens (vendas brutas e descontos)
+  let totalVendasBrutas = 0
+  let totalDescontos = 0
+  if (comandaIds.length > 0) {
+    try {
+      let q = supabase
+        .from('comanda_itens')
+        .select('comanda_id, quantidade, preco_unitario, desconto')
+        .in('comanda_id', comandaIds)
+      if (codigo) q = q.eq('codigo_empresa', codigo)
+      const { data, error } = await q
+      if (error) throw error
+      for (const it of (data || [])) {
+        const bruto = Number(it.quantidade || 0) * Number(it.preco_unitario || 0)
+        const desc = Number(it.desconto || 0)
+        totalVendasBrutas += bruto
+        totalDescontos += desc
+      }
+    } catch {}
+  }
+  const totalVendasLiquidas = Math.max(0, totalVendasBrutas - totalDescontos)
+
+  // 3) Pagamentos por finalizadora no período (pela data de recebimento)
+  const porFinalizadora = {}
+  let totalEntradas = 0
+  try {
+    let qp = supabase
+      .from('pagamentos')
+      .select('metodo, valor, recebido_em, status')
+    if (codigo) qp = qp.eq('codigo_empresa', codigo)
+    if (from) qp = qp.gte('recebido_em', new Date(from).toISOString())
+    if (to) qp = qp.lte('recebido_em', new Date(to).toISOString())
+    const { data, error } = await qp
+    if (error) throw error
+    for (const pg of (data || [])) {
+      const ok = (pg.status || 'Pago') !== 'Cancelado' && (pg.status || 'Pago') !== 'Estornado'
+      if (!ok) continue
+      const key = pg.metodo || 'outros'
+      const v = Number(pg.valor || 0)
+      porFinalizadora[key] = (porFinalizadora[key] || 0) + v
+      totalEntradas += v
+    }
+  } catch {}
+
+  return {
+    from: from ? new Date(from).toISOString() : null,
+    to: to ? new Date(to).toISOString() : null,
+    totalPorFinalizadora: porFinalizadora,
+    totalEntradas,
+    totalVendasBrutas,
+    totalDescontos,
+    totalVendasLiquidas,
+  }
+}
+
+// Usa a sessão de caixa aberta para calcular resumo do período da sessão (aberto_em -> agora)
+export async function listarResumoSessaoCaixaAtual({ codigoEmpresa } = {}) {
+  const codigo = codigoEmpresa || getCachedCompanyCode()
+  let abertoEm = null
+  try {
+    let q = supabase.from('caixa_sessoes').select('aberto_em').eq('status','open').order('aberto_em', { ascending: false }).limit(1)
+    if (codigo) q = q.eq('codigo_empresa', codigo)
+    const { data, error } = await q
+    if (error) throw error
+    abertoEm = data?.[0]?.aberto_em || null
+  } catch {}
+  if (!abertoEm) return null
+  const now = new Date().toISOString()
+  return listarResumoPeriodo({ from: abertoEm, to: now, codigoEmpresa: codigo })
 }
 
 export async function listarPagamentos({ comandaId, codigoEmpresa } = {}) {
@@ -269,6 +363,16 @@ export async function ensureCaixaAberto({ saldoInicial = 0, codigoEmpresa } = {}
   return data
 }
 
+// Verifica se há caixa aberto (sem criar)
+export async function getCaixaAberto({ codigoEmpresa } = {}) {
+  const codigo = codigoEmpresa || getCachedCompanyCode()
+  let q = supabase.from('caixa_sessoes').select('id,status,aberto_em,saldo_inicial').eq('status', 'open').order('aberto_em', { ascending: false }).limit(1)
+  if (codigo) q = q.eq('codigo_empresa', codigo)
+  const { data, error } = await q
+  if (error) throw error
+  return data?.[0] || null
+}
+
 // Lista fechamentos de caixa (histórico)
 export async function listarFechamentosCaixa({ from, to, limit = 50, offset = 0, codigoEmpresa } = {}) {
   const codigo = codigoEmpresa || getCachedCompanyCode()
@@ -348,21 +452,102 @@ export async function fecharCaixa({ saldoFinal = 0, codigoEmpresa } = {}) {
     // Porém, se for nosso erro de regra (mensagem acima), propaga
     if (chkErr && /Existem \d+ comandas/.test(chkErr.message || '')) throw chkErr
   }
-  // pegar sessão aberta
-  let q = supabase.from('caixa_sessoes').select('id').eq('status','open').order('aberto_em', { ascending: false }).limit(1)
+  // pegar sessão aberta (precisamos do id e aberto_em)
+  let q = supabase.from('caixa_sessoes').select('id,aberto_em').eq('status','open').order('aberto_em', { ascending: false }).limit(1)
   if (codigo) q = q.eq('codigo_empresa', codigo)
   const { data: sess, error: qErr } = await q
   if (qErr) throw qErr
   const caixaId = sess?.[0]?.id || null
+  const abertoEm = sess?.[0]?.aberto_em || null
+  if (!caixaId) throw new Error('Nenhuma sessão de caixa aberta encontrada.')
 
+  // Fechar sessão agora e capturar timestamp de fechamento
+  const fechadoEmIso = new Date().toISOString()
   const { data, error } = await supabase
     .from('caixa_sessoes')
-    .update({ status: 'closed', saldo_final: saldoFinal, fechado_em: new Date().toISOString() })
+    .update({ status: 'closed', saldo_final: saldoFinal, fechado_em: fechadoEmIso })
     .eq('id', caixaId)
     .select('id,status,fechado_em')
     .single()
   if (error) throw error
+
+  // Criar snapshot do fechamento em caixa_resumos
+  try {
+    if (abertoEm && fechadoEmIso) {
+      const resumo = await listarResumoPeriodo({ from: abertoEm, to: fechadoEmIso, codigoEmpresa: codigo })
+      const payload = {
+        codigo_empresa: codigo || getCachedCompanyCode(),
+        caixa_sessao_id: caixaId,
+        periodo_de: resumo.from || abertoEm,
+        periodo_ate: resumo.to || fechadoEmIso,
+        total_bruto: Number(resumo.totalVendasBrutas || 0),
+        total_descontos: Number(resumo.totalDescontos || 0),
+        total_liquido: Number(resumo.totalVendasLiquidas || 0),
+        total_entradas: Number(resumo.totalEntradas || 0),
+        por_finalizadora: resumo.totalPorFinalizadora || {}
+      }
+      await supabase.from('caixa_resumos').insert(payload)
+    }
+  } catch (snapErr) {
+    console.warn('[fecharCaixa] Falha ao gravar snapshot de fechamento:', snapErr)
+  }
   return data
+}
+
+// Lê o snapshot do fechamento (se existir) para uma sessão específica
+export async function getCaixaResumo({ caixaSessaoId, codigoEmpresa } = {}) {
+  if (!caixaSessaoId) throw new Error('caixaSessaoId é obrigatório')
+  const codigo = codigoEmpresa || getCachedCompanyCode()
+  let q = supabase
+    .from('caixa_resumos')
+    .select('*')
+    .eq('caixa_sessao_id', caixaSessaoId)
+    .order('criado_em', { ascending: false })
+    .limit(1)
+  if (codigo) q = q.eq('codigo_empresa', codigo)
+  const { data, error } = await q
+  if (error) throw error
+  return data?.[0] || null
+}
+
+// Cria movimentação de caixa (sangria/suprimento/troco/ajuste)
+export async function criarMovimentacaoCaixa({ tipo, valor, observacao = '', caixaSessaoId, codigoEmpresa } = {}) {
+  const codigo = codigoEmpresa || getCachedCompanyCode()
+  if (!tipo || !['sangria','suprimento','troco','ajuste'].includes(tipo)) throw new Error('Tipo inválido de movimentação')
+  let sessId = caixaSessaoId
+  if (!sessId) {
+    // pega sessão aberta
+    let q = supabase.from('caixa_sessoes').select('id').eq('status','open').order('aberto_em', { ascending: false }).limit(1)
+    if (codigo) q = q.eq('codigo_empresa', codigo)
+    const { data: s, error } = await q
+    if (error) throw error
+    sessId = s?.[0]?.id || null
+  }
+  if (!sessId) throw new Error('Sessão de caixa não encontrada para registrar movimentação')
+  const payload = {
+    codigo_empresa: codigo,
+    caixa_sessao_id: sessId,
+    tipo,
+    valor: Math.max(0, Number(valor) || 0),
+    observacao: (observacao || '').trim() || null
+  }
+  const { data, error } = await supabase.from('caixa_movimentacoes').insert(payload).select('*').single()
+  if (error) throw error
+  return data
+}
+
+export async function listarMovimentacoesCaixa({ caixaSessaoId, codigoEmpresa } = {}) {
+  const codigo = codigoEmpresa || getCachedCompanyCode()
+  if (!caixaSessaoId) throw new Error('caixaSessaoId é obrigatório')
+  let q = supabase
+    .from('caixa_movimentacoes')
+    .select('*')
+    .eq('caixa_sessao_id', caixaSessaoId)
+    .order('criado_em', { ascending: true })
+  if (codigo) q = q.eq('codigo_empresa', codigo)
+  const { data, error } = await q
+  if (error) throw error
+  return data || []
 }
 
 // Comandas

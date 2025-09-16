@@ -7255,3 +7255,58 @@ create index if not exists idx_pagamentos_recebido_em on public.pagamentos(receb
 --- ============================
 --- FIM DAS ATUALIZAÇÕES v4.2
 --- ============================
+
+-- ============================
+-- ATUALIZAÇÕES v4.3
+-- Data: 2025-09-16
+-- Assunto: Snapshot de fechamento de caixa e Movimentações de Caixa
+-- Mudanças:
+--   1) Criação das tabelas public.caixa_resumos e public.caixa_movimentacoes
+--      - Ambas com isolamento por empresa via coluna codigo_empresa (text)
+--      - FKs com UUID para public.caixa_sessoes(id)
+--   2) Índices por (codigo_empresa, caixa_sessao_id) e por período
+--   3) Snapshot é gerado no momento do fechamento pelo app (src/lib/store.js::fecharCaixa)
+
+-- 1) Tabela: public.caixa_resumos (snapshot "congelado" do fechamento)
+-- Guarda totais do período [aberto_em -> fechado_em] para cada sessão
+-- DDL de referência:
+-- create table if not exists public.caixa_resumos (
+--   id                bigserial primary key,
+--   codigo_empresa    text not null,
+--   caixa_sessao_id   uuid not null references public.caixa_sessoes(id) on delete cascade,
+--   periodo_de        timestamptz not null,
+--   periodo_ate       timestamptz not null,
+--   total_bruto       numeric(14,2) not null default 0,
+--   total_descontos   numeric(14,2) not null default 0,
+--   total_liquido     numeric(14,2) not null default 0,
+--   total_entradas    numeric(14,2) not null default 0,
+--   por_finalizadora  jsonb not null default '{}'::jsonb,
+--   criado_em         timestamptz not null default now()
+-- );
+-- create index if not exists idx_caixa_resumos_empresa_sessao on public.caixa_resumos (codigo_empresa, caixa_sessao_id);
+-- create index if not exists idx_caixa_resumos_periodo on public.caixa_resumos (periodo_de, periodo_ate);
+
+-- 2) Tabela: public.caixa_movimentacoes (sangria/suprimento/troco/ajuste)
+-- Registra movimentações manuais e de troco vinculadas à sessão
+-- DDL de referência:
+-- create table if not exists public.caixa_movimentacoes (
+--   id               bigserial primary key,
+--   codigo_empresa   text not null,
+--   caixa_sessao_id  uuid not null references public.caixa_sessoes(id) on delete cascade,
+--   tipo             text not null check (tipo in ('sangria','suprimento','troco','ajuste')),
+--   valor            numeric(14,2) not null,
+--   observacao       text,
+--   criado_em        timestamptz not null default now()
+-- );
+-- create index if not exists idx_caixa_mov_empresa_sessao on public.caixa_movimentacoes (codigo_empresa, caixa_sessao_id);
+-- create index if not exists idx_caixa_mov_tipo on public.caixa_movimentacoes (tipo);
+
+-- Notas importantes
+-- - FK para caixa_sessoes é UUID (id uuid) — ajustado para compatibilidade.
+-- - Snapshot em caixa_resumos garante histórico imutável do fechamento.
+-- - UI de fechamento calcula totais reais antes de confirmar e grava o snapshot.
+-- - Movimentações serão exibidas no Histórico e somadas no Caixa.
+
+-- ============================
+-- FIM DAS ATUALIZAÇÕES v4.3
+-- ============================

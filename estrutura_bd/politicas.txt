@@ -1881,6 +1881,57 @@ grant execute on function public.trg_comandas_baixar_estoque() to authenticated;
 -- ============================
 
 -- ============================
+-- ATUALIZAÇÕES v4.3
+-- Data: 2025-09-16
+-- Assunto: RLS para snapshot de fechamento e movimentações de caixa
+-- Tabelas novas: public.caixa_resumos, public.caixa_movimentacoes
+-- Observação: As instruções abaixo são idempotentes (DROP IF EXISTS + CREATE)
+
+-- Habilitar RLS
+alter table public.caixa_resumos enable row level security;
+alter table public.caixa_movimentacoes enable row level security;
+
+-- Remover políticas antigas (se existirem)
+drop policy if exists caixa_resumos_select on public.caixa_resumos;
+drop policy if exists caixa_resumos_insert on public.caixa_resumos;
+drop policy if exists caixa_resumos_update on public.caixa_resumos;
+drop policy if exists caixa_resumos_delete on public.caixa_resumos;
+
+drop policy if exists caixa_mov_select on public.caixa_movimentacoes;
+drop policy if exists caixa_mov_insert on public.caixa_movimentacoes;
+drop policy if exists caixa_mov_update on public.caixa_movimentacoes;
+drop policy if exists caixa_mov_delete on public.caixa_movimentacoes;
+
+-- Policies caixa_resumos (snapshot)
+create policy caixa_resumos_select on public.caixa_resumos
+  for select using (codigo_empresa = public.get_my_company_code());
+create policy caixa_resumos_insert on public.caixa_resumos
+  for insert with check (codigo_empresa = public.get_my_company_code());
+-- Para snapshot imutável, NÃO criar update/delete. Caso opte por permitir:
+create policy caixa_resumos_update on public.caixa_resumos
+  for update using (codigo_empresa = public.get_my_company_code()) with check (codigo_empresa = public.get_my_company_code());
+create policy caixa_resumos_delete on public.caixa_resumos
+  for delete using (codigo_empresa = public.get_my_company_code());
+
+-- Policies caixa_movimentacoes
+create policy caixa_mov_select on public.caixa_movimentacoes
+  for select using (codigo_empresa = public.get_my_company_code());
+create policy caixa_mov_insert on public.caixa_movimentacoes
+  for insert with check (codigo_empresa = public.get_my_company_code());
+create policy caixa_mov_update on public.caixa_movimentacoes
+  for update using (codigo_empresa = public.get_my_company_code()) with check (codigo_empresa = public.get_my_company_code());
+create policy caixa_mov_delete on public.caixa_movimentacoes
+  for delete using (codigo_empresa = public.get_my_company_code());
+
+-- Notas:
+-- - As tabelas usam FK UUID para caixa_sessoes(id).
+-- - O app grava snapshot em caixa_resumos no momento do fechamento.
+-- - Para tornar o snapshot imutável, remova as políticas de UPDATE/DELETE acima.
+
+-- ============================
+-- FIM DAS ATUALIZAÇÕES v4.3
+-- ============================
+-- ============================
 -- ATUALIZAÇÕES APLICADAS (v4.2)
 -- Data: 2025-09-15
 -- Motivo: Regras de fechamento de caixa e recomendações RLS pendentes

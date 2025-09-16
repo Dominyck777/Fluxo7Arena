@@ -12,7 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger, } from "@/components/ui/alert-dialog"
 import { Label } from '@/components/ui/label';
-import { listMesas, ensureCaixaAberto, fecharCaixa, getOrCreateComandaForMesa, listarItensDaComanda, adicionarItem, atualizarQuantidadeItem, removerItem, listarFinalizadoras, registrarPagamento, fecharComandaEMesa, listarComandasAbertas, listarTotaisPorComanda, criarMesa, listarClientes, adicionarClientesAComanda, listarClientesDaComanda } from '@/lib/store';
+import { listMesas, ensureCaixaAberto, fecharCaixa, getOrCreateComandaForMesa, listarItensDaComanda, adicionarItem, atualizarQuantidadeItem, removerItem, listarFinalizadoras, registrarPagamento, fecharComandaEMesa, listarComandasAbertas, listarTotaisPorComanda, criarMesa, listarClientes, adicionarClientesAComanda, listarClientesDaComanda, getCaixaAberto, listarResumoSessaoCaixaAtual } from '@/lib/store';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -190,10 +190,11 @@ function VendasPage() {
         } else {
           setSelectedTable(nextSelected);
         }
+        // Detectar sessão de caixa já aberta (não cria se não existir)
         try {
-          const sessao = await ensureCaixaAberto({ saldoInicial: 0, codigoEmpresa });
-          if (sessao?.status === 'open') setIsCashierOpen(true);
-        } catch {}
+          const sessao = await getCaixaAberto({ codigoEmpresa });
+          setIsCashierOpen(!!sessao);
+        } catch { setIsCashierOpen(false); }
         try {
           const prods = await listProducts({ includeInactive: false });
           setProducts(prods);
@@ -1385,84 +1386,119 @@ function VendasPage() {
     )
   }
 
+  const [openCashInitial, setOpenCashInitial] = useState('');
+  const [openCashDialogOpen, setOpenCashDialogOpen] = useState(false);
   const OpenCashierDialog = () => (
-    <AlertDialog>
-        <AlertDialogTrigger asChild>
-            <Button variant="success" disabled={isCashierOpen}>
-                <Unlock className="mr-2 h-4 w-4"/> Abrir Caixa
-            </Button>
-        </AlertDialogTrigger>
-        <AlertDialogContent>
-            <AlertDialogHeader>
-                <AlertDialogTitle>Abrir Caixa</AlertDialogTitle>
-                <AlertDialogDescription>Insira o valor inicial (suprimento) para abrir o caixa.</AlertDialogDescription>
-            </AlertDialogHeader>
-            <div className="py-4">
-                <Label htmlFor="initial-value">Valor Inicial</Label>
-                <div className="relative mt-2">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted">R$</span>
-                    <Input id="initial-value" type="number" placeholder="0,00" className="pl-9 font-semibold"/>
-                </div>
-            </div>
-            <AlertDialogFooter>
-                <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                <AlertDialogAction onClick={async () => {
-                  try {
-                    await ensureCaixaAberto({ saldoInicial: 0 });
-                    setIsCashierOpen(true);
-                    toast({ title: 'Caixa aberto com sucesso!', variant: 'success' });
-                  } catch (e) {
-                    toast({ title: 'Falha ao abrir caixa', description: e?.message || 'Tente novamente', variant: 'destructive' });
-                  }
-                }}>Confirmar Abertura</AlertDialogAction>
-            </AlertDialogFooter>
-        </AlertDialogContent>
+    <AlertDialog open={openCashDialogOpen} onOpenChange={setOpenCashDialogOpen}>
+      <AlertDialogTrigger asChild>
+          <Button variant="success" disabled={isCashierOpen} onClick={() => setOpenCashDialogOpen(true)}>
+              <Unlock className="mr-2 h-4 w-4"/> Abrir Caixa
+          </Button>
+      </AlertDialogTrigger>
+      <AlertDialogContent 
+        onKeyDown={(e) => e.stopPropagation()}
+        onKeyDownCapture={(e) => e.stopPropagation()}
+        onEscapeKeyDown={(e) => e.preventDefault()}
+        onPointerDownOutside={(e) => e.preventDefault()}
+      >
+        <AlertDialogHeader>
+          <AlertDialogTitle>Abrir Caixa</AlertDialogTitle>
+          <AlertDialogDescription>Insira o valor inicial (suprimento) para abrir o caixa.</AlertDialogDescription>
+        </AlertDialogHeader>
+        <div className="py-4">
+          <Label htmlFor="initial-value">Valor Inicial</Label>
+          <div className="relative mt-2">
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted">R$</span>
+            <Input id="initial-value" type="number" placeholder="0,00" className="pl-9 font-semibold" value={openCashInitial} onChange={(e) => setOpenCashInitial(e.target.value)} />
+          </div>
+        </div>
+        <AlertDialogFooter>
+          <AlertDialogCancel onClick={() => setOpenCashDialogOpen(false)}>Cancelar</AlertDialogCancel>
+          <AlertDialogAction onClick={async () => {
+            try {
+              const v = Number(String(openCashInitial).replace(',', '.')) || 0;
+              await ensureCaixaAberto({ saldoInicial: v });
+              setIsCashierOpen(true);
+              setOpenCashDialogOpen(false);
+              setOpenCashInitial('');
+              toast({ title: 'Caixa aberto com sucesso!', variant: 'success' });
+            } catch (e) {
+              toast({ title: 'Falha ao abrir caixa', description: e?.message || 'Tente novamente', variant: 'destructive' });
+            }
+          }}>Confirmar Abertura</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
     </AlertDialog>
   );
 
-  const CloseCashierDialog = () => (
-     <AlertDialog>
+  const CloseCashierDialog = () => {
+    const [closingData, setClosingData] = useState({ loading: false, saldoInicial: 0, resumo: null });
+    const handlePrepareClose = async () => {
+      try {
+        setClosingData({ loading: true, saldoInicial: 0, resumo: null });
+        const sess = await getCaixaAberto({ codigoEmpresa: userProfile?.codigo_empresa });
+        const sum = await listarResumoSessaoCaixaAtual({ codigoEmpresa: userProfile?.codigo_empresa });
+        setClosingData({ loading: false, saldoInicial: Number(sess?.saldo_inicial || 0), resumo: sum || { totalPorFinalizadora: {} } });
+      } catch (e) {
+        setClosingData({ loading: false, saldoInicial: 0, resumo: { totalPorFinalizadora: {} } });
+      }
+    };
+    const totalPorFinalizadora = closingData?.resumo?.totalPorFinalizadora || {};
+    const somaFinalizadoras = Object.values(totalPorFinalizadora).reduce((acc, v) => acc + Number(v || 0), 0);
+    const totalCaixa = Number(closingData.saldoInicial || 0) + somaFinalizadoras; // sem saídas por enquanto
+
+    return (
+      <AlertDialog>
         <AlertDialogTrigger asChild>
-            <Button variant="destructive" disabled={!isCashierOpen}>
-                <Lock className="mr-2 h-4 w-4"/> Fechar Caixa
-            </Button>
+          <Button variant="destructive" disabled={!isCashierOpen} onClick={handlePrepareClose}>
+            <Lock className="mr-2 h-4 w-4"/> Fechar Caixa
+          </Button>
         </AlertDialogTrigger>
         <AlertDialogContent>
-            <AlertDialogHeader>
-                <AlertDialogTitle>Fechar Caixa</AlertDialogTitle>
-                <AlertDialogDescription>Confira os valores e confirme o fechamento do caixa. Esta ação é irreversível.</AlertDialogDescription>
-            </AlertDialogHeader>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Fechar Caixa</AlertDialogTitle>
+            <AlertDialogDescription>Confira os valores e confirme o fechamento do caixa. Esta ação é irreversível.</AlertDialogDescription>
+          </AlertDialogHeader>
+          {closingData.loading ? (
+            <div className="py-4 text-text-muted">Carregando resumo…</div>
+          ) : (
             <div className="py-4 space-y-2">
-                <div className="flex justify-between"><span className="text-text-secondary">Valor Inicial:</span> <span className="font-mono">R$ 100,00</span></div>
-                <div className="flex justify-between"><span className="text-text-secondary">Vendas (Dinheiro):</span> <span className="font-mono">R$ 540,50</span></div>
-                <div className="flex justify-between"><span className="text-text-secondary">Vendas (Cartão):</span> <span className="font-mono">R$ 1230,00</span></div>
-                <div className="flex justify-between font-bold text-lg"><span className="text-text-primary">Total em Caixa:</span> <span className="font-mono text-success">R$ 640,50</span></div>
+              <div className="flex justify-between"><span className="text-text-secondary">Valor Inicial:</span> <span className="font-mono">R$ {Number(closingData.saldoInicial||0).toFixed(2)}</span></div>
+              {Object.keys(totalPorFinalizadora).length === 0 ? (
+                <div className="text-sm text-text-muted">Sem pagamentos nesta sessão.</div>
+              ) : (
+                Object.entries(totalPorFinalizadora).map(([metodo, valor]) => (
+                  <div key={metodo} className="flex justify-between"><span className="text-text-secondary">{String(metodo)}:</span> <span className="font-mono">R$ {Number(valor||0).toFixed(2)}</span></div>
+                ))
+              )}
+              <div className="flex justify-between font-bold text-lg"><span className="text-text-primary">Total em Caixa:</span> <span className="font-mono text-success">R$ {Number(totalCaixa||0).toFixed(2)}</span></div>
             </div>
-            <AlertDialogFooter>
-                <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                <AlertDialogAction onClick={async () => {
-                  try {
-                    // Pré-checagem: bloquear se houver comandas abertas
-                    try {
-                      const abertas = await listarComandasAbertas({ codigoEmpresa: userProfile?.codigo_empresa });
-                      if (abertas && abertas.length > 0) {
-                        toast({ title: 'Fechamento bloqueado', description: `Existem ${abertas.length} comandas abertas (inclui balcão). Finalize-as antes de fechar o caixa.`, variant: 'warning' });
-                        return;
-                      }
-                    } catch {}
-
-                    await fecharCaixa({ saldoFinal: 0 });
-                    setIsCashierOpen(false);
-                    toast({ title: 'Caixa fechado!', description: 'O relatório de fechamento foi gerado.' });
-                  } catch (e) {
-                    console.error(e);
-                    toast({ title: 'Falha ao fechar caixa', description: e?.message || 'Tente novamente', variant: 'destructive' });
+          )}
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={async () => {
+              try {
+                // Pré-checagem: bloquear se houver comandas abertas
+                try {
+                  const abertas = await listarComandasAbertas({ codigoEmpresa: userProfile?.codigo_empresa });
+                  if (abertas && abertas.length > 0) {
+                    toast({ title: 'Fechamento bloqueado', description: `Existem ${abertas.length} comandas abertas (inclui balcão). Finalize-as antes de fechar o caixa.`, variant: 'warning' });
+                    return;
                   }
-                }}>Confirmar Fechamento</AlertDialogAction>
-            </AlertDialogFooter>
+                } catch {}
+                await fecharCaixa({ saldoFinal: 0, codigoEmpresa: userProfile?.codigo_empresa });
+                setIsCashierOpen(false);
+                toast({ title: 'Caixa fechado!', description: 'O relatório de fechamento foi gerado.' });
+              } catch (e) {
+                console.error(e);
+                toast({ title: 'Falha ao fechar caixa', description: e?.message || 'Tente novamente', variant: 'destructive' });
+              }
+            }}>Confirmar Fechamento</AlertDialogAction>
+          </AlertDialogFooter>
         </AlertDialogContent>
-    </AlertDialog>
-  );
+      </AlertDialog>
+    )
+  };
 
   return (
     <>
