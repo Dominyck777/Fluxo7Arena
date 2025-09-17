@@ -976,6 +976,9 @@ function ProdutosPage() {
     // Sem persistência por enquanto
 
     const mountedRef = useRef(true);
+    const lastLoadTsRef = useRef(0);
+    const lastSizeRef = useRef(0);
+    const retryOnceRef = useRef(false);
     useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
 
     const refetchProducts = async () => {
@@ -992,12 +995,14 @@ function ProdutosPage() {
             setProducts(cached);
           }
         } catch {}
-      }, 5000);
+      }, 2000);
       try {
         const data = await listProducts({ includeInactive: filters.status === 'inactive', search: searchTerm, codigoEmpresa });
         if (!mountedRef.current) return;
         setProducts(data);
         try { localStorage.setItem(cacheKey, JSON.stringify(data)); } catch {}
+        lastSizeRef.current = Array.isArray(data) ? data.length : 0;
+        lastLoadTsRef.current = Date.now();
       } catch (err) {
         // eslint-disable-next-line no-console
         console.error('[Produtos] refetchProducts:error', err);
@@ -1011,19 +1016,24 @@ function ProdutosPage() {
 
     // Carrega na montagem (com cache imediato) e quando auth estiver pronta
     useEffect(() => {
-      const codigoEmpresa = userProfile?.codigo_empresa || null;
+      // descobrir codigo_empresa do userProfile ou do cache do auth
+      const cachedCodigo = (() => {
+        try {
+          const raw = localStorage.getItem('auth:userProfile');
+          return raw ? (JSON.parse(raw)?.codigo_empresa || null) : null;
+        } catch { return null; }
+      })();
+      const codigoEmpresa = userProfile?.codigo_empresa || cachedCodigo;
       if (!codigoEmpresa) return;
-      
+      const cacheKey = `produtos:list:${codigoEmpresa}`;
+
       // hydrate cache products imediatamente
       const cached = (() => {
-        try {
-          return JSON.parse(localStorage.getItem('products:list') || '[]');
-        } catch {
-          return [];
-        }
+        try { return JSON.parse(localStorage.getItem(cacheKey) || '[]'); } catch { return []; }
       })();
       if (Array.isArray(cached) && cached.length > 0) {
         setProducts(cached);
+        lastSizeRef.current = cached.length;
       }
       
       // load fresh data in background com retry
@@ -1051,16 +1061,16 @@ function ProdutosPage() {
         if (Array.isArray(cachedCats) && cachedCats.length > 0) setCategories(cachedCats);
       } catch {}
       
-      if (authReady) {
+      if (authReady && userProfile?.codigo_empresa) {
         const t = setTimeout(() => loadWithRetry(), 100);
         
         // Carregar categorias
         (async () => {
           try {
-            const cats = await listCategories({ codigoEmpresa });
+            const cats = await listCategories({ codigoEmpresa: userProfile.codigo_empresa });
             if (!mountedRef.current) return;
             setCategories(cats);
-            try { localStorage.setItem(`produtos:cats:${codigoEmpresa}`, JSON.stringify(cats)); } catch {}
+            try { localStorage.setItem(`produtos:cats:${userProfile.codigo_empresa}`, JSON.stringify(cats)); } catch {}
           } catch (err) {
             console.error('[Categorias] load on mount:error', err);
           }
@@ -1068,6 +1078,27 @@ function ProdutosPage() {
         
         return () => clearTimeout(t);
       }
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [authReady, userProfile?.codigo_empresa]);
+
+    // Recarregar ao focar/ficar visível se estiver estagnado
+    useEffect(() => {
+      const onFocus = () => {
+        const elapsed = Date.now() - (lastLoadTsRef.current || 0);
+        if (elapsed > 30000 || lastSizeRef.current === 0) refetchProducts();
+      };
+      const onVis = () => {
+        if (document.visibilityState === 'visible') {
+          const elapsed = Date.now() - (lastLoadTsRef.current || 0);
+          if (elapsed > 30000 || lastSizeRef.current === 0) refetchProducts();
+        }
+      };
+      window.addEventListener('focus', onFocus);
+      document.addEventListener('visibilitychange', onVis);
+      return () => {
+        window.removeEventListener('focus', onFocus);
+        document.removeEventListener('visibilitychange', onVis);
+      };
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [authReady, userProfile?.codigo_empresa]);
 

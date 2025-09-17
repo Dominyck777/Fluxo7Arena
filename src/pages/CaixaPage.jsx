@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useToast } from '@/components/ui/use-toast';
 import { Banknote, Wallet, ArrowDownCircle, ArrowUpCircle, FileText, CalendarDays } from 'lucide-react';
-import { ensureCaixaAberto, fecharCaixa, listarFechamentosCaixa, getCaixaAberto, listarResumoSessaoCaixaAtual } from '@/lib/store';
+import { ensureCaixaAberto, fecharCaixa, listarFechamentosCaixa, getCaixaAberto, listarResumoSessaoCaixaAtual, criarMovimentacaoCaixa, listarMovimentacoesCaixa } from '@/lib/store';
 import { useAuth } from '@/contexts/AuthContext';
 import { Input } from '@/components/ui/input';
 
@@ -34,6 +34,8 @@ function CaixaPage() {
   const [sessionSummary, setSessionSummary] = useState(null);
   const [confirmCloseOpen, setConfirmCloseOpen] = useState(false);
   const [confirmData, setConfirmData] = useState({ loading: false, resumo: null });
+  const [movModal, setMovModal] = useState({ open: false, tipo: 'suprimento', valor: '', observacao: '', loading: false });
+  const [movs, setMovs] = useState([]);
 
   const loadHistory = async () => {
     try {
@@ -48,10 +50,17 @@ function CaixaPage() {
   const loadSessionSummary = async () => {
     try {
       if (!isOpen) { setSessionSummary(null); return; }
-      const sum = await listarResumoSessaoCaixaAtual({ codigoEmpresa: userProfile?.codigo_empresa });
+      const [sum, sess] = await Promise.all([
+        listarResumoSessaoCaixaAtual({ codigoEmpresa: userProfile?.codigo_empresa }),
+        getCaixaAberto({ codigoEmpresa: userProfile?.codigo_empresa })
+      ]);
       setSessionSummary(sum || null);
+      if (sess?.id) {
+        try { const m = await listarMovimentacoesCaixa({ caixaSessaoId: sess.id, codigoEmpresa: userProfile?.codigo_empresa }); setMovs(m || []); } catch { setMovs([]); }
+      } else { setMovs([]); }
     } catch (e) {
       setSessionSummary(null);
+      setMovs([]);
     }
   };
 
@@ -129,8 +138,10 @@ function CaixaPage() {
                   <p className="text-2xl font-bold text-warning tabular-nums">R$ {(sessionSummary?.totalDescontos || 0).toFixed(2)}</p>
                 </div>
                 <div className="bg-surface-2 rounded-lg p-3 border border-border">
-                  <p className="text-xs text-text-secondary">Entradas (pagamentos)</p>
-                  <p className="text-2xl font-bold text-success tabular-nums">R$ {(sessionSummary?.totalEntradas || 0).toFixed(2)}</p>
+                  <p className="text-xs text-text-secondary">Entradas (pagamentos + suprimentos)</p>
+                  <p className="text-2xl font-bold text-success tabular-nums">
+                    {(() => { const supr = movs.filter(m=>m.tipo==='suprimento').reduce((a,b)=>a+Number(b.valor||0),0); return `R$ ${(Number(sessionSummary?.totalEntradas||0)+supr).toFixed(2)}` })()}
+                  </p>
                 </div>
               </div>
               {isOpen && (
@@ -150,16 +161,38 @@ function CaixaPage() {
                   </div>
                 </div>
               )}
+              {isOpen && (
+                <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="bg-surface-2 rounded-lg p-3 border border-border">
+                    <p className="text-xs text-text-secondary">Suprimentos</p>
+                    <p className="text-lg font-semibold">R$ {movs.filter(m=>m.tipo==='suprimento').reduce((a,b)=>a+Number(b.valor||0),0).toFixed(2)}</p>
+                  </div>
+                  <div className="bg-surface-2 rounded-lg p-3 border border-border">
+                    <p className="text-xs text-text-secondary">Sangrias + Troco</p>
+                    <p className="text-lg font-semibold">R$ {movs.filter(m=>m.tipo==='sangria'||m.tipo==='troco').reduce((a,b)=>a+Number(b.valor||0),0).toFixed(2)}</p>
+                  </div>
+                  <div className="bg-surface-2 rounded-lg p-3 border border-border">
+                    <p className="text-xs text-text-secondary">Saldo Estimado</p>
+                    <p className="text-lg font-bold text-success">
+                      {(() => {
+                        const entradas = Number(sessionSummary?.totalEntradas||0) + movs.filter(m=>m.tipo==='suprimento').reduce((a,b)=>a+Number(b.valor||0),0)
+                        const saidas = movs.filter(m=>m.tipo==='sangria'||m.tipo==='troco').reduce((a,b)=>a+Number(b.valor||0),0)
+                        return `R$ ${(entradas - saidas).toFixed(2)}`
+                      })()}
+                    </p>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
           <div className="md:col-span-4">
             <div className="fx-card">
               <h3 className="text-base font-bold mb-3">Atalhos</h3>
               <div className="grid grid-cols-2 gap-2">
-                <Button onClick={() => toast({ title: 'Em breve', description: 'Suprimento será implementado em breve.' })} variant="outline" className="justify-start">
+                <Button onClick={() => setMovModal({ open: true, tipo: 'suprimento', valor: '', observacao: '', loading: false })} variant="outline" className="justify-start">
                   <ArrowUpCircle className="h-4 w-4 mr-2 text-success" /> Suprimento
                 </Button>
-                <Button onClick={() => toast({ title: 'Em breve', description: 'Sangria será implementada em breve.' })} variant="outline" className="justify-start">
+                <Button onClick={() => setMovModal({ open: true, tipo: 'sangria', valor: '', observacao: '', loading: false })} variant="outline" className="justify-start">
                   <ArrowDownCircle className="h-4 w-4 mr-2 text-danger" /> Sangria
                 </Button>
                 <Button onClick={loadHistory} variant="outline" className="justify-start col-span-2" disabled={loading}>

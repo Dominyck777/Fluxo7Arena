@@ -8,7 +8,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/components/ui/use-toast';
 import { CalendarDays, FileText, Search, ArrowLeft, Loader2 } from 'lucide-react';
-import { listarComandas, listarItensDaComanda, listarTotaisPorComanda, listarPagamentos, listMesas, listarClientesDaComanda, listarFechamentosCaixa, listarResumoPeriodo } from '@/lib/store';
+import { listarComandas, listarItensDaComanda, listarTotaisPorComanda, listarPagamentos, listMesas, listarClientesDaComanda, listarFechamentosCaixa, listarResumoPeriodo, getCaixaResumo, listarMovimentacoesCaixa } from '@/lib/store';
 import { cn } from '@/lib/utils';
 import { useNavigate } from 'react-router-dom';
 
@@ -36,7 +36,7 @@ export default function HistoricoComandasPage() {
 
   const [detailId, setDetailId] = useState(null);
   const [detail, setDetail] = useState({ loading: false, itens: [], pagamentos: [] });
-  const [cashDetail, setCashDetail] = useState({ open: false, loading: false, resumo: null, periodo: { from: null, to: null } });
+  const [cashDetail, setCashDetail] = useState({ open: false, loading: false, resumo: null, periodo: { from: null, to: null }, movs: [] });
 
   const load = async () => {
     try {
@@ -310,13 +310,29 @@ export default function HistoricoComandasPage() {
               )}
               {(rows || []).map(r => (
                 <tr key={r.id} className="border-t border-border/70 hover:bg-success/5 cursor-pointer" onClick={async () => {
-                  // Abrir detalhes do fechamento com resumo por período
+                  // Abrir detalhes do fechamento preferindo snapshot e incluindo movimentações
                   try {
-                    setCashDetail({ open: true, loading: true, resumo: null, periodo: { from: r.aberto_em, to: r.fechado_em } });
-                    const res = await listarResumoPeriodo({ from: r.fechado_em ? r.fechado_em : r.aberto_em, to: r.fechado_em || new Date().toISOString() });
-                    setCashDetail({ open: true, loading: false, resumo: res || null, periodo: { from: r.aberto_em, to: r.fechado_em } });
+                    setCashDetail({ open: true, loading: true, resumo: null, periodo: { from: r.aberto_em, to: r.fechado_em }, movs: [] });
+                    const [snap, movs] = await Promise.all([
+                      getCaixaResumo({ caixaSessaoId: r.id }).catch(() => null),
+                      listarMovimentacoesCaixa({ caixaSessaoId: r.id }).catch(() => [])
+                    ]);
+                    if (snap) {
+                      // Adaptar snapshot ao formato usado no componente
+                      const resumo = {
+                        totalVendasBrutas: Number(snap.total_bruto || 0),
+                        totalDescontos: Number(snap.total_descontos || 0),
+                        totalVendasLiquidas: Number(snap.total_liquido || 0),
+                        totalEntradas: Number(snap.total_entradas || 0),
+                        totalPorFinalizadora: snap.por_finalizadora || {}
+                      }
+                      setCashDetail({ open: true, loading: false, resumo, periodo: { from: snap.periodo_de || r.aberto_em, to: snap.periodo_ate || r.fechado_em }, movs: movs || [] });
+                    } else {
+                      const res = await listarResumoPeriodo({ from: r.aberto_em, to: r.fechado_em || new Date().toISOString() });
+                      setCashDetail({ open: true, loading: false, resumo: res || null, periodo: { from: r.aberto_em, to: r.fechado_em }, movs: movs || [] });
+                    }
                   } catch (e) {
-                    setCashDetail({ open: true, loading: false, resumo: null, periodo: { from: r.aberto_em, to: r.fechado_em } });
+                    setCashDetail({ open: true, loading: false, resumo: null, periodo: { from: r.aberto_em, to: r.fechado_em }, movs: [] });
                   }
                 }}>
                   <td className="px-4 py-2">{r.id}</td>

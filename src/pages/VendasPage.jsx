@@ -97,6 +97,8 @@ function VendasPage() {
   };
   const mountedRef = useRef(true);
   useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
+  const lastTablesLoadTsRef = useRef(0);
+  const lastTablesSizeRef = useRef(0);
 
   useEffect(() => {
     const codigoEmpresa = userProfile?.codigo_empresa || null;
@@ -171,6 +173,8 @@ function VendasPage() {
         // Usar dados frescos do banco sem mesclar com estado anterior
         setTables(uiTables);
         try { if (cacheKey) localStorage.setItem(cacheKey, JSON.stringify(uiTables)); } catch {}
+        lastTablesSizeRef.current = Array.isArray(uiTables) ? uiTables.length : 0;
+        lastTablesLoadTsRef.current = Date.now();
         // Restaurar seleção anterior pelo cache (se houver)
         let nextSelected = null;
         try {
@@ -210,6 +214,74 @@ function VendasPage() {
     hydrateFromCache();
     if (authReady && codigoEmpresa) load();
     return () => {};
+  }, [authReady, userProfile?.codigo_empresa]);
+
+  // Recarregar lista de mesas ao focar/ficar visível quando estagnado
+  useEffect(() => {
+    const codigoEmpresa = userProfile?.codigo_empresa || null;
+    const reloadIfStale = () => {
+      if (!authReady || !codigoEmpresa) return;
+      const elapsed = Date.now() - (lastTablesLoadTsRef.current || 0);
+      if (elapsed > 30000 || lastTablesSizeRef.current === 0) {
+        // Rehydrate cache immediately to avoid empty perception
+        try {
+          const cacheKey = `vendas:tables:${codigoEmpresa}`;
+          const cached = JSON.parse(localStorage.getItem(cacheKey) || '[]');
+          if (Array.isArray(cached) && cached.length > 0) setTables(cached);
+        } catch {}
+        // Trigger fresh load
+        // replicate inner load from effect by calling list functions inline to avoid closure issues
+        (async () => {
+          try {
+            const mesas = await listMesas(codigoEmpresa);
+            let openComandas = [];
+            try { openComandas = await listarComandasAbertas({ codigoEmpresa }); } catch {}
+            const totals = await (async () => { try { return await listarTotaisPorComanda((openComandas || []).map(c => c.id), codigoEmpresa); } catch { return {}; } })();
+            const namesByComanda = await (async () => {
+              try {
+                const entries = await Promise.all((openComandas || []).map(async (c) => {
+                  try {
+                    const vincs = await listarClientesDaComanda({ comandaId: c.id, codigoEmpresa });
+                    const nomes = (vincs || []).map(v => v?.nome).filter(Boolean);
+                    return [c.id, nomes.length ? nomes.join(', ') : null];
+                  } catch { return [c.id, null]; }
+                }));
+                return Object.fromEntries(entries);
+              } catch { return {}; }
+            })();
+            const byMesa = new Map();
+            (openComandas || []).forEach(c => byMesa.set(c.mesa_id, c));
+            const uiTables = (mesas || []).map((m) => {
+              const c = byMesa.get(m.id);
+              let status = mapStatus(m.status);
+              let comandaId = null;
+              let totalHint = 0;
+              let customer = null;
+              if (c) {
+                status = (c.status === 'awaiting-payment' || c.status === 'awaiting_payment') ? 'awaiting-payment' : 'in-use';
+                comandaId = c.id;
+                totalHint = Number(totals[c.id] || 0);
+                customer = namesByComanda[c.id] || null;
+              }
+              return { id: m.id, number: m.numero, name: m.nome || null, status, order: [], customer, comandaId, totalHint };
+            });
+            setTables(uiTables);
+            try { localStorage.setItem(`vendas:tables:${codigoEmpresa}`, JSON.stringify(uiTables)); } catch {}
+            lastTablesSizeRef.current = Array.isArray(uiTables) ? uiTables.length : 0;
+            lastTablesLoadTsRef.current = Date.now();
+          } catch {}
+        })();
+      }
+    };
+    const onFocus = () => reloadIfStale();
+    const onVis = () => { if (document.visibilityState === 'visible') reloadIfStale(); };
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVis);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authReady, userProfile?.codigo_empresa]);
 
   // Persistir selectedTable no cache e, quando mudar para uma comanda, hidratar itens se necessário
