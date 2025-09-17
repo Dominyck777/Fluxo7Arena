@@ -7310,3 +7310,92 @@ create index if not exists idx_pagamentos_recebido_em on public.pagamentos(receb
 -- ============================
 -- FIM DAS ATUALIZAÇÕES v4.3
 -- ============================
+
+-- ============================
+-- ATUALIZAÇÕES v4.3.1
+-- Data: 2025-09-17
+-- Assunto: Ajustes e documentação de public.caixa_sessoes
+-- Mudanças/Notas:
+--  - Campos usados na aplicação:
+--      status: 'open' | 'closed'
+--      aberto_em: timestamptz (preenchido ao abrir)
+--      fechado_em: timestamptz (preenchido ao fechar)
+--      saldo_inicial: numeric(14,2) (valor informado na abertura)
+--      saldo_final: numeric(14,2) (valor informado no fechamento, quando aplicável)
+--      codigo_empresa: text (iso multi-tenant)
+--  - Índices recomendados:
+--      create index if not exists idx_caixa_sessoes_status_aberto on public.caixa_sessoes (status, aberto_em desc);
+--      create index if not exists idx_caixa_sessoes_empresa_aberto on public.caixa_sessoes (codigo_empresa, aberto_em desc);
+--  - Observação: As FKs de snapshot/movimentações referenciam caixa_sessoes(id uuid)
+--                e herdam o isolamento por codigo_empresa nas RLS específicas.
+
+-- ============================
+-- FIM DAS ATUALIZAÇÕES v4.3.1
+-- ============================
+
+-- ============================
+-- ATUALIZAÇÕES v4.4
+-- Data: 2025-09-17
+-- Assunto: Padronização por codigo_empresa e consistência de DDL no fluxo de vendas
+-- ============================
+
+-- Contexto
+-- - Inconsistências entre frontend e banco no fluxo de vendas/comandas foram identificadas.
+-- - Padronizamos o isolamento multi-tenant com a coluna codigo_empresa (text) em todas as tabelas do fluxo.
+-- - Garantimos índices e defaults adequados para performance e segurança.
+
+-- 1) Coluna codigo_empresa nas tabelas críticas (idempotente)
+-- Observação: Execute apenas se a coluna ainda não existir.
+-- Exemplo (referência):
+--   alter table if exists public.vendas            add column if not exists codigo_empresa text;
+--   alter table if exists public.itens_venda       add column if not exists codigo_empresa text;
+--   alter table if exists public.pagamentos        add column if not exists codigo_empresa text;
+--   alter table if exists public.comanda_clientes  add column if not exists codigo_empresa text;
+
+-- 2) Defaults/Triggers para codigo_empresa (opcional e idempotente)
+-- Estratégia A: Default direto
+--   alter table public.vendas           alter column codigo_empresa set default public.get_my_company_code();
+--   alter table public.itens_venda      alter column codigo_empresa set default public.get_my_company_code();
+--   alter table public.pagamentos       alter column codigo_empresa set default public.get_my_company_code();
+--   alter table public.comanda_clientes alter column codigo_empresa set default public.get_my_company_code();
+-- Estratégia B: Trigger BEFORE INSERT (exemplo consolidado)
+--   create or replace function public.set_company_code_default() returns trigger as $$
+--   begin
+--     if new.codigo_empresa is null then
+--       new.codigo_empresa := public.get_my_company_code();
+--     end if;
+--     return new;
+--   end; $$ language plpgsql security definer;
+--   do $$ begin
+--     if not exists (select 1 from pg_trigger where tgname = 'trg_set_company_code_vendas') then
+--       execute $$create trigger trg_set_company_code_vendas before insert on public.vendas
+--         for each row execute function public.set_company_code_default()$$;
+--     end if;
+--   end $$;
+
+-- 3) Índices recomendados (idempotentes)
+--   create index if not exists idx_vendas_empresa_data             on public.vendas (codigo_empresa, criado_em);
+--   create index if not exists idx_vendas_empresa_status           on public.vendas (codigo_empresa, status);
+--   create index if not exists idx_itens_venda_empresa_comanda     on public.itens_venda (codigo_empresa, comanda_id);
+--   create index if not exists idx_pagamentos_empresa_comanda      on public.pagamentos (codigo_empresa, comanda_id);
+--   create index if not exists idx_comanda_clientes_empresa_comanda on public.comanda_clientes (codigo_empresa, comanda_id);
+
+-- 4) Consistência de tipos de ID em comandas (vendas)
+-- - A tabela public.vendas (comandas) utiliza id bigserial primary key (inteiro sequencial)
+-- - Importante: o frontend não deve tentar inserir UUID em id
+-- - Deixe o banco gerar automaticamente o id; envie apenas campos essenciais no insert
+
+-- 5) Notas de compatibilidade
+-- - Padronizar sempre o uso de codigo_empresa no frontend (filtros, inserts/updates)
+-- - As políticas RLS documentadas em `estrutura_bd/politicas.txt` (v4.4) dependem de codigo_empresa
+-- - Em esquemas legados com empresa_id, recomenda-se migrar gradualmente para codigo_empresa
+
+-- 6) Checklist pós-aplicação
+-- - [ ] Verifique que todas as tabelas acima possuem a coluna codigo_empresa (text)
+-- - [ ] Garanta defaults/trigger aplicados (quando optar pela estratégia A ou B)
+-- - [ ] Confirme os índices criados (via \d public.<tabela> ou pg_indexes)
+-- - [ ] Rode testes de CRUD no app para validar RLS e performance
+
+-- ============================
+-- FIM DAS ATUALIZAÇÕES v4.4
+-- ============================

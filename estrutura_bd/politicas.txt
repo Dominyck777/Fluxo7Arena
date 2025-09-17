@@ -1877,7 +1877,64 @@ grant execute on function public.fix_invalid_comanda_status(uuid) to authenticat
 grant execute on function public.trg_comandas_baixar_estoque() to authenticated;
 
 -- ============================
--- FIM DAS ATUALIZAÇÕES v4.1
+-- FIM DAS ATUALIZAÇÕES v4.3
+-- ============================
+
+-- ============================
+-- ATUALIZAÇÕES v4.3.1
+-- Data: 2025-09-17
+-- Assunto: RLS pendentes em public.vendas e public.itens_venda
+-- Observação: Bloco idempotente
+
+alter table public.vendas enable row level security;
+alter table public.itens_venda enable row level security;
+
+-- Drop de políticas anteriores (se houver)
+drop policy if exists vendas_select_company_code on public.vendas;
+drop policy if exists vendas_insert_company_code on public.vendas;
+drop policy if exists vendas_update_company_code on public.vendas;
+drop policy if exists vendas_delete_company_code on public.vendas;
+
+drop policy if exists itens_venda_select_company_code on public.itens_venda;
+drop policy if exists itens_venda_insert_company_code on public.itens_venda;
+drop policy if exists itens_venda_update_company_code on public.itens_venda;
+drop policy if exists itens_venda_delete_company_code on public.itens_venda;
+
+-- public.vendas
+create policy vendas_select_company_code on public.vendas
+  as permissive for select to authenticated
+  using (codigo_empresa = public.get_my_company_code());
+create policy vendas_insert_company_code on public.vendas
+  as permissive for insert to authenticated
+  with check (codigo_empresa = public.get_my_company_code());
+create policy vendas_update_company_code on public.vendas
+  as permissive for update to authenticated
+  using (codigo_empresa = public.get_my_company_code())
+  with check (codigo_empresa = public.get_my_company_code());
+create policy vendas_delete_company_code on public.vendas
+  as permissive for delete to authenticated
+  using (codigo_empresa = public.get_my_company_code());
+
+-- public.itens_venda
+create policy itens_venda_select_company_code on public.itens_venda
+  as permissive for select to authenticated
+  using (codigo_empresa = public.get_my_company_code());
+create policy itens_venda_insert_company_code on public.itens_venda
+  as permissive for insert to authenticated
+  with check (codigo_empresa = public.get_my_company_code());
+create policy itens_venda_update_company_code on public.itens_venda
+  as permissive for update to authenticated
+  using (codigo_empresa = public.get_my_company_code())
+  with check (codigo_empresa = public.get_my_company_code());
+create policy itens_venda_delete_company_code on public.itens_venda
+  as permissive for delete to authenticated
+  using (codigo_empresa = public.get_my_company_code());
+
+-- Nota: Garantir que as FKs de itens_venda referenciem vendas com o mesmo codigo_empresa
+--       é recomendado via constraint ou trigger, se aplicável, para reforçar integridade multitenant.
+
+-- ============================
+-- FIM DAS ATUALIZAÇÕES v4.3.1
 -- ============================
 
 -- ============================
@@ -2129,4 +2186,94 @@ end$$;
 
 -- ============================
 -- FIM DAS ATUALIZAÇÕES v4.1
+-- ============================
+
+-- ============================
+-- ATUALIZAÇÕES APLICADAS (v4.4)
+-- Data: 2025-09-17
+-- Assunto: RLS de vendas e itens_venda padronizadas por codigo_empresa
+-- ============================
+
+-- Objetivo
+-- - Padronizar políticas RLS em tabelas críticas do fluxo de venda
+-- - Isolamento por empresa via public.get_my_company_code()
+-- - Blocos idempotentes para fácil reaplicação em ambientes
+
+-- Pré-requisitos
+-- - Funções SECURITY DEFINER: public.get_my_company_code(), public.get_my_company_id()
+-- - Coluna codigo_empresa (text) presente nas tabelas abaixo
+
+-- 1) Habilitar RLS (idempotente)
+do $$
+begin
+  begin execute $$alter table if exists public.vendas enable row level security$$; exception when others then null; end;
+  begin execute $$alter table if exists public.itens_venda enable row level security$$; exception when others then null; end;
+end$$;
+
+-- 2) RLS para public.vendas (comandas/cabeçalho)
+do $$
+begin
+  execute $$drop policy if exists vendas_select_company on public.vendas$$;
+  execute $$create policy vendas_select_company on public.vendas
+    as permissive for select to authenticated
+    using (codigo_empresa = public.get_my_company_code())$$;
+
+  execute $$drop policy if exists vendas_insert_company on public.vendas$$;
+  execute $$create policy vendas_insert_company on public.vendas
+    as permissive for insert to authenticated
+    with check (codigo_empresa = public.get_my_company_code())$$;
+
+  execute $$drop policy if exists vendas_update_company on public.vendas$$;
+  execute $$create policy vendas_update_company on public.vendas
+    as permissive for update to authenticated
+    using (codigo_empresa = public.get_my_company_code())
+    with check (codigo_empresa = public.get_my_company_code())$$;
+
+  execute $$drop policy if exists vendas_delete_company on public.vendas$$;
+  execute $$create policy vendas_delete_company on public.vendas
+    as permissive for delete to authenticated
+    using (codigo_empresa = public.get_my_company_code())$$;
+end$$;
+
+-- 3) RLS para public.itens_venda (itens da comanda)
+-- Observação: se houver coluna comanda_id com FK para public.vendas(id), 
+-- estas políticas ainda garantem isolamento via codigo_empresa do próprio item.
+do $$
+begin
+  execute $$drop policy if exists itens_venda_select_company on public.itens_venda$$;
+  execute $$create policy itens_venda_select_company on public.itens_venda
+    as permissive for select to authenticated
+    using (codigo_empresa = public.get_my_company_code())$$;
+
+  execute $$drop policy if exists itens_venda_insert_company on public.itens_venda$$;
+  execute $$create policy itens_venda_insert_company on public.itens_venda
+    as permissive for insert to authenticated
+    with check (codigo_empresa = public.get_my_company_code())$$;
+
+  execute $$drop policy if exists itens_venda_update_company on public.itens_venda$$;
+  execute $$create policy itens_venda_update_company on public.itens_venda
+    as permissive for update to authenticated
+    using (codigo_empresa = public.get_my_company_code())
+    with check (codigo_empresa = public.get_my_company_code())$$;
+
+  execute $$drop policy if exists itens_venda_delete_company on public.itens_venda$$;
+  execute $$create policy itens_venda_delete_company on public.itens_venda
+    as permissive for delete to authenticated
+    using (codigo_empresa = public.get_my_company_code())$$;
+end$$;
+
+-- 4) Recomendações
+-- - Padronizar o uso de codigo_empresa em todas as tabelas multi-tenant
+-- - Evitar dependências recursivas em RLS (subselects que referenciam a mesma tabela)
+-- - Garantir índices em (codigo_empresa, <colunas de busca>) para performance
+
+-- 5) Índices sugeridos (idempotentes)
+do $$
+begin
+  begin execute $$create index if not exists idx_vendas_empresa_data on public.vendas (codigo_empresa, criado_em)$$; exception when others then null; end;
+  begin execute $$create index if not exists idx_itens_venda_empresa_comanda on public.itens_venda (codigo_empresa, comanda_id)$$; exception when others then null; end;
+end$$;
+
+-- ============================
+-- FIM DAS ATUALIZAÇÕES v4.4
 -- ============================
