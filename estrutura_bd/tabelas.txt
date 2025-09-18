@@ -7399,3 +7399,75 @@ create index if not exists idx_pagamentos_recebido_em on public.pagamentos(receb
 -- ============================
 -- FIM DAS ATUALIZAÇÕES v4.4
 -- ============================
+
+-- ============================
+-- ATUALIZAÇÕES APLICADAS (v4.5)
+-- Data: 2025-09-18
+-- Assunto: Padronização de colunas/índices por codigo_empresa nas tabelas do fluxo de comandas
+--           (comandas, comanda_itens, pagamentos, comanda_clientes) alinhado ao frontend
+--           após validações de estoque e verificação agregada na finalização.
+-- ============================
+
+-- 1) Garantir coluna codigo_empresa (idempotente)
+do $$
+begin
+  begin execute $$alter table if exists public.comandas          add column if not exists codigo_empresa text$$;          exception when others then null; end;
+  begin execute $$alter table if exists public.comanda_itens     add column if not exists codigo_empresa text$$;          exception when others then null; end;
+  begin execute $$alter table if exists public.pagamentos        add column if not exists codigo_empresa text$$;          exception when others then null; end;
+  begin execute $$alter table if exists public.comanda_clientes  add column if not exists codigo_empresa text$$;          exception when others then null; end;
+end$$;
+
+-- 2) Defaults/Triggers para codigo_empresa (opcional e idempotente)
+-- Estratégia A: Default direto
+--   alter table if exists public.comandas          alter column codigo_empresa set default public.get_my_company_code();
+--   alter table if exists public.comanda_itens     alter column codigo_empresa set default public.get_my_company_code();
+--   alter table if exists public.pagamentos        alter column codigo_empresa set default public.get_my_company_code();
+--   alter table if exists public.comanda_clientes  alter column codigo_empresa set default public.get_my_company_code();
+-- Estratégia B: Trigger BEFORE INSERT (consolidado)
+do $$
+begin
+  begin execute $$create or replace function public.set_company_code_default() returns trigger as $$
+  begin
+    if new.codigo_empresa is null then
+      new.codigo_empresa := public.get_my_company_code();
+    end if;
+    return new;
+  end; $$ language plpgsql security definer$$; exception when others then null; end;
+
+  if not exists (select 1 from pg_trigger where tgname = 'trg_set_company_code_comandas') then
+    begin execute $$create trigger trg_set_company_code_comandas before insert on public.comandas
+      for each row execute function public.set_company_code_default()$$; exception when others then null; end;
+  end if;
+  if not exists (select 1 from pg_trigger where tgname = 'trg_set_company_code_comanda_itens') then
+    begin execute $$create trigger trg_set_company_code_comanda_itens before insert on public.comanda_itens
+      for each row execute function public.set_company_code_default()$$; exception when others then null; end;
+  end if;
+  if not exists (select 1 from pg_trigger where tgname = 'trg_set_company_code_pagamentos') then
+    begin execute $$create trigger trg_set_company_code_pagamentos before insert on public.pagamentos
+      for each row execute function public.set_company_code_default()$$; exception when others then null; end;
+  end if;
+  if not exists (select 1 from pg_trigger where tgname = 'trg_set_company_code_comanda_clientes') then
+    begin execute $$create trigger trg_set_company_code_comanda_clientes before insert on public.comanda_clientes
+      for each row execute function public.set_company_code_default()$$; exception when others then null; end;
+  end if;
+end$$;
+
+-- 3) Índices recomendados (idempotentes)
+do $$
+begin
+  begin execute $$create index if not exists idx_comandas_empresa_status           on public.comandas (codigo_empresa, status)$$;                 exception when others then null; end;
+  begin execute $$create index if not exists idx_comanda_itens_empresa_comanda     on public.comanda_itens (codigo_empresa, comanda_id)$$;        exception when others then null; end;
+  begin execute $$create index if not exists idx_pagamentos_empresa_comanda        on public.pagamentos (codigo_empresa, comanda_id)$$;           exception when others then null; end;
+  begin execute $$create index if not exists idx_comanda_clientes_empresa_comanda  on public.comanda_clientes (codigo_empresa, comanda_id)$$;     exception when others then null; end;
+end$$;
+
+-- 4) Notas
+-- - O frontend passou a evitar agregações no PostgREST (sum) e sumariza no cliente.
+-- - Verificação agregada de estoque ocorre antes do pagamento e requer apenas leitura.
+-- - Produtos: geração automática de código no frontend; opcional unique por empresa no banco
+--   (ex.: constraint ux_produtos_empresa_codigo_produto em (codigo_empresa, codigo_produto)).
+-- - Manter padronização por codigo_empresa em novos objetos multi-tenant.
+
+-- ============================
+-- FIM DAS ATUALIZAÇÕES v4.5
+-- ============================

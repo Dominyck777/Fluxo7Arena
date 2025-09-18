@@ -11,7 +11,7 @@ import { Search, ArrowLeft, Store, FileText, DollarSign, CheckCircle } from 'luc
 import { useNavigate } from 'react-router-dom';
 import { listProducts } from '@/lib/products';
 import { useAuth } from '@/contexts/AuthContext';
-import { getOrCreateComandaBalcao, listarComandaBalcaoAberta, criarComandaBalcao, listarItensDaComanda, adicionarItem, listarFinalizadoras, registrarPagamento, fecharComandaEMesa, listarClientes, adicionarClientesAComanda, atualizarQuantidadeItem, removerItem, listarClientesDaComanda } from '@/lib/store';
+import { getOrCreateComandaBalcao, listarComandaBalcaoAberta, criarComandaBalcao, listarItensDaComanda, adicionarItem, listarFinalizadoras, registrarPagamento, fecharComandaEMesa, listarClientes, adicionarClientesAComanda, atualizarQuantidadeItem, removerItem, listarClientesDaComanda, verificarEstoqueComanda } from '@/lib/store';
 
 const pageVariants = { hidden: { opacity: 0 }, visible: { opacity: 1, transition: { staggerChildren: 0.1 } } };
 const itemVariants = { hidden: { opacity: 0, y: 20 }, visible: { opacity: 1, y: 0, transition: { duration: 0.5 } } };
@@ -27,6 +27,7 @@ export default function BalcaoPage() {
   const [loading, setLoading] = useState(true);
   const [customerName, setCustomerName] = useState('');
   const [productSearch, setProductSearch] = useState('');
+  const [addingProductId, setAddingProductId] = useState(null);
 
   // Pagamento
   const [isPayOpen, setIsPayOpen] = useState(false);
@@ -100,11 +101,18 @@ export default function BalcaoPage() {
         if (cachedCustomer) setCustomerName(cachedCustomer);
       } catch { /* ignore cache errors */ }
 
-      // Novo: apenas obter comanda aberta existente (não cria automaticamente)
-      const c = await listarComandaBalcaoAberta({ codigoEmpresa });
+      // 2) Obter comanda aberta existente (não cria automaticamente)
+      // Se não encontrar, mas existir comandaId em cache, ainda tentamos refetch para evitar sumiço temporário
+      const cachedIdStr = localStorage.getItem(LS_KEY.comandaId);
+      const cachedId = cachedIdStr ? (Number.isNaN(+cachedIdStr) ? cachedIdStr : Number(cachedIdStr)) : null;
+      const c = await listarComandaBalcaoAberta({ codigoEmpresa }).catch(() => null);
       if (c?.id) {
         setComandaId(c.id);
         await refetchItemsAndCustomer(c.id);
+      } else if (cachedId) {
+        // Tenta reaproveitar a comanda do cache (mitiga atrasos de RLS)
+        setComandaId(cachedId);
+        await refetchItemsAndCustomer(cachedId, 3);
       } else {
         setComandaId(null);
         setItems([]);
@@ -208,6 +216,17 @@ export default function BalcaoPage() {
       if (!clientChosen) { setIsClientWizardOpen(true); toast({ title: 'Selecione o cliente', description: 'Escolha Cliente cadastrado ou Consumidor antes de vender.', variant: 'warning' }); return; }
       const codigoEmpresa = userProfile?.codigo_empresa;
       if (!codigoEmpresa) { toast({ title: 'Empresa não definida', description: 'Faça login novamente.', variant: 'destructive' }); return; }
+      if (addingProductId) return;
+      setAddingProductId(prod.id);
+
+      // Pré-validação no cliente para UX imediata (servidor também valida)
+      const stock = Number(prod.stock ?? prod.currentStock ?? 0);
+      const minStock = Number(prod.minStock ?? 0);
+      if (stock <= 0) {
+        toast({ title: 'Sem estoque', description: `Produto "${prod.name}" está com estoque zerado.`, variant: 'destructive' });
+        return;
+      }
+
       // Criar comanda se não existir ainda (somente no primeiro item)
       let cid = comandaId;
       if (!cid) {
@@ -219,9 +238,25 @@ export default function BalcaoPage() {
       await adicionarItem({ comandaId: cid, produtoId: prod.id, descricao: prod.name, quantidade: 1, precoUnitario: price, codigoEmpresa });
       const itens = await listarItensDaComanda({ comandaId: cid, codigoEmpresa });
       setItems((itens || []).map((it) => ({ id: it.id, name: it.descricao || 'Item', price: Number(it.preco_unitario || 0), quantity: Number(it.quantidade || 1) })));
-      toast({ title: 'Produto adicionado', description: prod.name, variant: 'success' });
+      // Avisos de estoque baixo/último
+      if (stock - 1 <= 0) {
+        toast({ title: 'Última unidade vendida', description: `"${prod.name}" esgotou após esta venda.`, variant: 'warning' });
+      } else if (stock - 1 <= minStock) {
+        toast({ title: 'Estoque baixo', description: `"${prod.name}" atingiu nível de estoque baixo.`, variant: 'warning' });
+      } else {
+        toast({ title: 'Produto adicionado', description: prod.name, variant: 'success' });
+      }
     } catch (e) {
-      toast({ title: 'Falha ao adicionar', description: e?.message || 'Tente novamente', variant: 'destructive' });
+      const msg = String(e?.message || '').toLowerCase();
+      if (e?.code === 'OUT_OF_STOCK' || msg.includes('sem estoque')) {
+        toast({ title: 'Sem estoque', description: 'Este produto está sem estoque.', variant: 'destructive' });
+      } else if (e?.code === 'INSUFFICIENT_STOCK' || msg.includes('insuficiente')) {
+        toast({ title: 'Estoque insuficiente', description: e?.message || 'Quantidade maior que o disponível.', variant: 'warning' });
+      } else {
+        toast({ title: 'Falha ao adicionar', description: e?.message || 'Tente novamente', variant: 'destructive' });
+      }
+    } finally {
+      setAddingProductId(null);
     }
   };
 
@@ -231,13 +266,30 @@ export default function BalcaoPage() {
       if (!clientChosen) { setIsClientWizardOpen(true); toast({ title: 'Selecione o cliente', description: 'Escolha Cliente cadastrado ou Consumidor antes de pagar.', variant: 'warning' }); setPayLoading(false); return; }
       const codigoEmpresa = userProfile?.codigo_empresa;
       if (!codigoEmpresa) { toast({ title: 'Empresa não definida', variant: 'destructive' }); return; }
+      if (!comandaId) {
+        const c = await getOrCreateComandaBalcao({ codigoEmpresa });
+        if (!c?.id) { toast({ title: 'Comanda não encontrada', description: 'Abra uma comanda antes de pagar.', variant: 'destructive' }); setPayLoading(false); return; }
+        setComandaId(c.id);
+      }
+      // Validação forte de estoque antes do pagamento
+      try {
+        await verificarEstoqueComanda({ comandaId: comandaId, codigoEmpresa });
+      } catch (err) {
+        const msg = Array.isArray(err?.items) && err.items.length
+          ? err.items.map(v => `${v.name} (solicitado ${v.solicitado}, estoque ${v.estoque})`).join('; ')
+          : (err?.message || 'Estoque insuficiente na comanda');
+        toast({ title: 'Estoque insuficiente', description: msg, variant: 'destructive', duration: 7000 });
+        setPayLoading(false);
+        return;
+      }
       const fins = await listarFinalizadoras({ somenteAtivas: true, codigoEmpresa });
       setPayMethods(fins || []);
-      setSelectedPayId(fins?.[0]?.id || null);
       setIsPayOpen(true);
     } catch (e) {
-      toast({ title: 'Falha ao preparar pagamento', description: e?.message || 'Tente novamente', variant: 'destructive' });
-    } finally { setPayLoading(false); }
+      toast({ title: 'Falha ao iniciar pagamento', description: e?.message || 'Tente novamente', variant: 'destructive' });
+    } finally {
+      setPayLoading(false);
+    }
   };
 
   const confirmPay = async () => {
@@ -359,7 +411,12 @@ export default function BalcaoPage() {
                             const itens = await listarItensDaComanda({ comandaId, codigoEmpresa });
                             setItems((itens || []).map((n) => ({ id: n.id, name: n.descricao || 'Item', price: Number(n.preco_unitario || 0), quantity: Number(n.quantidade || 1) })));
                           } catch {}
-                          toast({ title: 'Falha ao atualizar item', description: err?.message || 'Tente novamente', variant: 'destructive' });
+                          const msg = String(err?.message || '').toLowerCase();
+                          if (err?.code === 'INSUFFICIENT_STOCK' || msg.includes('insuficiente')) {
+                            toast({ title: 'Estoque insuficiente', description: err?.message || 'Quantidade maior que o disponível.', variant: 'warning' });
+                          } else {
+                            toast({ title: 'Falha ao atualizar item', description: err?.message || 'Tente novamente', variant: 'destructive' });
+                          }
                         }
                       }}>-</Button>
                       <span className="w-8 text-center font-semibold">{it.quantity}</span>
@@ -377,7 +434,12 @@ export default function BalcaoPage() {
                             const itens = await listarItensDaComanda({ comandaId, codigoEmpresa });
                             setItems((itens || []).map((n) => ({ id: n.id, name: n.descricao || 'Item', price: Number(n.preco_unitario || 0), quantity: Number(n.quantidade || 1) })));
                           } catch {}
-                          toast({ title: 'Falha ao atualizar item', description: err?.message || 'Tente novamente', variant: 'destructive' });
+                          const msg = String(err?.message || '').toLowerCase();
+                          if (err?.code === 'INSUFFICIENT_STOCK' || msg.includes('insuficiente')) {
+                            toast({ title: 'Estoque insuficiente', description: err?.message || 'Quantidade maior que o disponível.', variant: 'warning' });
+                          } else {
+                            toast({ title: 'Falha ao atualizar item', description: err?.message || 'Tente novamente', variant: 'destructive' });
+                          }
                         }
                       }}>+</Button>
                     </div>

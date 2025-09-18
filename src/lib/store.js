@@ -12,6 +12,51 @@ function getCachedCompanyCode() {
   }
 }
 
+// Verifica se a soma das quantidades por produto na comanda não excede o estoque disponível
+// Retorna true se OK; lança erro com detalhes se algum produto ultrapassar
+export async function verificarEstoqueComanda({ comandaId, codigoEmpresa } = {}) {
+  if (!comandaId) throw new Error('comandaId é obrigatório')
+  const codigo = codigoEmpresa || getCachedCompanyCode()
+  // 1) Carregar itens da comanda
+  let qi = supabase
+    .from('comanda_itens')
+    .select('produto_id, quantidade')
+    .eq('comanda_id', comandaId)
+  if (codigo) qi = qi.eq('codigo_empresa', codigo)
+  const { data: itens, error: ierr } = await qi
+  if (ierr) throw ierr
+  const sumByProduct = new Map()
+  for (const it of (itens || [])) {
+    const pid = it.produto_id
+    const q = Number(it.quantidade || 0)
+    sumByProduct.set(pid, (sumByProduct.get(pid) || 0) + q)
+  }
+  if (sumByProduct.size === 0) return true
+  const ids = Array.from(sumByProduct.keys())
+  // 2) Buscar estoques dos produtos
+  let qp = supabase.from('produtos').select('id, nome, estoque')
+  qp = qp.in('id', ids)
+  if (codigo) qp = qp.eq('codigo_empresa', codigo)
+  const { data: prods, error: perr } = await qp
+  if (perr) throw perr
+  const estoqueById = new Map((prods || []).map(p => [p.id, { nome: p.nome, estoque: Number(p.estoque || 0) }]))
+  const violacoes = []
+  for (const [pid, total] of sumByProduct.entries()) {
+    const info = estoqueById.get(pid) || { nome: `Produto ${pid}`, estoque: 0 }
+    if (total > info.estoque) {
+      violacoes.push({ id: pid, name: info.nome, solicitado: total, estoque: info.estoque })
+    }
+  }
+  if (violacoes.length > 0) {
+    const lista = violacoes.map(v => `${v.name}: solicitado ${v.solicitado}, estoque ${v.estoque}`).join('; ')
+    const err = new Error(`Estoque insuficiente para finalizar: ${lista}`)
+    err.code = 'INSUFFICIENT_STOCK_COMANDA'
+    err.items = violacoes
+    throw err
+  }
+  return true
+}
+
 // Detecta erro de NOT NULL em coluna status
 function isNotNullStatusError(err) {
   if (!err) return false;
@@ -751,6 +796,53 @@ export async function listarClientesDaComanda({ comandaId, codigoEmpresa } = {})
 // Itens (depende de tabela 'produtos' existir)
 export async function adicionarItem({ comandaId, produtoId, descricao, quantidade, precoUnitario, desconto = 0, codigoEmpresa }) {
   const codigo = codigoEmpresa || getCachedCompanyCode()
+  // 1) Backstop: impedir venda com estoque zerado e avisos para estoque baixo
+  try {
+    let qp = supabase
+      .from('produtos')
+      .select('id, estoque, estoque_minimo, nome')
+      .eq('id', produtoId)
+      .limit(1)
+    if (codigo) qp = qp.eq('codigo_empresa', codigo)
+    const { data: prod, error: perr } = await qp
+    if (perr) throw perr
+    const p = Array.isArray(prod) ? prod[0] : prod
+    if (p) {
+      const est = Number(p.estoque ?? 0)
+      const estMin = Number(p.estoque_minimo ?? 0)
+      const qty = Number(quantidade ?? 1)
+      if (est <= 0) {
+        const err = new Error(`Produto sem estoque: ${p.nome || ''}`.trim())
+        err.code = 'OUT_OF_STOCK'
+        throw err
+      }
+      // Soma atual na comanda deste produto para evitar ultrapassar estoque
+      let qs = supabase
+        .from('comanda_itens')
+        .select('quantidade')
+        .eq('comanda_id', comandaId)
+        .eq('produto_id', produtoId)
+      if (codigo) qs = qs.eq('codigo_empresa', codigo)
+      const { data: sumRows, error: serr } = await qs
+      if (serr) throw serr
+      const atual = Array.isArray(sumRows) && sumRows.length ? sumRows.reduce((acc, r) => acc + Number(r?.quantidade || 0), 0) : 0
+      const futuro = atual + qty
+      if (futuro > est) {
+        const err = new Error(`Estoque insuficiente. Em comanda: ${atual}, solicitado: +${qty}, disponível: ${est}`)
+        err.code = 'INSUFFICIENT_STOCK'
+        throw err
+      }
+      // Aviso de estoque baixo (não bloqueia)
+      if (est <= estMin && est > 0) {
+        try { console.warn(`[adicionarItem] Aviso: estoque baixo para produto '${p.nome}' (estoque=${est}, minimo=${estMin})`) } catch {}
+      }
+    }
+  } catch (stockErr) {
+    // Propaga erros de estoque para a UI tratar com mensagem clara
+    throw stockErr
+  }
+
+  // 2) Inserir item normalmente
   const payload = { comanda_id: comandaId, produto_id: produtoId, descricao, quantidade, preco_unitario: precoUnitario, desconto }
   if (codigo) payload.codigo_empresa = codigo
   const { data, error } = await supabase.from('comanda_itens').insert(payload).select('*').single()
@@ -761,9 +853,58 @@ export async function adicionarItem({ comandaId, produtoId, descricao, quantidad
 // Atualiza quantidade do item da comanda
 export async function atualizarQuantidadeItem({ itemId, quantidade, codigoEmpresa }) {
   const codigo = codigoEmpresa || getCachedCompanyCode()
+  // 1) Buscar item atual para validar delta e estoque
+  let qi = supabase
+    .from('comanda_itens')
+    .select('id, quantidade, produto_id, comanda_id')
+    .eq('id', itemId)
+    .limit(1)
+  if (codigo) qi = qi.eq('codigo_empresa', codigo)
+  const { data: currRows, error: ierr } = await qi
+  if (ierr) throw ierr
+  const curr = Array.isArray(currRows) ? currRows[0] : currRows
+  const newQty = Number(quantidade || 0)
+  if (!curr) throw new Error('Item não encontrado')
+  const oldQty = Number(curr.quantidade || 0)
+  const delta = newQty - oldQty
+  if (delta > 0) {
+    // Verifica estoque disponível do produto
+    let qp = supabase.from('produtos').select('id, estoque, nome, estoque_minimo').eq('id', curr.produto_id).limit(1)
+    if (codigo) qp = qp.eq('codigo_empresa', codigo)
+    const { data: prodRows, error: perr } = await qp
+    if (perr) throw perr
+    const p = Array.isArray(prodRows) ? prodRows[0] : prodRows
+    if (p) {
+      const est = Number(p.estoque ?? 0)
+      // Soma de outros itens desta comanda para o mesmo produto
+      let qs = supabase
+        .from('comanda_itens')
+        .select('quantidade')
+        .eq('comanda_id', curr.comanda_id)
+        .eq('produto_id', curr.produto_id)
+        .neq('id', curr.id)
+      if (codigo) qs = qs.eq('codigo_empresa', codigo)
+      const { data: sumRows, error: serr } = await qs
+      if (serr) throw serr
+      const outros = Array.isArray(sumRows) && sumRows.length ? sumRows.reduce((acc, r) => acc + Number(r?.quantidade || 0), 0) : 0
+      const futuro = outros + newQty
+      if (futuro > est) {
+        const err = new Error(`Estoque insuficiente. Em comanda (outros itens): ${outros}, novo para este item: ${newQty}, disponível: ${est}`)
+        err.code = 'INSUFFICIENT_STOCK'
+        throw err
+      }
+      const estMin = Number(p.estoque_minimo ?? 0)
+      const restante = est - (outros + newQty)
+      if (restante <= estMin && restante >= 0) {
+        try { console.warn(`[atualizarQuantidadeItem] Aviso: produto '${p.nome}' atingiu nível de estoque baixo (restante=${restante}, minimo=${estMin})`) } catch {}
+      }
+    }
+  }
+
+  // 2) Atualizar quantidade
   let q = supabase
     .from('comanda_itens')
-    .update({ quantidade })
+    .update({ quantidade: newQty })
     .eq('id', itemId)
   if (codigo) q = q.eq('codigo_empresa', codigo)
   const { data, error } = await q.select('*').single()

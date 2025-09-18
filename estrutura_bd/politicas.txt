@@ -2277,3 +2277,116 @@ end$$;
 -- ============================
 -- FIM DAS ATUALIZAÇÕES v4.4
 -- ============================
+
+-- ============================
+-- ATUALIZAÇÕES APLICADAS (v4.5)
+-- Data: 2025-09-18
+-- Assunto: RLS por codigo_empresa para comandas/comanda_itens/pagamentos
+--          alinhado ao frontend (src/lib/store.js)
+-- ============================
+
+-- Pré-requisitos
+-- - Funções SECURITY DEFINER: public.get_my_company_code(), public.get_my_company_id()
+-- - Coluna codigo_empresa (text) em: public.comandas, public.comanda_itens, public.pagamentos, public.comanda_clientes
+
+-- 1) Habilitar RLS (idempotente)
+do $$
+begin
+  begin execute $$alter table if exists public.comandas enable row level security$$; exception when others then null; end;
+  begin execute $$alter table if exists public.comanda_itens enable row level security$$; exception when others then null; end;
+  begin execute $$alter table if exists public.pagamentos enable row level security$$; exception when others then null; end;
+  begin execute $$alter table if exists public.comanda_clientes enable row level security$$; exception when others then null; end;
+end$$;
+
+-- 2) RLS: public.comandas (cabeçalho)
+do $$
+begin
+  execute $$drop policy if exists comandas_select_company on public.comandas$$;
+  execute $$create policy comandas_select_company on public.comandas
+    as permissive for select to authenticated
+    using (codigo_empresa = public.get_my_company_code())$$;
+
+  execute $$drop policy if exists comandas_insert_company on public.comandas$$;
+  execute $$create policy comandas_insert_company on public.comandas
+    as permissive for insert to authenticated
+    with check (codigo_empresa = public.get_my_company_code())$$;
+
+  execute $$drop policy if exists comandas_update_company on public.comandas$$;
+  execute $$create policy comandas_update_company on public.comandas
+    as permissive for update to authenticated
+    using (codigo_empresa = public.get_my_company_code())
+    with check (codigo_empresa = public.get_my_company_code())$$;
+
+  execute $$drop policy if exists comandas_delete_company on public.comandas$$;
+  execute $$create policy comandas_delete_company on public.comandas
+    as permissive for delete to authenticated
+    using (codigo_empresa = public.get_my_company_code())$$;
+end$$;
+
+-- 3) RLS: public.comanda_itens (itens da comanda)
+do $$
+begin
+  execute $$drop policy if exists comanda_itens_select_company on public.comanda_itens$$;
+  execute $$create policy comanda_itens_select_company on public.comanda_itens
+    as permissive for select to authenticated
+    using (codigo_empresa = public.get_my_company_code())$$;
+
+  execute $$drop policy if exists comanda_itens_insert_company on public.comanda_itens$$;
+  execute $$create policy comanda_itens_insert_company on public.comanda_itens
+    as permissive for insert to authenticated
+    with check (codigo_empresa = public.get_my_company_code())$$;
+
+  execute $$drop policy if exists comanda_itens_update_company on public.comanda_itens$$;
+  execute $$create policy comanda_itens_update_company on public.comanda_itens
+    as permissive for update to authenticated
+    using (codigo_empresa = public.get_my_company_code())
+    with check (codigo_empresa = public.get_my_company_code())$$;
+
+  execute $$drop policy if exists comanda_itens_delete_company on public.comanda_itens$$;
+  execute $$create policy comanda_itens_delete_company on public.comanda_itens
+    as permissive for delete to authenticated
+    using (codigo_empresa = public.get_my_company_code())$$;
+end$$;
+
+-- 4) RLS: public.pagamentos (recebimentos por comanda)
+do $$
+begin
+  execute $$drop policy if exists pagamentos_select_company on public.pagamentos$$;
+  execute $$create policy pagamentos_select_company on public.pagamentos
+    as permissive for select to authenticated
+    using (codigo_empresa = public.get_my_company_code())$$;
+
+  execute $$drop policy if exists pagamentos_insert_company on public.pagamentos$$;
+  execute $$create policy pagamentos_insert_company on public.pagamentos
+    as permissive for insert to authenticated
+    with check (codigo_empresa = public.get_my_company_code())$$;
+
+  execute $$drop policy if exists pagamentos_update_company on public.pagamentos$$;
+  execute $$create policy pagamentos_update_company on public.pagamentos
+    as permissive for update to authenticated
+    using (codigo_empresa = public.get_my_company_code())
+    with check (codigo_empresa = public.get_my_company_code())$$;
+
+  execute $$drop policy if exists pagamentos_delete_company on public.pagamentos$$;
+  execute $$create policy pagamentos_delete_company on public.pagamentos
+    as permissive for delete to authenticated
+    using (codigo_empresa = public.get_my_company_code())$$;
+end$$;
+
+-- 5) Índices sugeridos (idempotentes)
+do $$
+begin
+  begin execute $$create index if not exists idx_comandas_empresa_status on public.comandas (codigo_empresa, status)$$; exception when others then null; end;
+  begin execute $$create index if not exists idx_comanda_itens_empresa_comanda on public.comanda_itens (codigo_empresa, comanda_id)$$; exception when others then null; end;
+  begin execute $$create index if not exists idx_pagamentos_empresa_comanda on public.pagamentos (codigo_empresa, comanda_id)$$; exception when others then null; end;
+end$$;
+
+-- 6) Observações
+-- - Estas políticas harmonizam com o frontend após as mudanças de 2025-09-18
+--   (validação de estoque sem agregação PostgREST, verificação agregada antes do pagamento,
+--    e envio explícito de codigo_empresa nos inserts relevantes).
+-- - Manter a padronização por codigo_empresa em novas tabelas multi-tenant.
+
+-- ============================
+-- FIM DAS ATUALIZAÇÕES v4.5
+-- ============================

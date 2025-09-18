@@ -92,6 +92,51 @@ function mapDbToUi(row) {
   }
 }
 
+// ===== Relatórios rápidos de produtos =====
+// Retorna os produtos mais vendidos no dia corrente (00:00 até agora), ordenados por quantidade descendente
+export async function getMostSoldProductsToday({ limit = 5, codigoEmpresa } = {}) {
+  const start = new Date()
+  start.setHours(0, 0, 0, 0)
+  const startIso = start.toISOString()
+  // Consulta em comanda_itens somando quantidades do dia, filtrando por empresa, agrupando por produto
+  // Dependências de schema: comanda_itens(comanda_id, produto_id, quantidade, created_at, codigo_empresa)
+  // e produtos(id, nome)
+  // Nota: usamos duas queries para simplicidade e compatibilidade com PostgREST
+  // 1) Buscar agregados
+  const { data: rows, error } = await withTimeout((signal) => {
+    let q = supabase
+      .from('comanda_itens')
+      .select('produto_id, quantidade, created_at')
+      .gte('created_at', startIso)
+      .abortSignal(signal)
+    if (codigoEmpresa) q = q.eq('codigo_empresa', codigoEmpresa)
+    return q
+  }, 15000, 'Timeout getMostSoldProductsToday (15s)')
+  if (error) throw error
+  const agg = new Map()
+  for (const r of rows || []) {
+    const pid = r.produto_id
+    const qty = Number(r.quantidade || 0)
+    agg.set(pid, (agg.get(pid) || 0) + qty)
+  }
+  // 2) Ordenar e buscar nomes
+  const sorted = Array.from(agg.entries()).sort((a, b) => b[1] - a[1]).slice(0, limit)
+  if (sorted.length === 0) return []
+  const ids = sorted.map(([id]) => id)
+  const { data: prods, error: perr } = await withTimeout((signal) => {
+    let qp = supabase
+      .from('produtos')
+      .select('id, nome')
+      .in('id', ids)
+      .abortSignal(signal)
+    if (codigoEmpresa) qp = qp.eq('codigo_empresa', codigoEmpresa)
+    return qp
+  }, 15000, 'Timeout getMostSoldProductsToday:produtos (15s)')
+  if (perr) throw perr
+  const nameById = new Map((prods || []).map(p => [p.id, p.nome]))
+  return sorted.map(([id, total]) => ({ id, name: nameById.get(id) || String(id), total }))
+}
+
 // Helper to map UI -> DB
 function mapUiToDb(data) {
   return {
@@ -209,8 +254,10 @@ export async function listProducts(options = {}) {
   return mapped
 }
 
-export async function createProduct(product) {
+export async function createProduct(product, options = {}) {
+  const { codigoEmpresa } = options
   const payload = mapUiToDb(product)
+  if (codigoEmpresa) payload.codigo_empresa = codigoEmpresa
   // eslint-disable-next-line no-console
   console.info('[products.api] createProduct: payload', payload)
   const tryInsert = async () => {
@@ -271,7 +318,8 @@ export async function createProduct(product) {
   return mapped
 }
 
-export async function updateProduct(id, product) {
+export async function updateProduct(id, product, options = {}) {
+  // Não tocar em codigo_empresa em updates para evitar violações RLS
   const payload = mapUiToDb(product)
   // eslint-disable-next-line no-console
   console.info('[products.api] updateProduct: id', id, 'payload', payload)
