@@ -7154,3 +7154,113 @@ create index if not exists idx_pagamentos_recebido_em on public.pagamentos(receb
 --- ============================
 --- FIM DAS ATUALIZAÇÕES v4.0
 --- ============================
+
+-- ============================
+-- ATUALIZAÇÕES v4.1 — Agendamentos: código sequencial por empresa
+-- ============================
+
+-- 1) Coluna 'codigo' em agendamentos
+alter table public.agendamentos
+  add column if not exists codigo bigint;
+
+-- 2) Backfill: atribui códigos sequenciais por empresa (particiona por codigo_empresa)
+with ranked as (
+  select a.id,
+         a.codigo_empresa,
+         row_number() over (partition by a.codigo_empresa order by a.id) as rn
+  from public.agendamentos a
+  where a.codigo is null
+)
+update public.agendamentos a
+set codigo = r.rn
+from ranked r
+where a.id = r.id;
+
+-- 3) Índice único por (codigo_empresa, codigo)
+create unique index if not exists ux_agendamentos_empresa_codigo
+  on public.agendamentos (codigo_empresa, codigo);
+
+-- 4) NOT NULL após backfill (executar após passo 2)
+alter table public.agendamentos
+  alter column codigo set not null;
+
+-- 5) Estender empresa_counters para suportar agendamentos
+alter table public.empresa_counters
+  add column if not exists next_agendamento_codigo bigint not null default 1;
+
+-- 6) Sincroniza 'next_agendamento_codigo' com o máximo existente
+insert into public.empresa_counters (empresa_id, next_agendamento_codigo)
+select e.id as empresa_id,
+       greatest(coalesce(max(a.codigo), 0) + 1, 1) as next_agendamento_codigo
+from public.empresas e
+left join public.agendamentos a
+  on a.codigo_empresa = e.codigo_empresa
+group by e.id
+on conflict (empresa_id)
+do update
+  set next_agendamento_codigo = greatest(
+        public.empresa_counters.next_agendamento_codigo,
+        excluded.next_agendamento_codigo
+      );
+
+-- 7) Função para atribuir automaticamente o próximo código de agendamento por empresa
+create or replace function public.agendamentos_set_codigo_fn()
+returns trigger
+language plpgsql
+as $$
+declare
+  v_empresa_id uuid;
+  v_next bigint;
+begin
+  -- Se já vier com codigo, não altera
+  if new.codigo is not null then
+    return new;
+  end if;
+
+  -- Resolve empresa_id via codigo_empresa
+  if new.codigo_empresa is null then
+    raise exception 'agendamentos_set_codigo_fn: NEW.codigo_empresa não pode ser nulo';
+  end if;
+
+  select e.id into v_empresa_id
+  from public.empresas e
+  where e.codigo_empresa = new.codigo_empresa
+  limit 1;
+
+  if v_empresa_id is null then
+    raise exception 'agendamentos_set_codigo_fn: empresa não encontrada para codigo_empresa=%', new.codigo_empresa;
+  end if;
+
+  -- Garante existência da linha em empresa_counters
+  insert into public.empresa_counters (empresa_id)
+  values (v_empresa_id)
+  on conflict (empresa_id) do nothing;
+
+  -- Lê o próximo código atual e incrementa
+  select next_agendamento_codigo
+    into v_next
+  from public.empresa_counters
+  where empresa_id = v_empresa_id
+  for update;
+
+  new.codigo := v_next;
+
+  update public.empresa_counters
+  set next_agendamento_codigo = v_next + 1
+  where empresa_id = v_empresa_id;
+
+  return new;
+end;
+$$;
+
+-- 8) Trigger BEFORE INSERT
+drop trigger if exists zz_agendamentos_set_codigo on public.agendamentos;
+
+create trigger zz_agendamentos_set_codigo
+before insert on public.agendamentos
+for each row
+execute function public.agendamentos_set_codigo_fn();
+
+-- ============================
+-- FIM DAS ATUALIZAÇÕES v4.1
+-- ============================
