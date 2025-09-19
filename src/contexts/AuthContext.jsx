@@ -261,6 +261,14 @@ export const AuthProvider = ({ children }) => {
               console.warn('RLS recursion (42P17) persistente ao carregar perfil. Prosseguindo sem alterar cache.');
               return;
             }
+            // Tratar erros de autorização que podem causar logout forçado
+            if ([401, 403].includes(Number(error.status))) {
+              console.warn('[AuthDebug] Erro de autorização detectado, tentando fallback');
+              if (attempt < delays.length) {
+                await sleep(delays[attempt]);
+                continue;
+              }
+            }
             // Sem registro em colaboradores para este usuário: tentar fallback via 'usuarios'
             if (error.code === 'PGRST116') { // No rows
               try {

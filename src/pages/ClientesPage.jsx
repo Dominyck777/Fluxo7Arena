@@ -137,7 +137,10 @@ function ClientesPage() {
     const { userProfile, authReady } = useAuth();
     const [clients, setClients] = useState(() => {
       try {
-        const cached = JSON.parse(localStorage.getItem('clientes:list') || '[]');
+        const cachedProfile = localStorage.getItem('auth:userProfile');
+        const codigo = cachedProfile ? (JSON.parse(cachedProfile)?.codigo_empresa || null) : null;
+        const key = codigo ? `clientes:list:${codigo}` : 'clientes:list';
+        const cached = JSON.parse(localStorage.getItem(key) || '[]');
         return Array.isArray(cached) ? cached : [];
       } catch {
         return [];
@@ -151,6 +154,8 @@ function ClientesPage() {
     const [filters, setFilters] = useState({ searchTerm: '', status: 'all', cardFilter: null });
     // Retry control para contornar atrasos de token/RLS no Vercel
     const clientsRetryRef = useRef(false);
+    const lastLoadTsRef = useRef(0);
+    const lastSizeRef = useRef(0);
 
     const loadClients = async () => {
       try {
@@ -158,11 +163,13 @@ function ClientesPage() {
         const hasCache = clients && clients.length > 0;
         if (!hasCache) setLoading(true);
         if (!userProfile?.codigo_empresa) return; // aguarda empresa
+        const cacheKey = `clientes:list:${userProfile.codigo_empresa}`;
         let query = supabase
           .from('clientes')
           .select('*')
           .eq('codigo_empresa', userProfile.codigo_empresa)
           .order('nome', { ascending: true });
+
         if (filters.searchTerm.trim() !== '') {
           const s = filters.searchTerm.trim();
           const isNumeric = /^\d+$/.test(s);
@@ -176,6 +183,19 @@ function ClientesPage() {
         if (filters.status !== 'all') {
           query = query.eq('status', filters.status);
         }
+        const slowFallback = setTimeout(() => {
+          try {
+            if (!hasCache) {
+              const cached = JSON.parse(localStorage.getItem(cacheKey) || '[]');
+              if (Array.isArray(cached) && cached.length > 0) {
+                console.warn('[Clientes] slow fallback: using cached snapshot');
+                setClients(cached);
+                lastSizeRef.current = cached.length;
+              }
+            }
+          } catch {}
+        }, 2000);
+
         const { data, error } = await query;
         if (error) {
           // Primeiro erro: não derruba lista atual; tenta 1x novamente
@@ -196,20 +216,29 @@ function ClientesPage() {
         }
         clientsRetryRef.current = false;
         setClients(rows);
-        try { localStorage.setItem('clientes:list', JSON.stringify(rows)); } catch {}
+        try { localStorage.setItem(cacheKey, JSON.stringify(rows)); } catch {}
+        lastSizeRef.current = rows.length;
+        lastLoadTsRef.current = Date.now();
       } catch (err) {
         toast({ title: 'Erro ao carregar clientes', description: err.message, variant: 'destructive' });
       } finally {
         setLoading(false);
+        try { clearTimeout(slowFallback); } catch {}
       }
     };
 
     // Hidratar do cache para evitar sumiço ao trocar de aba e depois atualizar em background
     useEffect(() => {
       try {
-        const cached = JSON.parse(localStorage.getItem('clientes:list') || '[]');
-        if (Array.isArray(cached) && cached.length && clients.length === 0) {
-          setClients(cached);
+        const cachedProfile = localStorage.getItem('auth:userProfile');
+        const codigo = userProfile?.codigo_empresa || (cachedProfile ? (JSON.parse(cachedProfile)?.codigo_empresa || null) : null);
+        if (codigo) {
+          const key = `clientes:list:${codigo}`;
+          const cached = JSON.parse(localStorage.getItem(key) || '[]');
+          if (Array.isArray(cached) && cached.length && clients.length === 0) {
+            setClients(cached);
+            lastSizeRef.current = cached.length;
+          }
         }
       } catch {}
       // só dispara quando auth e perfil/empresa prontos
@@ -229,6 +258,31 @@ function ClientesPage() {
       return () => {};
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [filters.searchTerm, filters.status, authReady, userProfile?.codigo_empresa]);
+
+    // Recarregar ao focar/ficar visível se estiver estagnado
+    useEffect(() => {
+      const onFocus = () => {
+        const elapsed = Date.now() - (lastLoadTsRef.current || 0);
+        if (elapsed > 30000 || lastSizeRef.current === 0) {
+          if (authReady && userProfile?.codigo_empresa) loadClients();
+        }
+      };
+      const onVis = () => {
+        if (document.visibilityState === 'visible') {
+          const elapsed = Date.now() - (lastLoadTsRef.current || 0);
+          if (elapsed > 30000 || lastSizeRef.current === 0) {
+            if (authReady && userProfile?.codigo_empresa) loadClients();
+          }
+        }
+      };
+      window.addEventListener('focus', onFocus);
+      document.addEventListener('visibilitychange', onVis);
+      return () => {
+        window.removeEventListener('focus', onFocus);
+        document.removeEventListener('visibilitychange', onVis);
+      };
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [authReady, userProfile?.codigo_empresa]);
 
     const stats = useMemo(() => {
         const today = new Date();

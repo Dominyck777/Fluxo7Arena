@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+
 import { Helmet } from 'react-helmet';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
@@ -10,7 +11,7 @@ import { Search, ArrowLeft, Store, FileText, DollarSign, CheckCircle } from 'luc
 import { useNavigate } from 'react-router-dom';
 import { listProducts } from '@/lib/products';
 import { useAuth } from '@/contexts/AuthContext';
-import { getOrCreateComandaBalcao, criarComandaBalcao, listarItensDaComanda, adicionarItem, listarFinalizadoras, registrarPagamento, fecharComandaEMesa, listarClientes, adicionarClientesAComanda, atualizarQuantidadeItem, removerItem, listarClientesDaComanda } from '@/lib/store';
+import { getOrCreateComandaBalcao, listarComandaBalcaoAberta, criarComandaBalcao, listarItensDaComanda, adicionarItem, listarFinalizadoras, registrarPagamento, fecharComandaEMesa, listarClientes, adicionarClientesAComanda, atualizarQuantidadeItem, removerItem, listarClientesDaComanda, verificarEstoqueComanda } from '@/lib/store';
 
 const pageVariants = { hidden: { opacity: 0 }, visible: { opacity: 1, transition: { staggerChildren: 0.1 } } };
 const itemVariants = { hidden: { opacity: 0, y: 20 }, visible: { opacity: 1, y: 0, transition: { duration: 0.5 } } };
@@ -25,6 +26,8 @@ export default function BalcaoPage() {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [customerName, setCustomerName] = useState('');
+  const [productSearch, setProductSearch] = useState('');
+  const [addingProductId, setAddingProductId] = useState(null);
 
   // Pagamento
   const [isPayOpen, setIsPayOpen] = useState(false);
@@ -38,23 +41,89 @@ export default function BalcaoPage() {
   const [clients, setClients] = useState([]);
   const [selectedClientIds, setSelectedClientIds] = useState([]);
   const [linking, setLinking] = useState(false);
-  const [showClientBox, setShowClientBox] = useState(true);
+  const [showClientBox, setShowClientBox] = useState(false); // desativado no novo fluxo
+  const [isClientWizardOpen, setIsClientWizardOpen] = useState(false);
+  const [clientChosen, setClientChosen] = useState(false);
+
+  // Chaves de cache por empresa
+  const companyCode = userProfile?.codigo_empresa || 'anon';
+  const LS_KEY = {
+    comandaId: `balcao:comandaId:${companyCode}`,
+    items: `balcao:items:${companyCode}`,
+    customerName: `balcao:customer:${companyCode}`,
+  };
+
+  // Utilitário: recarregar itens e cliente para a comanda atual com retry leve
+  const refetchItemsAndCustomer = async (targetComandaId, attempts = 3) => {
+    if (!targetComandaId) return;
+    const codigoEmpresa = userProfile?.codigo_empresa;
+    for (let i = 0; i < attempts; i++) {
+      try {
+        const itens = await listarItensDaComanda({ comandaId: targetComandaId, codigoEmpresa });
+        setItems((itens || []).map((it) => ({ id: it.id, name: it.descricao || 'Item', price: Number(it.preco_unitario || 0), quantity: Number(it.quantidade || 1) })));
+        try {
+          const vincs = await listarClientesDaComanda({ comandaId: targetComandaId, codigoEmpresa });
+          const nomes = (vincs || []).map(v => v?.nome).filter(Boolean);
+          const nomeFinal = nomes.length ? nomes.join(', ') : '';
+          setCustomerName(nomeFinal);
+          setClientChosen(Boolean(nomeFinal));
+        } catch {
+          setCustomerName('');
+          setClientChosen(false);
+        }
+        break;
+      } catch (err) {
+        if (i === attempts - 1) {
+          toast({ title: 'Falha ao atualizar itens', description: err?.message || 'Tente novamente', variant: 'destructive' });
+        } else {
+          await new Promise(r => setTimeout(r, 500 * (i + 1)));
+        }
+      }
+    }
+  };
 
   const loadAll = async () => {
     try {
       setLoading(true);
-      // Sempre começar com uma comanda nova vazia ao entrar na página
-      const c = await criarComandaBalcao({ codigoEmpresa: userProfile?.codigo_empresa });
-      setComandaId(c.id);
-      const itens = await listarItensDaComanda({ comandaId: c.id, codigoEmpresa: userProfile?.codigo_empresa });
-      setItems((itens || []).map((it) => ({ id: it.id, name: it.descricao || 'Item', price: Number(it.preco_unitario || 0), quantity: Number(it.quantidade || 1) })));
-      // Carrega cliente(s) vinculados
+      // Garantir codigo da empresa
+      const codigoEmpresa = userProfile?.codigo_empresa;
+      if (!codigoEmpresa) {
+        throw new Error('Código da empresa não disponível. Faça login novamente.');
+      }
+
+      // 1) Hidratar de cache, se existir (para exibirmos imediatamente)
       try {
-        const vincs = await listarClientesDaComanda({ comandaId: c.id, codigoEmpresa: userProfile?.codigo_empresa });
-        const nomes = (vincs || []).map(v => v?.nome).filter(Boolean);
-        setCustomerName(nomes.length ? nomes.join(', ') : '');
-      } catch { setCustomerName(''); }
-      try { const prods = await listProducts({ includeInactive: false }); setProducts(prods || []); } catch { setProducts([]); }
+        const cachedId = localStorage.getItem(LS_KEY.comandaId);
+        const cachedItems = JSON.parse(localStorage.getItem(LS_KEY.items) || '[]');
+        const cachedCustomer = localStorage.getItem(LS_KEY.customerName) || '';
+        if (cachedId) setComandaId(Number.isNaN(+cachedId) ? cachedId : Number(cachedId));
+        if (Array.isArray(cachedItems) && cachedItems.length > 0) setItems(cachedItems);
+        if (cachedCustomer) setCustomerName(cachedCustomer);
+      } catch { /* ignore cache errors */ }
+
+      // 2) Obter comanda aberta existente (não cria automaticamente)
+      // Se não encontrar, mas existir comandaId em cache, ainda tentamos refetch para evitar sumiço temporário
+      const cachedIdStr = localStorage.getItem(LS_KEY.comandaId);
+      const cachedId = cachedIdStr ? (Number.isNaN(+cachedIdStr) ? cachedIdStr : Number(cachedIdStr)) : null;
+      const c = await listarComandaBalcaoAberta({ codigoEmpresa }).catch(() => null);
+      if (c?.id) {
+        setComandaId(c.id);
+        await refetchItemsAndCustomer(c.id);
+      } else if (cachedId) {
+        // Tenta reaproveitar a comanda do cache (mitiga atrasos de RLS)
+        setComandaId(cachedId);
+        await refetchItemsAndCustomer(cachedId, 3);
+      } else {
+        setComandaId(null);
+        setItems([]);
+        setCustomerName('');
+        setClientChosen(false);
+      }
+      // Carregar produtos (com busca inicial se houver)
+      try {
+        const prods = await listProducts({ includeInactive: false, search: productSearch?.trim() || undefined });
+        setProducts(prods || []);
+      } catch { setProducts([]); }
     } catch (e) {
       toast({ title: 'Falha ao carregar Modo Balcão', description: e?.message || 'Tente novamente', variant: 'destructive' });
     } finally {
@@ -62,7 +131,70 @@ export default function BalcaoPage() {
     }
   };
 
+  // Cancelar venda atual (fecha comanda sem registrar pagamentos) e abre nova
+  const cancelSale = async () => {
+    try {
+      if (!comandaId) return;
+      const codigoEmpresa = userProfile?.codigo_empresa;
+      if (!codigoEmpresa) { toast({ title: 'Empresa não definida', variant: 'destructive' }); return; }
+      await fecharComandaEMesa({ comandaId, codigoEmpresa });
+      // Não abre nova comanda automaticamente
+      setComandaId(null);
+      setItems([]);
+      setSelectedClientIds([]);
+      setCustomerName('');
+      setClientChosen(false);
+      toast({ title: 'Venda cancelada', description: 'Uma nova comanda foi aberta.', variant: 'success' });
+    } catch (e) {
+      toast({ title: 'Falha ao cancelar venda', description: e?.message || 'Tente novamente', variant: 'destructive' });
+    }
+  };
+
   useEffect(() => { loadAll(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [userProfile?.codigo_empresa]);
+
+  // Persistir em cache quando comandaId/itens/cliente mudarem
+  useEffect(() => {
+    try {
+      if (comandaId) localStorage.setItem(LS_KEY.comandaId, String(comandaId));
+      localStorage.setItem(LS_KEY.items, JSON.stringify(items || []));
+      localStorage.setItem(LS_KEY.customerName, customerName || '');
+    } catch { /* ignore */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [comandaId, items, customerName]);
+
+  // Recarregar itens quando janela ganha foco ou página volta a ficar visível
+  useEffect(() => {
+    const onFocus = () => { if (comandaId) refetchItemsAndCustomer(comandaId, 2); };
+    const onVisibility = () => { if (document.visibilityState === 'visible' && comandaId) refetchItemsAndCustomer(comandaId, 2); };
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [comandaId]);
+
+  // Busca de produtos com debounce
+  useEffect(() => {
+    let active = true;
+    const t = setTimeout(async () => {
+      try {
+        const prods = await listProducts({ includeInactive: false, search: productSearch?.trim() || undefined });
+        if (!active) return;
+        // Fallback: se backend não filtrar por search, filtramos localmente
+        if (productSearch?.trim()) {
+          const term = productSearch.trim().toLowerCase();
+          setProducts((prods || []).filter(p => (p.name || '').toLowerCase().includes(term)));
+        } else {
+          setProducts(prods || []);
+        }
+      } catch {
+        if (active) setProducts([]);
+      }
+    }, 300);
+    return () => { active = false; clearTimeout(t); };
+  }, [productSearch]);
 
   useEffect(() => {
     let active = true;
@@ -81,32 +213,88 @@ export default function BalcaoPage() {
 
   const addProduct = async (prod) => {
     try {
-      if (!comandaId) return;
+      if (!clientChosen) { setIsClientWizardOpen(true); toast({ title: 'Selecione o cliente', description: 'Escolha Cliente cadastrado ou Consumidor antes de vender.', variant: 'warning' }); return; }
+      const codigoEmpresa = userProfile?.codigo_empresa;
+      if (!codigoEmpresa) { toast({ title: 'Empresa não definida', description: 'Faça login novamente.', variant: 'destructive' }); return; }
+      if (addingProductId) return;
+      setAddingProductId(prod.id);
+
+      // Pré-validação no cliente para UX imediata (servidor também valida)
+      const stock = Number(prod.stock ?? prod.currentStock ?? 0);
+      const minStock = Number(prod.minStock ?? 0);
+      if (stock <= 0) {
+        toast({ title: 'Sem estoque', description: `Produto "${prod.name}" está com estoque zerado.`, variant: 'destructive' });
+        return;
+      }
+
+      // Criar comanda se não existir ainda (somente no primeiro item)
+      let cid = comandaId;
+      if (!cid) {
+        const c = await getOrCreateComandaBalcao({ codigoEmpresa });
+        cid = c.id;
+        setComandaId(c.id);
+      }
       const price = Number(prod.salePrice ?? prod.price ?? 0);
-      await adicionarItem({ comandaId, produtoId: prod.id, descricao: prod.name, quantidade: 1, precoUnitario: price, codigoEmpresa: userProfile?.codigo_empresa });
-      const itens = await listarItensDaComanda({ comandaId, codigoEmpresa: userProfile?.codigo_empresa });
+      await adicionarItem({ comandaId: cid, produtoId: prod.id, descricao: prod.name, quantidade: 1, precoUnitario: price, codigoEmpresa });
+      const itens = await listarItensDaComanda({ comandaId: cid, codigoEmpresa });
       setItems((itens || []).map((it) => ({ id: it.id, name: it.descricao || 'Item', price: Number(it.preco_unitario || 0), quantity: Number(it.quantidade || 1) })));
-      toast({ title: 'Produto adicionado', description: prod.name, variant: 'success' });
+      // Avisos de estoque baixo/último
+      if (stock - 1 <= 0) {
+        toast({ title: 'Última unidade vendida', description: `"${prod.name}" esgotou após esta venda.`, variant: 'warning' });
+      } else if (stock - 1 <= minStock) {
+        toast({ title: 'Estoque baixo', description: `"${prod.name}" atingiu nível de estoque baixo.`, variant: 'warning' });
+      } else {
+        toast({ title: 'Produto adicionado', description: prod.name, variant: 'success' });
+      }
     } catch (e) {
-      toast({ title: 'Falha ao adicionar', description: e?.message || 'Tente novamente', variant: 'destructive' });
+      const msg = String(e?.message || '').toLowerCase();
+      if (e?.code === 'OUT_OF_STOCK' || msg.includes('sem estoque')) {
+        toast({ title: 'Sem estoque', description: 'Este produto está sem estoque.', variant: 'destructive' });
+      } else if (e?.code === 'INSUFFICIENT_STOCK' || msg.includes('insuficiente')) {
+        toast({ title: 'Estoque insuficiente', description: e?.message || 'Quantidade maior que o disponível.', variant: 'warning' });
+      } else {
+        toast({ title: 'Falha ao adicionar', description: e?.message || 'Tente novamente', variant: 'destructive' });
+      }
+    } finally {
+      setAddingProductId(null);
     }
   };
 
   const openPay = async () => {
     try {
       setPayLoading(true);
-      const fins = await listarFinalizadoras({ somenteAtivas: true, codigoEmpresa: userProfile?.codigo_empresa });
+      if (!clientChosen) { setIsClientWizardOpen(true); toast({ title: 'Selecione o cliente', description: 'Escolha Cliente cadastrado ou Consumidor antes de pagar.', variant: 'warning' }); setPayLoading(false); return; }
+      const codigoEmpresa = userProfile?.codigo_empresa;
+      if (!codigoEmpresa) { toast({ title: 'Empresa não definida', variant: 'destructive' }); return; }
+      if (!comandaId) {
+        const c = await getOrCreateComandaBalcao({ codigoEmpresa });
+        if (!c?.id) { toast({ title: 'Comanda não encontrada', description: 'Abra uma comanda antes de pagar.', variant: 'destructive' }); setPayLoading(false); return; }
+        setComandaId(c.id);
+      }
+      // Validação forte de estoque antes do pagamento
+      try {
+        await verificarEstoqueComanda({ comandaId: comandaId, codigoEmpresa });
+      } catch (err) {
+        const msg = Array.isArray(err?.items) && err.items.length
+          ? err.items.map(v => `${v.name} (solicitado ${v.solicitado}, estoque ${v.estoque})`).join('; ')
+          : (err?.message || 'Estoque insuficiente na comanda');
+        toast({ title: 'Estoque insuficiente', description: msg, variant: 'destructive', duration: 7000 });
+        setPayLoading(false);
+        return;
+      }
+      const fins = await listarFinalizadoras({ somenteAtivas: true, codigoEmpresa });
       setPayMethods(fins || []);
-      setSelectedPayId(fins?.[0]?.id || null);
       setIsPayOpen(true);
     } catch (e) {
-      toast({ title: 'Falha ao preparar pagamento', description: e?.message || 'Tente novamente', variant: 'destructive' });
-    } finally { setPayLoading(false); }
+      toast({ title: 'Falha ao iniciar pagamento', description: e?.message || 'Tente novamente', variant: 'destructive' });
+    } finally {
+      setPayLoading(false);
+    }
   };
 
   const confirmPay = async () => {
     try {
-      if (!comandaId) return;
+      if (!comandaId) { toast({ title: 'Nenhuma comanda aberta', description: 'Adicione itens para abrir uma comanda.', variant: 'warning' }); return; }
       if (!selectedPayId) { toast({ title: 'Selecione uma finalizadora', variant: 'warning' }); return; }
       setPayLoading(true);
       // Vincula automaticamente os clientes selecionados antes de pagar
@@ -123,11 +311,12 @@ export default function BalcaoPage() {
       const metodo = fin?.tipo || null; // enum esperado pelo banco
       await registrarPagamento({ comandaId, finalizadoraId: selectedPayId, metodo, valor: total, codigoEmpresa: userProfile?.codigo_empresa });
       await fecharComandaEMesa({ comandaId, codigoEmpresa: userProfile?.codigo_empresa });
-      // Abre nova comanda de balcão para próxima venda
-      const c = await getOrCreateComandaBalcao({ codigoEmpresa: userProfile?.codigo_empresa });
-      setComandaId(c.id);
+      // Não abre nova comanda automaticamente; deixa para quando adicionar o próximo item
+      setComandaId(null);
       setItems([]);
       setSelectedClientIds([]);
+      setCustomerName('');
+      setClientChosen(false);
       toast({ title: 'Pagamento concluído', description: `Total R$ ${total.toFixed(2)}`, variant: 'success' });
       setIsPayOpen(false);
     } catch (e) {
@@ -160,7 +349,7 @@ export default function BalcaoPage() {
           <div className="p-4 border-b border-border">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted" />
-              <Input placeholder="Buscar produto..." className="pl-9" />
+              <Input placeholder="Buscar produto..." className="pl-9" value={productSearch} onChange={(e) => setProductSearch(e.target.value)} />
             </div>
           </div>
           <div className="flex-1 overflow-y-auto p-4 thin-scroll">
@@ -185,7 +374,8 @@ export default function BalcaoPage() {
               <div className="text-lg font-bold">Balcão{customerName ? ` • ${customerName}` : ''}</div>
             </div>
             <div className="flex items-center gap-2">
-              <Button size="sm" variant="outline" onClick={() => setShowClientBox((v) => !v)}>{showClientBox ? 'Ocultar Cliente' : 'Mostrar Cliente'}</Button>
+              <Button size="sm" variant="outline" onClick={() => setIsClientWizardOpen(true)}>+ Cliente</Button>
+              <Button size="sm" variant="outline" onClick={cancelSale}>Cancelar Venda</Button>
             </div>
           </div>
           <div className="flex-1 overflow-y-auto p-4 thin-scroll">
@@ -201,21 +391,56 @@ export default function BalcaoPage() {
                     </div>
                     <div className="flex items-center gap-2">
                       <Button size="icon" variant="outline" className="h-8 w-8" onClick={async () => {
+                        const codigoEmpresa = userProfile?.codigo_empresa;
+                        if (!codigoEmpresa) { toast({ title: 'Empresa não definida', variant: 'destructive' }); return; }
                         const next = Number(it.quantity || 1) - 1;
-                        if (next <= 0) {
-                          await removerItem({ itemId: it.id, codigoEmpresa: userProfile?.codigo_empresa });
-                        } else {
-                          await atualizarQuantidadeItem({ itemId: it.id, quantidade: next, codigoEmpresa: userProfile?.codigo_empresa });
+                        // Otimista: atualiza UI primeiro
+                        setItems(prev => {
+                          const arr = prev.map(n => n.id === it.id ? { ...n, quantity: Math.max(next, 0) } : n).filter(n => n.quantity > 0);
+                          return arr;
+                        });
+                        try {
+                          if (next <= 0) {
+                            await removerItem({ itemId: it.id, codigoEmpresa });
+                          } else {
+                            await atualizarQuantidadeItem({ itemId: it.id, quantidade: next, codigoEmpresa });
+                          }
+                        } catch (err) {
+                          // Recarrega estado real se falhar
+                          try {
+                            const itens = await listarItensDaComanda({ comandaId, codigoEmpresa });
+                            setItems((itens || []).map((n) => ({ id: n.id, name: n.descricao || 'Item', price: Number(n.preco_unitario || 0), quantity: Number(n.quantidade || 1) })));
+                          } catch {}
+                          const msg = String(err?.message || '').toLowerCase();
+                          if (err?.code === 'INSUFFICIENT_STOCK' || msg.includes('insuficiente')) {
+                            toast({ title: 'Estoque insuficiente', description: err?.message || 'Quantidade maior que o disponível.', variant: 'warning' });
+                          } else {
+                            toast({ title: 'Falha ao atualizar item', description: err?.message || 'Tente novamente', variant: 'destructive' });
+                          }
                         }
-                        const itens = await listarItensDaComanda({ comandaId, codigoEmpresa: userProfile?.codigo_empresa });
-                        setItems((itens || []).map((n) => ({ id: n.id, name: n.descricao || 'Item', price: Number(n.preco_unitario || 0), quantity: Number(n.quantidade || 1) })));
                       }}>-</Button>
                       <span className="w-8 text-center font-semibold">{it.quantity}</span>
                       <Button size="icon" variant="outline" className="h-8 w-8" onClick={async () => {
+                        const codigoEmpresa = userProfile?.codigo_empresa;
+                        if (!codigoEmpresa) { toast({ title: 'Empresa não definida', variant: 'destructive' }); return; }
                         const next = Number(it.quantity || 1) + 1;
-                        await atualizarQuantidadeItem({ itemId: it.id, quantidade: next, codigoEmpresa: userProfile?.codigo_empresa });
-                        const itens = await listarItensDaComanda({ comandaId, codigoEmpresa: userProfile?.codigo_empresa });
-                        setItems((itens || []).map((n) => ({ id: n.id, name: n.descricao || 'Item', price: Number(n.preco_unitario || 0), quantity: Number(n.quantidade || 1) })));
+                        // Otimista: atualiza UI primeiro
+                        setItems(prev => prev.map(n => n.id === it.id ? { ...n, quantity: next } : n));
+                        try {
+                          await atualizarQuantidadeItem({ itemId: it.id, quantidade: next, codigoEmpresa });
+                        } catch (err) {
+                          // Recarrega estado real se falhar
+                          try {
+                            const itens = await listarItensDaComanda({ comandaId, codigoEmpresa });
+                            setItems((itens || []).map((n) => ({ id: n.id, name: n.descricao || 'Item', price: Number(n.preco_unitario || 0), quantity: Number(n.quantidade || 1) })));
+                          } catch {}
+                          const msg = String(err?.message || '').toLowerCase();
+                          if (err?.code === 'INSUFFICIENT_STOCK' || msg.includes('insuficiente')) {
+                            toast({ title: 'Estoque insuficiente', description: err?.message || 'Quantidade maior que o disponível.', variant: 'warning' });
+                          } else {
+                            toast({ title: 'Falha ao atualizar item', description: err?.message || 'Tente novamente', variant: 'destructive' });
+                          }
+                        }
                       }}>+</Button>
                     </div>
                     <div className="font-semibold w-24 text-right">R$ {(Number(it.quantity)*Number(it.price)).toFixed(2)}</div>
@@ -225,57 +450,6 @@ export default function BalcaoPage() {
             )}
           </div>
           <div className="p-4 border-t border-border">
-            {showClientBox && (
-              <div className="mb-3">
-                <div className="flex gap-2 mb-2">
-                  <Button type="button" variant={clientMode === 'cadastrado' ? 'default' : 'outline'} onClick={() => setClientMode('cadastrado')}>Cliente cadastrado</Button>
-                  <Button type="button" variant={clientMode === 'consumidor' ? 'default' : 'outline'} onClick={() => setClientMode('consumidor')}>Consumidor</Button>
-                </div>
-                {clientMode === 'cadastrado' && (
-                  <div>
-                    <Label className="mb-1 block">Buscar cliente</Label>
-                    <div className="relative">
-                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted" />
-                      <Input placeholder="Nome, e-mail, telefone ou código" className="pl-9" value={clientSearch} onChange={(e) => setClientSearch(e.target.value)} />
-                    </div>
-                    <div className="mt-2 max-h-36 overflow-auto border rounded-md thin-scroll">
-                      <ul>
-                        {(clients || []).map(c => (
-                          <li key={c.id} className="p-2 flex items-center justify-between cursor-pointer hover:bg-surface-2" onClick={async () => {
-                            try {
-                              setLinking(true);
-                              await adicionarClientesAComanda({ comandaId, clienteIds: [c.id], nomesLivres: [], codigoEmpresa: userProfile?.codigo_empresa });
-                              setSelectedClientIds([]);
-                              setClientSearch('');
-                              setClients([]); // fecha visualmente a lista
-                              try {
-                                const vincs = await listarClientesDaComanda({ comandaId, codigoEmpresa: userProfile?.codigo_empresa });
-                                const nomes = (vincs || []).map(v => v?.nome).filter(Boolean);
-                                setCustomerName(nomes.length ? nomes.join(', ') : '');
-                              } catch { setCustomerName(''); }
-                              toast({ title: 'Cliente associado', variant: 'success' });
-                            } catch (e) {
-                              toast({ title: 'Falha ao associar cliente', description: e?.message || 'Tente novamente', variant: 'destructive' });
-                            } finally {
-                              setLinking(false);
-                            }
-                          }}>
-                            <div>
-                              <div className="font-medium">{c.nome}</div>
-                              <div className="text-xs text-text-muted">{c.email || '—'} {c.telefone ? `• ${c.telefone}` : ''}</div>
-                            </div>
-                            <CheckCircle size={16} className="text-success opacity-0 group-hover:opacity-100" />
-                          </li>
-                        ))}
-                        {(!clients || clients.length === 0) && (
-                          <li className="p-2 text-sm text-text-muted">Nenhum cliente encontrado.</li>
-                        )}
-                      </ul>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
             <div className="flex justify-between items-center text-lg font-bold mb-3">
               <span>Total</span>
               <span>R$ {total.toFixed(2)}</span>
@@ -313,6 +487,89 @@ export default function BalcaoPage() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsPayOpen(false)} disabled={payLoading}>Cancelar</Button>
             <Button onClick={confirmPay} disabled={payLoading || !selectedPayId || total <= 0}>{payLoading ? 'Processando...' : 'Confirmar'}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Wizard de Cliente: obrigatório antes de vender */}
+      <Dialog open={isClientWizardOpen} onOpenChange={(open) => setIsClientWizardOpen(open)}>
+        <DialogContent className="max-w-lg" onKeyDown={(e) => e.stopPropagation()}>
+          <DialogHeader>
+            <DialogTitle className="text-2xl font-bold">Identificar Cliente</DialogTitle>
+            <DialogDescription>Selecione o tipo de cliente para esta venda.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="flex gap-2">
+              <Button type="button" variant={clientMode === 'cadastrado' ? 'default' : 'outline'} onClick={() => setClientMode('cadastrado')}>Cliente cadastrado</Button>
+              <Button type="button" variant={clientMode === 'consumidor' ? 'default' : 'outline'} onClick={() => setClientMode('consumidor')}>Consumidor</Button>
+            </div>
+            {clientMode === 'cadastrado' ? (
+              <div>
+                <Label className="mb-1 block">Buscar cliente</Label>
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted" />
+                  <Input placeholder="Nome, e-mail, telefone ou código" className="pl-9" value={clientSearch} onChange={(e) => setClientSearch(e.target.value)} />
+                </div>
+                <div className="mt-2 max-h-48 overflow-auto border rounded-md thin-scroll">
+                  <ul>
+                    {(clients || []).map(c => (
+                      <li key={c.id} className="p-2 flex items-center justify-between cursor-pointer hover:bg-surface-2" onClick={async () => {
+                        try {
+                          setLinking(true);
+                          await adicionarClientesAComanda({ comandaId, clienteIds: [c.id], nomesLivres: [], codigoEmpresa: userProfile?.codigo_empresa });
+                          setSelectedClientIds([]);
+                          setClientSearch('');
+                          setClients([]);
+                          try {
+                            const vincs = await listarClientesDaComanda({ comandaId, codigoEmpresa: userProfile?.codigo_empresa });
+                            const nomes = (vincs || []).map(v => v?.nome).filter(Boolean);
+                            const nomeFinal = nomes.length ? nomes.join(', ') : '';
+                            setCustomerName(nomeFinal);
+                            setClientChosen(Boolean(nomeFinal));
+                            setIsClientWizardOpen(false);
+                          } catch {
+                            setCustomerName('');
+                            setClientChosen(false);
+                          }
+                          toast({ title: 'Cliente associado', variant: 'success' });
+                        } catch (e) {
+                          toast({ title: 'Falha ao associar cliente', description: e?.message || 'Tente novamente', variant: 'destructive' });
+                        } finally {
+                          setLinking(false);
+                        }
+                      }}>
+                        <div>
+                          <div className="font-medium">{c.nome}</div>
+                          <div className="text-xs text-text-muted">{c.email || '—'} {c.telefone ? `• ${c.telefone}` : ''}</div>
+                        </div>
+                        <CheckCircle size={16} className="text-success opacity-0 group-hover:opacity-100" />
+                      </li>
+                    ))}
+                    {(!clients || clients.length === 0) && (
+                      <li className="p-2 text-sm text-text-muted">Nenhum cliente encontrado.</li>
+                    )}
+                  </ul>
+                </div>
+              </div>
+            ) : (
+              <div className="text-sm text-text-secondary">
+                Consumidor final (sem cadastro). Você pode prosseguir com a venda.
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setIsClientWizardOpen(false); }}>Fechar</Button>
+            <Button onClick={async () => {
+              if (clientMode === 'consumidor') {
+                // Apenas marcar como escolhido
+                setCustomerName('');
+                setClientChosen(true);
+                setIsClientWizardOpen(false);
+              } else {
+                if (!customerName) { toast({ title: 'Selecione um cliente da lista', variant: 'warning' }); return; }
+                setIsClientWizardOpen(false);
+              }
+            }}>Confirmar</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

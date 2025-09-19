@@ -15,7 +15,7 @@ import { Calendar } from "@/components/ui/calendar";
 import { format, parseISO } from "date-fns";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Checkbox } from '@/components/ui/checkbox';
-import { listProducts, createProduct, updateProduct, deleteProduct, listCategories, createCategory, removeCategory } from '@/lib/products';
+import { listProducts, createProduct, updateProduct, deleteProduct, listCategories, createCategory, removeCategory, getMostSoldProductsToday } from '@/lib/products';
 import { useAuth } from '@/contexts/AuthContext';
 
 const initialProducts = [];
@@ -220,7 +220,7 @@ const StatCard = ({ icon, title, value, subtitle, color, onClick, isActive }) =>
     );
 };
 
-function ProductFormModal({ open, onOpenChange, product, onSave, categories, onCreateCategory }) {
+function ProductFormModal({ open, onOpenChange, product, onSave, categories, onCreateCategory, suggestedCode }) {
   const { toast } = useToast();
   const [code, setCode] = useState(product?.code || '');
   const [name, setName] = useState(product?.name || '');
@@ -403,6 +403,10 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
     setCest(product?.cest || '');
     // Controle de edição: novo produto pode editar; existente começa bloqueado
     setEditEnabled(!product);
+    // Sugestão automática de código para novo produto
+    if (!product && suggestedCode && !code) {
+      setCode(suggestedCode);
+    }
   }, [product, open]);
 
   // Auto-cálculos: custo e margem
@@ -424,7 +428,7 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
     if (saving) return; // guard against double click / duplicate submissions
     // Validações obrigatórias
     const errors = [];
-    if (!code?.trim()) errors.push('Código');
+    // Código pode ser vazio: será gerado automaticamente no salvamento
     if (!name?.trim()) errors.push('Descrição');
     if (!unit?.trim()) errors.push('Unidade');
     if (!type) errors.push('Tipo de Produto');
@@ -500,7 +504,10 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
       // Debug: log payload
       // eslint-disable-next-line no-console
       console.log('[Produtos] Salvando produto', payload);
-      await onSave(payload);
+      // Safety timeout para evitar travar indefinidamente
+      const timeoutMs = 20000;
+      const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout ao salvar produto (20s)')), timeoutMs));
+      await Promise.race([onSave(payload), timeout]);
       toast({ title: 'Produto salvo', description: 'O produto foi salvo com sucesso.', variant: 'success', duration: 4000, className: 'bg-amber-500 text-black shadow-xl' });
       onOpenChange(false);
     } catch (err) {
@@ -553,8 +560,8 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
 
             <TabsContent value="dados" className="space-y-3 mt-2">
               <div className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor="code" className="text-right">Código {(!code?.trim()) && (<span className="text-danger">*</span>)}</Label>
-                <Input id="code" value={code} onChange={(e)=>setCode(e.target.value.replace(/\D/g, ''))} className="col-span-3" placeholder="Ex.: 0001" disabled={!editEnabled} />
+                <Label htmlFor="code" className="text-right">Código <span className="text-text-muted text-xs ml-1">(gera automático se vazio)</span></Label>
+                <Input id="code" value={code} onChange={(e)=>setCode(e.target.value.replace(/\D/g, ''))} className="col-span-3" placeholder={suggestedCode || 'Ex.: 0001'} disabled={!editEnabled} />
               </div>
               <div className="grid grid-cols-4 items-center gap-4">
                 <Label htmlFor="name" className="text-right">Descrição {(!name?.trim()) && (<span className="text-danger">*</span>)}</Label>
@@ -976,6 +983,9 @@ function ProdutosPage() {
     // Sem persistência por enquanto
 
     const mountedRef = useRef(true);
+    const lastLoadTsRef = useRef(0);
+    const lastSizeRef = useRef(0);
+    const retryOnceRef = useRef(false);
     useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
 
     const refetchProducts = async () => {
@@ -992,12 +1002,14 @@ function ProdutosPage() {
             setProducts(cached);
           }
         } catch {}
-      }, 5000);
+      }, 2000);
       try {
         const data = await listProducts({ includeInactive: filters.status === 'inactive', search: searchTerm, codigoEmpresa });
         if (!mountedRef.current) return;
         setProducts(data);
         try { localStorage.setItem(cacheKey, JSON.stringify(data)); } catch {}
+        lastSizeRef.current = Array.isArray(data) ? data.length : 0;
+        lastLoadTsRef.current = Date.now();
       } catch (err) {
         // eslint-disable-next-line no-console
         console.error('[Produtos] refetchProducts:error', err);
@@ -1011,38 +1023,89 @@ function ProdutosPage() {
 
     // Carrega na montagem (com cache imediato) e quando auth estiver pronta
     useEffect(() => {
-      const codigoEmpresa = userProfile?.codigo_empresa || null;
+      // descobrir codigo_empresa do userProfile ou do cache do auth
+      const cachedCodigo = (() => {
+        try {
+          const raw = localStorage.getItem('auth:userProfile');
+          return raw ? (JSON.parse(raw)?.codigo_empresa || null) : null;
+        } catch { return null; }
+      })();
+      const codigoEmpresa = userProfile?.codigo_empresa || cachedCodigo;
       if (!codigoEmpresa) return;
-      // hydrate cache products
-      try {
-        const cached = JSON.parse(localStorage.getItem(`produtos:list:${codigoEmpresa}`) || '[]');
-        if (Array.isArray(cached) && cached.length > 0) {
-          const mapped = cached.map(p => ({
-            ...p,
-            validade: p?.validade ? (p.validade instanceof Date ? p.validade : new Date(p.validade)) : null,
-          }));
-          setProducts(mapped);
+      const cacheKey = `produtos:list:${codigoEmpresa}`;
+
+      // hydrate cache products imediatamente
+      const cached = (() => {
+        try { return JSON.parse(localStorage.getItem(cacheKey) || '[]'); } catch { return []; }
+      })();
+      if (Array.isArray(cached) && cached.length > 0) {
+        setProducts(cached);
+        lastSizeRef.current = cached.length;
+      }
+      
+      // load fresh data in background com retry
+      const loadWithRetry = async (attempts = 3) => {
+        for (let i = 0; i < attempts; i++) {
+          try {
+            if (mountedRef.current) {
+              await refetchProducts();
+              break;
+            }
+          } catch (err) {
+            console.warn(`[ProdutosPage] Tentativa ${i + 1} falhou:`, err);
+            if (i === attempts - 1) {
+              console.error('[ProdutosPage] Todas as tentativas falharam');
+            } else {
+              await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)));
+            }
+          }
         }
-      } catch {}
-      // hydrate cache categories
+      };
+      
+      // Carregar categorias em cache
       try {
         const cachedCats = JSON.parse(localStorage.getItem(`produtos:cats:${codigoEmpresa}`) || '[]');
         if (Array.isArray(cachedCats) && cachedCats.length > 0) setCategories(cachedCats);
       } catch {}
-      if (authReady) {
-        refetchProducts();
+      
+      if (authReady && userProfile?.codigo_empresa) {
+        const t = setTimeout(() => loadWithRetry(), 100);
+        
+        // Carregar categorias
         (async () => {
           try {
-            const cats = await listCategories({ codigoEmpresa });
+            const cats = await listCategories({ codigoEmpresa: userProfile.codigo_empresa });
             if (!mountedRef.current) return;
             setCategories(cats);
-            try { localStorage.setItem(`produtos:cats:${codigoEmpresa}`, JSON.stringify(cats)); } catch {}
+            try { localStorage.setItem(`produtos:cats:${userProfile.codigo_empresa}`, JSON.stringify(cats)); } catch {}
           } catch (err) {
-            // eslint-disable-next-line no-console
             console.error('[Categorias] load on mount:error', err);
           }
         })();
+        
+        return () => clearTimeout(t);
       }
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [authReady, userProfile?.codigo_empresa]);
+
+    // Recarregar ao focar/ficar visível se estiver estagnado
+    useEffect(() => {
+      const onFocus = () => {
+        const elapsed = Date.now() - (lastLoadTsRef.current || 0);
+        if (elapsed > 30000 || lastSizeRef.current === 0) refetchProducts();
+      };
+      const onVis = () => {
+        if (document.visibilityState === 'visible') {
+          const elapsed = Date.now() - (lastLoadTsRef.current || 0);
+          if (elapsed > 30000 || lastSizeRef.current === 0) refetchProducts();
+        }
+      };
+      window.addEventListener('focus', onFocus);
+      document.addEventListener('visibilitychange', onVis);
+      return () => {
+        window.removeEventListener('focus', onFocus);
+        document.removeEventListener('visibilitychange', onVis);
+      };
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [authReady, userProfile?.codigo_empresa]);
 
@@ -1061,14 +1124,35 @@ function ProdutosPage() {
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [searchTerm, authReady]);
 
+    // Trazer "mais vendido do dia" do backend
+    const [mostSoldToday, setMostSoldToday] = useState('N/A');
+    useEffect(() => {
+      let active = true;
+      (async () => {
+        try {
+          const items = await getMostSoldProductsToday({ limit: 1, codigoEmpresa: userProfile?.codigo_empresa });
+          if (!active) return;
+          if (Array.isArray(items) && items.length > 0) {
+            const top = items[0];
+            setMostSoldToday(`${top.name} (${top.total})`);
+          } else {
+            setMostSoldToday('—');
+          }
+        } catch {
+          if (active) setMostSoldToday('N/A');
+        }
+      })();
+      return () => { active = false; };
+    }, [userProfile?.codigo_empresa]);
+
     const stats = useMemo(() => {
         const today = new Date();
         return {
-            mostSold: 'N/A',
+            mostSold: mostSoldToday,
             lowStock: products.filter(p => p.status === 'low_stock' || (p.stock > 0 && p.stock <= p.minStock)).length,
             expired: products.filter(p => p.validade && p.validade < today).length
         }
-    }, [products]);
+    }, [products, mostSoldToday]);
 
     const filteredProducts = useMemo(() => {
         const today = new Date();
@@ -1235,19 +1319,27 @@ function ProdutosPage() {
           const next = (numericCodes.length ? Math.max(...numericCodes) + 1 : 1);
           payload.code = String(next).padStart(4, '0');
         }
+        const codigoEmpresa = userProfile?.codigo_empresa || null;
+        // Aplica um timeout curto só na gravação; refetch roda em background
+        const withLocalTimeout = async (p) => {
+          const timeoutMs = 12000;
+          const t = new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout update/create (12s)')), timeoutMs));
+          return Promise.race([p, t]);
+        };
+
         if (payload.id) {
-          const updated = await updateProduct(payload.id, payload);
+          const updated = await withLocalTimeout(updateProduct(payload.id, payload, { codigoEmpresa }));
           // eslint-disable-next-line no-console
           console.log('[Produtos] Produto atualizado', updated);
           setProducts(prev => prev.map(p => p.id === updated.id ? updated : p));
-          // Refetch para garantir consistência (triggers/RLS podem ajustar valores)
-          await refetchProducts();
+          // Refetch em background para não travar UI
+          setTimeout(() => { refetchProducts().catch(err => console.error('[Produtos] refetch pós-update falhou', err)); }, 0);
         } else {
-          const created = await createProduct(payload);
+          const created = await withLocalTimeout(createProduct(payload, { codigoEmpresa }));
           // eslint-disable-next-line no-console
           console.log('[Produtos] Produto criado', created);
           setProducts(prev => [created, ...prev]);
-          await refetchProducts();
+          setTimeout(() => { refetchProducts().catch(err => console.error('[Produtos] refetch pós-create falhou', err)); }, 0);
         }
       } catch (err) {
         // eslint-disable-next-line no-console
@@ -1286,6 +1378,16 @@ function ProdutosPage() {
       }
     };
     
+    // Código sugerido automático para novo produto (4 dígitos)
+    const suggestedCode = useMemo(() => {
+      const numericCodes = products
+        .map(p => (p.code || '').trim())
+        .filter(c => /^\d+$/.test(c))
+        .map(c => parseInt(c, 10));
+      const next = (numericCodes.length ? Math.max(...numericCodes) + 1 : 1);
+      return String(next).padStart(4, '0');
+    }, [products]);
+
     return (
       <>
         <Helmet>
@@ -1416,6 +1518,7 @@ function ProdutosPage() {
             categories={categories}
             onSave={handleSaveProduct}
             onCreateCategory={handleAddCategory}
+            suggestedCode={selectedProduct ? undefined : suggestedCode}
         />
         {/* Confirm Dialog for Delete */}
         <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>

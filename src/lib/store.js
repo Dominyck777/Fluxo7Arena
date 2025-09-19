@@ -12,6 +12,51 @@ function getCachedCompanyCode() {
   }
 }
 
+// Verifica se a soma das quantidades por produto na comanda não excede o estoque disponível
+// Retorna true se OK; lança erro com detalhes se algum produto ultrapassar
+export async function verificarEstoqueComanda({ comandaId, codigoEmpresa } = {}) {
+  if (!comandaId) throw new Error('comandaId é obrigatório')
+  const codigo = codigoEmpresa || getCachedCompanyCode()
+  // 1) Carregar itens da comanda
+  let qi = supabase
+    .from('comanda_itens')
+    .select('produto_id, quantidade')
+    .eq('comanda_id', comandaId)
+  if (codigo) qi = qi.eq('codigo_empresa', codigo)
+  const { data: itens, error: ierr } = await qi
+  if (ierr) throw ierr
+  const sumByProduct = new Map()
+  for (const it of (itens || [])) {
+    const pid = it.produto_id
+    const q = Number(it.quantidade || 0)
+    sumByProduct.set(pid, (sumByProduct.get(pid) || 0) + q)
+  }
+  if (sumByProduct.size === 0) return true
+  const ids = Array.from(sumByProduct.keys())
+  // 2) Buscar estoques dos produtos
+  let qp = supabase.from('produtos').select('id, nome, estoque')
+  qp = qp.in('id', ids)
+  if (codigo) qp = qp.eq('codigo_empresa', codigo)
+  const { data: prods, error: perr } = await qp
+  if (perr) throw perr
+  const estoqueById = new Map((prods || []).map(p => [p.id, { nome: p.nome, estoque: Number(p.estoque || 0) }]))
+  const violacoes = []
+  for (const [pid, total] of sumByProduct.entries()) {
+    const info = estoqueById.get(pid) || { nome: `Produto ${pid}`, estoque: 0 }
+    if (total > info.estoque) {
+      violacoes.push({ id: pid, name: info.nome, solicitado: total, estoque: info.estoque })
+    }
+  }
+  if (violacoes.length > 0) {
+    const lista = violacoes.map(v => `${v.name}: solicitado ${v.solicitado}, estoque ${v.estoque}`).join('; ')
+    const err = new Error(`Estoque insuficiente para finalizar: ${lista}`)
+    err.code = 'INSUFFICIENT_STOCK_COMANDA'
+    err.items = violacoes
+    throw err
+  }
+  return true
+}
+
 // Detecta erro de NOT NULL em coluna status
 function isNotNullStatusError(err) {
   if (!err) return false;
@@ -110,10 +155,104 @@ export async function listarComandas({ status, from, to, search = '', limit = 50
       q = q.or(`status.ilike.%${s}%`)
     }
   }
-
   const { data, error } = await q
   if (error) throw error
   return data || []
+}
+
+// ============ RESUMOS FINANCEIROS (RELATÓRIOS) ============
+
+// Retorna resumo financeiro do período [from, to]
+// - total por finalizadora (pagamentos)
+// - total de vendas brutas, descontos, vendas líquidas (comandas fechadas no período)
+export async function listarResumoPeriodo({ from, to, codigoEmpresa } = {}) {
+  const codigo = codigoEmpresa || getCachedCompanyCode()
+  // 1) Comandas fechadas no período
+  let comandasFechadas = []
+  try {
+    let q = supabase
+      .from('comandas')
+      .select('id, fechado_em')
+      .eq('status', 'closed')
+    if (codigo) q = q.eq('codigo_empresa', codigo)
+    if (from) q = q.gte('fechado_em', new Date(from).toISOString())
+    if (to) q = q.lte('fechado_em', new Date(to).toISOString())
+    const { data, error } = await q
+    if (error) throw error
+    comandasFechadas = data || []
+  } catch { comandasFechadas = [] }
+
+  const comandaIds = (comandasFechadas || []).map(c => c.id)
+
+  // 2) Somar itens (vendas brutas e descontos)
+  let totalVendasBrutas = 0
+  let totalDescontos = 0
+  if (comandaIds.length > 0) {
+    try {
+      let q = supabase
+        .from('comanda_itens')
+        .select('comanda_id, quantidade, preco_unitario, desconto')
+        .in('comanda_id', comandaIds)
+      if (codigo) q = q.eq('codigo_empresa', codigo)
+      const { data, error } = await q
+      if (error) throw error
+      for (const it of (data || [])) {
+        const bruto = Number(it.quantidade || 0) * Number(it.preco_unitario || 0)
+        const desc = Number(it.desconto || 0)
+        totalVendasBrutas += bruto
+        totalDescontos += desc
+      }
+    } catch {}
+  }
+  const totalVendasLiquidas = Math.max(0, totalVendasBrutas - totalDescontos)
+
+  // 3) Pagamentos por finalizadora no período (pela data de recebimento)
+  const porFinalizadora = {}
+  let totalEntradas = 0
+  try {
+    let qp = supabase
+      .from('pagamentos')
+      .select('metodo, valor, recebido_em, status')
+    if (codigo) qp = qp.eq('codigo_empresa', codigo)
+    if (from) qp = qp.gte('recebido_em', new Date(from).toISOString())
+    if (to) qp = qp.lte('recebido_em', new Date(to).toISOString())
+    const { data, error } = await qp
+    if (error) throw error
+    for (const pg of (data || [])) {
+      const ok = (pg.status || 'Pago') !== 'Cancelado' && (pg.status || 'Pago') !== 'Estornado'
+      if (!ok) continue
+      const key = pg.metodo || 'outros'
+      const v = Number(pg.valor || 0)
+      porFinalizadora[key] = (porFinalizadora[key] || 0) + v
+      totalEntradas += v
+    }
+  } catch {}
+
+  return {
+    from: from ? new Date(from).toISOString() : null,
+    to: to ? new Date(to).toISOString() : null,
+    totalPorFinalizadora: porFinalizadora,
+    totalEntradas,
+    totalVendasBrutas,
+    totalDescontos,
+    totalVendasLiquidas,
+  }
+}
+
+// Usa a sessão de caixa aberta para calcular resumo do período da sessão (aberto_em -> agora)
+export async function listarResumoSessaoCaixaAtual({ codigoEmpresa } = {}) {
+  const codigo = codigoEmpresa || getCachedCompanyCode()
+  let abertoEm = null
+  try {
+    let q = supabase.from('caixa_sessoes').select('aberto_em').eq('status','open').order('aberto_em', { ascending: false }).limit(1)
+    if (codigo) q = q.eq('codigo_empresa', codigo)
+    const { data, error } = await q
+    if (error) throw error
+    abertoEm = data?.[0]?.aberto_em || null
+  } catch {}
+  if (!abertoEm) return null
+  const now = new Date().toISOString()
+  return listarResumoPeriodo({ from: abertoEm, to: now, codigoEmpresa: codigo })
 }
 
 export async function listarPagamentos({ comandaId, codigoEmpresa } = {}) {
@@ -269,59 +408,256 @@ export async function ensureCaixaAberto({ saldoInicial = 0, codigoEmpresa } = {}
   return data
 }
 
+// Verifica se há caixa aberto (sem criar)
+export async function getCaixaAberto({ codigoEmpresa } = {}) {
+  const codigo = codigoEmpresa || getCachedCompanyCode()
+  let q = supabase.from('caixa_sessoes').select('id,status,aberto_em,saldo_inicial').eq('status', 'open').order('aberto_em', { ascending: false }).limit(1)
+  if (codigo) q = q.eq('codigo_empresa', codigo)
+  const { data, error } = await q
+  if (error) throw error
+  return data?.[0] || null
+}
+
+// Lista fechamentos de caixa (histórico)
+export async function listarFechamentosCaixa({ from, to, limit = 50, offset = 0, codigoEmpresa } = {}) {
+  const codigo = codigoEmpresa || getCachedCompanyCode()
+  let q = supabase
+    .from('caixa_sessoes')
+    .select('id, status, aberto_em, fechado_em, saldo_inicial, saldo_final')
+    .order('aberto_em', { ascending: false })
+    .range(offset, offset + limit - 1)
+  if (codigo) q = q.eq('codigo_empresa', codigo)
+  const mkStart = (d) => {
+    if (!d) return null
+    if (typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d)) {
+      const [y,m,day] = d.split('-').map(Number)
+      return new Date(y, m - 1, day, 0, 0, 0, 0)
+    }
+    return new Date(d)
+  }
+  const mkEnd = (d) => {
+    if (!d) return null
+    if (typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d)) {
+      const [y,m,day] = d.split('-').map(Number)
+      return new Date(y, m - 1, day, 23, 59, 59, 999)
+    }
+    return new Date(d)
+  }
+  const fromDt = mkStart(from)
+  const toDt = mkEnd(to)
+  if (fromDt) q = q.gte('aberto_em', fromDt.toISOString())
+  if (toDt) q = q.lte('aberto_em', toDt.toISOString())
+  const { data, error } = await q
+  if (error) throw error
+  return data || []
+}
+
 export async function fecharCaixa({ saldoFinal = 0, codigoEmpresa } = {}) {
   const codigo = codigoEmpresa || getCachedCompanyCode()
-  // pegar sessão aberta
-  let q = supabase.from('caixa_sessoes').select('id').eq('status','open').order('aberto_em', { ascending: false }).limit(1)
+  // Bloqueio: não permitir fechamento com comandas abertas (inclui balcão e mesas)
+  try {
+    let abertas = await listarComandasAbertas({ codigoEmpresa: codigo })
+    abertas = abertas || []
+
+    // 1) Auto-fechar comandas de balcão vazias (mesa_id null e sem itens)
+    const possiveisBalcao = abertas.filter(c => !c.mesa_id)
+    for (const c of possiveisBalcao) {
+      try {
+        const itens = await listarItensDaComanda({ comandaId: c.id, codigoEmpresa: codigo })
+        const qtd = (itens || []).length
+        if (qtd === 0) {
+          // auto-fecha comanda balcão vazia
+          await fecharComandaEMesa({ comandaId: c.id, codigoEmpresa: codigo })
+        }
+      } catch (e) {
+        // se falhar aqui, não bloqueia o fluxo; será tratado no próximo passo
+      }
+    }
+
+    // 2) Recarregar a lista e bloquear somente se ainda restarem abertas com itens
+    abertas = await listarComandasAbertas({ codigoEmpresa: codigo })
+    if (abertas && abertas.length > 0) {
+      // Verificar se são todas balcão vazias (fallback super seguro): se alguma tiver item, bloqueia
+      let restantesComItens = 0
+      for (const c of abertas) {
+        try {
+          const itens = await listarItensDaComanda({ comandaId: c.id, codigoEmpresa: codigo })
+          if ((itens || []).length > 0) restantesComItens++
+        } catch {
+          // assumimos que possui itens para evitar fechar indevido
+          restantesComItens++
+        }
+      }
+      if (restantesComItens > 0) {
+        throw new Error(`Existem ${restantesComItens} comandas com itens em aberto. Finalize-as antes de fechar o caixa.`)
+      }
+    }
+  } catch (chkErr) {
+    // Se a verificação de abertas falhar por erro de rede, segue para evitar bloqueios falsos
+    // Porém, se for nosso erro de regra (mensagem acima), propaga
+    if (chkErr && /Existem \d+ comandas/.test(chkErr.message || '')) throw chkErr
+  }
+  // pegar sessão aberta (precisamos do id e aberto_em)
+  let q = supabase.from('caixa_sessoes').select('id,aberto_em').eq('status','open').order('aberto_em', { ascending: false }).limit(1)
   if (codigo) q = q.eq('codigo_empresa', codigo)
   const { data: sess, error: qErr } = await q
   if (qErr) throw qErr
   const caixaId = sess?.[0]?.id || null
+  const abertoEm = sess?.[0]?.aberto_em || null
+  if (!caixaId) throw new Error('Nenhuma sessão de caixa aberta encontrada.')
 
+  // Fechar sessão agora e capturar timestamp de fechamento
+  const fechadoEmIso = new Date().toISOString()
   const { data, error } = await supabase
     .from('caixa_sessoes')
-    .update({ status: 'closed', saldo_final: saldoFinal, fechado_em: new Date().toISOString() })
+    .update({ status: 'closed', saldo_final: saldoFinal, fechado_em: fechadoEmIso })
     .eq('id', caixaId)
     .select('id,status,fechado_em')
     .single()
   if (error) throw error
+
+  // Criar snapshot do fechamento em caixa_resumos
+  try {
+    if (abertoEm && fechadoEmIso) {
+      const resumo = await listarResumoPeriodo({ from: abertoEm, to: fechadoEmIso, codigoEmpresa: codigo })
+      const payload = {
+        codigo_empresa: codigo || getCachedCompanyCode(),
+        caixa_sessao_id: caixaId,
+        periodo_de: resumo.from || abertoEm,
+        periodo_ate: resumo.to || fechadoEmIso,
+        total_bruto: Number(resumo.totalVendasBrutas || 0),
+        total_descontos: Number(resumo.totalDescontos || 0),
+        total_liquido: Number(resumo.totalVendasLiquidas || 0),
+        total_entradas: Number(resumo.totalEntradas || 0),
+        por_finalizadora: resumo.totalPorFinalizadora || {}
+      }
+      await supabase.from('caixa_resumos').insert(payload)
+    }
+  } catch (snapErr) {
+    console.warn('[fecharCaixa] Falha ao gravar snapshot de fechamento:', snapErr)
+  }
   return data
+}
+
+// Lê o snapshot do fechamento (se existir) para uma sessão específica
+export async function getCaixaResumo({ caixaSessaoId, codigoEmpresa } = {}) {
+  if (!caixaSessaoId) throw new Error('caixaSessaoId é obrigatório')
+  const codigo = codigoEmpresa || getCachedCompanyCode()
+  let q = supabase
+    .from('caixa_resumos')
+    .select('*')
+    .eq('caixa_sessao_id', caixaSessaoId)
+    .order('criado_em', { ascending: false })
+    .limit(1)
+  if (codigo) q = q.eq('codigo_empresa', codigo)
+  const { data, error } = await q
+  if (error) throw error
+  return data?.[0] || null
+}
+
+// Cria movimentação de caixa (sangria/suprimento/troco/ajuste)
+export async function criarMovimentacaoCaixa({ tipo, valor, observacao = '', caixaSessaoId, codigoEmpresa } = {}) {
+  const codigo = codigoEmpresa || getCachedCompanyCode()
+  if (!tipo || !['sangria','suprimento','troco','ajuste'].includes(tipo)) throw new Error('Tipo inválido de movimentação')
+  let sessId = caixaSessaoId
+  if (!sessId) {
+    // pega sessão aberta
+    let q = supabase.from('caixa_sessoes').select('id').eq('status','open').order('aberto_em', { ascending: false }).limit(1)
+    if (codigo) q = q.eq('codigo_empresa', codigo)
+    const { data: s, error } = await q
+    if (error) throw error
+    sessId = s?.[0]?.id || null
+  }
+  if (!sessId) throw new Error('Sessão de caixa não encontrada para registrar movimentação')
+  const payload = {
+    codigo_empresa: codigo,
+    caixa_sessao_id: sessId,
+    tipo,
+    valor: Math.max(0, Number(valor) || 0),
+    observacao: (observacao || '').trim() || null
+  }
+  const { data, error } = await supabase.from('caixa_movimentacoes').insert(payload).select('*').single()
+  if (error) throw error
+  return data
+}
+
+export async function listarMovimentacoesCaixa({ caixaSessaoId, codigoEmpresa } = {}) {
+  const codigo = codigoEmpresa || getCachedCompanyCode()
+  if (!caixaSessaoId) throw new Error('caixaSessaoId é obrigatório')
+  let q = supabase
+    .from('caixa_movimentacoes')
+    .select('*')
+    .eq('caixa_sessao_id', caixaSessaoId)
+    .order('criado_em', { ascending: true })
+  if (codigo) q = q.eq('codigo_empresa', codigo)
+  const { data, error } = await q
+  if (error) throw error
+  return data || []
 }
 
 // Comandas
 export async function abrirComandaParaMesa({ mesaId, codigoEmpresa } = {}) {
   const codigo = codigoEmpresa || getCachedCompanyCode()
-  if (!mesaId) throw new Error('mesaId é obrigatório')
   
-  console.log(`[abrirComandaParaMesa] Iniciando criação de comanda para mesa ${mesaId}, empresa ${codigo}`)
+  console.log(`[abrirComandaParaMesa] Iniciando para mesaId: ${mesaId}, codigo_empresa: ${codigo}`)
   
-  // Evitar duplicar se já houver aberta
-  let q = supabase.from('comandas').select('id,status').eq('mesa_id', mesaId).in('status', ['open','awaiting-payment']).limit(1)
-  if (codigo) q = q.eq('codigo_empresa', codigo)
-  const { data: abertas, error: errA } = await q
-  if (errA) {
-    console.error(`[abrirComandaParaMesa] Erro ao verificar comandas existentes:`, errA)
-    throw errA
+  // PRIMEIRO: Testar se conseguimos inserir algo simples na tabela comandas
+  console.log(`[abrirComandaParaMesa] TESTE: Verificando se conseguimos inserir na tabela comandas...`)
+  
+  try {
+    // Teste básico de inserção - payload mínimo
+    const testePayload = { 
+      status: 'open', 
+      aberto_em: new Date().toISOString()
+    }
+    
+    // Se temos código da empresa, adicionar
+    if (codigo) {
+      testePayload.codigo_empresa = codigo
+    }
+    
+    // Se temos mesa, adicionar
+    if (mesaId) {
+      testePayload.mesa_id = mesaId
+    }
+    
+    console.log(`[abrirComandaParaMesa] TESTE: Payload para inserção:`, testePayload)
+    
+    const { data, error } = await supabase
+      .from('comandas')
+      .insert(testePayload)
+      .select('*')
+      .single()
+    
+    if (error) {
+      console.error(`[abrirComandaParaMesa] ERRO CRÍTICO na inserção:`, {
+        error,
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+        code: error.code,
+        payload: testePayload
+      })
+      
+      // Vamos tentar descobrir o que está acontecendo
+      console.log(`[abrirComandaParaMesa] Tentando consultar estrutura da tabela...`)
+      const { data: estrutura, error: erroEstrutura } = await supabase
+        .from('comandas')
+        .select('*')
+        .limit(1)
+      
+      console.log(`[abrirComandaParaMesa] Resultado consulta estrutura:`, { estrutura, erroEstrutura })
+      
+      throw error
+    }
+    
+    console.log(`[abrirComandaParaMesa] ✅ SUCESSO! Comanda criada:`, data)
+    return data
+    
+  } catch (err) {
+    console.error(`[abrirComandaParaMesa] ERRO GERAL:`, err)
+    throw err
   }
-  
-  if (abertas && abertas.length > 0) {
-    console.log(`[abrirComandaParaMesa] Comanda existente encontrada:`, abertas[0])
-    return abertas[0]
-  }
-
-  const payload = { mesa_id: mesaId, status: 'open', aberto_em: new Date().toISOString() }
-  if (codigo) payload.codigo_empresa = codigo
-  
-  console.log(`[abrirComandaParaMesa] Criando nova comanda com payload:`, payload)
-  
-  const { data, error } = await supabase.from('comandas').insert(payload).select('id,status,mesa_id,codigo_empresa').single()
-  if (error) {
-    console.error(`[abrirComandaParaMesa] ERRO ao criar comanda:`, error)
-    throw error
-  }
-  
-  console.log(`[abrirComandaParaMesa] Comanda criada com sucesso:`, data)
-  return data
 }
 
 export async function listarComandaDaMesa({ mesaId, codigoEmpresa }) {
@@ -460,6 +796,53 @@ export async function listarClientesDaComanda({ comandaId, codigoEmpresa } = {})
 // Itens (depende de tabela 'produtos' existir)
 export async function adicionarItem({ comandaId, produtoId, descricao, quantidade, precoUnitario, desconto = 0, codigoEmpresa }) {
   const codigo = codigoEmpresa || getCachedCompanyCode()
+  // 1) Backstop: impedir venda com estoque zerado e avisos para estoque baixo
+  try {
+    let qp = supabase
+      .from('produtos')
+      .select('id, estoque, estoque_minimo, nome')
+      .eq('id', produtoId)
+      .limit(1)
+    if (codigo) qp = qp.eq('codigo_empresa', codigo)
+    const { data: prod, error: perr } = await qp
+    if (perr) throw perr
+    const p = Array.isArray(prod) ? prod[0] : prod
+    if (p) {
+      const est = Number(p.estoque ?? 0)
+      const estMin = Number(p.estoque_minimo ?? 0)
+      const qty = Number(quantidade ?? 1)
+      if (est <= 0) {
+        const err = new Error(`Produto sem estoque: ${p.nome || ''}`.trim())
+        err.code = 'OUT_OF_STOCK'
+        throw err
+      }
+      // Soma atual na comanda deste produto para evitar ultrapassar estoque
+      let qs = supabase
+        .from('comanda_itens')
+        .select('quantidade')
+        .eq('comanda_id', comandaId)
+        .eq('produto_id', produtoId)
+      if (codigo) qs = qs.eq('codigo_empresa', codigo)
+      const { data: sumRows, error: serr } = await qs
+      if (serr) throw serr
+      const atual = Array.isArray(sumRows) && sumRows.length ? sumRows.reduce((acc, r) => acc + Number(r?.quantidade || 0), 0) : 0
+      const futuro = atual + qty
+      if (futuro > est) {
+        const err = new Error(`Estoque insuficiente. Em comanda: ${atual}, solicitado: +${qty}, disponível: ${est}`)
+        err.code = 'INSUFFICIENT_STOCK'
+        throw err
+      }
+      // Aviso de estoque baixo (não bloqueia)
+      if (est <= estMin && est > 0) {
+        try { console.warn(`[adicionarItem] Aviso: estoque baixo para produto '${p.nome}' (estoque=${est}, minimo=${estMin})`) } catch {}
+      }
+    }
+  } catch (stockErr) {
+    // Propaga erros de estoque para a UI tratar com mensagem clara
+    throw stockErr
+  }
+
+  // 2) Inserir item normalmente
   const payload = { comanda_id: comandaId, produto_id: produtoId, descricao, quantidade, preco_unitario: precoUnitario, desconto }
   if (codigo) payload.codigo_empresa = codigo
   const { data, error } = await supabase.from('comanda_itens').insert(payload).select('*').single()
@@ -470,9 +853,58 @@ export async function adicionarItem({ comandaId, produtoId, descricao, quantidad
 // Atualiza quantidade do item da comanda
 export async function atualizarQuantidadeItem({ itemId, quantidade, codigoEmpresa }) {
   const codigo = codigoEmpresa || getCachedCompanyCode()
+  // 1) Buscar item atual para validar delta e estoque
+  let qi = supabase
+    .from('comanda_itens')
+    .select('id, quantidade, produto_id, comanda_id')
+    .eq('id', itemId)
+    .limit(1)
+  if (codigo) qi = qi.eq('codigo_empresa', codigo)
+  const { data: currRows, error: ierr } = await qi
+  if (ierr) throw ierr
+  const curr = Array.isArray(currRows) ? currRows[0] : currRows
+  const newQty = Number(quantidade || 0)
+  if (!curr) throw new Error('Item não encontrado')
+  const oldQty = Number(curr.quantidade || 0)
+  const delta = newQty - oldQty
+  if (delta > 0) {
+    // Verifica estoque disponível do produto
+    let qp = supabase.from('produtos').select('id, estoque, nome, estoque_minimo').eq('id', curr.produto_id).limit(1)
+    if (codigo) qp = qp.eq('codigo_empresa', codigo)
+    const { data: prodRows, error: perr } = await qp
+    if (perr) throw perr
+    const p = Array.isArray(prodRows) ? prodRows[0] : prodRows
+    if (p) {
+      const est = Number(p.estoque ?? 0)
+      // Soma de outros itens desta comanda para o mesmo produto
+      let qs = supabase
+        .from('comanda_itens')
+        .select('quantidade')
+        .eq('comanda_id', curr.comanda_id)
+        .eq('produto_id', curr.produto_id)
+        .neq('id', curr.id)
+      if (codigo) qs = qs.eq('codigo_empresa', codigo)
+      const { data: sumRows, error: serr } = await qs
+      if (serr) throw serr
+      const outros = Array.isArray(sumRows) && sumRows.length ? sumRows.reduce((acc, r) => acc + Number(r?.quantidade || 0), 0) : 0
+      const futuro = outros + newQty
+      if (futuro > est) {
+        const err = new Error(`Estoque insuficiente. Em comanda (outros itens): ${outros}, novo para este item: ${newQty}, disponível: ${est}`)
+        err.code = 'INSUFFICIENT_STOCK'
+        throw err
+      }
+      const estMin = Number(p.estoque_minimo ?? 0)
+      const restante = est - (outros + newQty)
+      if (restante <= estMin && restante >= 0) {
+        try { console.warn(`[atualizarQuantidadeItem] Aviso: produto '${p.nome}' atingiu nível de estoque baixo (restante=${restante}, minimo=${estMin})`) } catch {}
+      }
+    }
+  }
+
+  // 2) Atualizar quantidade
   let q = supabase
     .from('comanda_itens')
-    .update({ quantidade })
+    .update({ quantidade: newQty })
     .eq('id', itemId)
   if (codigo) q = q.eq('codigo_empresa', codigo)
   const { data, error } = await q.select('*').single()

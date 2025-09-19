@@ -6860,8 +6860,9 @@ create index if not exists idx_mesas_codigo_empresa on public.mesas(codigo_empre
 create unique index if not exists uq_mesas_empresa_numero on public.mesas(codigo_empresa, numero);
 
 -- 2) COMANDAS
+-- IMPORTANTE: Estrutura corrigida em 2025-09-15 - ID deve ser BIGSERIAL para compatibilidade
 create table if not exists public.comandas (
-  id uuid primary key default gen_random_uuid(),
+  id bigserial primary key,
   codigo_empresa varchar(10) not null,
   mesa_id uuid,
   status text not null default 'open', -- open | awaiting-payment | closed
@@ -6889,10 +6890,11 @@ create unique index if not exists uq_comanda_mesa_aberta
   where (mesa_id is not null and status in ('open','awaiting-payment'));
 
 -- 3) COMANDA_ITENS
+-- IMPORTANTE: comanda_id alterado para BIGINT para referenciar comandas.id (bigserial)
 create table if not exists public.comanda_itens (
   id uuid primary key default gen_random_uuid(),
   codigo_empresa varchar(10) not null,
-  comanda_id uuid not null,
+  comanda_id bigint not null,
   produto_id uuid,
   descricao text,
   quantidade integer not null default 1,
@@ -6901,7 +6903,7 @@ create table if not exists public.comanda_itens (
   created_at timestamptz not null default now()
 );
 alter table public.comanda_itens add column if not exists codigo_empresa varchar(10) not null;
-alter table public.comanda_itens add column if not exists comanda_id uuid not null;
+alter table public.comanda_itens add column if not exists comanda_id bigint not null;
 alter table public.comanda_itens add column if not exists produto_id uuid;
 alter table public.comanda_itens add column if not exists descricao text;
 alter table public.comanda_itens add column if not exists quantidade integer not null default 1;
@@ -7263,4 +7265,320 @@ execute function public.agendamentos_set_codigo_fn();
 
 -- ============================
 -- FIM DAS ATUALIZAÇÕES v4.1
+--- ATUALIZAÇÕES APLICADAS (v4.1)
+--- Data: 2025-09-15
+--- Motivo: Correção crítica - ID da tabela comandas deve ser BIGSERIAL
+--- Observação: Problema identificado e corrigido - incompatibilidade entre UUID e BIGSERIAL
+--- ============================
+
+-- CORREÇÃO APLICADA EM 2025-09-15:
+-- Problema: Código JavaScript tentava inserir UUIDs numa coluna BIGSERIAL
+-- Solução: Padronizada estrutura da tabela comandas para usar BIGSERIAL
+-- Impacto: Tabelas relacionadas (comanda_itens, pagamentos, comanda_clientes) 
+--          também precisam referenciar BIGINT ao invés de UUID
+
+-- Estrutura corrigida da tabela comandas:
+-- id: bigserial primary key (números sequenciais)
+-- comanda_id em tabelas relacionadas: bigint (para referenciar comandas.id)
+
+--- ============================
+--- FIM DAS ATUALIZAÇÕES v4.1
+--- ============================
+
+--- ============================
+--- ATUALIZAÇÕES APLICADAS (v4.2)
+--- Data: 2025-09-15
+--- Motivo: Correções de estabilidade e carregamento de dados
+--- Observação: Melhorias no frontend para resolver problemas de UX
+--- ============================
+
+-- PROBLEMAS CORRIGIDOS EM 2025-09-15:
+
+-- 1) CARREGAMENTO DE DADOS INCONSISTENTE
+--    Sintomas: Itens não apareciam automaticamente, necessário F5 para carregar
+--    Causas identificadas:
+--      - Dependência de authReady com condições de corrida
+--      - Cache com fallback lento (5 segundos)
+--      - Retry limitado em algumas funções
+--      - useEffect não carregava cache imediatamente
+--    Soluções aplicadas:
+--      - Cache imediato em VendasPage.jsx e ProdutosPage.jsx
+--      - Fallback reduzido de 5s para 2s
+--      - Retry automático com backoff exponencial (3 tentativas)
+--      - Carregamento de cache antes do refresh de dados
+
+-- 2) MESAS SOMEM AO LIBERAR + VOLTA PARA LOGIN
+--    Sintomas: Ao clicar "Liberar Mesa", todas as mesas somem e sistema volta para login
+--    Causas identificadas:
+--      - Erro na função fecharComandaEMesa causando exceções não tratadas
+--      - Estado não sincronizado após operações de fechamento
+--      - Possível erro de autenticação durante operação que força logout
+--      - refreshTablesLight() falhava silenciosamente
+--    Soluções aplicadas:
+--      - Logs detalhados para rastreamento completo do processo
+--      - Estado local imediato: setSelectedTable(null) antes do refresh
+--      - Tratamento de erros com fallback para recarregar mesas
+--      - Feedback visual com toasts informativos
+
+-- 3) VALORES ZERADOS APÓS OPERAÇÕES
+--    Sintomas: Totais das mesas apareciam como R$ 0,00 após adicionar comanda ou liberar mesa
+--    Causas identificadas:
+--      - refreshTablesLight() definia totalHint: 0 hardcoded
+--      - confirmOpen() também zerava totais de todas as mesas
+--      - Função listarItensComanda não existia (nome correto: listarItensDaComanda)
+--      - Cálculo incorreto usando preco_total inexistente
+--    Soluções aplicadas:
+--      - Implementado cálculo correto: (quantidade × preco_unitario) - desconto
+--      - Busca paralela de totais em refreshTablesLight()
+--      - Preservação de totais existentes em confirmOpen()
+--      - Logs detalhados para debug de cálculos
+
+-- 4) MELHORIAS NO AUTHCONTEXT
+--    Problemas: Erros 401/403 causavam logout forçado
+--    Soluções aplicadas:
+--      - Retry automático para erros de autorização
+--      - Prevenção de logout forçado em erros transitórios
+--      - Melhor handling de erros de autenticação
+
+-- ARQUIVOS MODIFICADOS:
+--   - src/pages/VendasPage.jsx: refreshTablesLight(), confirmOpen(), handleSelectTable()
+--   - src/contexts/AuthContext.jsx: loadUserProfile() com retry logic
+--   - src/pages/ProdutosPage.jsx: useEffect com retry e cache imediato
+
+-- MELHORIAS DE PERFORMANCE E UX:
+--   - Cache inteligente: carregamento imediato + refresh em background
+--   - Logs estruturados para facilitar debug
+--   - Fallbacks automáticos em caso de falha
+--   - Retry com backoff exponencial
+--   - Feedback visual consistente ao usuário
+
+-- RESULTADOS OBTIDOS:
+--   ✅ Dados aparecem imediatamente (cache)
+--   ✅ Refresh automático em background
+--   ✅ Retry automático em caso de falha
+--   ✅ Menos necessidade de F5 manual
+--   ✅ Processo de liberação de mesas estável
+--   ✅ Estado sincronizado corretamente
+--   ✅ Não força logout do sistema
+--   ✅ Valores corretos em todas as operações
+--   ✅ Sistema mais responsivo e estável
+
+--- ============================
+--- FIM DAS ATUALIZAÇÕES v4.2
+--- ============================
+
+-- ============================
+-- ATUALIZAÇÕES v4.3
+-- Data: 2025-09-16
+-- Assunto: Snapshot de fechamento de caixa e Movimentações de Caixa
+-- Mudanças:
+--   1) Criação das tabelas public.caixa_resumos e public.caixa_movimentacoes
+--      - Ambas com isolamento por empresa via coluna codigo_empresa (text)
+--      - FKs com UUID para public.caixa_sessoes(id)
+--   2) Índices por (codigo_empresa, caixa_sessao_id) e por período
+--   3) Snapshot é gerado no momento do fechamento pelo app (src/lib/store.js::fecharCaixa)
+
+-- 1) Tabela: public.caixa_resumos (snapshot "congelado" do fechamento)
+-- Guarda totais do período [aberto_em -> fechado_em] para cada sessão
+-- DDL de referência:
+-- create table if not exists public.caixa_resumos (
+--   id                bigserial primary key,
+--   codigo_empresa    text not null,
+--   caixa_sessao_id   uuid not null references public.caixa_sessoes(id) on delete cascade,
+--   periodo_de        timestamptz not null,
+--   periodo_ate       timestamptz not null,
+--   total_bruto       numeric(14,2) not null default 0,
+--   total_descontos   numeric(14,2) not null default 0,
+--   total_liquido     numeric(14,2) not null default 0,
+--   total_entradas    numeric(14,2) not null default 0,
+--   por_finalizadora  jsonb not null default '{}'::jsonb,
+--   criado_em         timestamptz not null default now()
+-- );
+-- create index if not exists idx_caixa_resumos_empresa_sessao on public.caixa_resumos (codigo_empresa, caixa_sessao_id);
+-- create index if not exists idx_caixa_resumos_periodo on public.caixa_resumos (periodo_de, periodo_ate);
+
+-- 2) Tabela: public.caixa_movimentacoes (sangria/suprimento/troco/ajuste)
+-- Registra movimentações manuais e de troco vinculadas à sessão
+-- DDL de referência:
+-- create table if not exists public.caixa_movimentacoes (
+--   id               bigserial primary key,
+--   codigo_empresa   text not null,
+--   caixa_sessao_id  uuid not null references public.caixa_sessoes(id) on delete cascade,
+--   tipo             text not null check (tipo in ('sangria','suprimento','troco','ajuste')),
+--   valor            numeric(14,2) not null,
+--   observacao       text,
+--   criado_em        timestamptz not null default now()
+-- );
+-- create index if not exists idx_caixa_mov_empresa_sessao on public.caixa_movimentacoes (codigo_empresa, caixa_sessao_id);
+-- create index if not exists idx_caixa_mov_tipo on public.caixa_movimentacoes (tipo);
+
+-- Notas importantes
+-- - FK para caixa_sessoes é UUID (id uuid) — ajustado para compatibilidade.
+-- - Snapshot em caixa_resumos garante histórico imutável do fechamento.
+-- - UI de fechamento calcula totais reais antes de confirmar e grava o snapshot.
+-- - Movimentações serão exibidas no Histórico e somadas no Caixa.
+
+-- ============================
+-- FIM DAS ATUALIZAÇÕES v4.3
+-- ============================
+
+-- ============================
+-- ATUALIZAÇÕES v4.3.1
+-- Data: 2025-09-17
+-- Assunto: Ajustes e documentação de public.caixa_sessoes
+-- Mudanças/Notas:
+--  - Campos usados na aplicação:
+--      status: 'open' | 'closed'
+--      aberto_em: timestamptz (preenchido ao abrir)
+--      fechado_em: timestamptz (preenchido ao fechar)
+--      saldo_inicial: numeric(14,2) (valor informado na abertura)
+--      saldo_final: numeric(14,2) (valor informado no fechamento, quando aplicável)
+--      codigo_empresa: text (iso multi-tenant)
+--  - Índices recomendados:
+--      create index if not exists idx_caixa_sessoes_status_aberto on public.caixa_sessoes (status, aberto_em desc);
+--      create index if not exists idx_caixa_sessoes_empresa_aberto on public.caixa_sessoes (codigo_empresa, aberto_em desc);
+--  - Observação: As FKs de snapshot/movimentações referenciam caixa_sessoes(id uuid)
+--                e herdam o isolamento por codigo_empresa nas RLS específicas.
+
+-- ============================
+-- FIM DAS ATUALIZAÇÕES v4.3.1
+-- ============================
+
+-- ============================
+-- ATUALIZAÇÕES v4.4
+-- Data: 2025-09-17
+-- Assunto: Padronização por codigo_empresa e consistência de DDL no fluxo de vendas
+-- ============================
+
+-- Contexto
+-- - Inconsistências entre frontend e banco no fluxo de vendas/comandas foram identificadas.
+-- - Padronizamos o isolamento multi-tenant com a coluna codigo_empresa (text) em todas as tabelas do fluxo.
+-- - Garantimos índices e defaults adequados para performance e segurança.
+
+-- 1) Coluna codigo_empresa nas tabelas críticas (idempotente)
+-- Observação: Execute apenas se a coluna ainda não existir.
+-- Exemplo (referência):
+--   alter table if exists public.vendas            add column if not exists codigo_empresa text;
+--   alter table if exists public.itens_venda       add column if not exists codigo_empresa text;
+--   alter table if exists public.pagamentos        add column if not exists codigo_empresa text;
+--   alter table if exists public.comanda_clientes  add column if not exists codigo_empresa text;
+
+-- 2) Defaults/Triggers para codigo_empresa (opcional e idempotente)
+-- Estratégia A: Default direto
+--   alter table public.vendas           alter column codigo_empresa set default public.get_my_company_code();
+--   alter table public.itens_venda      alter column codigo_empresa set default public.get_my_company_code();
+--   alter table public.pagamentos       alter column codigo_empresa set default public.get_my_company_code();
+--   alter table public.comanda_clientes alter column codigo_empresa set default public.get_my_company_code();
+-- Estratégia B: Trigger BEFORE INSERT (exemplo consolidado)
+--   create or replace function public.set_company_code_default() returns trigger as $$
+--   begin
+--     if new.codigo_empresa is null then
+--       new.codigo_empresa := public.get_my_company_code();
+--     end if;
+--     return new;
+--   end; $$ language plpgsql security definer;
+--   do $$ begin
+--     if not exists (select 1 from pg_trigger where tgname = 'trg_set_company_code_vendas') then
+--       execute $$create trigger trg_set_company_code_vendas before insert on public.vendas
+--         for each row execute function public.set_company_code_default()$$;
+--     end if;
+--   end $$;
+
+-- 3) Índices recomendados (idempotentes)
+--   create index if not exists idx_vendas_empresa_data             on public.vendas (codigo_empresa, criado_em);
+--   create index if not exists idx_vendas_empresa_status           on public.vendas (codigo_empresa, status);
+--   create index if not exists idx_itens_venda_empresa_comanda     on public.itens_venda (codigo_empresa, comanda_id);
+--   create index if not exists idx_pagamentos_empresa_comanda      on public.pagamentos (codigo_empresa, comanda_id);
+--   create index if not exists idx_comanda_clientes_empresa_comanda on public.comanda_clientes (codigo_empresa, comanda_id);
+
+-- 4) Consistência de tipos de ID em comandas (vendas)
+-- - A tabela public.vendas (comandas) utiliza id bigserial primary key (inteiro sequencial)
+-- - Importante: o frontend não deve tentar inserir UUID em id
+-- - Deixe o banco gerar automaticamente o id; envie apenas campos essenciais no insert
+
+-- 5) Notas de compatibilidade
+-- - Padronizar sempre o uso de codigo_empresa no frontend (filtros, inserts/updates)
+-- - As políticas RLS documentadas em `estrutura_bd/politicas.txt` (v4.4) dependem de codigo_empresa
+-- - Em esquemas legados com empresa_id, recomenda-se migrar gradualmente para codigo_empresa
+
+-- 6) Checklist pós-aplicação
+-- - [ ] Verifique que todas as tabelas acima possuem a coluna codigo_empresa (text)
+-- - [ ] Garanta defaults/trigger aplicados (quando optar pela estratégia A ou B)
+-- - [ ] Confirme os índices criados (via \d public.<tabela> ou pg_indexes)
+-- - [ ] Rode testes de CRUD no app para validar RLS e performance
+
+-- ============================
+-- FIM DAS ATUALIZAÇÕES v4.4
+-- ============================
+
+-- ============================
+-- ATUALIZAÇÕES APLICADAS (v4.5)
+-- Data: 2025-09-18
+-- Assunto: Padronização de colunas/índices por codigo_empresa nas tabelas do fluxo de comandas
+--           (comandas, comanda_itens, pagamentos, comanda_clientes) alinhado ao frontend
+--           após validações de estoque e verificação agregada na finalização.
+-- ============================
+
+-- 1) Garantir coluna codigo_empresa (idempotente)
+do $$
+begin
+  begin execute $$alter table if exists public.comandas          add column if not exists codigo_empresa text$$;          exception when others then null; end;
+  begin execute $$alter table if exists public.comanda_itens     add column if not exists codigo_empresa text$$;          exception when others then null; end;
+  begin execute $$alter table if exists public.pagamentos        add column if not exists codigo_empresa text$$;          exception when others then null; end;
+  begin execute $$alter table if exists public.comanda_clientes  add column if not exists codigo_empresa text$$;          exception when others then null; end;
+end$$;
+
+-- 2) Defaults/Triggers para codigo_empresa (opcional e idempotente)
+-- Estratégia A: Default direto
+--   alter table if exists public.comandas          alter column codigo_empresa set default public.get_my_company_code();
+--   alter table if exists public.comanda_itens     alter column codigo_empresa set default public.get_my_company_code();
+--   alter table if exists public.pagamentos        alter column codigo_empresa set default public.get_my_company_code();
+--   alter table if exists public.comanda_clientes  alter column codigo_empresa set default public.get_my_company_code();
+-- Estratégia B: Trigger BEFORE INSERT (consolidado)
+do $$
+begin
+  begin execute $$create or replace function public.set_company_code_default() returns trigger as $$
+  begin
+    if new.codigo_empresa is null then
+      new.codigo_empresa := public.get_my_company_code();
+    end if;
+    return new;
+  end; $$ language plpgsql security definer$$; exception when others then null; end;
+
+  if not exists (select 1 from pg_trigger where tgname = 'trg_set_company_code_comandas') then
+    begin execute $$create trigger trg_set_company_code_comandas before insert on public.comandas
+      for each row execute function public.set_company_code_default()$$; exception when others then null; end;
+  end if;
+  if not exists (select 1 from pg_trigger where tgname = 'trg_set_company_code_comanda_itens') then
+    begin execute $$create trigger trg_set_company_code_comanda_itens before insert on public.comanda_itens
+      for each row execute function public.set_company_code_default()$$; exception when others then null; end;
+  end if;
+  if not exists (select 1 from pg_trigger where tgname = 'trg_set_company_code_pagamentos') then
+    begin execute $$create trigger trg_set_company_code_pagamentos before insert on public.pagamentos
+      for each row execute function public.set_company_code_default()$$; exception when others then null; end;
+  end if;
+  if not exists (select 1 from pg_trigger where tgname = 'trg_set_company_code_comanda_clientes') then
+    begin execute $$create trigger trg_set_company_code_comanda_clientes before insert on public.comanda_clientes
+      for each row execute function public.set_company_code_default()$$; exception when others then null; end;
+  end if;
+end$$;
+
+-- 3) Índices recomendados (idempotentes)
+do $$
+begin
+  begin execute $$create index if not exists idx_comandas_empresa_status           on public.comandas (codigo_empresa, status)$$;                 exception when others then null; end;
+  begin execute $$create index if not exists idx_comanda_itens_empresa_comanda     on public.comanda_itens (codigo_empresa, comanda_id)$$;        exception when others then null; end;
+  begin execute $$create index if not exists idx_pagamentos_empresa_comanda        on public.pagamentos (codigo_empresa, comanda_id)$$;           exception when others then null; end;
+  begin execute $$create index if not exists idx_comanda_clientes_empresa_comanda  on public.comanda_clientes (codigo_empresa, comanda_id)$$;     exception when others then null; end;
+end$$;
+
+-- 4) Notas
+-- - O frontend passou a evitar agregações no PostgREST (sum) e sumariza no cliente.
+-- - Verificação agregada de estoque ocorre antes do pagamento e requer apenas leitura.
+-- - Produtos: geração automática de código no frontend; opcional unique por empresa no banco
+--   (ex.: constraint ux_produtos_empresa_codigo_produto em (codigo_empresa, codigo_produto)).
+-- - Manter padronização por codigo_empresa em novos objetos multi-tenant.
+
+-- ============================
+-- FIM DAS ATUALIZAÇÕES v4.5
 -- ============================

@@ -38,6 +38,7 @@ export default function FinalizadorasPage() {
   const loadsCountRef = useRef(0);
   const lastDataSizeRef = useRef(0);
   const retryOnceRef = useRef(false);
+  const secondRetryRef = useRef(false);
   const mountedRef = useRef(true);
   // Modal: criar
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -70,7 +71,7 @@ export default function FinalizadorasPage() {
             }
           } catch {}
         }
-      }, 5000);
+      }, 2000);
       const data = await listarFinalizadoras({ somenteAtivas: false, codigoEmpresa });
       if (!mountedRef.current) { try { console.warn(trace + ' skip apply: unmounted after fetch'); } catch {}; return; }
       const size = Array.isArray(data) ? data.length : (data ? 1 : 0);
@@ -91,6 +92,11 @@ export default function FinalizadorasPage() {
         retryOnceRef.current = true;
         setTimeout(() => { try { console.log('[Finalizadoras] retry after empty'); } catch {}; loadFinalizadoras(); }, 500);
       }
+      // Optional: second retry if still empty after first retry
+      if ((size === 0) && retryOnceRef.current && !secondRetryRef.current && authReady && codigoEmpresa) {
+        secondRetryRef.current = true;
+        setTimeout(() => { try { console.log('[Finalizadoras] second retry after empty'); } catch {}; loadFinalizadoras(); }, 1500);
+      }
     } catch (e) {
       try { console.error(trace + ' error', e); } catch {}
       toast({ title: 'Falha ao carregar finalizadoras', description: e?.message || 'Tente novamente', variant: 'destructive' });
@@ -105,22 +111,43 @@ export default function FinalizadorasPage() {
   useEffect(() => {
     mountedRef.current = true;
     try { console.log('[Finalizadoras] mount'); } catch {}
-    if (authReady && userProfile?.codigo_empresa) {
-      // Immediate cache hydration to avoid empty list perception
-      try {
-        const cacheKey = `finalizadoras:list:${userProfile.codigo_empresa}`;
+    // Cache hydration immediately (even if authReady is false)
+    try {
+      const cachedCodigo = (() => {
+        try {
+          const raw = localStorage.getItem('auth:userProfile');
+          return raw ? (JSON.parse(raw)?.codigo_empresa || null) : null;
+        } catch { return null; }
+      })();
+      const codigoToUse = userProfile?.codigo_empresa || cachedCodigo;
+      if (codigoToUse) {
+        const cacheKey = `finalizadoras:list:${codigoToUse}`;
         const cached = JSON.parse(localStorage.getItem(cacheKey) || '[]');
         if (Array.isArray(cached) && cached.length > 0) {
           setFinalizadoras(cached);
           lastDataSizeRef.current = cached.length;
         }
-      } catch {}
+      }
+    } catch {}
+    if (authReady && userProfile?.codigo_empresa) {
       loadFinalizadoras();
     }
     const onVis = () => {
       try { console.log('[Finalizadoras] visibilitychange', { visibility: document.visibilityState, lastLoadTs: lastLoadTsRef.current, lastDataSize: lastDataSizeRef.current }); } catch {}
+      if (document.visibilityState === 'visible') {
+        const elapsed = Date.now() - (lastLoadTsRef.current || 0);
+        if (elapsed > 30000 || lastDataSizeRef.current === 0) {
+          loadFinalizadoras();
+        }
+      }
     };
-    const onFocus = () => { try { console.log('[Finalizadoras] window:focus'); } catch {}; };
+    const onFocus = () => {
+      try { console.log('[Finalizadoras] window:focus'); } catch {}
+      const elapsed = Date.now() - (lastLoadTsRef.current || 0);
+      if (elapsed > 30000 || lastDataSizeRef.current === 0) {
+        loadFinalizadoras();
+      }
+    };
     window.addEventListener('visibilitychange', onVis);
     window.addEventListener('focus', onFocus);
     return () => {
