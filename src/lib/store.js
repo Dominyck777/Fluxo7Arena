@@ -147,9 +147,11 @@ export async function listarComandas({ status, from, to, search = '', limit = 50
 
   const s = (search || '').trim()
   if (s) {
-    // pesquisa básica por id de comanda (numérico) ou status
+    // pesquisa por id (numérico ou uuid) ou por status
     const isNumeric = /^\d+$/.test(s)
-    if (isNumeric) {
+    const isUUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(s)
+    if (isNumeric || isUUID) {
+      // tenta por id e também por status como fallback
       q = q.or(`id.eq.${s},status.ilike.%${s}%`)
     } else {
       q = q.or(`status.ilike.%${s}%`)

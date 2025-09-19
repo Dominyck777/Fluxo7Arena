@@ -7582,3 +7582,63 @@ end$$;
 -- ============================
 -- FIM DAS ATUALIZAÇÕES v4.5
 -- ============================
+
+-- ============================
+-- ATUALIZAÇÕES APLICADAS (v4.5.1)
+-- Data: 2025-09-19
+-- Assunto: Consolidação do estado atual em produção após execução dos scripts no Supabase
+--           (manter UUID em public.comandas.id por enquanto; ajustes de FKs; índices e gatilhos)
+-- ============================
+
+-- 1) Decisão temporária: manter public.comandas.id como UUID
+--    - Motivo: incompatibilidades detectadas nas FKs durante tentativa de migração para BIGSERIAL
+--    - Impacto: colunas comanda_id nas tabelas filhas devem permanecer como UUID e referenciar comandas(id)
+
+-- 2) Garantir tipos e FKs compatíveis com UUID
+--    - comanda_clientes.comanda_id: UUID -> FK para public.comandas(id)
+--    - pagamentos.comanda_id:       UUID -> FK para public.comandas(id)
+--    DDL efetivamente aplicado no ambiente:
+--      alter table if exists public.comanda_clientes drop constraint if exists comanda_clientes_comanda_id_fkey;
+--      alter table if exists public.comanda_clientes alter column comanda_id type uuid using (comanda_id::text::uuid);
+--      alter table if exists public.comanda_clientes add constraint comanda_clientes_comanda_id_fkey
+--        foreign key (comanda_id) references public.comandas(id) on delete cascade;
+--
+--      alter table if exists public.pagamentos drop constraint if exists pagamentos_comanda_id_fkey;
+--      alter table if exists public.pagamentos alter column comanda_id type uuid using (comanda_id::text::uuid);
+--      alter table if exists public.pagamentos add constraint pagamentos_comanda_id_fkey
+--        foreign key (comanda_id) references public.comandas(id) on delete cascade;
+
+-- 3) Índices consolidados (por codigo_empresa e auxiliares)
+--    create index if not exists idx_mesas_codigo_empresa             on public.mesas(codigo_empresa);
+--    create index if not exists idx_comandas_codigo_empresa          on public.comandas(codigo_empresa);
+--    create index if not exists idx_comanda_itens_empresa            on public.comanda_itens(codigo_empresa);
+--    create index if not exists idx_comanda_clientes_empresa         on public.comanda_clientes(codigo_empresa);
+--    create index if not exists idx_pagamentos_empresa               on public.pagamentos(codigo_empresa);
+--    create index if not exists idx_finalizadoras_empresa            on public.finalizadoras(codigo_empresa);
+--    create index if not exists idx_caixa_sessoes_empresa            on public.caixa_sessoes(codigo_empresa);
+--    create index if not exists idx_comandas_mesa_status on public.comandas(mesa_id, status) where fechado_em is null;
+--    create index if not exists idx_pagamentos_recebido_em on public.pagamentos(recebido_em);
+
+-- 4) Gatilhos para preencher codigo_empresa automaticamente (se ausente)
+--    - Função: public.set_company_code_default()
+--    - Triggers criados:
+--        trg_set_company_code_comandas          (public.comandas)
+--        trg_set_company_code_comanda_itens     (public.comanda_itens)
+--        trg_set_company_code_comanda_clientes  (public.comanda_clientes)
+--        trg_set_company_code_pagamentos        (public.pagamentos)
+--        trg_set_company_code_finalizadoras     (public.finalizadoras)
+--        trg_set_company_code_mesas             (public.mesas)
+--        trg_set_company_code_caixa             (public.caixa_sessoes)
+
+-- 5) Próxima migração (planejada) para BIGSERIAL em comandas
+--    - Quando agendada janela de manutenção, executar migração assistida:
+--      a) adicionar coluna id_bigint bigserial em public.comandas
+--      b) popular colunas comanda_id_bigint nas tabelas filhas por mapeamento id(uuid)->id_bigint
+--      c) trocar FKs para referenciar id_bigint
+--      d) promover id_bigint a PK e renomear para id
+--      e) remover colunas antigas comanda_id (uuid) e renomear as novas para comanda_id
+--    - Frontend já está preparado para não enviar id no insert e usar codigo_empresa
+
+-- ============================
+-- FIM DAS ATUALIZAÇÕES v4.5.1
+-- ============================

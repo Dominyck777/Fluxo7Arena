@@ -2390,3 +2390,93 @@ end$$;
 -- ============================
 -- FIM DAS ATUALIZAÇÕES v4.5
 -- ============================
+
+-- ============================
+-- ATUALIZAÇÕES APLICADAS (v4.5.1)
+-- Data: 2025-09-19
+-- Assunto: Consolidação das políticas RLS e índices aplicados no Supabase (sem DO/EXECUTE)
+-- ============================
+
+-- 1) Observação sobre chave de comandas
+--    - public.comandas.id permanece UUID por enquanto
+--    - As colunas comanda_id em public.comanda_clientes e public.pagamentos permanecem UUID e referenciam comandas(id)
+
+-- 2) Políticas RLS criadas/atualizadas (DDL direto)
+-- MESAS
+drop policy if exists mesas_select_company on public.mesas;
+create policy mesas_select_company on public.mesas as permissive for select to authenticated using (codigo_empresa = public.get_my_company_code());
+drop policy if exists mesas_insert_company on public.mesas;
+create policy mesas_insert_company on public.mesas as permissive for insert to authenticated with check (codigo_empresa = public.get_my_company_code());
+drop policy if exists mesas_update_company on public.mesas;
+create policy mesas_update_company on public.mesas as permissive for update to authenticated using (codigo_empresa = public.get_my_company_code()) with check (codigo_empresa = public.get_my_company_code());
+drop policy if exists mesas_delete_company on public.mesas;
+create policy mesas_delete_company on public.mesas as permissive for delete to authenticated using (codigo_empresa = public.get_my_company_code());
+
+-- COMANDAS
+drop policy if exists comandas_select_company on public.comandas;
+create policy comandas_select_company on public.comandas as permissive for select to authenticated using (codigo_empresa = public.get_my_company_code());
+drop policy if exists comandas_insert_company on public.comandas;
+create policy comandas_insert_company on public.comandas as permissive for insert to authenticated with check (codigo_empresa = public.get_my_company_code());
+drop policy if exists comandas_update_company on public.comandas;
+create policy comandas_update_company on public.comandas as permissive for update to authenticated using (codigo_empresa = public.get_my_company_code()) with check (codigo_empresa = public.get_my_company_code());
+drop policy if exists comandas_delete_company on public.comandas;
+create policy comandas_delete_company on public.comandas as permissive for delete to authenticated using (codigo_empresa = public.get_my_company_code());
+
+-- COMANDA_ITENS
+drop policy if exists comanda_itens_select_company on public.comanda_itens;
+create policy comanda_itens_select_company on public.comanda_itens as permissive for select to authenticated using (codigo_empresa = public.get_my_company_code());
+drop policy if exists comanda_itens_insert_company on public.comanda_itens;
+create policy comanda_itens_insert_company on public.comanda_itens as permissive for insert to authenticated with check (codigo_empresa = public.get_my_company_code());
+drop policy if exists comanda_itens_update_company on public.comanda_itens;
+create policy comanda_itens_update_company on public.comanda_itens as permissive for update to authenticated using (codigo_empresa = public.get_my_company_code()) with check (codigo_empresa = public.get_my_company_code());
+drop policy if exists comanda_itens_delete_company on public.comanda_itens;
+create policy comanda_itens_delete_company on public.comanda_itens as permissive for delete to authenticated using (codigo_empresa = public.get_my_company_code());
+
+-- COMANDA_CLIENTES
+drop policy if exists comanda_clientes_select_company on public.comanda_clientes;
+create policy comanda_clientes_select_company on public.comanda_clientes as permissive for select to authenticated using (codigo_empresa = public.get_my_company_code());
+drop policy if exists comanda_clientes_insert_company on public.comanda_clientes;
+create policy comanda_clientes_insert_company on public.comanda_clientes as permissive for insert to authenticated with check (codigo_empresa = public.get_my_company_code());
+drop policy if exists comanda_clientes_update_company on public.comanda_clientes;
+create policy comanda_clientes_update_company on public.comanda_clientes as permissive for update to authenticated using (codigo_empresa = public.get_my_company_code()) with check (codigo_empresa = public.get_my_company_code());
+drop policy if exists comanda_clientes_delete_company on public.comanda_clientes;
+create policy comanda_clientes_delete_company on public.comanda_clientes as permissive for delete to authenticated using (codigo_empresa = public.get_my_company_code());
+
+-- PAGAMENTOS
+drop policy if exists pagamentos_select_company on public.pagamentos;
+create policy pagamentos_select_company on public.pagamentos as permissive for select to authenticated using (codigo_empresa = public.get_my_company_code());
+drop policy if exists pagamentos_insert_company on public.pagamentos;
+create policy pagamentos_insert_company on public.pagamentos as permissive for insert to authenticated with check (codigo_empresa = public.get_my_company_code());
+drop policy if exists pagamentos_update_company on public.pagamentos;
+create policy pagamentos_update_company on public.pagamentos as permissive for update to authenticated using (codigo_empresa = public.get_my_company_code()) with check (codigo_empresa = public.get_my_company_code());
+drop policy if exists pagamentos_delete_company on public.pagamentos;
+create policy pagamentos_delete_company on public.pagamentos as permissive for delete to authenticated using (codigo_empresa = public.get_my_company_code());
+
+-- FINALIZADORAS
+drop policy if exists finalizadoras_select_company on public.finalizadoras;
+create policy finalizadoras_select_company on public.finalizadoras as permissive for select to authenticated using (codigo_empresa = public.get_my_company_code());
+drop policy if exists finalizadoras_insert_company on public.finalizadoras;
+create policy finalizadoras_insert_company on public.finalizadoras as permissive for insert to authenticated with check (codigo_empresa = public.get_my_company_code());
+drop policy if exists finalizadoras_update_company on public.finalizadoras;
+create policy finalizadoras_update_company on public.finalizadoras as permissive for update to authenticated using (codigo_empresa = public.get_my_company_code()) with check (codigo_empresa = public.get_my_company_code());
+drop policy if exists finalizadoras_delete_company on public.finalizadoras;
+create policy finalizadoras_delete_company on public.finalizadoras as permissive for delete to authenticated using (codigo_empresa = public.get_my_company_code());
+
+-- CAIXA_SESSOES
+drop policy if exists caixa_sessoes_select_company on public.caixa_sessoes;
+create policy caixa_sessoes_select_company on public.caixa_sessoes as permissive for select to authenticated using (codigo_empresa = public.get_my_company_code());
+drop policy if exists caixa_sessoes_insert_company on public.caixa_sessoes;
+create policy caixa_sessoes_insert_company on public.caixa_sessoes as permissive for insert to authenticated with check (codigo_empresa = public.get_my_company_code());
+drop policy if exists caixa_sessoes_update_company on public.caixa_sessoes;
+create policy caixa_sessoes_update_company on public.caixa_sessoes as permissive for update to authenticated using (codigo_empresa = public.get_my_company_code()) with check (codigo_empresa = public.get_my_company_code());
+drop policy if exists caixa_sessoes_delete_company on public.caixa_sessoes;
+create policy caixa_sessoes_delete_company on public.caixa_sessoes as permissive for delete to authenticated using (codigo_empresa = public.get_my_company_code());
+
+-- 3) Índices reforçados (idempotentes)
+create index if not exists idx_comandas_empresa_status on public.comandas (codigo_empresa, status);
+create index if not exists idx_comanda_itens_empresa_comanda on public.comanda_itens (codigo_empresa, comanda_id);
+create index if not exists idx_pagamentos_empresa_comanda on public.pagamentos (codigo_empresa, comanda_id);
+
+-- ============================
+-- FIM DAS ATUALIZAÇÕES v4.5.1
+-- ============================
