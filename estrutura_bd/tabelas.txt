@@ -7264,8 +7264,8 @@ for each row
 execute function public.agendamentos_set_codigo_fn();
 
 -- ============================
--- FIM DAS ATUALIZAÇÕES v4.1
---- ATUALIZAÇÕES APLICADAS (v4.1)
+-- FIM DAS ATUALIZAÇÕES v4.1b
+--- ATUALIZAÇÕES APLICADAS (v4.1b)
 --- Data: 2025-09-15
 --- Motivo: Correção crítica - ID da tabela comandas deve ser BIGSERIAL
 --- Observação: Problema identificado e corrigido - incompatibilidade entre UUID e BIGSERIAL
