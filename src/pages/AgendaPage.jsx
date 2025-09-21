@@ -1325,10 +1325,38 @@ function AgendaPage() {
     const adjTop = top + gapY;
     // Para meia hora, não force altura mínima acima do espaço disponível após os gaps
     const adjHeight = Math.max(isHalfHour ? 40 : 32, height - gapY * 2);
+
+    // Escalonamento proporcional (>= 90min): já aumentar em 90min
+    const isLong = durationMin >= 90;
+    const maxScale = 2;
+    const minScaleAt90 = 1.15; // 90min já fica maior
+    const scale = isLong
+      ? (() => {
+          const t = Math.min(Math.max((durationMin - 90) / 90, 0), 1); // 0 em 90min, 1 em 180min
+          return Math.min(minScaleAt90 + t * (maxScale - minScaleAt90), maxScale);
+        })()
+      : 1;
+    // Tamanhos base aproximados
+    const nameBasePx = 16; // text-base
+    const smallBasePx = 14; // text-sm
+    const timeBasePx = isHalfHour ? 14 : 16;
+    const iconBasePx = isHalfHour ? 16 : 24;
+    const namePx = Math.round(nameBasePx * (isLong ? scale : 1));
+    const smallPx = Math.round(smallBasePx * (isLong ? scale : 1));
+    const timePx = Math.round(timeBasePx * (isLong ? scale : 1));
+    const iconPx = Math.round(iconBasePx * (isLong ? scale : 1));
+    // Padding cresce levemente
+    const basePadX = isHalfHour ? 12 : 16;
+    const basePadY = isHalfHour ? 12 : 16;
+    const padScale = isLong ? Math.min(scale, 1.3) : 1;
+    const padX = Math.round(basePadX * padScale);
+    const padY = Math.round(basePadY * padScale);
+
     // Participantes agregados (pago/total)
     const participants = participantsByAgendamento[booking.id] || [];
     const paidCount = participants.filter(p => (p.status_pagamento_text || '').toLowerCase() === 'pago').length;
     const totalParticipants = participants.length;
+
     return (
       <motion.div
         layout={isModalOpen ? false : "position"}
@@ -1359,47 +1387,49 @@ function AgendaPage() {
         <div className={cn("absolute left-0 top-0 h-full w-[6px] rounded-l-md", config.accent)} />
 
         {/* Conteúdo (centralizado verticalmente) */}
-        <div className={cn("h-full flex", isHalfHour ? "px-3 py-3" : "px-4 py-4")}
+        <div
+          className={cn("h-full flex", isHalfHour ? "px-3 py-3" : "px-4 py-4")}
+          style={{ paddingLeft: padX, paddingRight: padX, paddingTop: padY, paddingBottom: padY }}
         >
           <div className="flex-1 flex flex-col justify-center">
             <div className={cn("flex justify-between gap-2", isHalfHour ? "items-center" : "items-start") }>
               {/* Esquerda: cliente e, em meia hora, modalidade à direita do nome */}
               <div className="flex items-center gap-2 min-w-0">
-                <p className="font-semibold text-text-primary truncate text-base">{shortName(booking.customer)}</p>
+                <p className="font-semibold text-text-primary truncate text-base" style={{ fontSize: namePx, lineHeight: 1.15 }}>{shortName(booking.customer)}</p>
                 {isHalfHour && (
-                  <span className="text-sm font-medium text-text-secondary truncate bg-white/5 border border-white/10 rounded px-2.5 py-0 whitespace-nowrap">
+                  <span className="text-sm font-medium text-text-secondary truncate bg-white/5 border border-white/10 rounded px-2.5 py-0 whitespace-nowrap" style={{ fontSize: smallPx }}>
                     {booking.modality}
                   </span>
                 )}
               </div>
               <div className={cn("flex items-center gap-2", isHalfHour ? "whitespace-nowrap shrink-0" : "flex-col items-end") }>
-                <span className={cn("text-text-muted whitespace-nowrap", isHalfHour ? "text-sm" : "text-base") }>
+                <span className={cn("text-text-muted whitespace-nowrap", isHalfHour ? "text-sm" : "text-base") } style={{ fontSize: timePx }}>
                   {format(booking.start, 'HH:mm')}–{format(booking.end, 'HH:mm')}
                 </span>
                 {/* Indicador de pagamento de participantes (pago/total) */}
                 {totalParticipants > 0 && (
-                  <span className={`text-xs font-semibold rounded px-2 py-0.5 border ${paidCount === totalParticipants ? 'text-emerald-300 bg-emerald-500/10 border-emerald-400/30' : 'text-amber-300 bg-amber-500/10 border-amber-400/30'}`}>
+                  <span className={`text-xs font-semibold rounded px-2 py-0.5 border ${paidCount === totalParticipants ? 'text-emerald-300 bg-emerald-500/10 border-emerald-400/30' : 'text-amber-300 bg-amber-500/10 border-amber-400/30'}`} style={{ fontSize: Math.max(12, Math.round(12 * (isLong ? scale : 1))) }}>
                     {paidCount}/{totalParticipants} pagos
                   </span>
                 )}
                 {isHalfHour ? (
                   <div className="flex items-center gap-1.5 whitespace-nowrap shrink-0">
-                    <Icon className={cn("w-4 h-4", config.text)} />
-                    <span className={cn("truncate", config.text, "text-xs")}>{config.label}</span>
+                    <Icon className={cn(config.text)} style={{ width: iconPx, height: iconPx }} />
+                    <span className={cn("truncate", config.text, "text-xs")} style={{ fontSize: Math.max(12, Math.round(12 * (isLong ? scale : 1))) }}>{config.label}</span>
                   </div>
                 ) : null}
               </div>
             </div>
             <div className="mt-1 flex items-center justify-between gap-2">
               {!isHalfHour && (
-                <span className="text-sm font-medium text-text-secondary truncate bg-white/5 border border-white/10 rounded px-2.5 py-0.5">
+                <span className="text-sm font-medium text-text-secondary truncate bg-white/5 border border-white/10 rounded px-2.5 py-0.5" style={{ fontSize: smallPx }}>
                   {booking.modality}
                 </span>
               )}
               {!isHalfHour && (
                 <div className="flex items-center gap-1.5 text-sm">
-                  <Icon className={cn("w-6 h-6", config.text)} />
-                  <span className={cn("truncate", config.text)}>{config.label}</span>
+                  <Icon className={cn(config.text)} style={{ width: iconPx, height: iconPx }} />
+                  <span className={cn("truncate", config.text)} style={{ fontSize: smallPx }}>{config.label}</span>
                 </div>
               )}
             </div>
@@ -1482,6 +1512,8 @@ function AgendaPage() {
     const selectedClientsRef = useRef([]);
     // Track if the user has already selected any clients in this modal open cycle
     const userSelectedOnceRef = useRef(false);
+    // Guarda o primeiro cliente selecionado nesta abertura do modal (para compor o rótulo corretamente)
+    const firstSelectedIdRef = useRef(null);
     useEffect(() => {
       selectedClientsRef.current = Array.isArray(form.selectedClients) ? form.selectedClients : [];
       try { if ((selectedClientsRef.current || []).length > 0) userSelectedOnceRef.current = true; } catch {}
@@ -1569,6 +1601,16 @@ function AgendaPage() {
             finalArr = fallback;
           }
         }
+        // Reordenar para manter o primeiro cliente realmente escolhido na 1ª posição em NOVO agendamento
+        try {
+          if (!editingBooking && Array.isArray(finalArr) && finalArr.length > 0 && firstSelectedIdRef.current) {
+            const idx = finalArr.findIndex(c => c && c.id === firstSelectedIdRef.current);
+            if (idx > 0) {
+              const primary = finalArr[idx];
+              finalArr = [primary, ...finalArr.filter((_, i) => i !== idx)];
+            }
+          }
+        } catch {}
         // Detailed decision log
         try {
           console.warn('[CustomerPicker][applySelectedClients]', {
@@ -1882,6 +1924,21 @@ function AgendaPage() {
     const initializedRef = useRef(false);
     // Lista local de clientes para evitar re-render do componente pai durante a 1ª abertura
     const [localCustomers, setLocalCustomers] = useState(customerOptions);
+    // Watchdog: se ficar carregando sem itens locais por >2s, desliga o loading para mostrar 'Nenhum cliente encontrado'
+    const clientsLoadingSinceRef = useRef(0);
+    useEffect(() => {
+      if (clientsLoading) {
+        if (!clientsLoadingSinceRef.current) clientsLoadingSinceRef.current = Date.now();
+        const t = setTimeout(() => {
+          if (clientsLoading && (!Array.isArray(localCustomers) || localCustomers.length === 0)) {
+            setClientsLoading(false);
+          }
+        }, 2000);
+        return () => clearTimeout(t);
+      } else {
+        clientsLoadingSinceRef.current = 0;
+      }
+    }, [clientsLoading, localCustomers]);
     // Lista efetiva de clientes selecionados: sempre refletir o estado atual do formulário
     const effectiveSelectedClients = useMemo(() => (Array.isArray(form.selectedClients) ? form.selectedClients : []), [form.selectedClients]);
 
@@ -3308,8 +3365,8 @@ function AgendaPage() {
                           onTouchMove={(e) => { e.stopPropagation(); }}
                           style={{ overscrollBehavior: 'contain' }}
                         >
-                          {/* Loading state */}
-                          {clientsLoading && (
+                          {/* Loading state: só exibe se não houver itens locais */}
+                          {clientsLoading && ((localCustomers || []).length === 0) && (
                             <div className="px-3 py-4 text-sm text-text-muted">Carregando clientes…</div>
                           )}
                           {/* Empty state when not loading */}
@@ -3353,12 +3410,16 @@ function AgendaPage() {
                                   if (exists) {
                                     const next = (Array.isArray(selectedClientsRef.current) ? selectedClientsRef.current : []).filter(x => (x.id && id) ? (x.id !== id) : (String(x.nome || '').toLowerCase() !== nameKey));
                                     try { clearedByUserRef.current = next.length === 0; } catch {}
+                                    // Se o usuário removeu até zerar, limpar o marcador do primeiro selecionado
+                                    try { if (next.length === 0) firstSelectedIdRef.current = null; } catch {}
                                     try { if (next.length > 0) { lastNonEmptySelectionRef.current = next; } } catch {}
                                     try { selectedClientsRef.current = next; } catch {}
                                     applySelectedClients('list:remove', next);
                                   } else {
                                     const novo = { id, nome };
                                     const next = [...(Array.isArray(selectedClientsRef.current) ? selectedClientsRef.current : []), novo];
+                                    // Se é o primeiro desta sessão, fixar como primeiro para o rótulo
+                                    try { if ((selectedClientsRef.current || []).length === 0) firstSelectedIdRef.current = id || null; } catch {}
                                     try { clearedByUserRef.current = false; } catch {}
                                     try { if (next.length > 0) { lastNonEmptySelectionRef.current = next; } } catch {}
                                     try { selectedClientsRef.current = next; } catch {}
