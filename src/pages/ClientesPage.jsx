@@ -4,7 +4,8 @@ import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useToast } from "@/components/ui/use-toast";
-import { Plus, Search, Users, UserX, UserCheck, Gift, FileText, Edit, Trash2, MoreHorizontal, DollarSign, History, XCircle } from 'lucide-react';
+import { Plus, Search, Users, UserX, UserCheck, Gift, Edit, Trash2, MoreHorizontal, History, XCircle } from 'lucide-react';
+
 import { cn } from '@/lib/utils';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
@@ -49,60 +50,151 @@ function ClientDetailsModal({ open, onOpenChange, client, onEdit }) {
 
   const handleNotImplemented = () => {
     toast({
-      title: "Funcionalidade em desenvolvimento! 🚧",
-      description: "Este recurso ainda não foi implementado, mas você pode solicitá-lo no próximo prompt! 🚀",
+      title: "Funcionalidade em desenvolvimento! ",
+      description: "Este recurso ainda não foi implementado, mas você pode solicitá-lo no próximo prompt! ",
     });
   };
 
   const DetailRow = ({ label, value }) => (
-    <div className="flex justify-between items-center py-2 border-b border-border/50">
-      <span className="text-sm text-text-secondary">{label}</span>
-      <span className="text-sm font-semibold text-text-primary text-right">{value}</span>
+    <div className="grid grid-cols-12 items-start gap-3 py-2 border-b border-border/50">
+      <div className="col-span-5 sm:col-span-4">
+        <span className="block text-[11px] uppercase tracking-wide text-text-muted font-semibold">{label}</span>
+      </div>
+      <div className="col-span-7 sm:col-span-8">
+        <span className="block text-sm font-medium text-text-primary break-words">{value}</span>
+      </div>
     </div>
   );
 
+  // Histórico recente (comandas, itens e pagamentos)
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [history, setHistory] = useState([]);
+
+  const formatCurrency = (n) =>
+    new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(n || 0));
+
+  useEffect(() => {
+    const loadHistory = async () => {
+      if (!open || !client?.id) return;
+      setHistoryLoading(true);
+      try {
+        // 1) Buscar últimos vínculos do cliente com comandas
+        const { data: vincs, error: vincErr } = await supabase
+          .from('comanda_clientes')
+          .select('comanda_id, created_at')
+          .eq('cliente_id', client.id)
+          .order('created_at', { ascending: false })
+          .limit(10);
+        if (vincs && vincs.length === 0) {
+          setHistory([]);
+          setHistoryLoading(false);
+          return;
+        }
+        if (vincErr) throw vincErr;
+        const comandaIds = Array.from(new Set((vincs || []).map(v => v.comanda_id).filter(Boolean)));
+        if (comandaIds.length === 0) {
+          setHistory([]);
+          setHistoryLoading(false);
+          return;
+        }
+
+        // 2) Detalhes das comandas
+        let qCom = supabase.from('comandas').select('id,status,aberto_em,fechado_em').in('id', comandaIds);
+        const { data: comandas, error: comErr } = await qCom;
+        if (comErr) throw comErr;
+        const byComanda = new Map((comandas || []).map(c => [c.id, c]));
+
+        // 3) Itens das comandas (somatório)
+        let qItens = supabase
+          .from('comanda_itens')
+          .select('comanda_id, quantidade, preco_unitario, desconto')
+          .in('comanda_id', comandaIds);
+        const { data: itens, error: itErr } = await qItens;
+        if (itErr) throw itErr;
+        const totalPorComanda = {};
+        for (const it of (itens || [])) {
+          const bruto = Number(it.quantidade || 0) * Number(it.preco_unitario || 0);
+          const desc = Number(it.desconto || 0);
+          totalPorComanda[it.comanda_id] = (totalPorComanda[it.comanda_id] || 0) + Math.max(0, bruto - desc);
+        }
+
+        // 4) Pagamentos por comanda (somatório válidos)
+        let qP = supabase
+          .from('pagamentos')
+          .select('comanda_id, valor, status, recebido_em, metodo')
+          .in('comanda_id', comandaIds);
+        const { data: pays, error: payErr } = await qP;
+        if (payErr) throw payErr;
+        const pagoPorComanda = {};
+        for (const pg of (pays || [])) {
+          const ok = (pg.status || 'Pago') !== 'Cancelado' && (pg.status || 'Pago') !== 'Estornado';
+          if (!ok) continue;
+          pagoPorComanda[pg.comanda_id] = (pagoPorComanda[pg.comanda_id] || 0) + Number(pg.valor || 0);
+        }
+
+        // 5) Montar histórico em ordem cronológica dos vínculos (created_at desc)
+        const rows = (vincs || []).map(v => {
+          const c = byComanda.get(v.comanda_id) || {};
+          const total = Number(totalPorComanda[v.comanda_id] || 0);
+          const pago = Number(pagoPorComanda[v.comanda_id] || 0);
+          const saldo = Math.max(0, total - pago);
+          return {
+            comanda_id: v.comanda_id,
+            created_at: v.created_at,
+            aberto_em: c.aberto_em || null,
+            fechado_em: c.fechado_em || null,
+            status: c.status || 'open',
+            total,
+            pago,
+            saldo,
+          };
+        });
+
+        setHistory(rows);
+      } catch (err) {
+        toast({ title: 'Falha ao carregar histórico do cliente', description: err?.message || 'Tente novamente', variant: 'destructive' });
+      } finally {
+        setHistoryLoading(false);
+      }
+    };
+    loadHistory();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, client?.id]);
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[800px]">
+      <DialogContent className="sm:max-w-[800px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Detalhes do Cliente</DialogTitle>
         </DialogHeader>
-        <div className="flex-1 p-6 overflow-y-auto space-y-8">
+        <div className="p-6 space-y-8">
             <div className="overflow-hidden">
-              <h2 className="text-xl font-bold truncate">{client.nome}</h2>
-              <span className="text-sm text-text-secondary truncate">{client.email || '—'}</span>
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <h2 className="text-2xl font-extrabold tracking-tight text-text-primary truncate">{client.nome}</h2>
+                  <div className="mt-2 flex items-center flex-wrap gap-2">
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-surface-2 border border-border text-text-secondary">
+                      Código: <span className="text-text-primary font-mono">{client.codigo}</span>
+                    </span>
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold border ${client.status === 'active' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-400/30' : 'bg-rose-500/10 text-rose-400 border-rose-400/30'}`}>
+                      {client.status === 'active' ? 'Ativo' : 'Inativo'}
+                    </span>
+                  </div>
+                  <span className="mt-2 block text-sm text-text-secondary truncate">{client.email || '—'}</span>
+                </div>
+              </div>
             </div>
             
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <div className="grid grid-cols-1 gap-8">
                 <div>
-                    <h4 className="font-semibold text-text-primary mb-2">Informações Cadastrais</h4>
-                     <div className="bg-surface-2 p-4 rounded-lg space-y-1">
+                    <h4 className="text-sm font-semibold uppercase tracking-wide text-text-secondary mb-2">Informações Cadastrais</h4>
+                    <div className="bg-surface-2 p-4 rounded-lg space-y-1">
                         <DetailRow label="Código" value={client.codigo} />
-                        <DetailRow label="CPF/CNPJ" value={client.cpf || '—'} />
+                        <DetailRow label="CPF/CNPJ" value={client.cpf || client.cnpj || '—'} />
                         <DetailRow label="Telefone" value={client.telefone || '—'} />
                         <DetailRow label="Aniversário" value={client.aniversario ? new Date(client.aniversario).toLocaleDateString('pt-BR') : '—'} />
-                    </div>
-                </div>
-                
-                <div>
-                    <div className="flex items-center gap-2 text-text-primary mb-2">
-                        <DollarSign className="w-5 h-5 text-text-secondary"/>
-                        <h4 className="font-semibold">Financeiro</h4>
-                    </div>
-                    <div className="bg-surface-2 p-4 rounded-lg">
-                        <div className="flex justify-between items-center">
-                            <span className="text-sm text-text-secondary">Saldo Atual</span>
-                            <span className={cn(
-                                "text-xl font-black tracking-tighter",
-                                Number(client.saldo || 0) >= 0 ? "text-success" : "text-danger"
-                            )}>
-                              R$ {Number(client.saldo || 0).toFixed(2)}
-                            </span>
-                        </div>
-                         <div className="flex gap-2 mt-4">
-                            <Button size="sm" className="flex-1" onClick={handleNotImplemented}>Ajustar Saldo</Button>
-                            <Button size="sm" variant="outline" className="flex-1" onClick={handleNotImplemented}><FileText className="mr-2 h-4 w-4"/>Exportar p/ NF</Button>
-                        </div>
+                        <DetailRow label="Email" value={client.email || '—'} />
+                        <DetailRow label="Status" value={client.status === 'active' ? 'Ativo' : 'Inativo'} />
                     </div>
                 </div>
             </div>
@@ -112,8 +204,46 @@ function ClientDetailsModal({ open, onOpenChange, client, onEdit }) {
                     <History className="w-5 h-5 text-text-secondary"/>
                     <h4 className="font-semibold">Histórico Recente</h4>
                 </div>
-                <div className="bg-surface-2 p-4 rounded-lg text-center">
-                  <p className="text-sm text-text-muted py-8">Histórico de consumo e reservas em breve.</p>
+                <div className="bg-surface-2 p-4 rounded-lg">
+                  {historyLoading ? (
+                    <div className="text-center py-8 text-sm text-text-muted">Carregando histórico...</div>
+                  ) : (history && history.length > 0) ? (
+                    <div className="space-y-3">
+                      {history.map((h, idx) => (
+                        <div key={`${h.comanda_id}-${idx}`} className="flex items-center justify-between gap-3 p-3 rounded-md border border-border/60 bg-background">
+                          <div className="min-w-0">
+                            <div className="text-sm font-semibold text-text-primary truncate">Comanda #{h.comanda_id}</div>
+                            <div className="text-xs text-text-secondary truncate">
+                              {h.aberto_em ? new Date(h.aberto_em).toLocaleString('pt-BR') : new Date(h.created_at).toLocaleString('pt-BR')}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <div className="text-right">
+                              <div className="text-xs text-text-muted">Total</div>
+                              <div className="text-sm font-bold">{formatCurrency(h.total)}</div>
+                            </div>
+                            <div className="text-right">
+                              <div className="text-xs text-text-muted">Pago</div>
+                              <div className="text-sm font-medium text-success">{formatCurrency(h.pago)}</div>
+                            </div>
+                            <div className="text-right">
+                              <div className="text-xs text-text-muted">Saldo</div>
+                              <div className={cn("text-sm font-bold", h.saldo > 0 ? "text-danger" : "text-text-secondary")}>{formatCurrency(h.saldo)}</div>
+                            </div>
+                            <span className={cn(
+                              "px-2 py-1 text-[11px] font-semibold rounded-full border",
+                              h.status === 'closed' || h.fechado_em ? "bg-success/10 text-success border-success/30" :
+                              (h.status === 'awaiting-payment' ? "bg-info/10 text-info border-info/30" : "bg-warning/10 text-warning border-warning/30")
+                            )}>
+                              {h.status === 'closed' || h.fechado_em ? 'Fechada' : (h.status === 'awaiting-payment' ? 'Pagamento' : 'Em uso')}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-center py-8 text-sm text-text-muted">Sem registros recentes para este cliente.</div>
+                  )}
                 </div>
             </div>
         </div>
@@ -168,7 +298,7 @@ function ClientesPage() {
           .from('clientes')
           .select('*')
           .eq('codigo_empresa', userProfile.codigo_empresa)
-          .order('nome', { ascending: true });
+          .order('codigo', { ascending: true });
 
         if (filters.searchTerm.trim() !== '') {
           const s = filters.searchTerm.trim();
