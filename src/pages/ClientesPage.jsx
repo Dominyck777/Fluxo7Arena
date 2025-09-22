@@ -44,9 +44,8 @@ const StatCard = ({ icon, title, value, color, onClick, isActive }) => {
     );
 };
 
-function ClientDetailsModal({ open, onOpenChange, client, onEdit }) {
+function ClientDetailsModal({ open, onOpenChange, client, onEdit, codigoEmpresa }) {
   const { toast } = useToast();
-  if (!client) return null;
 
   const handleNotImplemented = () => {
     toast({
@@ -69,37 +68,78 @@ function ClientDetailsModal({ open, onOpenChange, client, onEdit }) {
   // Histórico recente (comandas, itens e pagamentos)
   const [historyLoading, setHistoryLoading] = useState(false);
   const [history, setHistory] = useState([]);
+  // Histórico de agendamentos
+  const [bookingsLoading, setBookingsLoading] = useState(false);
+  const [bookings, setBookings] = useState([]);
 
   const formatCurrency = (n) =>
     new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(n || 0));
+
+  // Lista unificada (comandas + agendamentos) ordenada por data/hora desc
+  const unifiedRecent = useMemo(() => {
+    try {
+      const a = (history || []).map(h => ({
+        kind: 'comanda',
+        ts: new Date(h.aberto_em || h.created_at || 0).getTime(),
+        data: h,
+      }));
+      const b = (bookings || []).map(bk => ({
+        kind: 'agendamento',
+        ts: new Date(bk.inicio || 0).getTime(),
+        data: bk,
+      }));
+      return [...a, ...b]
+        .sort((x, y) => (y.ts - x.ts))
+        .slice(0, 10);
+    } catch { return []; }
+  }, [history, bookings]);
 
   useEffect(() => {
     const loadHistory = async () => {
       if (!open || !client?.id) return;
       setHistoryLoading(true);
+      setBookingsLoading(true);
       try {
         // 1) Buscar últimos vínculos do cliente com comandas
-        const { data: vincs, error: vincErr } = await supabase
+        let qV = supabase
           .from('comanda_clientes')
           .select('comanda_id, created_at')
           .eq('cliente_id', client.id)
           .order('created_at', { ascending: false })
           .limit(10);
+        if (codigoEmpresa) qV = qV.eq('codigo_empresa', codigoEmpresa);
+        const { data: vincs, error: vincErr } = await qV;
         if (vincs && vincs.length === 0) {
-          setHistory([]);
-          setHistoryLoading(false);
-          return;
+          // ainda tentaremos pegar comandas diretas por cliente_id
         }
         if (vincErr) throw vincErr;
-        const comandaIds = Array.from(new Set((vincs || []).map(v => v.comanda_id).filter(Boolean)));
+        const vincComandaIds = Array.from(new Set((vincs || []).map(v => v.comanda_id).filter(Boolean)));
+
+        // 1b) Complementar: comandas vinculadas diretamente ao cliente (comandas.cliente_id)
+        let qDirect = supabase
+          .from('comandas')
+          .select('id, status, aberto_em, fechado_em')
+          .eq('cliente_id', client.id)
+          .order('aberto_em', { ascending: false })
+          .limit(10);
+        if (codigoEmpresa) qDirect = qDirect.eq('codigo_empresa', codigoEmpresa);
+        const { data: directComandas, error: dirErr } = await qDirect;
+        if (dirErr) throw dirErr;
+        const directIds = Array.from(new Set((directComandas || []).map(c => c.id)));
+
+        const comandaIds = Array.from(new Set([ ...vincComandaIds, ...directIds ]));
         if (comandaIds.length === 0) {
           setHistory([]);
           setHistoryLoading(false);
-          return;
+          // não retorna ainda; bookings serão carregados por loadBookings
         }
 
-        // 2) Detalhes das comandas
-        let qCom = supabase.from('comandas').select('id,status,aberto_em,fechado_em').in('id', comandaIds);
+        // 2) Detalhes das comandas (join mesa para exibir nome/numero)
+        let qCom = supabase
+          .from('comandas')
+          .select('id,status,aberto_em,fechado_em, mesa:mesas!comandas_mesa_id_fkey ( nome, numero )')
+          .in('id', comandaIds);
+        if (codigoEmpresa) qCom = qCom.eq('codigo_empresa', codigoEmpresa);
         const { data: comandas, error: comErr } = await qCom;
         if (comErr) throw comErr;
         const byComanda = new Map((comandas || []).map(c => [c.id, c]));
@@ -109,6 +149,7 @@ function ClientDetailsModal({ open, onOpenChange, client, onEdit }) {
           .from('comanda_itens')
           .select('comanda_id, quantidade, preco_unitario, desconto')
           .in('comanda_id', comandaIds);
+        if (codigoEmpresa) qItens = qItens.eq('codigo_empresa', codigoEmpresa);
         const { data: itens, error: itErr } = await qItens;
         if (itErr) throw itErr;
         const totalPorComanda = {};
@@ -123,6 +164,7 @@ function ClientDetailsModal({ open, onOpenChange, client, onEdit }) {
           .from('pagamentos')
           .select('comanda_id, valor, status, recebido_em, metodo')
           .in('comanda_id', comandaIds);
+        if (codigoEmpresa) qP = qP.eq('codigo_empresa', codigoEmpresa);
         const { data: pays, error: payErr } = await qP;
         if (payErr) throw payErr;
         const pagoPorComanda = {};
@@ -133,39 +175,130 @@ function ClientDetailsModal({ open, onOpenChange, client, onEdit }) {
         }
 
         // 5) Montar histórico em ordem cronológica dos vínculos (created_at desc)
-        const rows = (vincs || []).map(v => {
-          const c = byComanda.get(v.comanda_id) || {};
-          const total = Number(totalPorComanda[v.comanda_id] || 0);
-          const pago = Number(pagoPorComanda[v.comanda_id] || 0);
+        // Construir histórico a partir de vínculos e das comandas diretas (evitando duplicatas)
+        const makeRow = (cid, createdAtFallback = null) => {
+          const c = byComanda.get(cid) || {};
+          const total = Number(totalPorComanda[cid] || 0);
+          const pago = Number(pagoPorComanda[cid] || 0);
           const saldo = Math.max(0, total - pago);
+          const mesaNome = c.mesa?.[0]?.nome || c.mesa?.nome || null;
+          const mesaNumero = c.mesa?.[0]?.numero || c.mesa?.numero || null;
+          const mesa_title = mesaNome || (mesaNumero != null ? `Mesa ${mesaNumero}` : 'Balcão');
           return {
-            comanda_id: v.comanda_id,
-            created_at: v.created_at,
+            comanda_id: cid,
+            created_at: createdAtFallback,
             aberto_em: c.aberto_em || null,
             fechado_em: c.fechado_em || null,
             status: c.status || 'open',
             total,
             pago,
             saldo,
+            mesa_title,
           };
-        });
+        };
 
-        setHistory(rows);
+        const rowsFromVinc = (vincs || []).map(v => makeRow(v.comanda_id, v.created_at));
+        const rowsFromDirect = (directComandas || [])
+          .filter(dc => !(vincComandaIds || []).includes(dc.id))
+          .map(dc => makeRow(dc.id, dc.aberto_em));
+
+        // Unir, ordenar por data (aberto_em ou created_at) decrescente
+        const mergedRows = [...rowsFromVinc, ...rowsFromDirect].sort((a, b) => {
+          const ta = new Date(a.aberto_em || a.created_at || 0).getTime();
+          const tb = new Date(b.aberto_em || b.created_at || 0).getTime();
+          return tb - ta;
+        }).slice(0, 10);
+
+        setHistory(mergedRows);
       } catch (err) {
         toast({ title: 'Falha ao carregar histórico do cliente', description: err?.message || 'Tente novamente', variant: 'destructive' });
       } finally {
         setHistoryLoading(false);
       }
     };
+    const loadBookings = async () => {
+      if (!open || !client?.id) return;
+      setBookingsLoading(true);
+      try {
+        // Buscar últimos agendamentos do cliente
+        let q = supabase
+          .from('agendamentos')
+          .select(`
+            id, inicio, fim, status, modalidade,
+            quadra:quadra_id ( nome )
+          `)
+          .eq('cliente_id', client.id)
+          .order('inicio', { ascending: false })
+          .limit(10);
+        if (codigoEmpresa) q = q.eq('codigo_empresa', codigoEmpresa);
+        const { data, error } = await q;
+        if (error) throw error;
+        const baseRows = (data || []).map(r => ({
+          id: r.id,
+          inicio: r.inicio,
+          fim: r.fim,
+          status: r.status,
+          modalidade: r.modalidade,
+          quadra_nome: (r.quadra?.[0]?.nome || r.quadra?.nome || null),
+        }));
+
+        // Complementar: agendamentos onde o cliente é participante (via view v_agendamento_participantes)
+        let qp = supabase
+          .from('v_agendamento_participantes')
+          .select('agendamento_id')
+          .eq('cliente_id', client.id)
+          .limit(30);
+        // (nem sempre a view expõe codigo_empresa; confiar em RLS)
+        const { data: partRows, error: partErr } = await qp;
+        if (partErr) throw partErr;
+        const participantIds = Array.from(new Set((partRows || []).map(p => p.agendamento_id).filter(Boolean)));
+        const alreadyIds = new Set((baseRows || []).map(r => r.id));
+        const missingIds = participantIds.filter(id => !alreadyIds.has(id));
+
+        let addRows = [];
+        if (missingIds.length > 0) {
+          let q2 = supabase
+            .from('agendamentos')
+            .select(`
+              id, inicio, fim, status, modalidade,
+              quadra:quadra_id ( nome )
+            `)
+            .in('id', missingIds);
+          if (codigoEmpresa) q2 = q2.eq('codigo_empresa', codigoEmpresa);
+          const { data: extra, error: extraErr } = await q2;
+          if (extraErr) throw extraErr;
+          addRows = (extra || []).map(r => ({
+            id: r.id,
+            inicio: r.inicio,
+            fim: r.fim,
+            status: r.status,
+            modalidade: r.modalidade,
+            quadra_nome: (r.quadra?.[0]?.nome || r.quadra?.nome || null),
+          }));
+        }
+
+        const merged = [...baseRows, ...addRows].sort((a, b) => new Date(b.inicio) - new Date(a.inicio)).slice(0, 10);
+        setBookings(merged);
+      } catch (e) {
+        // não derrubar o modal por erro nos agendamentos
+        console.warn('[ClientDetailsModal] Falha ao carregar agendamentos do cliente:', e);
+      } finally {
+        setBookingsLoading(false);
+      }
+    };
     loadHistory();
+    loadBookings();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, client?.id]);
+
+  if (!client) return null;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[800px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Detalhes do Cliente</DialogTitle>
+          <DialogDescription>Informações cadastrais e histórico recente deste cliente.</DialogDescription>
         </DialogHeader>
         <div className="p-6 space-y-8">
             <div className="overflow-hidden">
@@ -200,43 +333,67 @@ function ClientDetailsModal({ open, onOpenChange, client, onEdit }) {
             </div>
             
             <div className="space-y-4">
-                 <div className="flex items-center gap-2 text-text-primary">
-                    <History className="w-5 h-5 text-text-secondary"/>
-                    <h4 className="font-semibold">Histórico Recente</h4>
+                <div className="flex items-center gap-2 text-text-primary">
+                  <History className="w-5 h-5 text-text-secondary"/>
+                  <h4 className="font-semibold">Histórico Recente</h4>
                 </div>
                 <div className="bg-surface-2 p-4 rounded-lg">
-                  {historyLoading ? (
+                  {(historyLoading || bookingsLoading) ? (
                     <div className="text-center py-8 text-sm text-text-muted">Carregando histórico...</div>
-                  ) : (history && history.length > 0) ? (
+                  ) : (unifiedRecent && unifiedRecent.length > 0) ? (
                     <div className="space-y-3">
-                      {history.map((h, idx) => (
-                        <div key={`${h.comanda_id}-${idx}`} className="flex items-center justify-between gap-3 p-3 rounded-md border border-border/60 bg-background">
+                      {unifiedRecent.map((item, idx) => (
+                        <div key={`${item.kind}-${idx}`} className="flex items-center justify-between gap-3 p-3 rounded-md border border-border/60 bg-background">
                           <div className="min-w-0">
-                            <div className="text-sm font-semibold text-text-primary truncate">Comanda #{h.comanda_id}</div>
-                            <div className="text-xs text-text-secondary truncate">
-                              {h.aberto_em ? new Date(h.aberto_em).toLocaleString('pt-BR') : new Date(h.created_at).toLocaleString('pt-BR')}
-                            </div>
+                            {item.kind === 'comanda' ? (
+                              <>
+                                <div className="text-sm font-semibold text-text-primary truncate">{item.data.mesa_title || 'Balcão'}</div>
+                                <div className="text-xs text-text-secondary truncate">
+                                  {(() => { const h = item.data; return h.aberto_em ? new Date(h.aberto_em).toLocaleString('pt-BR') : new Date(h.created_at).toLocaleString('pt-BR'); })()}
+                                </div>
+                              </>
+                            ) : (
+                              <>
+                                <div className="text-sm font-semibold text-text-primary truncate">{item.data.modalidade || 'Agendamento'}</div>
+                                <div className="text-xs text-text-secondary truncate">
+                                  {new Date(item.data.inicio).toLocaleString('pt-BR')} — {item.data.quadra_nome || 'Quadra'}
+                                </div>
+                              </>
+                            )}
                           </div>
                           <div className="flex items-center gap-3">
-                            <div className="text-right">
-                              <div className="text-xs text-text-muted">Total</div>
-                              <div className="text-sm font-bold">{formatCurrency(h.total)}</div>
-                            </div>
-                            <div className="text-right">
-                              <div className="text-xs text-text-muted">Pago</div>
-                              <div className="text-sm font-medium text-success">{formatCurrency(h.pago)}</div>
-                            </div>
-                            <div className="text-right">
-                              <div className="text-xs text-text-muted">Saldo</div>
-                              <div className={cn("text-sm font-bold", h.saldo > 0 ? "text-danger" : "text-text-secondary")}>{formatCurrency(h.saldo)}</div>
-                            </div>
-                            <span className={cn(
-                              "px-2 py-1 text-[11px] font-semibold rounded-full border",
-                              h.status === 'closed' || h.fechado_em ? "bg-success/10 text-success border-success/30" :
-                              (h.status === 'awaiting-payment' ? "bg-info/10 text-info border-info/30" : "bg-warning/10 text-warning border-warning/30")
-                            )}>
-                              {h.status === 'closed' || h.fechado_em ? 'Fechada' : (h.status === 'awaiting-payment' ? 'Pagamento' : 'Em uso')}
-                            </span>
+                            {item.kind === 'comanda' ? (
+                              <>
+                                <span className={cn(
+                                  "px-2 py-1 text-[11px] font-semibold rounded-full border",
+                                  item.data.status === 'closed' || item.data.fechado_em ? "bg-success/10 text-success border-success/30" :
+                                  (item.data.status === 'awaiting-payment' ? "bg-info/10 text-info border-info/30" : "bg-warning/10 text-warning border-warning/30")
+                                )}>
+                                  {item.data.status === 'closed' || item.data.fechado_em ? 'Fechada' : (item.data.status === 'awaiting-payment' ? 'Pagamento' : 'Em uso')}
+                                </span>
+                              </>
+                            ) : (
+                              <span className={cn(
+                                "px-2 py-1 text-[11px] font-semibold rounded-full border",
+                                item.data.status === 'finished' ? "bg-success/10 text-success border-success/30" :
+                                item.data.status === 'canceled' ? "bg-danger/10 text-danger border-danger/30" :
+                                item.data.status === 'in_progress' ? "bg-warning/10 text-warning border-warning/30" :
+                                item.data.status === 'confirmed' ? "bg-info/10 text-info border-info/30" :
+                                item.data.status === 'absent' ? "bg-rose-500/10 text-rose-400 border-rose-400/30" :
+                                "bg-muted/10 text-text-secondary border-border/30"
+                              )}>
+                                {(() => {
+                                  switch (item.data.status) {
+                                    case 'finished': return 'Finalizado';
+                                    case 'canceled': return 'Cancelado';
+                                    case 'in_progress': return 'Em andamento';
+                                    case 'confirmed': return 'Confirmado';
+                                    case 'absent': return 'Ausente';
+                                    case 'scheduled': default: return 'Agendado';
+                                  }
+                                })()}
+                              </span>
+                            )}
                           </div>
                         </div>
                       ))}
@@ -281,7 +438,7 @@ function ClientesPage() {
     const [isDetailsOpen, setIsDetailsOpen] = useState(false);
     const [selectedClient, setSelectedClient] = useState(null);
     const [editingClient, setEditingClient] = useState(null);
-    const [filters, setFilters] = useState({ searchTerm: '', status: 'all', cardFilter: null });
+    const [filters, setFilters] = useState({ searchTerm: '', status: 'all' });
     // Retry control para contornar atrasos de token/RLS no Vercel
     const clientsRetryRef = useRef(false);
     const lastLoadTsRef = useRef(0);
@@ -419,8 +576,6 @@ function ClientesPage() {
         const currentMonth = today.getMonth();
         return {
             total: clients.length,
-            withDebt: clients.filter(c => Number(c.saldo || 0) < 0).length,
-            withCredit: clients.filter(c => Number(c.saldo || 0) > 0).length,
             birthdays: clients.filter(c => c.aniversario && new Date(c.aniversario).getMonth() === currentMonth).length,
         };
     }, [clients]);
@@ -434,16 +589,8 @@ function ClientesPage() {
               (client.nome || '').toLowerCase().includes(filters.searchTerm.toLowerCase()) ||
               (client.cpf || '').includes(filters.searchTerm) ||
               (client.telefone || '').includes(filters.searchTerm);
-          
           const statusMatch = filters.status === 'all' || client.status === filters.status;
-
-          const cardFilterMatch = !filters.cardFilter || (
-              (filters.cardFilter === 'withDebt' && Number(client.saldo || 0) < 0) ||
-              (filters.cardFilter === 'withCredit' && Number(client.saldo || 0) > 0) ||
-              (filters.cardFilter === 'birthdays' && client.aniversario && new Date(client.aniversario).getMonth() === currentMonth)
-          );
-
-          return searchTermMatch && statusMatch && cardFilterMatch;
+          return searchTermMatch && statusMatch;
       });
     }, [clients, filters]);
     
@@ -479,18 +626,11 @@ function ClientesPage() {
       }
     };
     
-    const handleCardFilter = (filterType) => {
-        setFilters(prev => ({
-            ...prev,
-            cardFilter: prev.cardFilter === filterType ? null : filterType
-        }));
-    }
-
     const handleClearFilters = () => {
-      setFilters({ searchTerm: '', status: 'all', cardFilter: null });
+      setFilters({ searchTerm: '', status: 'all' });
     }
     
-    const hasActiveFilters = filters.searchTerm !== '' || filters.status !== 'all' || filters.cardFilter !== null;
+    const hasActiveFilters = filters.searchTerm !== '' || filters.status !== 'all';
 
     return (
       <>
@@ -508,11 +648,9 @@ function ClientesPage() {
                     <Button onClick={handleAddNew}><Plus className="mr-2 h-4 w-4" /> Novo Cliente</Button>
                 </motion.div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-6">
                     <StatCard icon={Users} title="Total de Clientes" value={stats.total} color="text-brand" />
-                    <StatCard icon={UserX} title="Com Saldo Negativo" value={stats.withDebt} color="text-danger" onClick={() => handleCardFilter('withDebt')} isActive={filters.cardFilter === 'withDebt'}/>
-                    <StatCard icon={UserCheck} title="Com Crédito" value={stats.withCredit} color="text-success" onClick={() => handleCardFilter('withCredit')} isActive={filters.cardFilter === 'withCredit'}/>
-                    <StatCard icon={Gift} title="Aniversariantes do Mês" value={stats.birthdays} color="text-info" onClick={() => handleCardFilter('birthdays')} isActive={filters.cardFilter === 'birthdays'}/>
+                    <StatCard icon={Gift} title="Aniversariantes do Mês" value={stats.birthdays} color="text-info" />
                 </div>
 
                 <motion.div initial={{opacity: 0, y: 20}} animate={{opacity: 1, y: 0}} transition={{delay: 0.2}}>
@@ -553,14 +691,13 @@ function ClientesPage() {
                                     <TableHead>Cliente</TableHead>
                                     <TableHead>Contato</TableHead>
                                     <TableHead>Status</TableHead>
-                                    <TableHead className="text-right">Saldo</TableHead>
                                     <TableHead className="w-[50px]"></TableHead>
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
                                 {loading ? (
                                   <TableRow>
-                                    <TableCell colSpan={6} className="h-24 text-center">Carregando...</TableCell>
+                                    <TableCell colSpan={5} className="h-24 text-center">Carregando...</TableCell>
                                   </TableRow>
                                 ) : filteredClients.length > 0 ? (
                                     filteredClients.map(client => (
@@ -581,14 +718,6 @@ function ClientesPage() {
                                                     {client.status === 'active' ? 'Ativo' : 'Inativo'}
                                                 </span>
                                             </TableCell>
-                                            <TableCell className="text-right">
-                                                <span className={cn(
-                                                    "font-bold",
-                                                    Number(client.saldo || 0) >= 0 ? "text-success" : "text-danger"
-                                                )}>
-                                                    R$ {Number(client.saldo || 0).toFixed(2)}
-                                                </span>
-                                            </TableCell>
                                             <TableCell>
                                                 <DropdownMenu>
                                                     <DropdownMenuTrigger asChild>
@@ -607,7 +736,7 @@ function ClientesPage() {
                                     ))
                                 ) : (
                                     <TableRow>
-                                        <TableCell colSpan={6} className="h-24 text-center">
+                                        <TableCell colSpan={5} className="h-24 text-center">
                                             Nenhum cliente encontrado com os filtros aplicados.
                                         </TableCell>
                                     </TableRow>
@@ -629,6 +758,7 @@ function ClientesPage() {
           onOpenChange={setIsDetailsOpen}
           client={selectedClient}
           onEdit={handleEdit}
+          codigoEmpresa={userProfile?.codigo_empresa}
         />
       </>
     );
