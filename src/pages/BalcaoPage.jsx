@@ -6,8 +6,9 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/components/ui/use-toast';
-import { Search, ArrowLeft, Store, FileText, DollarSign, CheckCircle } from 'lucide-react';
+import { Search, DollarSign, CheckCircle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { listProducts } from '@/lib/products';
 import { useAuth } from '@/contexts/AuthContext';
@@ -331,16 +332,19 @@ export default function BalcaoPage() {
         <meta name="description" content="Venda rápida no balcão." />
       </Helmet>
 
-      <motion.div variants={itemVariants} className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={() => navigate('/historico')}><FileText className="mr-2 h-4 w-4"/>Histórico</Button>
-        </div>
-        <div>
-          <h1 className="text-3xl font-black text-text-primary tracking-tighter">Modo Balcão</h1>
-          <p className="text-text-secondary">Venda rápida sem mesa.</p>
-        </div>
-        <div>
-          <Button variant="outline" onClick={() => navigate('/vendas')}><Store className="mr-2 h-4 w-4"/>Modo Mesas</Button>
+      <motion.div variants={itemVariants} className="flex items-center justify-between mb-6 gap-4 flex-wrap">
+        <div className="flex items-center gap-3">
+          <Tabs value="balcao" onValueChange={(v) => {
+            if (v === 'mesas') navigate('/vendas');
+            if (v === 'balcao') navigate('/balcao');
+            if (v === 'historico') navigate('/historico');
+          }}>
+            <TabsList className="grid grid-cols-3">
+              <TabsTrigger value="mesas">Mesas</TabsTrigger>
+              <TabsTrigger value="balcao">Balcão</TabsTrigger>
+              <TabsTrigger value="historico">Histórico</TabsTrigger>
+            </TabsList>
+          </Tabs>
         </div>
       </motion.div>
 

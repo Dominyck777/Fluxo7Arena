@@ -60,6 +60,8 @@ function VendasPage() {
   const [isCounterModeOpen, setIsCounterModeOpen] = useState(false);
   const [counterOrder, setCounterOrder] = useState([]);
   const [isCashierDetailsOpen, setIsCashierDetailsOpen] = useState(false);
+  const [cashLoading, setCashLoading] = useState(false);
+  const [cashSummary, setCashSummary] = useState(null);
   const [isOrderDetailsOpen, setIsOrderDetailsOpen] = useState(false);
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -89,6 +91,26 @@ function VendasPage() {
       document.body.style.overflow = original || '';
     };
   }, [isCreateMesaOpen, isOpenTableDialog, isOrderDetailsOpen, isCashierDetailsOpen, isPayOpen]);
+
+  // Carregar resumo do caixa quando abrir o diálogo
+  useEffect(() => {
+    const codigoEmpresa = userProfile?.codigo_empresa || null;
+    const loadSummary = async () => {
+      try {
+        if (!isCashierDetailsOpen) return;
+        if (!codigoEmpresa) return;
+        setCashLoading(true);
+        const summary = await listarResumoSessaoCaixaAtual({ codigoEmpresa }).catch(() => null);
+        setCashSummary(summary);
+      } catch {
+        setCashSummary(null);
+      } finally {
+        setCashLoading(false);
+      }
+    };
+    loadSummary();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isCashierDetailsOpen, userProfile?.codigo_empresa]);
 
   const mapStatus = (s) => {
     if (s === 'in_use') return 'in-use';
@@ -687,33 +709,41 @@ function VendasPage() {
     );
   };
 
-  const CashierDetailsDialog = () => (
-    <Dialog open={isCashierDetailsOpen} onOpenChange={setIsCashierDetailsOpen}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle className="text-2xl font-bold">Detalhes do Caixa</DialogTitle>
-          <DialogDescription>Resumo da sessão atual do caixa.</DialogDescription>
-        </DialogHeader>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <div className="bg-surface-2 rounded-lg p-3 border border-border">
-            <p className="text-xs text-text-secondary">Saldo Inicial</p>
-            <p className="text-2xl font-bold tabular-nums">R$ 0,00</p>
+  const CashierDetailsDialog = () => {
+    const fmt = (v) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(v || 0));
+    const saldoInicial = cashSummary?.saldo_inicial ?? 0;
+    const entradas = cashSummary?.totalEntradas ?? cashSummary?.entradas ?? 0;
+    const saidas = cashSummary?.totalSaidas ?? cashSummary?.saidas ?? 0;
+    return (
+      <Dialog open={isCashierDetailsOpen} onOpenChange={setIsCashierDetailsOpen}>
+        <DialogContent className="max-w-md" onKeyDown={(e) => e.stopPropagation()}>
+          <DialogHeader>
+            <DialogTitle className="text-2xl font-bold">Detalhes do Caixa</DialogTitle>
+            <DialogDescription>
+              {cashLoading ? 'Carregando resumo...' : (cashSummary ? 'Resumo da sessão atual do caixa.' : 'Nenhuma sessão de caixa aberta.')}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="bg-surface-2 rounded-lg p-3 border border-border">
+              <p className="text-xs text-text-secondary">Saldo Inicial</p>
+              <p className="text-2xl font-bold tabular-nums">{fmt(saldoInicial)}</p>
+            </div>
+            <div className="bg-surface-2 rounded-lg p-3 border border-border">
+              <p className="text-xs text-text-secondary">Entradas</p>
+              <p className="text-2xl font-bold text-success tabular-nums">{fmt(entradas)}</p>
+            </div>
+            <div className="bg-surface-2 rounded-lg p-3 border border-border">
+              <p className="text-xs text-text-secondary">Saídas</p>
+              <p className="text-2xl font-bold text-danger tabular-nums">{fmt(saidas)}</p>
+            </div>
           </div>
-          <div className="bg-surface-2 rounded-lg p-3 border border-border">
-            <p className="text-xs text-text-secondary">Entradas</p>
-            <p className="text-2xl font-bold text-success tabular-nums">R$ 0,00</p>
-          </div>
-          <div className="bg-surface-2 rounded-lg p-3 border border-border">
-            <p className="text-xs text-text-secondary">Saídas</p>
-            <p className="text-2xl font-bold text-danger tabular-nums">R$ 0,00</p>
-          </div>
-        </div>
-        <DialogFooter>
-          <Button variant="secondary" onClick={() => setIsCashierDetailsOpen(false)}>Fechar</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
+          <DialogFooter>
+            <Button variant="secondary" onClick={() => setIsCashierDetailsOpen(false)}>Fechar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    );
+  };
 
   const OrderDetailsDialog = () => {
     const tbl = selectedTable;
@@ -1579,22 +1609,27 @@ function VendasPage() {
         <meta name="description" content="Loja (PDV): controle de mesas, produtos e vendas." />
       </Helmet>
       <motion.div variants={pageVariants} initial="hidden" animate="visible" className="h-full flex flex-col">
-        <motion.div variants={itemVariants} className="flex items-center justify-between mb-6">
-          <div>
-            <h1 className="text-3xl font-black text-text-primary tracking-tighter">Loja</h1>
-            <p className="text-text-secondary">Gerencie as vendas do seu bar ou lanchonete.</p>
+        <motion.div variants={itemVariants} className="flex items-center justify-between mb-6 gap-4 flex-wrap">
+          <div className="flex items-center gap-3">
+            <Tabs value="mesas" onValueChange={(v) => {
+              if (v === 'mesas') navigate('/vendas');
+              if (v === 'balcao') navigate('/balcao');
+              if (v === 'historico') navigate('/historico');
+            }}>
+              <TabsList className="grid grid-cols-3">
+                <TabsTrigger value="mesas">Mesas</TabsTrigger>
+                <TabsTrigger value="balcao">Balcão</TabsTrigger>
+                <TabsTrigger value="historico">Histórico</TabsTrigger>
+              </TabsList>
+            </Tabs>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3 ml-auto">
             <OpenCashierDialog />
             <CloseCashierDialog />
             <Button variant="outline" onClick={() => setIsCashierDetailsOpen(true)}>
               <Banknote className="mr-2 h-4 w-4" /> Detalhes do Caixa
             </Button>
-            <div className="w-px h-6 bg-border mx-2"></div>
-            <Button variant="outline" onClick={() => { navigate('/historico'); }}>
-              <FileText className="mr-2 h-4 w-4" /> Histórico
-            </Button>
-            <Button variant="outline" onClick={() => navigate('/balcao')}><Store className="mr-2 h-4 w-4" /> Modo Balcão</Button>
+            <div className="w-px h-6 bg-border mx-1"></div>
             <Button onClick={() => setIsCreateMesaOpen(true)}><Plus className="mr-2 h-4 w-4" /> Nova Mesa</Button>
           </div>
         </motion.div>

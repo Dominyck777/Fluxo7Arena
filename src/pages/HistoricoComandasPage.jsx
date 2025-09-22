@@ -7,7 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/components/ui/use-toast';
-import { CalendarDays, FileText, Search, ArrowLeft, Loader2 } from 'lucide-react';
+import { CalendarDays, FileText, Search, Loader2 } from 'lucide-react';
 import { listarComandas, listarItensDaComanda, listarTotaisPorComanda, listarPagamentos, listMesas, listarClientesDaComanda, listarFechamentosCaixa, listarResumoPeriodo, getCaixaResumo, listarMovimentacoesCaixa } from '@/lib/store';
 import { cn } from '@/lib/utils';
 import { useNavigate } from 'react-router-dom';
@@ -170,27 +170,33 @@ export default function HistoricoComandasPage() {
         <meta name="description" content="Histórico de vendas, comandas e fechamentos de caixa." />
       </Helmet>
 
-      <motion.div variants={itemVariants} className="flex items-center justify-between mb-6">
+      <motion.div variants={itemVariants} className="flex items-center justify-between mb-6 gap-4 flex-wrap">
         <div className="flex items-center gap-3">
-          <button onClick={() => { try { navigate(-1); } catch { navigate('/vendas'); } }} className="inline-flex items-center justify-center h-8 w-8 rounded-md border border-border hover:bg-surface-2 transition-colors" aria-label="Voltar">
-            <ArrowLeft className="h-4 w-4 text-text-secondary" />
-          </button>
-          <div>
-            <h1 className="text-3xl font-black text-text-primary tracking-tighter">Histórico</h1>
-            <p className="text-text-secondary">Comandas e Fechamentos de Caixa.</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-4">
-          <Tabs value={tab} onValueChange={setTab} className="w-[320px]">
-            <TabsList className="grid grid-cols-2">
-              <TabsTrigger value="comandas">Comandas</TabsTrigger>
-              <TabsTrigger value="fechamentos">Fechamentos de Caixa</TabsTrigger>
+          <Tabs value="historico" onValueChange={(v) => {
+            if (v === 'mesas') navigate('/vendas');
+            if (v === 'balcao') navigate('/balcao');
+            if (v === 'historico') navigate('/historico');
+          }}>
+            <TabsList className="grid grid-cols-3">
+              <TabsTrigger value="mesas">Mesas</TabsTrigger>
+              <TabsTrigger value="balcao">Balcão</TabsTrigger>
+              <TabsTrigger value="historico">Histórico</TabsTrigger>
             </TabsList>
           </Tabs>
-          {tab === 'comandas' && (
-            <div className="text-sm text-text-secondary">Total do período: <span className="font-semibold text-text-primary">R$ {totals.sum.toFixed(2)}</span></div>
-          )}
         </div>
+      </motion.div>
+
+      {/* Abas internas do Histórico */}
+      <motion.div variants={itemVariants} className="flex items-center justify-between mb-4">
+        <Tabs value={tab} onValueChange={setTab}>
+          <TabsList className="grid grid-cols-2">
+            <TabsTrigger value="comandas">Comandas</TabsTrigger>
+            <TabsTrigger value="fechamentos">Fechamentos de Caixa</TabsTrigger>
+          </TabsList>
+        </Tabs>
+        {tab === 'comandas' && (
+          <div className="text-sm text-text-secondary">Total do período: <span className="font-semibold text-text-primary">R$ {totals.sum.toFixed(2)}</span></div>
+        )}
       </motion.div>
       
       {tab === 'comandas' && (
