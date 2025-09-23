@@ -12,6 +12,89 @@ function getCachedCompanyCode() {
   }
 }
 
+// Garante que há sessão de caixa aberta para a empresa atual
+// Lança erro com code = 'NO_OPEN_CASH_SESSION' se não houver
+export async function assertCaixaAberto({ codigoEmpresa } = {}) {
+  const codigo = codigoEmpresa || getCachedCompanyCode()
+  let q = supabase.from('caixa_sessoes').select('id').eq('status','open').order('aberto_em', { ascending: false }).limit(1)
+  if (codigo) q = q.eq('codigo_empresa', codigo)
+  const { data, error } = await q
+  if (error) throw error
+  const open = Array.isArray(data) && data.length > 0
+  if (!open) {
+    const err = new Error('É necessário abrir o caixa antes de criar comandas.')
+    err.code = 'NO_OPEN_CASH_SESSION'
+    throw err
+  }
+  return true
+}
+
+// Busca clientes vinculados para várias comandas em lote e retorna mapa { comanda_id: 'Nome1, Nome2' }
+export async function listarClientesPorComandas(comandaIds = [], codigoEmpresa) {
+  if (!Array.isArray(comandaIds) || comandaIds.length === 0) return {};
+  const codigo = codigoEmpresa || getCachedCompanyCode();
+  // Tenta com relacionamento pelo nome padrão; se falhar, tenta chave alternativa; se falhar, sem embed
+  const trySelect = async (rel) => {
+    let q = supabase
+      .from('comanda_clientes')
+      .select(`comanda_id, cliente_id, nome_livre, clientes:clientes${rel}(id, nome)`) // rel ex: !comanda_clientes_cliente_id_fkey
+      .in('comanda_id', comandaIds);
+    if (codigo) q = q.eq('codigo_empresa', codigo);
+    return q;
+  };
+  let rows = [];
+  try {
+    const { data, error } = await trySelect('!comanda_clientes_cliente_id_fkey');
+    if (error) throw error; rows = data || [];
+  } catch {
+    try {
+      const { data, error } = await trySelect('!fk_comanda_clientes_cliente');
+      if (error) throw error; rows = data || [];
+    } catch {
+      let q = supabase
+        .from('comanda_clientes')
+        .select('comanda_id, cliente_id, nome_livre')
+        .in('comanda_id', comandaIds);
+      if (codigo) q = q.eq('codigo_empresa', codigo);
+      const { data } = await q; rows = data || [];
+    }
+  }
+  const map = {};
+  for (const r of rows) {
+    const id = r.comanda_id;
+    const nome = (r.clientes?.nome) || r.nome_livre || '';
+    if (!map[id]) map[id] = [];
+    if (nome) map[id].push(nome);
+  }
+  for (const k of Object.keys(map)) map[k] = Array.from(new Set(map[k])).join(', ');
+  return map;
+}
+
+// Busca finalizadoras em lote e retorna mapa { comanda_id: 'Pix, Dinheiro' }
+export async function listarFinalizadorasPorComandas(comandaIds = [], codigoEmpresa) {
+  if (!Array.isArray(comandaIds) || comandaIds.length === 0) return {};
+  const codigo = codigoEmpresa || getCachedCompanyCode();
+  let q = supabase
+    .from('pagamentos')
+    .select('comanda_id, metodo, status')
+    .in('comanda_id', comandaIds);
+  if (codigo) q = q.eq('codigo_empresa', codigo);
+  const { data, error } = await q;
+  if (error) throw error;
+  const map = {};
+  for (const pg of (data || [])) {
+    const ok = (pg.status || 'Pago') !== 'Cancelado' && (pg.status || 'Pago') !== 'Estornado';
+    if (!ok) continue;
+    const id = pg.comanda_id;
+    const m = pg.metodo || '';
+    if (!map[id]) map[id] = new Set();
+    if (m) map[id].add(m);
+  }
+  const out = {};
+  for (const [k, set] of Object.entries(map)) out[k] = Array.from(set).join(', ');
+  return out;
+}
+
 // Verifica se a soma das quantidades por produto na comanda não excede o estoque disponível
 // Retorna true se OK; lança erro com detalhes se algum produto ultrapassar
 export async function verificarEstoqueComanda({ comandaId, codigoEmpresa } = {}) {
@@ -82,6 +165,8 @@ export async function listarComandaBalcaoAberta({ codigoEmpresa } = {}) {
 
 export async function getOrCreateComandaBalcao({ codigoEmpresa } = {}) {
   const codigo = codigoEmpresa || getCachedCompanyCode()
+  // Bloqueio: exigir caixa aberto
+  await assertCaixaAberto({ codigoEmpresa: codigo })
   const atual = await listarComandaBalcaoAberta({ codigoEmpresa: codigo })
   if (atual) return atual
   const payload = { status: 'open', mesa_id: null, aberto_em: new Date().toISOString() }
@@ -94,6 +179,8 @@ export async function getOrCreateComandaBalcao({ codigoEmpresa } = {}) {
 // Cria SEMPRE uma nova comanda de balcão (sem mesa)
 export async function criarComandaBalcao({ codigoEmpresa } = {}) {
   const codigo = codigoEmpresa || getCachedCompanyCode()
+  // Bloqueio: exigir caixa aberto
+  await assertCaixaAberto({ codigoEmpresa: codigo })
   const payload = { status: 'open', mesa_id: null, aberto_em: new Date().toISOString() }
   if (codigo) payload.codigo_empresa = codigo
   const { data, error } = await supabase.from('comandas').insert(payload).select('id,status,aberto_em').single()
@@ -454,7 +541,7 @@ export async function listarFechamentosCaixa({ from, to, limit = 50, offset = 0,
   return data || []
 }
 
-export async function fecharCaixa({ saldoFinal = 0, codigoEmpresa } = {}) {
+export async function fecharCaixa({ saldoFinal = null, codigoEmpresa } = {}) {
   const codigo = codigoEmpresa || getCachedCompanyCode()
   // Bloqueio: não permitir fechamento com comandas abertas (inclui balcão e mesas)
   try {
@@ -499,22 +586,31 @@ export async function fecharCaixa({ saldoFinal = 0, codigoEmpresa } = {}) {
     // Porém, se for nosso erro de regra (mensagem acima), propaga
     if (chkErr && /Existem \d+ comandas/.test(chkErr.message || '')) throw chkErr
   }
-  // pegar sessão aberta (precisamos do id e aberto_em)
-  let q = supabase.from('caixa_sessoes').select('id,aberto_em').eq('status','open').order('aberto_em', { ascending: false }).limit(1)
+  // pegar sessão aberta (precisamos do id, aberto_em e saldo_inicial)
+  let q = supabase.from('caixa_sessoes').select('id,aberto_em,saldo_inicial').eq('status','open').order('aberto_em', { ascending: false }).limit(1)
   if (codigo) q = q.eq('codigo_empresa', codigo)
   const { data: sess, error: qErr } = await q
   if (qErr) throw qErr
   const caixaId = sess?.[0]?.id || null
   const abertoEm = sess?.[0]?.aberto_em || null
+  const saldoInicialSessao = Number(sess?.[0]?.saldo_inicial || 0)
   if (!caixaId) throw new Error('Nenhuma sessão de caixa aberta encontrada.')
 
-  // Fechar sessão agora e capturar timestamp de fechamento
+  // Calcular resumo do período para estimar saldo final quando não informado
   const fechadoEmIso = new Date().toISOString()
+  let totalEntradas = 0
+  try {
+    const resumoTmp = await listarResumoPeriodo({ from: abertoEm, to: fechadoEmIso, codigoEmpresa: codigo })
+    totalEntradas = Number(resumoTmp?.totalEntradas || 0)
+  } catch {}
+  const efetivoSaldoFinal = (saldoFinal !== null && saldoFinal !== undefined) ? Number(saldoFinal) : (saldoInicialSessao + totalEntradas)
+
+  // Fechar sessão agora com saldo_final definido
   const { data, error } = await supabase
     .from('caixa_sessoes')
-    .update({ status: 'closed', saldo_final: saldoFinal, fechado_em: fechadoEmIso })
+    .update({ status: 'closed', saldo_final: efetivoSaldoFinal, fechado_em: fechadoEmIso })
     .eq('id', caixaId)
-    .select('id,status,fechado_em')
+    .select('id,status,fechado_em,saldo_final')
     .single()
   if (error) throw error
 
@@ -600,6 +696,8 @@ export async function listarMovimentacoesCaixa({ caixaSessaoId, codigoEmpresa } 
 // Comandas
 export async function abrirComandaParaMesa({ mesaId, codigoEmpresa } = {}) {
   const codigo = codigoEmpresa || getCachedCompanyCode()
+  // Bloqueio: exigir caixa aberto
+  await assertCaixaAberto({ codigoEmpresa: codigo })
   
   console.log(`[abrirComandaParaMesa] Iniciando para mesaId: ${mesaId}, codigo_empresa: ${codigo}`)
   
@@ -695,6 +793,8 @@ export async function listarItensDaComanda({ comandaId, codigoEmpresa }) {
 // Conveniência: SEMPRE criar nova comanda para mesa (nunca reutilizar)
 export async function getOrCreateComandaForMesa({ mesaId, codigoEmpresa } = {}) {
   const codigo = codigoEmpresa || getCachedCompanyCode()
+  // Bloqueio: exigir caixa aberto
+  await assertCaixaAberto({ codigoEmpresa: codigo })
   
   console.log(`[getOrCreateComandaForMesa] SEMPRE criando nova comanda para mesa ${mesaId}`)
   

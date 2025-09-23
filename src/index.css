@@ -72,6 +72,29 @@
     /* Evita shift de layout ao abrir modal (scrollbar) */
     scrollbar-gutter: stable both-edges;
   }
+  /* Global dark scrollbar (page scroll) */
+  html {
+    /* Firefox */
+    scrollbar-width: thin;
+    scrollbar-color: #2d2d2d #101010; /* thumb track */
+  }
+  /* WebKit global (Chrome/Edge/Safari) */
+  html::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  html::-webkit-scrollbar-track {
+    background: #101010; /* neutral dark track */
+  }
+  html::-webkit-scrollbar-thumb {
+    background-color: #2d2d2d; /* dark thumb */
+    border-radius: 8px;
+    border: 1px solid #3a3a3a;
+  }
+  html::-webkit-scrollbar-thumb:hover {
+    background-color: #3a3a3a;
+  }
+
   /* Placeholder mais discreto para todos os inputs/textarea (evita confundir com texto digitado) */
   input::placeholder,
   textarea::placeholder {

@@ -1588,7 +1588,7 @@ function VendasPage() {
                     return;
                   }
                 } catch {}
-                await fecharCaixa({ saldoFinal: 0, codigoEmpresa: userProfile?.codigo_empresa });
+                await fecharCaixa({ codigoEmpresa: userProfile?.codigo_empresa });
                 setIsCashierOpen(false);
                 toast({ title: 'Caixa fechado!', description: 'O relatório de fechamento foi gerado.' });
               } catch (e) {

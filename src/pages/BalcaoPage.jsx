@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 
 import { Helmet } from 'react-helmet';
 import { motion } from 'framer-motion';
@@ -29,6 +29,8 @@ export default function BalcaoPage() {
   const [customerName, setCustomerName] = useState('');
   const [productSearch, setProductSearch] = useState('');
   const [addingProductId, setAddingProductId] = useState(null);
+  const [pendingProduct, setPendingProduct] = useState(null);
+  const [cancelLoading, setCancelLoading] = useState(false);
 
   // Pagamento
   const [isPayOpen, setIsPayOpen] = useState(false);
@@ -45,6 +47,11 @@ export default function BalcaoPage() {
   const [showClientBox, setShowClientBox] = useState(false); // desativado no novo fluxo
   const [isClientWizardOpen, setIsClientWizardOpen] = useState(false);
   const [clientChosen, setClientChosen] = useState(false);
+  
+  // Refs para robustez contra respostas antigas (stale)
+  const itemsReqIdRef = useRef(0); // identifica a última requisição válida de itens
+  const itemsRef = useRef([]);
+  useEffect(() => { itemsRef.current = items; }, [items]);
 
   // Chaves de cache por empresa
   const companyCode = userProfile?.codigo_empresa || 'anon';
@@ -52,18 +59,30 @@ export default function BalcaoPage() {
     comandaId: `balcao:comandaId:${companyCode}`,
     items: `balcao:items:${companyCode}`,
     customerName: `balcao:customer:${companyCode}`,
+    clientChosen: `balcao:clientChosen:${companyCode}`,
+    pendingClientIds: `balcao:pendingClientIds:${companyCode}`,
   };
 
   // Utilitário: recarregar itens e cliente para a comanda atual com retry leve
   const refetchItemsAndCustomer = async (targetComandaId, attempts = 3) => {
     if (!targetComandaId) return;
     const codigoEmpresa = userProfile?.codigo_empresa;
+    const reqId = ++itemsReqIdRef.current;
     for (let i = 0; i < attempts; i++) {
       try {
         const itens = await listarItensDaComanda({ comandaId: targetComandaId, codigoEmpresa });
-        setItems((itens || []).map((it) => ({ id: it.id, name: it.descricao || 'Item', price: Number(it.preco_unitario || 0), quantity: Number(it.quantidade || 1) })));
+        // Ignora respostas antigas
+        if (reqId !== itemsReqIdRef.current) return;
+        const normalized = (itens || []).map((it) => ({ id: it.id, name: it.descricao || 'Item', price: Number(it.preco_unitario || 0), quantity: Number(it.quantidade || 1) }));
+        // Evita sobrescrever com vazio se já temos itens na UI (consistência eventual)
+        if (normalized.length === 0 && (itemsRef.current || []).length > 0) {
+          // mantém o estado atual e continua para tentar carregar clientes
+        } else {
+          setItems(normalized);
+        }
         try {
           const vincs = await listarClientesDaComanda({ comandaId: targetComandaId, codigoEmpresa });
+          if (reqId !== itemsReqIdRef.current) return;
           const nomes = (vincs || []).map(v => v?.nome).filter(Boolean);
           const nomeFinal = nomes.length ? nomes.join(', ') : '';
           setCustomerName(nomeFinal);
@@ -77,7 +96,10 @@ export default function BalcaoPage() {
         if (i === attempts - 1) {
           toast({ title: 'Falha ao atualizar itens', description: err?.message || 'Tente novamente', variant: 'destructive' });
         } else {
-          await new Promise(r => setTimeout(r, 500 * (i + 1)));
+          // Backoff com jitter leve
+          const base = 350 * (i + 1);
+          const jitter = Math.floor(Math.random() * 120);
+          await new Promise(r => setTimeout(r, base + jitter));
         }
       }
     }
@@ -97,9 +119,13 @@ export default function BalcaoPage() {
         const cachedId = localStorage.getItem(LS_KEY.comandaId);
         const cachedItems = JSON.parse(localStorage.getItem(LS_KEY.items) || '[]');
         const cachedCustomer = localStorage.getItem(LS_KEY.customerName) || '';
+        const cachedChosen = localStorage.getItem(LS_KEY.clientChosen);
+        const cachedPendingIds = JSON.parse(localStorage.getItem(LS_KEY.pendingClientIds) || '[]');
         if (cachedId) setComandaId(Number.isNaN(+cachedId) ? cachedId : Number(cachedId));
         if (Array.isArray(cachedItems) && cachedItems.length > 0) setItems(cachedItems);
         if (cachedCustomer) setCustomerName(cachedCustomer);
+        if (cachedChosen === 'true') setClientChosen(true);
+        if (Array.isArray(cachedPendingIds) && cachedPendingIds.length > 0) setSelectedClientIds(cachedPendingIds);
       } catch { /* ignore cache errors */ }
 
       // 2) Obter comanda aberta existente (não cria automaticamente)
@@ -117,8 +143,25 @@ export default function BalcaoPage() {
       } else {
         setComandaId(null);
         setItems([]);
-        setCustomerName('');
-        setClientChosen(false);
+        // Hidratar possível seleção pendente (sem comanda)
+        try {
+          const cachedCustomer = localStorage.getItem(LS_KEY.customerName) || '';
+          const cachedChosen = localStorage.getItem(LS_KEY.clientChosen) === 'true';
+          const cachedPendingIds = JSON.parse(localStorage.getItem(LS_KEY.pendingClientIds) || '[]');
+          setCustomerName(cachedCustomer || '');
+          setClientChosen(Boolean(cachedChosen));
+          setSelectedClientIds(Array.isArray(cachedPendingIds) ? cachedPendingIds : []);
+        } catch {
+          setCustomerName('');
+          setClientChosen(false);
+          setSelectedClientIds([]);
+        }
+        // Limpar cache se não há comanda aberta
+        try {
+          localStorage.removeItem(LS_KEY.comandaId);
+          localStorage.removeItem(LS_KEY.items);
+          // não apagar customerName/clientChosen/pendingClientIds aqui para preservar escolha pré-comanda
+        } catch {}
       }
       // Carregar produtos (com busca inicial se houver)
       try {
@@ -135,19 +178,26 @@ export default function BalcaoPage() {
   // Cancelar venda atual (fecha comanda sem registrar pagamentos) e abre nova
   const cancelSale = async () => {
     try {
-      if (!comandaId) return;
+      setCancelLoading(true);
       const codigoEmpresa = userProfile?.codigo_empresa;
-      if (!codigoEmpresa) { toast({ title: 'Empresa não definida', variant: 'destructive' }); return; }
-      await fecharComandaEMesa({ comandaId, codigoEmpresa });
-      // Não abre nova comanda automaticamente
+      if (comandaId && codigoEmpresa) {
+        try { await fecharComandaEMesa({ comandaId, codigoEmpresa }); } catch { /* ignora e segue limpando UI */ }
+      }
+    } finally {
+      // Limpa UI e cache independentemente do resultado do backend
       setComandaId(null);
       setItems([]);
       setSelectedClientIds([]);
       setCustomerName('');
       setClientChosen(false);
-      toast({ title: 'Venda cancelada', description: 'Uma nova comanda foi aberta.', variant: 'success' });
-    } catch (e) {
-      toast({ title: 'Falha ao cancelar venda', description: e?.message || 'Tente novamente', variant: 'destructive' });
+      setPendingProduct(null);
+      try {
+        localStorage.removeItem(LS_KEY.comandaId);
+        localStorage.removeItem(LS_KEY.items);
+        localStorage.removeItem(LS_KEY.customerName);
+      } catch {}
+      setCancelLoading(false);
+      toast({ title: 'Venda cancelada', variant: 'success' });
     }
   };
 
@@ -159,9 +209,17 @@ export default function BalcaoPage() {
       if (comandaId) localStorage.setItem(LS_KEY.comandaId, String(comandaId));
       localStorage.setItem(LS_KEY.items, JSON.stringify(items || []));
       localStorage.setItem(LS_KEY.customerName, customerName || '');
+      localStorage.setItem(LS_KEY.clientChosen, clientChosen ? 'true' : 'false');
+      if (!comandaId) {
+        // Antes da comanda, guardamos possíveis clientes pendentes
+        localStorage.setItem(LS_KEY.pendingClientIds, JSON.stringify(selectedClientIds || []));
+      } else {
+        // Com comanda aberta, removemos pendências
+        localStorage.removeItem(LS_KEY.pendingClientIds);
+      }
     } catch { /* ignore */ }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [comandaId, items, customerName]);
+  }, [comandaId, items, customerName, clientChosen, selectedClientIds]);
 
   // Recarregar itens quando janela ganha foco ou página volta a ficar visível
   useEffect(() => {
@@ -212,13 +270,17 @@ export default function BalcaoPage() {
 
   const total = useMemo(() => items.reduce((acc, it) => acc + Number(it.price || 0) * Number(it.quantity || 0), 0), [items]);
 
-  const addProduct = async (prod) => {
+  const addProduct = async (prod, opts = {}) => {
     try {
-      if (!clientChosen) { setIsClientWizardOpen(true); toast({ title: 'Selecione o cliente', description: 'Escolha Cliente cadastrado ou Consumidor antes de vender.', variant: 'warning' }); return; }
+      if (!clientChosen && !opts.skipClientCheck) {
+        setPendingProduct(prod);
+        setIsClientWizardOpen(true);
+        toast({ title: 'Selecione o cliente', description: 'Escolha Cliente cadastrado ou Consumidor antes de vender.', variant: 'warning' });
+        return;
+      }
       const codigoEmpresa = userProfile?.codigo_empresa;
       if (!codigoEmpresa) { toast({ title: 'Empresa não definida', description: 'Faça login novamente.', variant: 'destructive' }); return; }
       if (addingProductId) return;
-      setAddingProductId(prod.id);
 
       // Pré-validação no cliente para UX imediata (servidor também valida)
       const stock = Number(prod.stock ?? prod.currentStock ?? 0);
@@ -228,15 +290,45 @@ export default function BalcaoPage() {
         return;
       }
 
+      // Só aqui marcamos como "adicionando" para não travar em early-returns
+      setAddingProductId(prod.id);
+
       // Criar comanda se não existir ainda (somente no primeiro item)
       let cid = comandaId;
+      const createdNow = !cid;
       if (!cid) {
-        const c = await getOrCreateComandaBalcao({ codigoEmpresa });
-        cid = c.id;
-        setComandaId(c.id);
+        try {
+          const c = await getOrCreateComandaBalcao({ codigoEmpresa });
+          cid = c.id;
+          setComandaId(c.id);
+        } catch (err) {
+          if (err?.code === 'NO_OPEN_CASH_SESSION') {
+            toast({ title: 'Abra o caixa para vender', description: 'Você precisa abrir o caixa antes de iniciar uma comanda no Balcão.', variant: 'warning' });
+            return;
+          }
+          throw err;
+        }
       }
       const price = Number(prod.salePrice ?? prod.price ?? 0);
       await adicionarItem({ comandaId: cid, produtoId: prod.id, descricao: prod.name, quantidade: 1, precoUnitario: price, codigoEmpresa });
+      // Se havia clientes selecionados em memória e a comanda acabou de ser criada, associar agora
+      try {
+        const ids = Array.from(new Set(selectedClientIds || []));
+        if (createdNow && ids.length > 0) {
+          await adicionarClientesAComanda({ comandaId: cid, clienteIds: ids, nomesLivres: [], codigoEmpresa });
+          // atualizar nome exibido
+          const vincs = await listarClientesDaComanda({ comandaId: cid, codigoEmpresa });
+          const nomes = (vincs || []).map(v => v?.nome).filter(Boolean);
+          setCustomerName(nomes.length ? nomes.join(', ') : '');
+          setClientChosen(true);
+          // Limpar pendências de cliente após associar
+          try {
+            localStorage.removeItem(LS_KEY.pendingClientIds);
+            localStorage.setItem(LS_KEY.customerName, (nomes.length ? nomes.join(', ') : ''));
+            localStorage.setItem(LS_KEY.clientChosen, 'true');
+          } catch {}
+        }
+      } catch {}
       const itens = await listarItensDaComanda({ comandaId: cid, codigoEmpresa });
       setItems((itens || []).map((it) => ({ id: it.id, name: it.descricao || 'Item', price: Number(it.preco_unitario || 0), quantity: Number(it.quantidade || 1) })));
       // Avisos de estoque baixo/último
@@ -268,9 +360,18 @@ export default function BalcaoPage() {
       const codigoEmpresa = userProfile?.codigo_empresa;
       if (!codigoEmpresa) { toast({ title: 'Empresa não definida', variant: 'destructive' }); return; }
       if (!comandaId) {
-        const c = await getOrCreateComandaBalcao({ codigoEmpresa });
-        if (!c?.id) { toast({ title: 'Comanda não encontrada', description: 'Abra uma comanda antes de pagar.', variant: 'destructive' }); setPayLoading(false); return; }
-        setComandaId(c.id);
+        try {
+          const c = await getOrCreateComandaBalcao({ codigoEmpresa });
+          if (!c?.id) { toast({ title: 'Comanda não encontrada', description: 'Abra uma comanda antes de pagar.', variant: 'destructive' }); setPayLoading(false); return; }
+          setComandaId(c.id);
+        } catch (err) {
+          if (err?.code === 'NO_OPEN_CASH_SESSION') {
+            toast({ title: 'Abra o caixa para pagar', description: 'É necessário abrir o caixa antes de iniciar/confirmar uma venda.', variant: 'warning' });
+            setPayLoading(false);
+            return;
+          }
+          throw err;
+        }
       }
       // Validação forte de estoque antes do pagamento
       try {
@@ -318,6 +419,12 @@ export default function BalcaoPage() {
       setSelectedClientIds([]);
       setCustomerName('');
       setClientChosen(false);
+      // Limpar cache para não reidratar cliente antigo ao voltar
+      try {
+        localStorage.removeItem(LS_KEY.comandaId);
+        localStorage.removeItem(LS_KEY.items);
+        localStorage.removeItem(LS_KEY.customerName);
+      } catch {}
       toast({ title: 'Pagamento concluído', description: `Total R$ ${total.toFixed(2)}`, variant: 'success' });
       setIsPayOpen(false);
     } catch (e) {
@@ -378,12 +485,21 @@ export default function BalcaoPage() {
               <div className="text-lg font-bold">Balcão{customerName ? ` • ${customerName}` : ''}</div>
             </div>
             <div className="flex items-center gap-2">
-              <Button size="sm" variant="outline" onClick={() => setIsClientWizardOpen(true)}>+ Cliente</Button>
-              <Button size="sm" variant="outline" onClick={cancelSale}>Cancelar Venda</Button>
+              {clientChosen ? (
+                <Button size="sm" variant="outline" onClick={() => setIsClientWizardOpen(true)}>+ Cliente</Button>
+              ) : (
+                <Button size="sm" onClick={() => setIsClientWizardOpen(true)}>+ Nova venda</Button>
+              )}
+              <Button size="sm" variant="outline" onClick={cancelSale} disabled={cancelLoading}>{cancelLoading ? 'Cancelando...' : 'Cancelar Venda'}</Button>
             </div>
           </div>
           <div className="flex-1 overflow-y-auto p-4 thin-scroll">
-            {items.length === 0 ? (
+            {(!clientChosen) ? (
+              <div className="text-center pt-12">
+                <div className="text-sm text-text-secondary mb-3">Para começar, inicie uma nova venda e selecione o cliente.</div>
+                <Button onClick={() => setIsClientWizardOpen(true)}>Iniciar nova venda</Button>
+              </div>
+            ) : items.length === 0 ? (
               <div className="text-center text-text-muted pt-16">Comanda vazia. Adicione produtos ao lado.</div>
             ) : (
               <ul className="space-y-2 pr-1">
@@ -504,8 +620,8 @@ export default function BalcaoPage() {
           </DialogHeader>
           <div className="space-y-4">
             <div className="flex gap-2">
-              <Button type="button" variant={clientMode === 'cadastrado' ? 'default' : 'outline'} onClick={() => setClientMode('cadastrado')}>Cliente cadastrado</Button>
-              <Button type="button" variant={clientMode === 'consumidor' ? 'default' : 'outline'} onClick={() => setClientMode('consumidor')}>Consumidor</Button>
+              <Button type="button" variant="outline" onClick={() => setClientMode('cadastrado')}>Cliente cadastrado</Button>
+              <Button type="button" variant="outline" onClick={() => setClientMode('consumidor')}>Consumidor</Button>
             </div>
             {clientMode === 'cadastrado' ? (
               <div>
@@ -520,24 +636,40 @@ export default function BalcaoPage() {
                       <li key={c.id} className="p-2 flex items-center justify-between cursor-pointer hover:bg-surface-2" onClick={async () => {
                         try {
                           setLinking(true);
-                          await adicionarClientesAComanda({ comandaId, clienteIds: [c.id], nomesLivres: [], codigoEmpresa: userProfile?.codigo_empresa });
-                          setSelectedClientIds([]);
+                          const codigoEmpresa = userProfile?.codigo_empresa;
+                          if (!codigoEmpresa) { toast({ title: 'Empresa não definida', variant: 'destructive' }); return; }
+                          if (comandaId) {
+                            await adicionarClientesAComanda({ comandaId, clienteIds: [c.id], nomesLivres: [], codigoEmpresa });
+                            const vincs = await listarClientesDaComanda({ comandaId, codigoEmpresa });
+                            const nomes = (vincs || []).map(v => v?.nome).filter(Boolean);
+                            setCustomerName(nomes.length ? nomes.join(', ') : '');
+                            setClientChosen(true);
+                          } else {
+                            // Sem comanda ainda: guarda seleção para associar no primeiro item
+                            setSelectedClientIds(prev => {
+                              const arr = Array.from(new Set([...(prev||[]), c.id]));
+                              try { localStorage.setItem(LS_KEY.pendingClientIds, JSON.stringify(arr)); } catch {}
+                              return arr;
+                            });
+                            setCustomerName(c.nome || '');
+                            setClientChosen(true);
+                            try {
+                              localStorage.setItem(LS_KEY.customerName, c.nome || '');
+                              localStorage.setItem(LS_KEY.clientChosen, 'true');
+                            } catch {}
+                          }
                           setClientSearch('');
                           setClients([]);
-                          try {
-                            const vincs = await listarClientesDaComanda({ comandaId, codigoEmpresa: userProfile?.codigo_empresa });
-                            const nomes = (vincs || []).map(v => v?.nome).filter(Boolean);
-                            const nomeFinal = nomes.length ? nomes.join(', ') : '';
-                            setCustomerName(nomeFinal);
-                            setClientChosen(Boolean(nomeFinal));
-                            setIsClientWizardOpen(false);
-                          } catch {
-                            setCustomerName('');
-                            setClientChosen(false);
+                          // Fecha wizard primeiro para evitar competição de foco/modal
+                          setIsClientWizardOpen(false);
+                          toast({ title: 'Cliente selecionado', variant: 'success' });
+                          // Se havia um produto pendente, adiciona automaticamente após selecionar cliente
+                          if (pendingProduct) {
+                            const p = pendingProduct; setPendingProduct(null);
+                            await addProduct(p, { skipClientCheck: true });
                           }
-                          toast({ title: 'Cliente associado', variant: 'success' });
                         } catch (e) {
-                          toast({ title: 'Falha ao associar cliente', description: e?.message || 'Tente novamente', variant: 'destructive' });
+                          toast({ title: 'Falha ao selecionar cliente', description: e?.message || 'Tente novamente', variant: 'destructive' });
                         } finally {
                           setLinking(false);
                         }
@@ -564,14 +696,29 @@ export default function BalcaoPage() {
           <DialogFooter>
             <Button variant="outline" onClick={() => { setIsClientWizardOpen(false); }}>Fechar</Button>
             <Button onClick={async () => {
-              if (clientMode === 'consumidor') {
-                // Apenas marcar como escolhido
-                setCustomerName('');
-                setClientChosen(true);
-                setIsClientWizardOpen(false);
-              } else {
-                if (!customerName) { toast({ title: 'Selecione um cliente da lista', variant: 'warning' }); return; }
-                setIsClientWizardOpen(false);
+              try {
+                if (clientMode === 'consumidor') {
+                  // Apenas marcar; criaremos a comanda no primeiro item adicionado
+                  setCustomerName('');
+                  setClientChosen(true);
+                  setIsClientWizardOpen(false);
+                  try {
+                    localStorage.setItem(LS_KEY.customerName, '');
+                    localStorage.setItem(LS_KEY.clientChosen, 'true');
+                    localStorage.setItem(LS_KEY.pendingClientIds, JSON.stringify([]));
+                  } catch {}
+                } else {
+                  if (!customerName && (!selectedClientIds || selectedClientIds.length === 0)) { toast({ title: 'Selecione um cliente da lista', variant: 'warning' }); return; }
+                  // Cliente já selecionado (podendo não ter comanda ainda); apenas fechar
+                  setIsClientWizardOpen(false);
+                }
+                // Consumir produto pendente, se houver
+                if (pendingProduct) {
+                  const p = pendingProduct; setPendingProduct(null);
+                  await addProduct(p, { skipClientCheck: true });
+                }
+              } catch (e) {
+                toast({ title: 'Falha ao iniciar venda', description: e?.message || 'Tente novamente', variant: 'destructive' });
               }
             }}>Confirmar</Button>
           </DialogFooter>

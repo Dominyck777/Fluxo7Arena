@@ -1,14 +1,15 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Helmet } from 'react-helmet';
 import { motion } from 'framer-motion';
 import { Input } from '@/components/ui/input';
+import { Calendar } from '@/components/ui/calendar';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/components/ui/use-toast';
 import { CalendarDays, FileText, Search, Loader2 } from 'lucide-react';
-import { listarComandas, listarItensDaComanda, listarTotaisPorComanda, listarPagamentos, listMesas, listarClientesDaComanda, listarFechamentosCaixa, listarResumoPeriodo, getCaixaResumo, listarMovimentacoesCaixa } from '@/lib/store';
+import { listarComandas, listarItensDaComanda, listarTotaisPorComanda, listarPagamentos, listMesas, listarClientesDaComanda, listarFechamentosCaixa, listarResumoPeriodo, getCaixaResumo, listarMovimentacoesCaixa, listarClientesPorComandas, listarFinalizadorasPorComandas } from '@/lib/store';
 import { cn } from '@/lib/utils';
 import { useNavigate } from 'react-router-dom';
 
@@ -19,6 +20,90 @@ function useDebounced(value, delay = 300) {
   const [v, setV] = useState(value);
   useEffect(() => { const t = setTimeout(() => setV(value), delay); return () => clearTimeout(t); }, [value, delay]);
   return v;
+}
+
+// Componente local para campo de data com ícone clicável que abre o datepicker nativo
+function DateInput({ value, onChange }) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef(null);
+  
+  // Fechar ao clicar fora
+  useEffect(() => {
+    function onDocClick(e) {
+      if (!wrapRef.current) return;
+      if (!wrapRef.current.contains(e.target)) setOpen(false);
+    }
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, []);
+
+  // Util: parse/format
+  const parseISODate = (s) => {
+    try {
+      const [y,m,d] = String(s || '').split('-').map(Number);
+      if (!y || !m || !d) return null;
+      return new Date(y, m - 1, d);
+    } catch { return null; }
+  };
+
+  const statusCaixaPt = (s) => {
+    const v = String(s || '').toLowerCase();
+    if (v === 'open') return 'Aberto';
+    if (v === 'closed') return 'Fechado';
+    return '—';
+  };
+  const formatYMD = (d) => {
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+  };
+  const formatBR = (d) => {
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${pad(d.getDate())}/${pad(d.getMonth()+1)}/${d.getFullYear()}`;
+  };
+
+  const selected = parseISODate(value);
+  const display = selected ? formatBR(selected) : '';
+
+  return (
+    <div className="relative" ref={wrapRef}>
+      <button
+        type="button"
+        className="absolute left-2 top-1/2 -translate-y-1/2 p-1 rounded hover:bg-warning/10 focus:outline-none"
+        onClick={() => setOpen((v) => !v)}
+        aria-label="Abrir calendário"
+      >
+        <CalendarDays className="h-4 w-4 text-warning" />
+      </button>
+      <Input
+        type="text"
+        readOnly
+        onClick={() => setOpen((v) => !v)}
+        className="pl-9 pr-3 w-full bg-surface text-text-primary border border-warning/40 focus-visible:ring-warning focus-visible:border-warning"
+        value={display}
+      />
+      {open && (
+        <div className="absolute z-50 mt-1 left-0 bg-black text-white border border-warning/40 rounded-md shadow-xl p-2">
+          <Calendar
+            mode="single"
+            selected={selected || undefined}
+            onSelect={(d) => { if (d) { onChange(formatYMD(d)); setOpen(false); } }}
+            showOutsideDays
+            className=""
+            classNames={{
+              caption_label: 'text-sm font-medium text-white',
+              head_cell: 'text-xs text-warning/80 w-9',
+              day: 'h-9 w-9 p-0 font-normal text-white hover:bg-warning/10 rounded-md',
+              day_selected: 'bg-warning text-black hover:bg-warning focus:bg-warning',
+              day_today: 'border border-warning text-white',
+              day_outside: 'text-white/30',
+              nav_button: 'h-7 w-7 p-0 text-white hover:bg-warning/10 rounded-md',
+              table: 'w-full',
+            }}
+          />
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function HistoricoComandasPage() {
@@ -36,44 +121,48 @@ export default function HistoricoComandasPage() {
 
   const [detailId, setDetailId] = useState(null);
   const [detail, setDetail] = useState({ loading: false, itens: [], pagamentos: [] });
+  const [detailMeta, setDetailMeta] = useState(null); // { mesaLabel, clientesStr, aberto_em, fechado_em, tipo }
   const [cashDetail, setCashDetail] = useState({ open: false, loading: false, resumo: null, periodo: { from: null, to: null }, movs: [] });
 
-  const load = async () => {
+  // Paginação de comandas
+  const PAGE_LIMIT = 100;
+  const [offset, setOffset] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+
+  // Resilient loading helpers
+  const mountedRef = useRef(false);
+  const lastLoadTsRef = useRef(0);
+  const getEmpresaCodigoFromCache = () => {
+    try {
+      const raw = localStorage.getItem('auth:userProfile');
+      return raw ? (JSON.parse(raw)?.codigo_empresa || null) : null;
+    } catch { return null; }
+  };
+  const cacheKey = useMemo(() => {
+    const emp = getEmpresaCodigoFromCache() || 'na';
+    const k = `hist:comandas:${emp}:${from}:${to}:${status}:${tipo}:${(debouncedSearch||'').trim()}`;
+    return k;
+  }, [from, to, status, tipo, debouncedSearch]);
+
+  const load = async ({ append = false, skipCacheWrite = false } = {}) => {
     try {
       setLoading(true);
       if (tab === 'comandas') {
         // Busca base de comandas (sem depender do id no filtro de busca)
-        const list = await listarComandas({ status, from, to, search: '', limit: 100, offset: 0 });
+        const list = await listarComandas({ status, from, to, search: debouncedSearch || '', limit: PAGE_LIMIT, offset });
         // Carrega totais em lote
         const ids = (list || []).map(r => r.id);
         let totals = {};
-        try { totals = await listarTotaisPorComanda(ids); } catch { totals = {}; }
+        try { totals = await listarTotaisPorComanda(ids, getEmpresaCodigoFromCache()); } catch { totals = {}; }
         // Mapa de mesas { id: numero }
         let mesas = [];
-        try { mesas = await listMesas(); } catch { mesas = []; }
+        try { mesas = await listMesas(getEmpresaCodigoFromCache()); } catch { mesas = []; }
         const mapMesaNumero = new Map((mesas || []).map(m => [m.id, m.numero]));
-        // Nomes de clientes (consulta individual por comanda, agregando em string)
-        const namesByComanda = {};
-        try {
-          await Promise.all((ids || []).map(async (id) => {
-            try {
-              const vincs = await listarClientesDaComanda({ comandaId: id });
-              const nomes = (vincs || []).map(v => v?.nome).filter(Boolean);
-              namesByComanda[id] = nomes.join(', ');
-            } catch { namesByComanda[id] = ''; }
-          }));
-        } catch {}
-        // Finalizadoras (rótulos) a partir dos pagamentos
-        const finsByComanda = {};
-        try {
-          await Promise.all((ids || []).map(async (id) => {
-            try {
-              const pgs = await listarPagamentos({ comandaId: id });
-              const labels = Array.from(new Set((pgs || []).map(pg => pg?.metodo).filter(Boolean)));
-              finsByComanda[id] = labels.join(', ');
-            } catch { finsByComanda[id] = ''; }
-          }));
-        } catch {}
+        // Nomes de clientes e finalizadoras em lote (evita N+1)
+        let namesByComanda = {};
+        let finsByComanda = {};
+        try { namesByComanda = await listarClientesPorComandas(ids); } catch { namesByComanda = {}; }
+        try { finsByComanda = await listarFinalizadorasPorComandas(ids); } catch { finsByComanda = {}; }
         const withTotals = (list || []).map(r => ({
           ...r,
           // status derivado: se existe fechado_em, considerar 'closed' para exibição/filtragem
@@ -83,7 +172,16 @@ export default function HistoricoComandasPage() {
           clientesStr: namesByComanda[r.id] || '',
           finalizadorasStr: finsByComanda[r.id] || ''
         }));
-        setRows(withTotals);
+        setHasMore((list || []).length === PAGE_LIMIT);
+        if (append) {
+          setRows(prev => [...prev, ...withTotals]);
+        } else {
+          setRows(withTotals);
+        }
+        // Cache persist
+        if (!skipCacheWrite) {
+          try { localStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), rows: withTotals })); } catch {}
+        }
       } else {
         // Fechamentos de caixa
         const sess = await listarFechamentosCaixa({ from, to, limit: 100, offset: 0 });
@@ -93,20 +191,100 @@ export default function HistoricoComandasPage() {
       toast({ title: 'Falha ao carregar histórico', description: e?.message || 'Tente novamente', variant: 'destructive' });
     } finally {
       setLoading(false);
+      lastLoadTsRef.current = Date.now();
     }
   };
 
-  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [status, debouncedSearch, from, to, tab]);
+  // Hydrate from cache immediately on filters change to avoid empty UI
+  useEffect(() => {
+    mountedRef.current = true;
+    if (tab === 'comandas') {
+      try {
+        const raw = localStorage.getItem(cacheKey);
+        if (raw) {
+          const obj = JSON.parse(raw);
+          // Usa cache apenas se for recente (até 2 minutos)
+          if (obj && Array.isArray(obj.rows) && (Date.now() - Number(obj.ts || 0) < 120000)) {
+            setRows(obj.rows);
+          }
+        }
+      } catch {}
+    }
+    return () => { mountedRef.current = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cacheKey, tab]);
+
+  // Recarrega lista ao trocar filtros/abas, resetando paginação
+  useEffect(() => {
+    if (tab === 'comandas') {
+      setOffset(0);
+      setHasMore(false);
+    }
+    load({ append: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status, debouncedSearch, from, to, tab]);
+
+  // Retry backoff se vier vazio (corridas de auth/latência)
+  useEffect(() => {
+    if (!loading && tab === 'comandas' && rows.length === 0) {
+      const t = setTimeout(() => { if (mountedRef.current) load({ append: false, skipCacheWrite: false }); }, 1500);
+      return () => clearTimeout(t);
+    }
+  }, [rows.length, loading, tab]);
+
+  // Reload ao voltar foco/visível se passou muito tempo (30s)
+  useEffect(() => {
+    const onVis = () => {
+      if (document.visibilityState === 'visible') {
+        if (Date.now() - (lastLoadTsRef.current || 0) > 30000) load({ append: false });
+      }
+    };
+    const onFocus = () => {
+      if (Date.now() - (lastLoadTsRef.current || 0) > 30000) load({ append: false });
+    };
+    window.addEventListener('visibilitychange', onVis);
+    window.addEventListener('focus', onFocus);
+    return () => {
+      window.removeEventListener('visibilitychange', onVis);
+      window.removeEventListener('focus', onFocus);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cacheKey, tab]);
 
   const openDetail = async (id) => {
     setDetailId(id);
     setDetail({ loading: true, itens: [], pagamentos: [] });
+    // Monta metadados a partir da linha da lista (mesa, clientes, horários)
     try {
-      const [itens, pagamentos] = await Promise.all([
-        listarItensDaComanda({ comandaId: id }),
-        listarPagamentos({ comandaId: id })
-      ]);
-      setDetail({ loading: false, itens: itens || [], pagamentos: pagamentos || [] });
+      const row = (rows || []).find(r => r.id === id) || null;
+      if (row) {
+        const mesaLabel = (row.mesa_id == null) ? 'Balcão' : (row.mesaNumero != null ? `Mesa ${row.mesaNumero}` : 'Comanda');
+        setDetailMeta({
+          mesaLabel,
+          clientesStr: row.clientesStr || '',
+          aberto_em: row.aberto_em || null,
+          fechado_em: row.fechado_em || null,
+          tipo: (row.mesa_id == null) ? 'balcao' : 'comanda',
+        });
+      } else {
+        setDetailMeta(null);
+      }
+    } catch { setDetailMeta(null); }
+    try {
+      const fetchOnce = async () => {
+        const [itens, pagamentos] = await Promise.all([
+          listarItensDaComanda({ comandaId: id }),
+          listarPagamentos({ comandaId: id })
+        ]);
+        return { itens: itens || [], pagamentos: pagamentos || [] };
+      };
+      let result = await fetchOnce();
+      // Retry único se vier tudo vazio (ex.: latência/consistência eventual)
+      if ((result.itens.length === 0) && (result.pagamentos.length === 0)) {
+        await new Promise(r => setTimeout(r, 700));
+        result = await fetchOnce();
+      }
+      setDetail({ loading: false, itens: result.itens, pagamentos: result.pagamentos });
     } catch (e) {
       setDetail({ loading: false, itens: [], pagamentos: [] });
       toast({ title: 'Falha ao carregar detalhes', description: e?.message || 'Tente novamente', variant: 'destructive' });
@@ -127,17 +305,25 @@ export default function HistoricoComandasPage() {
       if (tipo === 'comanda' && isBalcao) return false;
       return true;
     });
+    // 1.5) Aplica filtro por Status no client-side também (além do backend)
+    const byStatus = byTipo.filter(r => {
+      const s = (r.fechado_em ? 'closed' : (r.status || 'open'));
+      if (status === 'closed') return s === 'closed';
+      if (status === 'open') return s === 'open';
+      if (status === 'awaiting-payment') return s === 'awaiting-payment';
+      return true;
+    });
     // 2) Se não houver termo, retorna somente por Tipo
-    if (!term) return byTipo;
+    if (!term) return byStatus;
     // 3) Aplica busca textual adicional
-    return byTipo.filter(r => {
+    return byStatus.filter(r => {
       const mesaTxt = (r.mesaNumero != null ? String(r.mesaNumero) : '').toLowerCase();
       const statusTxt = (r.statusDerived || r.status || '').toLowerCase();
       const clientesTxt = (r.clientesStr || '').toLowerCase();
       const tipoTxt = (r.mesa_id == null) ? 'balcao' : 'comanda';
       return mesaTxt.includes(term) || statusTxt.includes(term) || clientesTxt.includes(term) || tipoTxt.includes(term);
     });
-  }, [rows, debouncedSearch, tipo]);
+  }, [rows, debouncedSearch, tipo, status]);
 
   const statusPt = (s) => {
     if (s === 'open') return 'Aberta';
@@ -154,6 +340,14 @@ export default function HistoricoComandasPage() {
     } catch { return '—'; }
   };
 
+  // Status de sessão de caixa em português (usado na aba Fechamentos)
+  const statusCaixaPt = (s) => {
+    const v = String(s || '').toLowerCase();
+    if (v === 'open') return 'Aberto';
+    if (v === 'closed') return 'Fechado';
+    return '—';
+  };
+
   const fmtMoney = (v) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(v||0));
 
   const statusBadgeClass = (s) => {
@@ -164,7 +358,7 @@ export default function HistoricoComandasPage() {
   };
 
   return (
-    <motion.div variants={pageVariants} initial="hidden" animate="visible" className="h-full flex flex-col">
+    <motion.div variants={pageVariants} initial="hidden" animate="visible" className="min-h-screen flex flex-col">
       <Helmet>
         <title>Histórico - Fluxo7 Arena</title>
         <meta name="description" content="Histórico de vendas, comandas e fechamentos de caixa." />
@@ -184,37 +378,46 @@ export default function HistoricoComandasPage() {
             </TabsList>
           </Tabs>
         </div>
+        {/* Abas internas do Histórico movidas para a barra superior (lado direito) */}
+        <div className="flex items-center gap-3">
+          <Tabs value={tab} onValueChange={setTab}>
+            <TabsList className="grid grid-cols-2 text-sm">
+              <TabsTrigger value="comandas" className="text-sm">Comandas</TabsTrigger>
+              <TabsTrigger value="fechamentos" className="text-sm">Fechamentos</TabsTrigger>
+            </TabsList>
+          </Tabs>
+          {tab === 'comandas' && (
+            <div className="text-xs sm:text-sm text-text-secondary whitespace-nowrap">Total: <span className="font-semibold text-text-primary">R$ {totals.sum.toFixed(2)}</span></div>
+          )}
+        </div>
       </motion.div>
 
-      {/* Abas internas do Histórico */}
-      <motion.div variants={itemVariants} className="flex items-center justify-between mb-4">
-        <Tabs value={tab} onValueChange={setTab}>
-          <TabsList className="grid grid-cols-2">
-            <TabsTrigger value="comandas">Comandas</TabsTrigger>
-            <TabsTrigger value="fechamentos">Fechamentos de Caixa</TabsTrigger>
-          </TabsList>
-        </Tabs>
-        {tab === 'comandas' && (
-          <div className="text-sm text-text-secondary">Total do período: <span className="font-semibold text-text-primary">R$ {totals.sum.toFixed(2)}</span></div>
-        )}
-      </motion.div>
+      {/* Paginação - Comandas */}
+      {tab === 'comandas' && (
+        <div className="flex items-center justify-between mt-2">
+          <div className="text-xs text-text-secondary">Carregadas {rows.length} {rows.length === 1 ? 'comanda' : 'comandas'}</div>
+          {hasMore && (
+            <Button size="sm" variant="outline" disabled={loading} onClick={async () => {
+              const next = offset + PAGE_LIMIT;
+              setOffset(next);
+              await load({ append: true });
+            }}>Carregar mais</Button>
+          )}
+        </div>
+      )}
+
+      {/* Abas internas foram movidas para o topo; aqui removidas para ganhar espaço */}
       
       {tab === 'comandas' && (
       <motion.div variants={itemVariants} className="bg-surface rounded-lg border border-border p-4 mb-4">
         <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
           <div>
             <Label className="mb-1 block">Período Inicial</Label>
-            <div className="relative">
-              <CalendarDays className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-white/70" />
-              <Input type="date" className="pl-9" value={from} onChange={(e) => setFrom(e.target.value)} />
-            </div>
+            <DateInput value={from} onChange={setFrom} />
           </div>
           <div>
             <Label className="mb-1 block">Período Final</Label>
-            <div className="relative">
-              <CalendarDays className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-white/70" />
-              <Input type="date" className="pl-9" value={to} onChange={(e) => setTo(e.target.value)} />
-            </div>
+            <DateInput value={to} onChange={setTo} />
           </div>
           <div className="md:col-span-2">
             <Label className="mb-1 block">Busca</Label>
@@ -226,20 +429,20 @@ export default function HistoricoComandasPage() {
           <div>
             <Label className="mb-1 block">Status</Label>
             <Tabs value={status} onValueChange={setStatus} className="w-full">
-              <TabsList className="grid grid-cols-3">
-                <TabsTrigger value="closed">Fechadas</TabsTrigger>
-                <TabsTrigger value="open">Abertas</TabsTrigger>
-                <TabsTrigger value="awaiting-payment">Pagamento</TabsTrigger>
+              <TabsList className="grid grid-cols-3 text-xs">
+                <TabsTrigger value="closed" className="text-xs">Fechadas</TabsTrigger>
+                <TabsTrigger value="open" className="text-xs">Abertas</TabsTrigger>
+                <TabsTrigger value="awaiting-payment" className="text-xs">Pagamento</TabsTrigger>
               </TabsList>
             </Tabs>
           </div>
           <div>
             <Label className="mb-1 block">Tipo</Label>
             <Tabs value={tipo} onValueChange={setTipo} className="w-full">
-              <TabsList className="grid grid-cols-3">
-                <TabsTrigger value="all">Todos</TabsTrigger>
-                <TabsTrigger value="comanda">Comandas</TabsTrigger>
-                <TabsTrigger value="balcao">Balcão</TabsTrigger>
+              <TabsList className="grid grid-cols-3 text-xs">
+                <TabsTrigger value="all" className="text-xs">Todos</TabsTrigger>
+                <TabsTrigger value="comanda" className="text-xs">Comandas</TabsTrigger>
+                <TabsTrigger value="balcao" className="text-xs">Balcão</TabsTrigger>
               </TabsList>
             </Tabs>
           </div>
@@ -249,29 +452,32 @@ export default function HistoricoComandasPage() {
 
       {tab === 'comandas' && (
       <motion.div variants={itemVariants} className="bg-surface rounded-lg border border-border p-0 overflow-hidden">
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto pr-2 sm:pr-3">
           <table className="min-w-full text-sm">
             <thead className="bg-surface-2 text-text-secondary">
               <tr>
-                <th className="text-left px-4 py-3">Mesa</th>
-                <th className="text-left px-4 py-3">Tipo</th>
+                <th className="text-left px-4 py-3 whitespace-nowrap">Mesa</th>
+                <th className="text-left px-4 py-3 whitespace-nowrap">Tipo</th>
                 <th className="text-left px-4 py-3">Clientes</th>
                 <th className="text-left px-4 py-3">Status</th>
                 <th className="text-left px-4 py-3">Finalizadora</th>
-                <th className="text-left px-4 py-3">Abertura</th>
-                <th className="text-left px-4 py-3">Fechamento</th>
+                <th className="text-left px-4 py-3 whitespace-nowrap">Abertura</th>
+                <th className="text-left px-4 py-3 whitespace-nowrap">Fechamento</th>
                 <th className="text-right px-4 py-3">Total</th>
-                <th className="text-right px-4 py-3">Ações</th>
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 && (
-                <tr><td colSpan={8} className="px-4 py-6 text-center text-text-muted">Nenhuma comanda encontrada no período.</td></tr>
+                <tr><td colSpan={7} className="px-4 py-6 text-center text-text-muted">Nenhuma comanda encontrada no período.</td></tr>
               )}
               {filtered.map(r => (
-                <tr key={r.id} className="border-t border-border/70 hover:bg-warning/10">
-                  <td className="px-4 py-2">{r.mesa_id == null ? 'Balcão' : (r.mesaNumero != null ? `Mesa ${r.mesaNumero}` : '—')}</td>
-                  <td className="px-4 py-2">{r.mesa_id == null ? 'Balcão' : 'Comanda'}</td>
+                <tr
+                  key={r.id}
+                  className="border-t border-border/70 hover:bg-warning/10 cursor-pointer transition-all duration-150 hover:translate-x-[1px]"
+                  onClick={() => openDetail(r.id)}
+                >
+                  <td className="px-4 py-2 whitespace-nowrap">{r.mesa_id == null ? 'Balcão' : (r.mesaNumero != null ? `Mesa ${r.mesaNumero}` : '—')}</td>
+                  <td className="px-4 py-2 whitespace-nowrap">{r.mesa_id == null ? 'Balcão' : 'Comanda'}</td>
                   <td className="px-4 py-2 truncate max-w-[260px]">{r.clientesStr || '—'}</td>
                   <td className="px-4 py-2">
                     <span className={cn("inline-flex items-center text-[11px] font-medium px-2 py-0.5 rounded-full border", statusBadgeClass(r.statusDerived || r.status))}>
@@ -279,14 +485,9 @@ export default function HistoricoComandasPage() {
                     </span>
                   </td>
                   <td className="px-4 py-2 truncate max-w-[220px]">{r.finalizadorasStr || '—'}</td>
-                  <td className="px-4 py-2">{fmtDate(r.aberto_em)}</td>
-                  <td className="px-4 py-2">{fmtDate(r.fechado_em)}</td>
+                  <td className="px-4 py-2 whitespace-nowrap">{fmtDate(r.aberto_em)}</td>
+                  <td className="px-4 py-2 whitespace-nowrap">{fmtDate(r.fechado_em)}</td>
                   <td className="px-4 py-2 text-right font-semibold whitespace-nowrap">{fmtMoney(r.total)}</td>
-                  <td className="px-4 py-2 text-right">
-                    <Button size="sm" variant="outline" onClick={() => openDetail(r.id)}>
-                      <FileText className="mr-2 h-4 w-4" /> Detalhes
-                    </Button>
-                  </td>
                 </tr>
               ))}
             </tbody>
@@ -297,12 +498,25 @@ export default function HistoricoComandasPage() {
       )}
 
       {tab === 'fechamentos' && (
-      <motion.div variants={itemVariants} className="bg-surface rounded-lg border border-border p-0 overflow-hidden">
-        <div className="overflow-x-auto">
+      <>
+      <motion.div variants={itemVariants} className="bg-surface rounded-lg border border-border p-4 mb-4">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+          <div>
+            <Label className="mb-1 block">Período Inicial</Label>
+            <DateInput value={from} onChange={setFrom} />
+          </div>
+          <div>
+            <Label className="mb-1 block">Período Final</Label>
+            <DateInput value={to} onChange={setTo} />
+          </div>
+        </div>
+      </motion.div>
+
+      <motion.div variants={itemVariants} className="bg-surface rounded-lg border border-border p-4 overflow-hidden">
+        <div className="overflow-x-auto max-h-[60vh] overflow-y-auto pr-2 sm:pr-3">
           <table className="min-w-full text-sm">
             <thead className="bg-surface-2 text-text-secondary">
               <tr>
-                <th className="text-left px-4 py-3">ID</th>
                 <th className="text-left px-4 py-3">Abertura</th>
                 <th className="text-left px-4 py-3">Fechamento</th>
                 <th className="text-left px-4 py-3">Status</th>
@@ -311,18 +525,30 @@ export default function HistoricoComandasPage() {
               </tr>
             </thead>
             <tbody>
+              {loading && (!rows || rows.length === 0) && (
+                <tr><td colSpan={5} className="px-4 py-6 text-center text-text-muted"><Loader2 className="inline mr-2 h-4 w-4 animate-spin"/>Carregando fechamentos…</td></tr>
+              )}
               {(!rows || rows.length === 0) && (
-                <tr><td colSpan={6} className="px-4 py-6 text-center text-text-muted">Nenhum fechamento encontrado no período.</td></tr>
+                <tr><td colSpan={5} className="px-4 py-6 text-center text-text-muted">Nenhum fechamento encontrado no período.</td></tr>
               )}
               {(rows || []).map(r => (
-                <tr key={r.id} className="border-t border-border/70 hover:bg-success/5 cursor-pointer" onClick={async () => {
+                <tr key={r.id} className="border-t border-border/70 hover:bg-success/10 cursor-pointer transition-all duration-150 hover:translate-x-[1px]" onClick={async () => {
                   // Abrir detalhes do fechamento preferindo snapshot e incluindo movimentações
                   try {
                     setCashDetail({ open: true, loading: true, resumo: null, periodo: { from: r.aberto_em, to: r.fechado_em }, movs: [] });
-                    const [snap, movs] = await Promise.all([
-                      getCaixaResumo({ caixaSessaoId: r.id }).catch(() => null),
-                      listarMovimentacoesCaixa({ caixaSessaoId: r.id }).catch(() => [])
-                    ]);
+                    const loadResumo = async () => {
+                      const [snap, movs] = await Promise.all([
+                        getCaixaResumo({ caixaSessaoId: r.id }).catch(() => null),
+                        listarMovimentacoesCaixa({ caixaSessaoId: r.id }).catch(() => [])
+                      ]);
+                      return { snap, movs };
+                    };
+                    let { snap, movs } = await loadResumo();
+                    if (!snap) {
+                      // Retry leve se snapshot ainda não disponível
+                      await new Promise(rs => setTimeout(rs, 700));
+                      ({ snap, movs } = await loadResumo());
+                    }
                     if (snap) {
                       // Adaptar snapshot ao formato usado no componente
                       const resumo = {
@@ -341,26 +567,45 @@ export default function HistoricoComandasPage() {
                     setCashDetail({ open: true, loading: false, resumo: null, periodo: { from: r.aberto_em, to: r.fechado_em }, movs: [] });
                   }
                 }}>
-                  <td className="px-4 py-2">{r.id}</td>
                   <td className="px-4 py-2">{fmtDate(r.aberto_em)}</td>
                   <td className="px-4 py-2">{fmtDate(r.fechado_em)}</td>
-                  <td className="px-4 py-2 capitalize">{r.status || '—'}</td>
-                  <td className="px-4 py-2 text-right">{fmtMoney(r.saldo_inicial)}</td>
-                  <td className="px-4 py-2 text-right">{fmtMoney(r.saldo_final)}</td>
+                  <td className="px-4 py-2">{statusCaixaPt(r.status)}</td>
+                  <td className="px-4 py-2 text-right">{r?.saldo_inicial != null ? fmtMoney(r.saldo_inicial) : '—'}</td>
+                  <td className="px-4 py-2 text-right">{r?.saldo_final != null ? fmtMoney(r.saldo_final) : '—'}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       </motion.div>
+      </>
       )}
 
       {tab === 'comandas' && (
-      <Dialog open={!!detailId} onOpenChange={(v) => { if (!v) { setDetailId(null); setDetail({ loading: false, itens: [], pagamentos: [] }); } }}>
+      <Dialog open={!!detailId} onOpenChange={(v) => { if (!v) { setDetailId(null); setDetail({ loading: false, itens: [], pagamentos: [] }); setDetailMeta(null); } }}>
         <DialogContent className="max-w-3xl" onKeyDown={(e) => e.stopPropagation()}>
           <DialogHeader>
-            <DialogTitle>Detalhes da Comanda #{detailId || '—'}</DialogTitle>
-            <DialogDescription>Itens e pagamentos registrados.</DialogDescription>
+            <DialogTitle>
+              {detailMeta ? (
+                <span>
+                  {detailMeta.mesaLabel}
+                  {detailMeta.clientesStr ? <span className="text-text-secondary"> • {detailMeta.clientesStr}</span> : null}
+                </span>
+              ) : (
+                <>Detalhes da Comanda #{detailId || '—'}</>
+              )}
+            </DialogTitle>
+            <DialogDescription>
+              {detailMeta ? (
+                <>
+                  {detailMeta.aberto_em ? <>Abertura: {fmtDate(detailMeta.aberto_em)}</> : '—'}
+                  {" "}•{" "}
+                  {detailMeta.fechado_em ? <>Fechamento: {fmtDate(detailMeta.fechado_em)}</> : '—'}
+                </>
+              ) : (
+                <>Itens e pagamentos registrados.</>
+              )}
+            </DialogDescription>
           </DialogHeader>
           {detail.loading ? (
             <div className="p-6 text-center text-text-muted"><Loader2 className="mr-2 inline h-4 w-4 animate-spin" /> Carregando...</div>
@@ -399,7 +644,7 @@ export default function HistoricoComandasPage() {
             </div>
           )}
           <DialogFooter>
-            <Button variant="secondary" onClick={() => { setDetailId(null); }}>Fechar</Button>
+            <Button size="sm" variant="secondary" onClick={() => { setDetailId(null); }}>Fechar</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -453,7 +698,7 @@ export default function HistoricoComandasPage() {
             </div>
           )}
           <DialogFooter>
-            <Button variant="secondary" onClick={() => setCashDetail({ open: false, loading: false, resumo: null, periodo: { from: null, to: null } })}>Fechar</Button>
+            <Button size="sm" variant="secondary" onClick={() => setCashDetail({ open: false, loading: false, resumo: null, periodo: { from: null, to: null } })}>Fechar</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
