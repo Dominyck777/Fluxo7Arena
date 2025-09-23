@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 
 import { Helmet } from 'react-helmet';
 import { motion } from 'framer-motion';
@@ -47,6 +47,11 @@ export default function BalcaoPage() {
   const [showClientBox, setShowClientBox] = useState(false); // desativado no novo fluxo
   const [isClientWizardOpen, setIsClientWizardOpen] = useState(false);
   const [clientChosen, setClientChosen] = useState(false);
+  
+  // Refs para robustez contra respostas antigas (stale)
+  const itemsReqIdRef = useRef(0); // identifica a última requisição válida de itens
+  const itemsRef = useRef([]);
+  useEffect(() => { itemsRef.current = items; }, [items]);
 
   // Chaves de cache por empresa
   const companyCode = userProfile?.codigo_empresa || 'anon';
@@ -62,12 +67,22 @@ export default function BalcaoPage() {
   const refetchItemsAndCustomer = async (targetComandaId, attempts = 3) => {
     if (!targetComandaId) return;
     const codigoEmpresa = userProfile?.codigo_empresa;
+    const reqId = ++itemsReqIdRef.current;
     for (let i = 0; i < attempts; i++) {
       try {
         const itens = await listarItensDaComanda({ comandaId: targetComandaId, codigoEmpresa });
-        setItems((itens || []).map((it) => ({ id: it.id, name: it.descricao || 'Item', price: Number(it.preco_unitario || 0), quantity: Number(it.quantidade || 1) })));
+        // Ignora respostas antigas
+        if (reqId !== itemsReqIdRef.current) return;
+        const normalized = (itens || []).map((it) => ({ id: it.id, name: it.descricao || 'Item', price: Number(it.preco_unitario || 0), quantity: Number(it.quantidade || 1) }));
+        // Evita sobrescrever com vazio se já temos itens na UI (consistência eventual)
+        if (normalized.length === 0 && (itemsRef.current || []).length > 0) {
+          // mantém o estado atual e continua para tentar carregar clientes
+        } else {
+          setItems(normalized);
+        }
         try {
           const vincs = await listarClientesDaComanda({ comandaId: targetComandaId, codigoEmpresa });
+          if (reqId !== itemsReqIdRef.current) return;
           const nomes = (vincs || []).map(v => v?.nome).filter(Boolean);
           const nomeFinal = nomes.length ? nomes.join(', ') : '';
           setCustomerName(nomeFinal);
@@ -81,7 +96,10 @@ export default function BalcaoPage() {
         if (i === attempts - 1) {
           toast({ title: 'Falha ao atualizar itens', description: err?.message || 'Tente novamente', variant: 'destructive' });
         } else {
-          await new Promise(r => setTimeout(r, 500 * (i + 1)));
+          // Backoff com jitter leve
+          const base = 350 * (i + 1);
+          const jitter = Math.floor(Math.random() * 120);
+          await new Promise(r => setTimeout(r, base + jitter));
         }
       }
     }
