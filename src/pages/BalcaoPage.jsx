@@ -263,7 +263,6 @@ export default function BalcaoPage() {
       const codigoEmpresa = userProfile?.codigo_empresa;
       if (!codigoEmpresa) { toast({ title: 'Empresa não definida', description: 'Faça login novamente.', variant: 'destructive' }); return; }
       if (addingProductId) return;
-      setAddingProductId(prod.id);
 
       // Pré-validação no cliente para UX imediata (servidor também valida)
       const stock = Number(prod.stock ?? prod.currentStock ?? 0);
@@ -273,13 +272,24 @@ export default function BalcaoPage() {
         return;
       }
 
+      // Só aqui marcamos como "adicionando" para não travar em early-returns
+      setAddingProductId(prod.id);
+
       // Criar comanda se não existir ainda (somente no primeiro item)
       let cid = comandaId;
       const createdNow = !cid;
       if (!cid) {
-        const c = await getOrCreateComandaBalcao({ codigoEmpresa });
-        cid = c.id;
-        setComandaId(c.id);
+        try {
+          const c = await getOrCreateComandaBalcao({ codigoEmpresa });
+          cid = c.id;
+          setComandaId(c.id);
+        } catch (err) {
+          if (err?.code === 'NO_OPEN_CASH_SESSION') {
+            toast({ title: 'Abra o caixa para vender', description: 'Você precisa abrir o caixa antes de iniciar uma comanda no Balcão.', variant: 'warning' });
+            return;
+          }
+          throw err;
+        }
       }
       const price = Number(prod.salePrice ?? prod.price ?? 0);
       await adicionarItem({ comandaId: cid, produtoId: prod.id, descricao: prod.name, quantidade: 1, precoUnitario: price, codigoEmpresa });
@@ -332,9 +342,18 @@ export default function BalcaoPage() {
       const codigoEmpresa = userProfile?.codigo_empresa;
       if (!codigoEmpresa) { toast({ title: 'Empresa não definida', variant: 'destructive' }); return; }
       if (!comandaId) {
-        const c = await getOrCreateComandaBalcao({ codigoEmpresa });
-        if (!c?.id) { toast({ title: 'Comanda não encontrada', description: 'Abra uma comanda antes de pagar.', variant: 'destructive' }); setPayLoading(false); return; }
-        setComandaId(c.id);
+        try {
+          const c = await getOrCreateComandaBalcao({ codigoEmpresa });
+          if (!c?.id) { toast({ title: 'Comanda não encontrada', description: 'Abra uma comanda antes de pagar.', variant: 'destructive' }); setPayLoading(false); return; }
+          setComandaId(c.id);
+        } catch (err) {
+          if (err?.code === 'NO_OPEN_CASH_SESSION') {
+            toast({ title: 'Abra o caixa para pagar', description: 'É necessário abrir o caixa antes de iniciar/confirmar uma venda.', variant: 'warning' });
+            setPayLoading(false);
+            return;
+          }
+          throw err;
+        }
       }
       // Validação forte de estoque antes do pagamento
       try {
