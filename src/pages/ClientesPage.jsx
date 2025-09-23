@@ -183,7 +183,7 @@ function ClientDetailsModal({ open, onOpenChange, client, onEdit, codigoEmpresa 
           const saldo = Math.max(0, total - pago);
           const mesaNome = c.mesa?.[0]?.nome || c.mesa?.nome || null;
           const mesaNumero = c.mesa?.[0]?.numero || c.mesa?.numero || null;
-          const mesa_title = mesaNome || (mesaNumero != null ? `Mesa ${mesaNumero}` : 'Comanda');
+          const mesa_title = mesaNome || (mesaNumero != null ? `Mesa ${mesaNumero}` : 'Balcão');
           return {
             comanda_id: cid,
             created_at: createdAtFallback,
@@ -341,62 +341,64 @@ function ClientDetailsModal({ open, onOpenChange, client, onEdit, codigoEmpresa 
                   {(historyLoading || bookingsLoading) ? (
                     <div className="text-center py-8 text-sm text-text-muted">Carregando histórico...</div>
                   ) : (unifiedRecent && unifiedRecent.length > 0) ? (
-                    <div className="space-y-3">
-                      {unifiedRecent.map((item, idx) => (
-                        <div key={`${item.kind}-${idx}`} className="flex items-center justify-between gap-3 p-3 rounded-md border border-border/60 bg-background">
-                          <div className="min-w-0">
-                            {item.kind === 'comanda' ? (
-                              <>
-                                <div className="text-sm font-semibold text-text-primary truncate">{item.data.mesa_title || 'Comanda'}</div>
-                                <div className="text-xs text-text-secondary truncate">
-                                  {(() => { const h = item.data; return h.aberto_em ? new Date(h.aberto_em).toLocaleString('pt-BR') : new Date(h.created_at).toLocaleString('pt-BR'); })()}
-                                </div>
-                              </>
-                            ) : (
-                              <>
-                                <div className="text-sm font-semibold text-text-primary truncate">{item.data.modalidade || 'Agendamento'}</div>
-                                <div className="text-xs text-text-secondary truncate">
-                                  {new Date(item.data.inicio).toLocaleString('pt-BR')} — {item.data.quadra_nome || 'Quadra'}
-                                </div>
-                              </>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-3">
-                            {item.kind === 'comanda' ? (
-                              <>
+                    <div className="max-h-64 overflow-y-auto thin-scroll pr-1">
+                      <div className="space-y-3">
+                        {unifiedRecent.map((item, idx) => (
+                          <div key={`${item.kind}-${idx}`} className="flex items-center justify-between gap-3 p-3 rounded-md border border-border/60 bg-background">
+                            <div className="min-w-0">
+                              {item.kind === 'comanda' ? (
+                                <>
+                                  <div className="text-sm font-semibold text-text-primary truncate">{item.data.mesa_title || 'Balcão'}</div>
+                                  <div className="text-xs text-text-secondary truncate">
+                                    {(() => { const h = item.data; return h.aberto_em ? new Date(h.aberto_em).toLocaleString('pt-BR') : new Date(h.created_at).toLocaleString('pt-BR'); })()}
+                                  </div>
+                                </>
+                              ) : (
+                                <>
+                                  <div className="text-sm font-semibold text-text-primary truncate">{item.data.modalidade || 'Agendamento'}</div>
+                                  <div className="text-xs text-text-secondary truncate">
+                                    {new Date(item.data.inicio).toLocaleString('pt-BR')} — {item.data.quadra_nome || 'Quadra'}
+                                  </div>
+                                </>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-3">
+                              {item.kind === 'comanda' ? (
+                                <>
+                                  <span className={cn(
+                                    "px-2 py-1 text-[11px] font-semibold rounded-full border",
+                                    item.data.status === 'closed' || item.data.fechado_em ? "bg-success/10 text-success border-success/30" :
+                                    (item.data.status === 'awaiting-payment' ? "bg-info/10 text-info border-info/30" : "bg-warning/10 text-warning border-warning/30")
+                                  )}>
+                                    {item.data.status === 'closed' || item.data.fechado_em ? 'Fechada' : (item.data.status === 'awaiting-payment' ? 'Pagamento' : 'Em uso')}
+                                  </span>
+                                </>
+                              ) : (
                                 <span className={cn(
                                   "px-2 py-1 text-[11px] font-semibold rounded-full border",
-                                  item.data.status === 'closed' || item.data.fechado_em ? "bg-success/10 text-success border-success/30" :
-                                  (item.data.status === 'awaiting-payment' ? "bg-info/10 text-info border-info/30" : "bg-warning/10 text-warning border-warning/30")
+                                  item.data.status === 'finished' ? "bg-success/10 text-success border-success/30" :
+                                  item.data.status === 'canceled' ? "bg-danger/10 text-danger border-danger/30" :
+                                  item.data.status === 'in_progress' ? "bg-warning/10 text-warning border-warning/30" :
+                                  item.data.status === 'confirmed' ? "bg-info/10 text-info border-info/30" :
+                                  item.data.status === 'absent' ? "bg-rose-500/10 text-rose-400 border-rose-400/30" :
+                                  "bg-muted/10 text-text-secondary border-border/30"
                                 )}>
-                                  {item.data.status === 'closed' || item.data.fechado_em ? 'Fechada' : (item.data.status === 'awaiting-payment' ? 'Pagamento' : 'Em uso')}
+                                  {(() => {
+                                    switch (item.data.status) {
+                                      case 'finished': return 'Finalizado';
+                                      case 'canceled': return 'Cancelado';
+                                      case 'in_progress': return 'Em andamento';
+                                      case 'confirmed': return 'Confirmado';
+                                      case 'absent': return 'Ausente';
+                                      case 'scheduled': default: return 'Agendado';
+                                    }
+                                  })()}
                                 </span>
-                              </>
-                            ) : (
-                              <span className={cn(
-                                "px-2 py-1 text-[11px] font-semibold rounded-full border",
-                                item.data.status === 'finished' ? "bg-success/10 text-success border-success/30" :
-                                item.data.status === 'canceled' ? "bg-danger/10 text-danger border-danger/30" :
-                                item.data.status === 'in_progress' ? "bg-warning/10 text-warning border-warning/30" :
-                                item.data.status === 'confirmed' ? "bg-info/10 text-info border-info/30" :
-                                item.data.status === 'absent' ? "bg-rose-500/10 text-rose-400 border-rose-400/30" :
-                                "bg-muted/10 text-text-secondary border-border/30"
-                              )}>
-                                {(() => {
-                                  switch (item.data.status) {
-                                    case 'finished': return 'Finalizado';
-                                    case 'canceled': return 'Cancelado';
-                                    case 'in_progress': return 'Em andamento';
-                                    case 'confirmed': return 'Confirmado';
-                                    case 'absent': return 'Ausente';
-                                    case 'scheduled': default: return 'Agendado';
-                                  }
-                                })()}
-                              </span>
-                            )}
+                              )}
+                            </div>
                           </div>
-                        </div>
-                      ))}
+                        ))}
+                      </div>
                     </div>
                   ) : (
                     <div className="text-center py-8 text-sm text-text-muted">Sem registros recentes para este cliente.</div>
