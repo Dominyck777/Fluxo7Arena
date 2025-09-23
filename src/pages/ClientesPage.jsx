@@ -183,7 +183,7 @@ function ClientDetailsModal({ open, onOpenChange, client, onEdit, codigoEmpresa 
           const saldo = Math.max(0, total - pago);
           const mesaNome = c.mesa?.[0]?.nome || c.mesa?.nome || null;
           const mesaNumero = c.mesa?.[0]?.numero || c.mesa?.numero || null;
-          const mesa_title = mesaNome || (mesaNumero != null ? `Mesa ${mesaNumero}` : 'Balcão');
+          const mesa_title = mesaNome || (mesaNumero != null ? `Mesa ${mesaNumero}` : 'Comanda');
           return {
             comanda_id: cid,
             created_at: createdAtFallback,
@@ -347,7 +347,7 @@ function ClientDetailsModal({ open, onOpenChange, client, onEdit, codigoEmpresa 
                           <div className="min-w-0">
                             {item.kind === 'comanda' ? (
                               <>
-                                <div className="text-sm font-semibold text-text-primary truncate">{item.data.mesa_title || 'Balcão'}</div>
+                                <div className="text-sm font-semibold text-text-primary truncate">{item.data.mesa_title || 'Comanda'}</div>
                                 <div className="text-xs text-text-secondary truncate">
                                   {(() => { const h = item.data; return h.aberto_em ? new Date(h.aberto_em).toLocaleString('pt-BR') : new Date(h.created_at).toLocaleString('pt-BR'); })()}
                                 </div>
