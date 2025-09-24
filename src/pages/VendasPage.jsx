@@ -5,7 +5,7 @@ import { motion } from 'framer-motion';
 import { DragDropContext, Droppable, Draggable } from 'react-beautiful-dnd';
 import { Button } from '@/components/ui/button';
 import { useToast } from "@/components/ui/use-toast";
-import { Plus, GripVertical, Search, CheckCircle, Clock, FileText, ShoppingBag, Trash2, DollarSign, X, Store, Lock, Unlock, Minus, Banknote, ArrowDownCircle, ArrowUpCircle, CalendarDays } from 'lucide-react';
+import { Plus, GripVertical, Search, CheckCircle, Clock, FileText, ShoppingBag, Trash2, DollarSign, X, Store, Lock, Unlock, Minus, Banknote, ArrowDownCircle, ArrowUpCircle, CalendarDays, Users } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -594,8 +594,8 @@ function VendasPage() {
         ref={provided.innerRef}
         {...provided.draggableProps}
         className={cn(
-          "p-4 rounded-lg border bg-surface flex flex-col cursor-pointer transition-colors duration-150 relative h-44 shadow-sm min-w-[240px]",
-          isDragging && 'shadow-md',
+          "p-4 rounded-lg border bg-surface flex flex-col cursor-pointer transition-all duration-200 relative h-44 shadow-sm min-w-[240px] hover:shadow-md hover:scale-[1.02]",
+          isDragging && 'shadow-lg scale-105',
           selectedTable?.id === table.id && 'ring-2 ring-brand/60 bg-surface-2'
         )}
         onClick={() => handleSelectTable(table)}
@@ -603,23 +603,60 @@ function VendasPage() {
         <div {...provided.dragHandleProps} className="absolute top-2 right-2 text-text-muted opacity-60 hover:opacity-100">
           <GripVertical size={14} />
         </div>
-        <div className="flex items-center gap-2 mb-1">
+        <div className="flex items-center gap-2 mb-2">
           <Icon className="w-5 h-5 text-text-secondary" />
-          <span className="text-lg font-semibold text-text-primary truncate">{table.name ? table.name : `Mesa ${table.number}`}</span>
-        </div>
-        <div className="mb-2">
+          <span className="text-lg font-semibold text-text-primary truncate flex-1">{table.name ? table.name : `Mesa ${table.number}`}</span>
           <span className={cn("text-[11px] font-medium px-2 py-0.5 rounded-full border", badgeClass)}>
             {config.label}
           </span>
         </div>
+        
+        {/* Área central com ícone da mesa baseado no status */}
+        <div className={cn(
+          "flex-1 flex items-center justify-center",
+          selectedTable?.id === table.id && "animate-pulse"
+        )}>
+          {table.status === 'available' ? (
+            <img 
+              src="/mesalivre.png" 
+              alt="Mesa livre" 
+              className={cn(
+                "w-16 h-16 object-contain opacity-80 transition-all duration-200",
+                selectedTable?.id === table.id && "opacity-100 scale-110"
+              )}
+            />
+          ) : table.status === 'in-use' ? (
+            <img 
+              src="/mesaocupada.png" 
+              alt="Mesa ocupada" 
+              className={cn(
+                "w-16 h-16 object-contain opacity-80 transition-all duration-200",
+                selectedTable?.id === table.id && "opacity-100 scale-110"
+              )}
+            />
+          ) : (
+            <div className={cn(
+              "w-16 h-16 rounded-lg bg-info/20 border-2 border-info/40 flex items-center justify-center transition-all duration-200",
+              selectedTable?.id === table.id && "bg-info/30 border-info/60 scale-110"
+            )}>
+              <FileText className="w-8 h-8 text-info" />
+            </div>
+          )}
+        </div>
         {(table.status === 'in-use' || table.status === 'awaiting-payment') ? (
           <div className="w-full mt-auto">
-            <div className="text-sm sm:text-base font-medium text-text-primary truncate" title={table.customer || ''}>{table.customer || '—'}</div>
-            <div className="text-sm font-bold text-text-secondary">R$ {displayTotal.toFixed(2)}</div>
+            <div className="flex items-center gap-1 mb-1">
+              <Users className="w-3 h-3 text-text-muted flex-shrink-0" />
+              <div className="text-sm sm:text-base font-medium text-text-primary truncate" title={table.customer || ''}>{table.customer || '—'}</div>
+            </div>
+            <div className="flex items-center gap-1">
+              <DollarSign className="w-3 h-3 text-text-muted flex-shrink-0" />
+              <div className="text-sm font-bold text-text-secondary">R$ {displayTotal.toFixed(2)}</div>
+            </div>
           </div>
         ) : (
-          <div className="w-full mt-auto">
-            <div className="text-xs text-text-muted">Sem comanda</div>
+          <div className="w-full">
+            <div className="text-xs text-text-muted text-center">Sem comanda</div>
           </div>
         )}
       </div>
