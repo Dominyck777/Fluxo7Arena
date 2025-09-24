@@ -1,4 +1,6 @@
 import React from 'react';
+import { useLocation } from 'react-router-dom';
+
 import { Calendar, Bell, LogOut, Building, SidebarClose, SidebarOpen } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
@@ -16,12 +18,12 @@ function Header({ onToggleSidebar, sidebarVisible }) {
     const raw = localStorage.getItem('auth:company');
     if (raw) {
       const parsed = JSON.parse(raw);
-      cachedCompanyName = parsed?.nome_fantasia || parsed?.razao_social || parsed?.nome || parsed?.codigo_empresa || '';
+      cachedCompanyName = parsed?.nome_fantasia || parsed?.razao_social || parsed?.nome || parsed?.codigoEmpresa || '';
       // cache simples da logo
       var cachedLogo = parsed?.logo_url || '';
     }
   } catch {}
-  const companyName = company?.nome_fantasia || company?.razao_social || company?.nome || company?.codigo_empresa || cachedCompanyName || 'Empresa não vinculada';
+  const companyName = company?.nome_fantasia || company?.razao_social || company?.nome || company?.codigoEmpresa || cachedCompanyName || 'Empresa não vinculada';
   const companyLogo = company?.logo_url || (typeof cachedLogo !== 'undefined' ? cachedLogo : '');
   // Cache-buster para garantir atualização visual quando a logo for trocada mas a URL base se mantiver
   const companyLogoSrc = React.useMemo(() => {
@@ -62,12 +64,45 @@ function Header({ onToggleSidebar, sidebarVisible }) {
     year: 'numeric'
   });
 
+  const location = useLocation();
+  const pageTitle = React.useMemo(() => {
+    try {
+      const pathname = String(location?.pathname || '');
+      // Painel principal: não exibir título central
+      if (pathname === '/' || pathname.startsWith('/dashboard')) return '';
+      const map = [
+        { key: '/agenda', label: 'Agenda' },
+        { key: '/clientes', label: 'Clientes' },
+        { key: '/produtos', label: 'Produtos' },
+        { key: '/vendas', label: 'Vendas' },
+        { key: '/financeiro', label: 'Financeiro' },
+        { key: '/balcao', label: 'Balcão' },
+        { key: '/cadastros', label: 'Cadastros' },
+        { key: '/quadras', label: 'Quadras' },
+        { key: '/equipe', label: 'Equipe' },
+        { key: '/finalizadoras', label: 'Finalizadoras' },
+        { key: '/empresas', label: 'Empresas' },
+        { key: '/configuracoes', label: 'Configurações' },
+        { key: '/login', label: 'Login' },
+      ];
+      const found = map.find(m => pathname.startsWith(m.key));
+      if (found) return found.label;
+      // Fallback: usar título do documento antes de " - "
+      if (typeof document !== 'undefined') {
+        const raw = String(document.title || '');
+        const base = raw.includes(' - ') ? raw.split(' - ')[0] : raw;
+        return base || '';
+      }
+    } catch {}
+    return '';
+  }, [location?.pathname]);
+
   return (
     <motion.header
       initial={{ opacity: 0, y: -80 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
-      className="bg-surface/80 backdrop-blur-sm text-text-primary h-[72px] flex-shrink-0 flex items-center justify-between px-8 border-b border-border shadow-[0_1px_0_rgba(255,255,255,0.04)]"
+      className="relative bg-surface/80 backdrop-blur-sm text-text-primary h-[72px] flex-shrink-0 flex items-center justify-between px-8 border-b border-border shadow-[0_1px_0_RGBA(255,255,255,0.04)]"
     >
       <div className="flex items-center gap-4">
         <Button
@@ -89,7 +124,7 @@ function Header({ onToggleSidebar, sidebarVisible }) {
           className="group pl-3 pr-5 py-1.5 rounded-full border border-white/10 bg-gradient-to-b from-surface-2/60 to-surface/60 text-text-primary flex items-center gap-4 shadow-sm hover:border-white/20 transition-colors"
           title={companyName}
         >
-          <div className="relative w-11 h-11 shrink-0 rounded-full overflow-hidden border border-white/10 ring-2 ring-brand/30 ring-offset-0 bg-surface-2/60 grid place-items-center shadow-[0_0_0_3px_rgba(0,0,0,0.2)]">
+          <div className="relative w-11 h-11 shrink-0 rounded-full overflow-hidden border border-white/10 ring-2 ring-brand/30 ring-offset-0 bg-surface-2/60 grid place-items-center shadow-[0_0_0_3px_RGBA(0,0,0,0.2)]">
             {companyLogoSrc ? (
               <img src={companyLogoSrc} alt="Logo" className="w-full h-full object-cover" />
             ) : (
@@ -102,6 +137,13 @@ function Header({ onToggleSidebar, sidebarVisible }) {
         </div>
         {/* Data removida conforme solicitado */}
       </div>
+
+      {/* Título central da aba atual (overlay centralizado) */}
+      {pageTitle ? (
+        <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
+          <h1 className="text-lg md:text-xl font-bold tracking-tight text-text-primary">{pageTitle}</h1>
+        </div>
+      ) : null}
 
       <div className="flex items-center gap-2">
         <Button variant="ghost" size="icon" onClick={handleNotImplemented} className="text-text-secondary hover:text-text-primary transition-colors duration-200">

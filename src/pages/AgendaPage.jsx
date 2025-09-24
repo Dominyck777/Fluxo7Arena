@@ -1406,18 +1406,18 @@ function AgendaPage() {
                 <span className={cn("text-text-muted whitespace-nowrap", isHalfHour ? "text-sm" : "text-base") } style={{ fontSize: timePx }}>
                   {format(booking.start, 'HH:mm')}–{format(booking.end, 'HH:mm')}
                 </span>
-                {/* Indicador de pagamento de participantes (pago/total) */}
-                {totalParticipants > 0 && (
-                  <span className={`text-xs font-semibold rounded px-2 py-0.5 border ${paidCount === totalParticipants ? 'text-emerald-300 bg-emerald-500/10 border-emerald-400/30' : 'text-amber-300 bg-amber-500/10 border-amber-400/30'}`} style={{ fontSize: Math.max(12, Math.round(12 * (isLong ? scale : 1))) }}>
-                    {paidCount}/{totalParticipants} pagos
-                  </span>
-                )}
                 {isHalfHour ? (
                   <div className="flex items-center gap-1.5 whitespace-nowrap shrink-0">
                     <Icon className={cn(config.text)} style={{ width: iconPx, height: iconPx }} />
                     <span className={cn("truncate", config.text, "text-xs")} style={{ fontSize: Math.max(12, Math.round(12 * (isLong ? scale : 1))) }}>{config.label}</span>
                   </div>
                 ) : null}
+                {/* Indicador de pagamento de participantes (pago/total) — em layout meia hora fica ao lado do status (à direita) */}
+                {isHalfHour && totalParticipants > 0 && (
+                  <span className={`text-sm font-semibold rounded-full px-2.5 py-1 border ${paidCount === totalParticipants ? 'text-emerald-300 bg-emerald-500/10 border-emerald-400/30' : 'text-amber-300 bg-amber-500/10 border-amber-400/30'}`} style={{ fontSize: Math.max(13, Math.round(13 * (isLong ? scale : 1))) }}>
+                    {paidCount}/{totalParticipants} pagos
+                  </span>
+                )}
               </div>
             </div>
             <div className="mt-1 flex items-center justify-between gap-2">
@@ -1427,9 +1427,17 @@ function AgendaPage() {
                 </span>
               )}
               {!isHalfHour && (
-                <div className="flex items-center gap-1.5 text-sm">
-                  <Icon className={cn(config.text)} style={{ width: iconPx, height: iconPx }} />
-                  <span className={cn("truncate", config.text)} style={{ fontSize: smallPx }}>{config.label}</span>
+                <div className="flex items-center gap-2 text-sm">
+                  <div className="flex items-center gap-1.5">
+                    <Icon className={cn(config.text)} style={{ width: iconPx, height: iconPx }} />
+                    <span className={cn("truncate", config.text)} style={{ fontSize: smallPx }}>{config.label}</span>
+                  </div>
+                  {/* Chip de pagamentos ao lado direito do status */}
+                  {totalParticipants > 0 && (
+                    <span className={`text-sm font-semibold rounded-full px-2.5 py-1 border ${paidCount === totalParticipants ? 'text-emerald-300 bg-emerald-500/10 border-emerald-400/30' : 'text-amber-300 bg-amber-500/10 border-amber-400/30'}`} style={{ fontSize: Math.max(13, Math.round(13 * (isLong ? scale : 1))) }}>
+                      {paidCount}/{totalParticipants} pagos
+                    </span>
+                  )}
                 </div>
               )}
             </div>
