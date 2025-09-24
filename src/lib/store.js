@@ -3,10 +3,24 @@ import { supabase } from '@/lib/supabase'
 // Util: tenta obter o codigo da empresa do AuthContext armazenado no localStorage
 function getCachedCompanyCode() {
   try {
+    // 1) auth:userProfile
     const cached = localStorage.getItem('auth:userProfile')
-    if (!cached) return null
-    const obj = JSON.parse(cached)
-    return obj?.codigo_empresa || null
+    if (cached) {
+      const obj = JSON.parse(cached)
+      if (obj?.codigo_empresa) return obj.codigo_empresa
+    }
+    // 2) auth:company
+    const comp = localStorage.getItem('auth:company')
+    if (comp) {
+      const cobj = JSON.parse(comp)
+      if (cobj?.codigo_empresa) return cobj.codigo_empresa
+      if (cobj?.codigo) return cobj.codigo // fallback caso a chave seja 'codigo'
+    }
+    // 3) global fallback (se o app expuser)
+    if (typeof window !== 'undefined' && window.__authProfile && window.__authProfile.codigo_empresa) {
+      return window.__authProfile.codigo_empresa
+    }
+    return null
   } catch {
     return null
   }

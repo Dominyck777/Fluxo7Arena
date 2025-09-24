@@ -53,6 +53,13 @@ export default function BalcaoPage() {
   const itemsRef = useRef([]);
   useEffect(() => { itemsRef.current = items; }, [items]);
 
+  // Resilient mounting flag (evitar setState após unmount)
+  const mountedRef = useRef(false);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+
   // Chaves de cache por empresa
   const companyCode = userProfile?.codigo_empresa || 'anon';
   const LS_KEY = {
@@ -61,6 +68,8 @@ export default function BalcaoPage() {
     customerName: `balcao:customer:${companyCode}`,
     clientChosen: `balcao:clientChosen:${companyCode}`,
     pendingClientIds: `balcao:pendingClientIds:${companyCode}`,
+    missCount: `balcao:missCount:${companyCode}`,
+    lastMissTs: `balcao:lastMissTs:${companyCode}`,
   };
 
   // Utilitário: recarregar itens e cliente para a comanda atual com retry leve
@@ -108,10 +117,14 @@ export default function BalcaoPage() {
   const loadAll = async () => {
     try {
       setLoading(true);
+      // Timeout de segurança para não travar em loading
+      let safetyTimer = setTimeout(() => { if (mountedRef.current) setLoading(false); }, 10000);
       // Garantir codigo da empresa
       const codigoEmpresa = userProfile?.codigo_empresa;
       if (!codigoEmpresa) {
-        throw new Error('Código da empresa não disponível. Faça login novamente.');
+        // Short-circuit de pré-requisito
+        if (mountedRef.current) setLoading(false);
+        return;
       }
 
       // 1) Hidratar de cache, se existir (para exibirmos imediatamente)
@@ -141,9 +154,22 @@ export default function BalcaoPage() {
         setComandaId(cachedId);
         await refetchItemsAndCustomer(cachedId, 3);
       } else {
-        setComandaId(null);
-        setItems([]);
-        // Hidratar possível seleção pendente (sem comanda)
+        // Nenhuma comanda aberta encontrada e não há cache de comandaId
+        // Aplicar "dois strikes" antes de limpar itens/cache para mitigar latência/RLS
+        let missCount = 0; let lastMissTs = 0;
+        try {
+          missCount = Number(localStorage.getItem(LS_KEY.missCount) || '0');
+          lastMissTs = Number(localStorage.getItem(LS_KEY.lastMissTs) || '0');
+        } catch {}
+        const now = Date.now();
+        const withinWindow = (now - lastMissTs) < 90000; // 90s janela
+        const nextMiss = withinWindow ? (missCount + 1) : 1;
+        try {
+          localStorage.setItem(LS_KEY.missCount, String(nextMiss));
+          localStorage.setItem(LS_KEY.lastMissTs, String(now));
+        } catch {}
+
+        // Sempre manter possíveis seleções de cliente
         try {
           const cachedCustomer = localStorage.getItem(LS_KEY.customerName) || '';
           const cachedChosen = localStorage.getItem(LS_KEY.clientChosen) === 'true';
@@ -151,27 +177,34 @@ export default function BalcaoPage() {
           setCustomerName(cachedCustomer || '');
           setClientChosen(Boolean(cachedChosen));
           setSelectedClientIds(Array.isArray(cachedPendingIds) ? cachedPendingIds : []);
-        } catch {
-          setCustomerName('');
-          setClientChosen(false);
-          setSelectedClientIds([]);
-        }
-        // Limpar cache se não há comanda aberta
-        try {
-          localStorage.removeItem(LS_KEY.comandaId);
-          localStorage.removeItem(LS_KEY.items);
-          // não apagar customerName/clientChosen/pendingClientIds aqui para preservar escolha pré-comanda
         } catch {}
+
+        setComandaId(null);
+        // Só limpar itens e cache após 2 misses consecutivos na janela
+        if (nextMiss >= 2) {
+          setItems([]);
+          try {
+            localStorage.removeItem(LS_KEY.comandaId);
+            localStorage.removeItem(LS_KEY.items);
+          } catch {}
+        } else {
+          // No primeiro miss, manter os itens cacheados visíveis
+          try {
+            const cachedItems = JSON.parse(localStorage.getItem(LS_KEY.items) || '[]');
+            if (Array.isArray(cachedItems) && cachedItems.length > 0) setItems(cachedItems);
+          } catch {}
+        }
       }
       // Carregar produtos (com busca inicial se houver)
       try {
-        const prods = await listProducts({ includeInactive: false, search: productSearch?.trim() || undefined });
-        setProducts(prods || []);
+        const prods = await listProducts({ includeInactive: false, search: productSearch?.trim() || undefined, codigoEmpresa });
+        if (mountedRef.current) setProducts(prods || []);
       } catch { setProducts([]); }
+      clearTimeout(safetyTimer);
     } catch (e) {
       toast({ title: 'Falha ao carregar Modo Balcão', description: e?.message || 'Tente novamente', variant: 'destructive' });
     } finally {
-      setLoading(false);
+      if (mountedRef.current) setLoading(false);
     }
   };
 
@@ -201,7 +234,19 @@ export default function BalcaoPage() {
     }
   };
 
-  useEffect(() => { loadAll(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [userProfile?.codigo_empresa]);
+  useEffect(() => {
+    let retryOnce = false;
+    const run = async () => {
+      await loadAll();
+      // Retry leve se após o load inicial continuarmos sem comanda e sem itens, para mitigar latência/RLS
+      if (!retryOnce && mountedRef.current && !comandaId && (itemsRef.current || []).length === 0) {
+        retryOnce = true;
+        setTimeout(() => { if (mountedRef.current) loadAll(); }, 700);
+      }
+    };
+    run();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userProfile?.codigo_empresa]);
 
   // Persistir em cache quando comandaId/itens/cliente mudarem
   useEffect(() => {
@@ -239,7 +284,7 @@ export default function BalcaoPage() {
     let active = true;
     const t = setTimeout(async () => {
       try {
-        const prods = await listProducts({ includeInactive: false, search: productSearch?.trim() || undefined });
+        const prods = await listProducts({ includeInactive: false, search: productSearch?.trim() || undefined, codigoEmpresa: userProfile?.codigo_empresa });
         if (!active) return;
         // Fallback: se backend não filtrar por search, filtramos localmente
         if (productSearch?.trim()) {

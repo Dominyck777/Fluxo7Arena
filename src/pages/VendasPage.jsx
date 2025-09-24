@@ -77,10 +77,14 @@ function VendasPage() {
   const [payMethods, setPayMethods] = useState([]);
   const [selectedPayId, setSelectedPayId] = useState(null);
   const [payLoading, setPayLoading] = useState(false);
+  // Abrir Caixa (AlertDialog)
+  const [openCashInitial, setOpenCashInitial] = useState('');
+  const [openCashDialogOpen, setOpenCashDialogOpen] = useState(false);
+  const openCashInputRef = useRef(null);
 
   // Evita movimentação do layout quando diálogos estão abertos (bloqueia scroll do fundo)
   useEffect(() => {
-    const anyOpen = isCreateMesaOpen || isOpenTableDialog || isOrderDetailsOpen || isCashierDetailsOpen || isPayOpen;
+    const anyOpen = isCreateMesaOpen || isOpenTableDialog || isOrderDetailsOpen || isCashierDetailsOpen || isPayOpen || openCashDialogOpen;
     const original = document.body.style.overflow;
     if (anyOpen) {
       document.body.style.overflow = 'hidden';
@@ -90,7 +94,7 @@ function VendasPage() {
     return () => {
       document.body.style.overflow = original || '';
     };
-  }, [isCreateMesaOpen, isOpenTableDialog, isOrderDetailsOpen, isCashierDetailsOpen, isPayOpen]);
+  }, [isCreateMesaOpen, isOpenTableDialog, isOrderDetailsOpen, isCashierDetailsOpen, isPayOpen, openCashDialogOpen]);
 
   // Carregar resumo do caixa quando abrir o diálogo
   useEffect(() => {
@@ -121,6 +125,7 @@ function VendasPage() {
   useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
   const lastTablesLoadTsRef = useRef(0);
   const lastTablesSizeRef = useRef(0);
+  const loadReqIdRef = useRef(0);
 
   useEffect(() => {
     const codigoEmpresa = userProfile?.codigo_empresa || null;
@@ -144,6 +149,7 @@ function VendasPage() {
     const load = async () => {
       try {
         if (!authReady || !codigoEmpresa) return;
+        const myReq = ++loadReqIdRef.current;
         try { console.group(trace); } catch {}
         try { console.log('start', { codigoEmpresa }); } catch {}
         const slowFallback = setTimeout(() => {
@@ -151,7 +157,15 @@ function VendasPage() {
           try { console.warn(trace + ' still waiting... (showing cached tables if any)'); } catch {}
           hydrateFromCache();
         }, 2000);
-        const mesas = await listMesas(codigoEmpresa);
+        // Safety timeout para não travar o loading
+        const safetyTimer = setTimeout(() => {
+          if (mountedRef.current && loadReqIdRef.current === myReq) {
+            try { console.warn(trace + ' safety timeout reached'); } catch {}
+            hydrateFromCache();
+          }
+        }, 10000);
+
+        let mesas = await listMesas(codigoEmpresa);
         let openComandas = [];
         try { 
           openComandas = await listarComandasAbertas({ codigoEmpresa }); 
@@ -191,10 +205,15 @@ function VendasPage() {
           }
           return { id: m.id, number: m.numero, name: m.nome || null, status, order: [], customer, comandaId, totalHint };
         });
-        if (!mountedRef.current) return;
-        // Usar dados frescos do banco sem mesclar com estado anterior
-        setTables(uiTables);
-        try { if (cacheKey) localStorage.setItem(cacheKey, JSON.stringify(uiTables)); } catch {}
+        if (!mountedRef.current || loadReqIdRef.current !== myReq) { clearTimeout(slowFallback); clearTimeout(safetyTimer); return; }
+        // Se vier tudo vazio após idle, preservar cache e agendar um retry leve
+        if ((uiTables || []).length === 0) {
+          hydrateFromCache();
+          setTimeout(() => { if (mountedRef.current && loadReqIdRef.current === myReq) load(); }, 800);
+        } else {
+          setTables(uiTables);
+          try { if (cacheKey) localStorage.setItem(cacheKey, JSON.stringify(uiTables)); } catch {}
+        }
         lastTablesSizeRef.current = Array.isArray(uiTables) ? uiTables.length : 0;
         lastTablesLoadTsRef.current = Date.now();
         // Restaurar seleção anterior pelo cache (se houver)
@@ -222,11 +241,13 @@ function VendasPage() {
           setIsCashierOpen(!!sessao);
         } catch { setIsCashierOpen(false); }
         try {
-          const prods = await listProducts({ includeInactive: false });
+          const prods = await listProducts({ includeInactive: false, codigoEmpresa });
           setProducts(prods);
         } catch (e) { console.warn('Falha ao carregar produtos:', e?.message || e); }
         try { console.log('ok', { tables: uiTables.length, openComandas: (openComandas || []).length }); } catch {}
         try { console.groupEnd(); } catch {}
+        clearTimeout(slowFallback);
+        clearTimeout(safetyTimer);
       } catch (e) {
         console.error('Erro ao carregar mesas:', e);
       }
@@ -676,7 +697,14 @@ function VendasPage() {
     };
     return (
       <Dialog open={isPayOpen} onOpenChange={setIsPayOpen}>
-        <DialogContent className="max-w-md">
+        <DialogContent
+          className="max-w-md"
+          onKeyDown={(e) => e.stopPropagation()}
+          onKeyDownCapture={(e) => e.stopPropagation()}
+          onOpenAutoFocus={(e) => e.preventDefault()}
+          onPointerDownOutside={(e) => e.stopPropagation()}
+          onInteractOutside={(e) => e.stopPropagation()}
+        >
           <DialogHeader>
             <DialogTitle className="text-2xl font-bold">Fechar Conta</DialogTitle>
             <DialogDescription>Selecione a finalizadora e confirme o pagamento.</DialogDescription>
@@ -716,7 +744,14 @@ function VendasPage() {
     const saidas = cashSummary?.totalSaidas ?? cashSummary?.saidas ?? 0;
     return (
       <Dialog open={isCashierDetailsOpen} onOpenChange={setIsCashierDetailsOpen}>
-        <DialogContent className="max-w-md" onKeyDown={(e) => e.stopPropagation()}>
+        <DialogContent
+          className="max-w-md"
+          onKeyDown={(e) => e.stopPropagation()}
+          onKeyDownCapture={(e) => e.stopPropagation()}
+          onOpenAutoFocus={(e) => e.preventDefault()}
+          onPointerDownOutside={(e) => e.stopPropagation()}
+          onInteractOutside={(e) => e.stopPropagation()}
+        >
           <DialogHeader>
             <DialogTitle className="text-2xl font-bold">Detalhes do Caixa</DialogTitle>
             <DialogDescription>
@@ -751,7 +786,14 @@ function VendasPage() {
     const total = tbl ? calculateTotal(items) : 0;
     return (
       <Dialog open={isOrderDetailsOpen} onOpenChange={setIsOrderDetailsOpen}>
-        <DialogContent className="max-w-xl" onKeyDown={(e) => e.stopPropagation()} onKeyDownCapture={(e) => e.stopPropagation()}>
+        <DialogContent
+          className="max-w-xl"
+          onKeyDown={(e) => e.stopPropagation()}
+          onKeyDownCapture={(e) => e.stopPropagation()}
+          onOpenAutoFocus={(e) => e.preventDefault()}
+          onPointerDownOutside={(e) => e.stopPropagation()}
+          onInteractOutside={(e) => e.stopPropagation()}
+        >
           <DialogHeader>
             <DialogTitle className="text-2xl font-bold">Comanda da Mesa {tbl?.number ?? '—'}</DialogTitle>
             <DialogDescription>{tbl?.customer ? `Cliente: ${tbl.customer}` : 'Sem cliente vinculado'}</DialogDescription>
@@ -969,7 +1011,14 @@ function VendasPage() {
     };
     return (
       <Dialog open={isCreateMesaOpen} onOpenChange={(open) => { setIsCreateMesaOpen(open); if (!open) { setNumeroVal(''); setNomeVal(''); } }}>
-        <DialogContent className="max-w-md w-[400px]" onKeyDown={(e) => e.stopPropagation()} onKeyDownCapture={(e) => e.stopPropagation()}>
+        <DialogContent
+          className="max-w-md w-[400px]"
+          onKeyDown={(e) => e.stopPropagation()}
+          onKeyDownCapture={(e) => e.stopPropagation()}
+          onOpenAutoFocus={(e) => e.preventDefault()}
+          onPointerDownOutside={(e) => e.stopPropagation()}
+          onInteractOutside={(e) => e.stopPropagation()}
+        >
           <DialogHeader>
             <DialogTitle className="text-2xl font-bold">Nova Mesa</DialogTitle>
             <DialogDescription>Crie uma nova mesa informando, opcionalmente, o número desejado. Em branco cria a próxima sequência.</DialogDescription>
@@ -1175,7 +1224,14 @@ function VendasPage() {
     const total = calculateTotal(counterItems);
     return (
       <Dialog open={isCounterModeOpen} onOpenChange={setIsCounterModeOpen}>
-        <DialogContent className="max-w-4xl h-[90vh]">
+        <DialogContent
+          className="max-w-4xl h-[90vh]"
+          onKeyDown={(e) => e.stopPropagation()}
+          onKeyDownCapture={(e) => e.stopPropagation()}
+          onOpenAutoFocus={(e) => e.preventDefault()}
+          onPointerDownOutside={(e) => e.stopPropagation()}
+          onInteractOutside={(e) => e.stopPropagation()}
+        >
           <DialogHeader>
             <DialogTitle className="text-2xl font-bold">Modo Balcão</DialogTitle>
             <DialogDescription>Venda rápida para clientes sem mesa.</DialogDescription>
@@ -1423,7 +1479,14 @@ function VendasPage() {
 
     return (
       <Dialog open={isOpenTableDialog} onOpenChange={(open) => { setIsOpenTableDialog(open); if (!open) { setPendingTable(null); setClienteNome(''); setSelectedClientIds([]); setCommonName(''); setMode('registered'); } }}>
-        <DialogContent className="max-w-xl w-[720px] max-h-[80vh] overflow-y-auto" onKeyDown={(e) => e.stopPropagation()} onKeyDownCapture={(e) => e.stopPropagation()}>
+        <DialogContent
+          className="max-w-xl w-[720px] max-h-[80vh] overflow-y-auto"
+          onKeyDown={(e) => e.stopPropagation()}
+          onKeyDownCapture={(e) => e.stopPropagation()}
+          onOpenAutoFocus={(e) => e.preventDefault()}
+          onPointerDownOutside={(e) => e.stopPropagation()}
+          onInteractOutside={(e) => e.stopPropagation()}
+        >
           <DialogHeader>
             <DialogTitle className="text-2xl font-bold">Abrir Mesa {pendingTable ? `#${pendingTable.number}` : ''}</DialogTitle>
             <DialogDescription>Escolha uma das opções: cliente cadastrado OU cliente comum.</DialogDescription>
@@ -1488,8 +1551,14 @@ function VendasPage() {
     )
   }
 
-  const [openCashInitial, setOpenCashInitial] = useState('');
-  const [openCashDialogOpen, setOpenCashDialogOpen] = useState(false);
+  useEffect(() => {
+    if (openCashDialogOpen) {
+      // Foca o input assim que o dialog abrir (após paint)
+      setTimeout(() => {
+        try { openCashInputRef.current?.focus(); } catch {}
+      }, 0);
+    }
+  }, [openCashDialogOpen]);
   const OpenCashierDialog = () => (
     <AlertDialog open={openCashDialogOpen} onOpenChange={setOpenCashDialogOpen}>
       <AlertDialogTrigger asChild>
@@ -1498,10 +1567,13 @@ function VendasPage() {
           </Button>
       </AlertDialogTrigger>
       <AlertDialogContent 
+        className="sm:max-w-[425px]"
         onKeyDown={(e) => e.stopPropagation()}
         onKeyDownCapture={(e) => e.stopPropagation()}
         onEscapeKeyDown={(e) => e.preventDefault()}
-        onPointerDownOutside={(e) => e.preventDefault()}
+        onPointerDownOutside={(e) => { e.preventDefault(); e.stopPropagation(); }}
+        onInteractOutside={(e) => { e.preventDefault(); e.stopPropagation(); }}
+        onOpenAutoFocus={(e) => e.preventDefault()}
       >
         <AlertDialogHeader>
           <AlertDialogTitle>Abrir Caixa</AlertDialogTitle>
@@ -1511,7 +1583,54 @@ function VendasPage() {
           <Label htmlFor="initial-value">Valor Inicial</Label>
           <div className="relative mt-2">
             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted">R$</span>
-            <Input id="initial-value" type="number" placeholder="0,00" className="pl-9 font-semibold" value={openCashInitial} onChange={(e) => setOpenCashInitial(e.target.value)} />
+            <Input
+              id="initial-value"
+              ref={openCashInputRef}
+              type="text"
+              inputMode="decimal"
+              pattern="[0-9.,]*"
+              placeholder="0,00"
+              className="pl-9 font-semibold"
+              autoFocus
+              value={openCashInitial}
+              onChange={(e) => {
+                // permite apenas dígitos e uma vírgula ou ponto
+                const raw = e.target.value;
+                const cleaned = raw.replace(/[^0-9,\.]/g, '');
+                // Normaliza: mantém apenas o primeiro separador
+                let sepSeen = false;
+                let out = '';
+                for (const ch of cleaned) {
+                  if (/[0-9]/.test(ch)) { out += ch; continue; }
+                  if ((ch === ',' || ch === '.') && !sepSeen) { out += ','; sepSeen = true; }
+                }
+                setOpenCashInitial(out);
+                // manter foco e caret ao final
+                requestAnimationFrame(() => {
+                  try {
+                    const el = openCashInputRef.current;
+                    if (el) {
+                      const len = el.value.length;
+                      el.setSelectionRange(len, len);
+                    }
+                  } catch {}
+                });
+              }}
+              onKeyDown={(e) => {
+                e.stopPropagation();
+                // bloquear letras explicitamente
+                if (/^[a-zA-Z]$/.test(e.key)) {
+                  e.preventDefault();
+                }
+              }}
+              onBeforeInput={(e) => {
+                const data = e.data ?? '';
+                if (data && /[^0-9,\.]/.test(data)) {
+                  e.preventDefault();
+                }
+              }}
+              onMouseDown={(e) => e.stopPropagation()}
+            />
           </div>
         </div>
         <AlertDialogFooter>
@@ -1556,7 +1675,13 @@ function VendasPage() {
             <Lock className="mr-2 h-4 w-4"/> Fechar Caixa
           </Button>
         </AlertDialogTrigger>
-        <AlertDialogContent>
+        <AlertDialogContent
+          onOpenAutoFocus={(e) => e.preventDefault()}
+          onKeyDown={(e) => e.stopPropagation()}
+          onKeyDownCapture={(e) => e.stopPropagation()}
+          onPointerDownOutside={(e) => { e.preventDefault(); e.stopPropagation(); }}
+          onInteractOutside={(e) => { e.preventDefault(); e.stopPropagation(); }}
+        >
           <AlertDialogHeader>
             <AlertDialogTitle>Fechar Caixa</AlertDialogTitle>
             <AlertDialogDescription>Confira os valores e confirme o fechamento do caixa. Esta ação é irreversível.</AlertDialogDescription>

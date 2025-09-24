@@ -133,6 +133,8 @@ export default function HistoricoComandasPage() {
   // Resilient loading helpers
   const mountedRef = useRef(false);
   const lastLoadTsRef = useRef(0);
+  const detailReqIdRef = useRef(0);
+  const detailOpenRef = useRef(false);
   const getEmpresaCodigoFromCache = () => {
     try {
       const raw = localStorage.getItem('auth:userProfile');
@@ -148,16 +150,26 @@ export default function HistoricoComandasPage() {
   const load = async ({ append = false, skipCacheWrite = false } = {}) => {
     try {
       setLoading(true);
+      // Short-circuit de pré-requisito: precisa de codigoEmpresa
+      const emp = getEmpresaCodigoFromCache();
+      if (!emp) {
+        setLoading(false);
+        return;
+      }
+      // Timeout de segurança
+      const safetyTimer = setTimeout(() => setLoading(false), 10000);
       if (tab === 'comandas') {
         // Busca base de comandas (sem depender do id no filtro de busca)
         const list = await listarComandas({ status, from, to, search: debouncedSearch || '', limit: PAGE_LIMIT, offset });
         // Carrega totais em lote
         const ids = (list || []).map(r => r.id);
         let totals = {};
-        try { totals = await listarTotaisPorComanda(ids, getEmpresaCodigoFromCache()); } catch { totals = {}; }
+        if (ids.length > 0) {
+          try { totals = await listarTotaisPorComanda(ids, emp); } catch { totals = {}; }
+        }
         // Mapa de mesas { id: numero }
         let mesas = [];
-        try { mesas = await listMesas(getEmpresaCodigoFromCache()); } catch { mesas = []; }
+        try { mesas = await listMesas(emp); } catch { mesas = []; }
         const mapMesaNumero = new Map((mesas || []).map(m => [m.id, m.numero]));
         // Nomes de clientes e finalizadoras em lote (evita N+1)
         let namesByComanda = {};
@@ -185,9 +197,10 @@ export default function HistoricoComandasPage() {
         }
       } else {
         // Fechamentos de caixa
-        const sess = await listarFechamentosCaixa({ from, to, limit: 100, offset: 0 });
+        const sess = await listarFechamentosCaixa({ from, to, limit: 100, offset: 0, codigoEmpresa: emp });
         setRows(sess || []);
       }
+      clearTimeout(safetyTimer);
     } catch (e) {
       toast({ title: 'Falha ao carregar histórico', description: e?.message || 'Tente novamente', variant: 'destructive' });
     } finally {
@@ -255,6 +268,22 @@ export default function HistoricoComandasPage() {
   const openDetail = async (id) => {
     setDetailId(id);
     setDetail({ loading: true, itens: [], pagamentos: [] });
+    const emp = getEmpresaCodigoFromCache();
+    detailOpenRef.current = true;
+    // token/reqId para evitar sobrescrita por respostas antigas
+    const myReq = ++detailReqIdRef.current;
+    // Timeout de segurança para nunca travar em loading
+    const safetyTimer = setTimeout(() => {
+      if (detailReqIdRef.current === myReq && detailOpenRef.current) setDetail((prev) => ({ ...prev, loading: false }));
+    }, 10000);
+    // Pré-requisito faltando: encerra loading e informa
+    if (!emp) {
+      clearTimeout(safetyTimer);
+      if (detailReqIdRef.current === myReq && detailOpenRef.current) {
+        setDetail({ loading: false, itens: [], pagamentos: [] });
+      }
+      return;
+    }
     // Monta metadados a partir da linha da lista (mesa, clientes, horários)
     try {
       const row = (rows || []).find(r => r.id === id) || null;
@@ -274,8 +303,8 @@ export default function HistoricoComandasPage() {
     try {
       const fetchOnce = async () => {
         const [itens, pagamentos] = await Promise.all([
-          listarItensDaComanda({ comandaId: id }),
-          listarPagamentos({ comandaId: id })
+          listarItensDaComanda({ comandaId: id, codigoEmpresa: emp }),
+          listarPagamentos({ comandaId: id, codigoEmpresa: emp })
         ]);
         return { itens: itens || [], pagamentos: pagamentos || [] };
       };
@@ -285,10 +314,20 @@ export default function HistoricoComandasPage() {
         await new Promise(r => setTimeout(r, 700));
         result = await fetchOnce();
       }
-      setDetail({ loading: false, itens: result.itens, pagamentos: result.pagamentos });
+      // Aplicar apenas se ainda for a mesma requisição e id
+      if (detailReqIdRef.current === myReq && detailOpenRef.current) {
+        setDetail({ loading: false, itens: result.itens, pagamentos: result.pagamentos });
+      }
     } catch (e) {
-      setDetail({ loading: false, itens: [], pagamentos: [] });
+      if (detailReqIdRef.current === myReq && detailOpenRef.current) {
+        setDetail({ loading: false, itens: [], pagamentos: [] });
+      }
       toast({ title: 'Falha ao carregar detalhes', description: e?.message || 'Tente novamente', variant: 'destructive' });
+    } finally {
+      clearTimeout(safetyTimer);
+      if (detailReqIdRef.current === myReq && detailOpenRef.current) {
+        setDetail((prev) => ({ ...prev, loading: false }));
+      }
     }
   };
 
@@ -589,7 +628,7 @@ export default function HistoricoComandasPage() {
       )}
 
       {tab === 'comandas' && (
-      <Dialog open={!!detailId} onOpenChange={(v) => { if (!v) { setDetailId(null); setDetail({ loading: false, itens: [], pagamentos: [] }); setDetailMeta(null); } }}>
+      <Dialog open={!!detailId} onOpenChange={(v) => { if (!v) { detailOpenRef.current = false; setDetailId(null); setDetail({ loading: false, itens: [], pagamentos: [] }); setDetailMeta(null); } else { detailOpenRef.current = true; } }}>
         <DialogContent className="max-w-3xl" onKeyDown={(e) => e.stopPropagation()}>
           <DialogHeader>
             <DialogTitle>

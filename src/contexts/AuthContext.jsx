@@ -147,6 +147,41 @@ export const AuthProvider = ({ children }) => {
     recover();
   }, [authReady, user?.id, !!userProfile, userProfile?.codigo_empresa, !!company]);
 
+  // Idle Watchdog: ao voltar o foco/visibilidade, reidrata cache e dispara refresh em background
+  useEffect(() => {
+    const rehydrateFromCache = () => {
+      try {
+        const cachedProfile = localStorage.getItem('auth:userProfile');
+        const cachedCompany = localStorage.getItem('auth:company');
+        if (cachedProfile) {
+          const p = JSON.parse(cachedProfile);
+          if (!userProfile || !userProfile.codigo_empresa) setUserProfile(p);
+        }
+        if (cachedCompany) {
+          const c = JSON.parse(cachedCompany);
+          if (!company || !company.codigo_empresa) setCompany(c);
+        }
+      } catch {}
+    };
+    const onFocus = () => {
+      rehydrateFromCache();
+      // Dispara refresh de perfil/empresa em background se houver sessão
+      if (user?.id) {
+        loadUserProfile(user.id).catch(() => {});
+      }
+    };
+    const onVis = () => {
+      if (document.visibilityState === 'visible') onFocus();
+    };
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVis);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
+
   const loadUserProfile = async (userId) => {
     if (loadingProfileRef.current) {
       console.log('[AuthDebug] loadUserProfile:skip (already running)');
