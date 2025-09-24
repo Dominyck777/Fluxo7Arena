@@ -995,6 +995,37 @@ function ClientesPage() {
           return searchTermMatch && statusMatch;
       });
     }, [clients, filters]);
+
+    // Ordenação (Clientes)
+    const [sort, setSort] = useState({ by: 'codigo', dir: 'asc' });
+    const toggleSort = (by) => {
+      setSort((prev) => (
+        prev.by === by
+          ? { by, dir: prev.dir === 'asc' ? 'desc' : 'asc' }
+          : { by, dir: 'asc' }
+      ));
+    };
+    const sortedClients = useMemo(() => {
+      const arr = [...filteredClients];
+      const dir = sort.dir === 'asc' ? 1 : -1;
+      const safeNum = (n, fallback) => (Number.isFinite(n) ? n : fallback);
+      arr.sort((a, b) => {
+        if (sort.by === 'codigo') {
+          const an = safeNum(parseInt(String(a.codigo || '').trim(), 10), Infinity);
+          const bn = safeNum(parseInt(String(b.codigo || '').trim(), 10), Infinity);
+          if (an === bn) return 0;
+          return an > bn ? dir : -dir;
+        }
+        if (sort.by === 'nome') {
+          const an = (a.nome || '').toString();
+          const bn = (b.nome || '').toString();
+          const cmp = an.localeCompare(bn, 'pt-BR', { sensitivity: 'base' });
+          return cmp * dir;
+        }
+        return 0;
+      });
+      return arr;
+    }, [filteredClients, sort]);
     
     const handleViewDetails = (client) => {
       setSelectedClient(client);
@@ -1095,12 +1126,24 @@ function ClientesPage() {
                             </div>
                         </div>
                         <Table>
-                            <TableHeader>
-                                <TableRow>
-                                    <TableHead>Código</TableHead>
-                                    <TableHead>Cliente</TableHead>
-                                    <TableHead>Contato</TableHead>
-                                    <TableHead>Status</TableHead>
+                            <TableHeader className="sticky top-0 bg-surface-2 z-10">
+                                <TableRow className="border-b border-border">
+                                    <TableHead
+                                      className="select-none cursor-pointer text-text-secondary"
+                                      onClick={() => toggleSort('codigo')}
+                                      title="Ordenar por código"
+                                    >
+                                      Código {sort.by === 'codigo' ? (sort.dir === 'asc' ? '▲' : '▼') : ''}
+                                    </TableHead>
+                                    <TableHead
+                                      className="text-text-secondary select-none cursor-pointer"
+                                      onClick={() => toggleSort('nome')}
+                                      title="Ordenar por nome"
+                                    >
+                                      Cliente {sort.by === 'nome' ? (sort.dir === 'asc' ? '▲' : '▼') : ''}
+                                    </TableHead>
+                                    <TableHead className="text-text-secondary">Contato</TableHead>
+                                    <TableHead className="text-text-secondary">Status</TableHead>
                                     <TableHead className="w-[50px]"></TableHead>
                                 </TableRow>
                             </TableHeader>
@@ -1109,8 +1152,8 @@ function ClientesPage() {
                                   <TableRow>
                                     <TableCell colSpan={5} className="h-24 text-center">Carregando...</TableCell>
                                   </TableRow>
-                                ) : filteredClients.length > 0 ? (
-                                    filteredClients.map(client => (
+                                ) : sortedClients.length > 0 ? (
+                                    sortedClients.map(client => (
                                         <TableRow key={client.id} className="cursor-pointer" onClick={() => handleViewDetails(client)}>
                                             <TableCell className="font-mono text-base font-semibold text-text-primary">{client.codigo}</TableCell>
                                             {/* Cliente */}
@@ -1122,11 +1165,10 @@ function ClientesPage() {
                                                     </span>
                                                 </div>
                                             </TableCell>
-                                            {/* Contato */}
+                                            {/* Contato: priorizar telefone; se não houver, mostrar email */}
                                             <TableCell>
                                                 <div className="flex flex-col">
-                                                    <span className="text-sm truncate">{client.email || '—'}</span>
-                                                    <span className="text-sm text-text-muted truncate">{client.telefone || '—'}</span>
+                                                    <span className="text-sm truncate">{client.telefone || client.email || '—'}</span>
                                                 </div>
                                             </TableCell>
                                             {/* Status */}
