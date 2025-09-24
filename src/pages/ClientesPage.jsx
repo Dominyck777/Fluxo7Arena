@@ -71,6 +71,9 @@ function ClientDetailsModal({ open, onOpenChange, client, onEdit, codigoEmpresa 
   // Histórico de agendamentos
   const [bookingsLoading, setBookingsLoading] = useState(false);
   const [bookings, setBookings] = useState([]);
+  // Retry simples para lidar com atrasos de token/RLS
+  const historyRetryRef = useRef(false);
+  const bookingsRetryRef = useRef(false);
 
   // Detalhes do item selecionado (comanda/agendamento)
   const [detailOpen, setDetailOpen] = useState(false);
@@ -215,11 +218,26 @@ function ClientDetailsModal({ open, onOpenChange, client, onEdit, codigoEmpresa 
   };
 
   useEffect(() => {
+    let cancelled = false;
+    // Ao abrir o modal, resetar tentativas de retry
+    if (open) {
+      historyRetryRef.current = false;
+      bookingsRetryRef.current = false;
+    }
+    // Se não houver codigoEmpresa ainda, não iniciar loaders para evitar travas
+    if (open && client?.id && !codigoEmpresa) {
+      setHistoryLoading(false);
+      setBookingsLoading(false);
+      return () => { cancelled = true; };
+    }
     const loadHistory = async () => {
       if (!open || !client?.id) return;
       setHistoryLoading(true);
-      setBookingsLoading(true);
+      // Safety timeout: evita loader infinito em casos de latência/restrições RLS
+      let safetyTimer;
+      try { safetyTimer = setTimeout(() => setHistoryLoading(false), 10000); } catch {}
       try {
+        console.debug('[ClientDetailsModal] loadHistory: start', { clientId: client.id, codigoEmpresa });
         // 1) Buscar últimos vínculos do cliente com comandas
         let qV = supabase
           .from('comanda_clientes')
@@ -251,7 +269,7 @@ function ClientDetailsModal({ open, onOpenChange, client, onEdit, codigoEmpresa 
         if (comandaIds.length === 0) {
           setHistory([]);
           setHistoryLoading(false);
-          // não retorna ainda; bookings serão carregados por loadBookings
+          return; // Evita seguir para queries com lista vazia, que podem travar
         }
 
         // 2) Detalhes das comandas (join mesa para exibir nome/numero)
@@ -328,18 +346,29 @@ function ClientDetailsModal({ open, onOpenChange, client, onEdit, codigoEmpresa 
           const tb = new Date(b.aberto_em || b.created_at || 0).getTime();
           return tb - ta;
         }).slice(0, 10);
-
-        setHistory(mergedRows);
+        // Retry 1x se veio vazio (mitigar atraso de RLS/token)
+        if (!cancelled && mergedRows.length === 0 && !historyRetryRef.current) {
+          historyRetryRef.current = true;
+          console.debug('[ClientDetailsModal] loadHistory: empty result, retrying once...');
+          setTimeout(() => { if (open && client?.id) loadHistory(); }, 700);
+          return;
+        }
+        if (!cancelled) setHistory(mergedRows);
       } catch (err) {
         toast({ title: 'Falha ao carregar histórico do cliente', description: err?.message || 'Tente novamente', variant: 'destructive' });
       } finally {
-        setHistoryLoading(false);
+        try { clearTimeout(safetyTimer); } catch {}
+        if (!cancelled) setHistoryLoading(false);
       }
     };
     const loadBookings = async () => {
       if (!open || !client?.id) return;
       setBookingsLoading(true);
+      // Safety timeout para bookings
+      let safetyTimer;
+      try { safetyTimer = setTimeout(() => setBookingsLoading(false), 10000); } catch {}
       try {
+        console.debug('[ClientDetailsModal] loadBookings: start', { clientId: client.id, codigoEmpresa });
         // Buscar últimos agendamentos do cliente
         let q = supabase
           .from('agendamentos')
@@ -398,18 +427,33 @@ function ClientDetailsModal({ open, onOpenChange, client, onEdit, codigoEmpresa 
         }
 
         const merged = [...baseRows, ...addRows].sort((a, b) => new Date(b.inicio) - new Date(a.inicio)).slice(0, 10);
-        setBookings(merged);
+        if (!cancelled && merged.length === 0 && !bookingsRetryRef.current) {
+          bookingsRetryRef.current = true;
+          console.debug('[ClientDetailsModal] loadBookings: empty result, retrying once...');
+          setTimeout(() => { if (open && client?.id) loadBookings(); }, 700);
+          return;
+        }
+        if (!cancelled) setBookings(merged);
       } catch (e) {
         // não derrubar o modal por erro nos agendamentos
         console.warn('[ClientDetailsModal] Falha ao carregar agendamentos do cliente:', e);
       } finally {
-        setBookingsLoading(false);
+        try { clearTimeout(safetyTimer); } catch {}
+        if (!cancelled) setBookingsLoading(false);
       }
     };
     loadHistory();
     loadBookings();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, client?.id]);
+    return () => {
+      cancelled = true;
+      // Ao fechar o modal, garantir limpeza dos loaders
+      if (!open) {
+        setHistoryLoading(false);
+        setBookingsLoading(false);
+      }
+    };
+  }, [open, client?.id, codigoEmpresa]);
 
   if (!client) return null;
 
@@ -458,7 +502,7 @@ function ClientDetailsModal({ open, onOpenChange, client, onEdit, codigoEmpresa 
                   <h4 className="font-semibold">Histórico Recente</h4>
                 </div>
                 <div className="bg-surface-2 p-4 rounded-lg">
-                  {(historyLoading || bookingsLoading) ? (
+                  {(historyLoading && bookingsLoading) ? (
                     <div className="text-center py-8 text-sm text-text-muted">Carregando histórico...</div>
                   ) : (unifiedRecent && unifiedRecent.length > 0) ? (
                     <div className="max-h-64 overflow-y-auto thin-scroll pr-1">
@@ -839,7 +883,15 @@ function ClientesPage() {
     // ===== Export Helpers (Clientes) =====
     function downloadClientsCsv(rows) {
       const headers = [
-        'Código','Nome','CPF/CNPJ','Telefone','Email','Aniversário','Status'
+        'Código','Tipo Pessoa','Nome/Razão Social','Apelido/Nome Fantasia',
+        'CPF','CNPJ','RG','IE',
+        'Email','Telefone','Fone 2','Celular 1','Celular 2','WhatsApp',
+        'CEP','Endereço','Número','Complemento','Bairro','Cidade','UF','Cidade IBGE',
+        'Limite Crédito','Tipo Recebimento','Regime Tributário','Tipo Contribuinte',
+        'Aniversário','Sexo','Estado Civil','Nome da Mãe','Nome do Pai',
+        'Observações',
+        'É Cliente','É Fornecedor','É Funcionário','É Administradora','É Parceiro','CCF/SPC',
+        'Status'
       ];
       const sep = ';';
       const fmtDate = (v) => {
@@ -855,6 +907,11 @@ function ClientesPage() {
         } catch {}
         return String(v);
       };
+      const fmtMoney = (n) => {
+        const num = Number(n ?? 0);
+        return Number.isFinite(num) ? num.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '';
+      };
+      const fmtBool = (b) => (b ? 'Sim' : 'Não');
       const escape = (val) => {
         const v = val == null ? '' : String(val);
         return /[";\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
@@ -864,11 +921,43 @@ function ClientesPage() {
       for (const c of rows) {
         const record = [
           c.codigo ?? '',
-          c.nome ?? '',
-          c.cpf || c.cnpj || '',
-          c.telefone || '',
+          c.tipo_pessoa || '',
+          c.nome || '',
+          c.apelido || '',
+          c.cpf || '',
+          c.cnpj || '',
+          c.rg || '',
+          c.ie || '',
           c.email || '',
+          c.telefone || '',
+          c.fone2 || '',
+          c.celular1 || '',
+          c.celular2 || '',
+          c.whatsapp || '',
+          c.cep || '',
+          c.endereco || '',
+          c.numero || '',
+          c.complemento || '',
+          c.bairro || '',
+          c.cidade || '',
+          c.uf || '',
+          c.cidade_ibge || '',
+          fmtMoney(c.limite_credito),
+          c.tipo_recebimento || '',
+          c.regime_tributario || '',
+          c.tipo_contribuinte || '',
           fmtDate(c.aniversario),
+          c.sexo || '',
+          c.estado_civil || '',
+          c.nome_mae || '',
+          c.nome_pai || '',
+          c.observacoes || '',
+          fmtBool(!!c.flag_cliente),
+          fmtBool(!!c.flag_fornecedor),
+          fmtBool(!!c.flag_funcionario),
+          fmtBool(!!c.flag_administradora),
+          fmtBool(!!c.flag_parceiro),
+          fmtBool(!!c.flag_ccf_spc),
           c.status === 'active' ? 'Ativo' : 'Inativo',
         ].map(escape).join(sep);
         lines.push(record);
@@ -1023,14 +1112,24 @@ function ClientesPage() {
                                 ) : filteredClients.length > 0 ? (
                                     filteredClients.map(client => (
                                         <TableRow key={client.id} className="cursor-pointer" onClick={() => handleViewDetails(client)}>
-                                            <TableCell className="font-mono text-xs text-text-secondary">{client.codigo}</TableCell>
-                                            <TableCell className="font-medium">{client.nome}</TableCell>
+                                            <TableCell className="font-mono text-base font-semibold text-text-primary">{client.codigo}</TableCell>
+                                            {/* Cliente */}
                                             <TableCell>
                                                 <div className="flex flex-col">
-                                                    <span className="text-sm">{client.email || '—'}</span>
-                                                    <span className="text-xs text-text-muted">{client.telefone || '—'}</span>
+                                                    <span className="text-base font-semibold text-text-primary truncate">{client.nome || '—'}</span>
+                                                    <span className="text-xs text-text-muted truncate">
+                                                      {(client.cpf && `CPF: ${client.cpf}`) || (client.cnpj && `CNPJ: ${client.cnpj}`) || (client.apelido ? `Apelido: ${client.apelido}` : ' ')}
+                                                    </span>
                                                 </div>
                                             </TableCell>
+                                            {/* Contato */}
+                                            <TableCell>
+                                                <div className="flex flex-col">
+                                                    <span className="text-sm truncate">{client.email || '—'}</span>
+                                                    <span className="text-sm text-text-muted truncate">{client.telefone || '—'}</span>
+                                                </div>
+                                            </TableCell>
+                                            {/* Status */}
                                             <TableCell>
                                                 <span className={cn(
                                                     "px-2 py-1 text-xs font-semibold rounded-full",
