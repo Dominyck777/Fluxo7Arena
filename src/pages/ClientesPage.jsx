@@ -4,7 +4,7 @@ import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useToast } from "@/components/ui/use-toast";
-import { Plus, Search, Users, UserX, UserCheck, Gift, Edit, Trash2, MoreHorizontal, History, XCircle } from 'lucide-react';
+import { Plus, Search, Users, UserX, UserCheck, Gift, Edit, Trash2, MoreHorizontal, History, XCircle, Eye, EyeOff, Download } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from '@/components/ui/dialog';
@@ -72,6 +72,12 @@ function ClientDetailsModal({ open, onOpenChange, client, onEdit, codigoEmpresa 
   const [bookingsLoading, setBookingsLoading] = useState(false);
   const [bookings, setBookings] = useState([]);
 
+  // Detalhes do item selecionado (comanda/agendamento)
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailKind, setDetailKind] = useState(null); // 'comanda' | 'agendamento'
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailData, setDetailData] = useState(null);
+
   const formatCurrency = (n) =>
     new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(n || 0));
 
@@ -93,6 +99,120 @@ function ClientDetailsModal({ open, onOpenChange, client, onEdit, codigoEmpresa 
         .slice(0, 10);
     } catch { return []; }
   }, [history, bookings]);
+
+  const openDetail = async (item) => {
+    try {
+      setDetailOpen(true);
+      setDetailKind(item?.kind || null);
+      setDetailLoading(true);
+      setDetailData(null);
+      if (item?.kind === 'comanda') {
+        const comandaId = item?.data?.comanda_id;
+        if (!comandaId) { setDetailLoading(false); return; }
+        // Carregar itens da comanda (com nome do produto)
+        let qi = supabase
+          .from('comanda_itens')
+          .select('id, quantidade, preco_unitario, desconto, produto:produtos!comanda_itens_produto_id_fkey ( nome )')
+          .eq('comanda_id', comandaId);
+        if (codigoEmpresa) qi = qi.eq('codigo_empresa', codigoEmpresa);
+        const { data: itensData } = await qi;
+        const itens = (itensData || []).map(it => ({
+          id: it.id,
+          quantidade: it.quantidade,
+          preco_unitario: it.preco_unitario,
+          desconto: it.desconto,
+          produto_nome: it.produto?.[0]?.nome || it.produto?.nome || 'Item',
+        }));
+        // Carregar pagamentos
+        let qp = supabase
+          .from('pagamentos')
+          .select('id, valor, status, recebido_em, metodo')
+          .eq('comanda_id', comandaId);
+        if (codigoEmpresa) qp = qp.eq('codigo_empresa', codigoEmpresa);
+        const { data: pagamentosData } = await qp;
+        const pagamentos = pagamentosData || [];
+        // Carregar clientes vinculados
+        let qc = supabase
+          .from('comanda_clientes')
+          .select('cliente:clientes!comanda_clientes_cliente_id_fkey ( id, nome, email, telefone )')
+          .eq('comanda_id', comandaId);
+        if (codigoEmpresa) qc = qc.eq('codigo_empresa', codigoEmpresa);
+        const { data: clientesRows } = await qc;
+        const clientes = (clientesRows || []).map(r => r.cliente?.[0] || r.cliente).filter(Boolean);
+        const totalItens = (itens || []).reduce((acc, it) => acc + (Number(it.quantidade || 0) * Number(it.preco_unitario || 0) - Number(it.desconto || 0)), 0);
+        const totalPagos = (pagamentos || []).filter(pg => (pg.status || 'Pago') !== 'Cancelado' && (pg.status || 'Pago') !== 'Estornado').reduce((acc, pg) => acc + Number(pg.valor || 0), 0);
+        const saldo = Math.max(0, totalItens - totalPagos);
+        setDetailData({
+          comandaId,
+          mesa_title: item?.data?.mesa_title || 'Balcão',
+          status: item?.data?.status || 'open',
+          itens: itens || [],
+          pagamentos: pagamentos || [],
+          clientes,
+          totalItens,
+          totalPagos,
+          saldo,
+          aberto_em: item?.data?.aberto_em || item?.data?.created_at || null,
+          fechado_em: item?.data?.fechado_em || null,
+        });
+      } else if (item?.kind === 'agendamento') {
+        const agId = item?.data?.id;
+        if (!agId) { setDetailLoading(false); return; }
+        // Buscar participantes e status de pagamento
+        let partRows = [];
+        try {
+          const { data: parts } = await supabase
+            .from('v_agendamento_participantes')
+            .select('*')
+            .eq('agendamento_id', agId)
+            .limit(200);
+          partRows = parts || [];
+        } catch { partRows = []; }
+        const ids = Array.from(new Set((partRows || []).map(p => p.cliente_id).filter(Boolean)));
+        let participantes = [];
+        // Tentar montar participantes com dados do próprio view (nome/contato se existir)
+        participantes = (partRows || []).map(p => ({
+          id: p.cliente_id,
+          nome: p.cliente_nome || p.nome || null,
+          email: p.cliente_email || p.email || null,
+          telefone: p.cliente_telefone || p.telefone || null,
+          valor_cota: p.valor_cota ?? null,
+          status_pagamento: p.status_pagamento_text || p.status_pagamento || null,
+        }));
+        // Fallback: completar dados de clientes faltantes
+        const missingIds = ids.filter(id => !participantes.some(pp => String(pp.id) === String(id) && pp.nome));
+        if (missingIds.length > 0) {
+          try {
+            const { data: clientesInfo } = await supabase
+              .from('clientes')
+              .select('id,nome,email,telefone')
+              .in('id', missingIds);
+            const byId = new Map((clientesInfo || []).map(c => [String(c.id), c]));
+            participantes = participantes.map(pp => {
+              if (!pp.nome) {
+                const c = byId.get(String(pp.id));
+                if (c) return { ...pp, nome: c.nome, email: c.email, telefone: c.telefone };
+              }
+              return pp;
+            });
+          } catch {}
+        }
+        setDetailData({
+          id: agId,
+          inicio: item?.data?.inicio || null,
+          fim: item?.data?.fim || null,
+          status: item?.data?.status || null,
+          modalidade: item?.data?.modalidade || null,
+          quadra_nome: item?.data?.quadra_nome || null,
+          participantes,
+        });
+      }
+    } catch {
+      // silent
+    } finally {
+      setDetailLoading(false);
+    }
+  };
 
   useEffect(() => {
     const loadHistory = async () => {
@@ -344,7 +464,12 @@ function ClientDetailsModal({ open, onOpenChange, client, onEdit, codigoEmpresa 
                     <div className="max-h-64 overflow-y-auto thin-scroll pr-1">
                       <div className="space-y-3">
                         {unifiedRecent.map((item, idx) => (
-                          <div key={`${item.kind}-${idx}`} className="flex items-center justify-between gap-3 p-3 rounded-md border border-border/60 bg-background">
+                          <div
+                            key={`${item.kind}-${idx}`}
+                            className="group flex items-center justify-between gap-3 p-3 rounded-md border border-border/60 bg-background cursor-pointer transition-colors transition-shadow hover:bg-surface-2/60 hover:shadow-md hover:border-brand/30"
+                            title="Clique para ver detalhes"
+                            onClick={() => openDetail(item)}
+                          >
                             <div className="min-w-0">
                               {item.kind === 'comanda' ? (
                                 <>
@@ -372,28 +497,32 @@ function ClientDetailsModal({ open, onOpenChange, client, onEdit, codigoEmpresa 
                                   )}>
                                     {item.data.status === 'closed' || item.data.fechado_em ? 'Fechada' : (item.data.status === 'awaiting-payment' ? 'Pagamento' : 'Em uso')}
                                   </span>
+                                  <span className="opacity-0 group-hover:opacity-100 transition-opacity text-[11px] text-text-secondary whitespace-nowrap">Clique para detalhes</span>
                                 </>
                               ) : (
-                                <span className={cn(
-                                  "px-2 py-1 text-[11px] font-semibold rounded-full border",
-                                  item.data.status === 'finished' ? "bg-success/10 text-success border-success/30" :
-                                  item.data.status === 'canceled' ? "bg-danger/10 text-danger border-danger/30" :
-                                  item.data.status === 'in_progress' ? "bg-warning/10 text-warning border-warning/30" :
-                                  item.data.status === 'confirmed' ? "bg-info/10 text-info border-info/30" :
-                                  item.data.status === 'absent' ? "bg-rose-500/10 text-rose-400 border-rose-400/30" :
-                                  "bg-muted/10 text-text-secondary border-border/30"
-                                )}>
-                                  {(() => {
-                                    switch (item.data.status) {
-                                      case 'finished': return 'Finalizado';
-                                      case 'canceled': return 'Cancelado';
-                                      case 'in_progress': return 'Em andamento';
-                                      case 'confirmed': return 'Confirmado';
-                                      case 'absent': return 'Ausente';
-                                      case 'scheduled': default: return 'Agendado';
-                                    }
-                                  })()}
-                                </span>
+                                <>
+                                  <span className={cn(
+                                    "px-2 py-1 text-[11px] font-semibold rounded-full border",
+                                    item.data.status === 'finished' ? "bg-success/10 text-success border-success/30" :
+                                    item.data.status === 'canceled' ? "bg-danger/10 text-danger border-danger/30" :
+                                    item.data.status === 'in_progress' ? "bg-warning/10 text-warning border-warning/30" :
+                                    item.data.status === 'confirmed' ? "bg-info/10 text-info border-info/30" :
+                                    item.data.status === 'absent' ? "bg-rose-500/10 text-rose-400 border-rose-400/30" :
+                                    "bg-muted/10 text-text-secondary border-border/30"
+                                  )}>
+                                    {(() => {
+                                      switch (item.data.status) {
+                                        case 'finished': return 'Finalizado';
+                                        case 'canceled': return 'Cancelado';
+                                        case 'in_progress': return 'Em andamento';
+                                        case 'confirmed': return 'Confirmado';
+                                        case 'absent': return 'Ausente';
+                                        case 'scheduled': default: return 'Agendado';
+                                      }
+                                    })()}
+                                  </span>
+                                  <span className="opacity-0 group-hover:opacity-100 transition-opacity text-[11px] text-text-secondary whitespace-nowrap">Clique para detalhes</span>
+                                </>
                               )}
                             </div>
                           </div>
@@ -405,6 +534,130 @@ function ClientDetailsModal({ open, onOpenChange, client, onEdit, codigoEmpresa 
                   )}
                 </div>
             </div>
+            {/* Detalhes do histórico selecionado */}
+            <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
+              <DialogContent className="sm:max-w-[700px]">
+                <DialogHeader>
+                  <DialogTitle>
+                    {detailKind === 'comanda' ? (detailData?.mesa_title || 'Detalhes da Comanda') : 'Detalhes do Agendamento'}
+                  </DialogTitle>
+                  <DialogDescription>
+                    {detailKind === 'comanda' ? 'Itens e pagamentos desta comanda.' : 'Informações do agendamento e participantes.'}
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4">
+                  {detailLoading ? (
+                    <div className="text-sm text-text-muted">Carregando detalhes...</div>
+                  ) : detailKind === 'comanda' && detailData ? (
+                    <div className="space-y-4">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div className="bg-surface-2 rounded-md p-3 border border-border">
+                          <p className="text-xs text-text-secondary">Status</p>
+                          <p className="font-semibold">{(() => {
+                            const s = String(detailData.status || '').toLowerCase();
+                            if (s === 'closed' || detailData.fechado_em) return 'Fechada';
+                            if (s === 'awaiting-payment') return 'Aguardando pagamento';
+                            return 'Aberta';
+                          })()}</p>
+                        </div>
+                        <div className="bg-surface-2 rounded-md p-3 border border-border">
+                          <p className="text-xs text-text-secondary">Abertura</p>
+                          <p className="font-semibold">{detailData.aberto_em ? new Date(detailData.aberto_em).toLocaleString('pt-BR') : '—'}</p>
+                        </div>
+                        <div className="bg-surface-2 rounded-md p-3 border border-border">
+                          <p className="text-xs text-text-secondary">Fechamento</p>
+                          <p className="font-semibold">{detailData.fechado_em ? new Date(detailData.fechado_em).toLocaleString('pt-BR') : '—'}</p>
+                        </div>
+                      </div>
+                      <div>
+                        <h5 className="text-sm font-semibold mb-2">Itens</h5>
+                        <div className="border rounded-md divide-y divide-border">
+                          {(detailData.itens || []).map((it) => (
+                            <div key={it.id} className="p-2 grid grid-cols-12 gap-2 text-sm">
+                              <div className="col-span-6 truncate">{it.produto_nome || 'Item'}</div>
+                              <div className="col-span-2 text-right">qtd {Number(it.quantidade || 0)}</div>
+                              <div className="col-span-2 text-right">R$ {Number(it.preco_unitario || 0).toFixed(2)}</div>
+                              <div className="col-span-2 text-right text-text-secondary">{Number(it.desconto||0) ? `- R$ ${Number(it.desconto||0).toFixed(2)}` : ''}</div>
+                            </div>
+                          ))}
+                          {(!detailData.itens || detailData.itens.length === 0) && (
+                            <div className="p-3 text-sm text-text-muted">Nenhum item.</div>
+                          )}
+                        </div>
+                      </div>
+                      <div>
+                        <h5 className="text-sm font-semibold mb-2">Pagamentos</h5>
+                        <div className="border rounded-md divide-y divide-border">
+                          {(detailData.pagamentos || []).map((pg) => (
+                            <div key={pg.id} className="p-2 flex items-center justify-between text-sm">
+                              <span className="truncate">{pg.metodo || '—'} {pg.status ? `(${pg.status})` : ''}</span>
+                              <span className="font-semibold">R$ {Number(pg.valor || 0).toFixed(2)}</span>
+                            </div>
+                          ))}
+                          {(!detailData.pagamentos || detailData.pagamentos.length === 0) && (
+                            <div className="p-3 text-sm text-text-muted">Nenhum pagamento registrado.</div>
+                          )}
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div className="bg-surface-2 rounded-md p-3 border border-border"><p className="text-xs text-text-secondary">Total de Itens</p><p className="font-bold">R$ {Number(detailData.totalItens||0).toFixed(2)}</p></div>
+                        <div className="bg-surface-2 rounded-md p-3 border border-border"><p className="text-xs text-text-secondary">Total Pago</p><p className="font-bold text-success">R$ {Number(detailData.totalPagos||0).toFixed(2)}</p></div>
+                      </div>
+                    </div>
+                  ) : detailKind === 'agendamento' && detailData ? (
+                    <div className="space-y-4">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div className="bg-surface-2 rounded-md p-3 border border-border">
+                          <p className="text-xs text-text-secondary">Modalidade</p>
+                          <p className="font-semibold">{detailData.modalidade || '—'}</p>
+                        </div>
+                        <div className="bg-surface-2 rounded-md p-3 border border-border">
+                          <p className="text-xs text-text-secondary">Quadra</p>
+                          <p className="font-semibold">{detailData.quadra_nome || '—'}</p>
+                        </div>
+                        <div className="bg-surface-2 rounded-md p-3 border border-border">
+                          <p className="text-xs text-text-secondary">Início</p>
+                          <p className="font-semibold">{detailData.inicio ? new Date(detailData.inicio).toLocaleString('pt-BR') : '—'}</p>
+                        </div>
+                        <div className="bg-surface-2 rounded-md p-3 border border-border">
+                          <p className="text-xs text-text-secondary">Fim</p>
+                          <p className="font-semibold">{detailData.fim ? new Date(detailData.fim).toLocaleString('pt-BR') : '—'}</p>
+                        </div>
+                      </div>
+                      <div>
+                        <h5 className="text-sm font-semibold mb-2">Participantes</h5>
+                        <div className="border rounded-md divide-y divide-border">
+                          {(detailData.participantes || []).map((p) => (
+                            <div key={p.id} className="p-2 text-sm flex items-center justify-between gap-3">
+                              <div className="min-w-0">
+                                <div className="font-medium truncate">{p.nome || 'Participante'}</div>
+                                <div className="text-xs text-text-muted truncate">{p.email || '—'} {p.telefone ? `• ${p.telefone}` : ''}</div>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                {p.valor_cota != null && (
+                                  <span className="text-xs font-semibold text-text-secondary">R$ {Number(p.valor_cota || 0).toFixed(2)}</span>
+                                )}
+                                <span className={`text-[11px] font-semibold rounded-full px-2 py-0.5 border ${String(p.status_pagamento || '').toLowerCase() === 'pago' ? 'bg-success/10 text-success border-success/30' : 'bg-warning/10 text-warning border-warning/30'}`}>
+                                  {String(p.status_pagamento || p.status_pagamento_text || 'Pendente')}
+                                </span>
+                              </div>
+                            </div>
+                          ))}
+                          {(!detailData.participantes || detailData.participantes.length === 0) && (
+                            <div className="p-3 text-sm text-text-muted">Nenhum participante encontrado.</div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-sm text-text-muted">Nenhuma informação para exibir.</div>
+                  )}
+                </div>
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setDetailOpen(false)}>Fechar</Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
         </div>
 
         <DialogFooter>
@@ -436,6 +689,7 @@ function ClientesPage() {
       }
     });
     const [loading, setLoading] = useState(false);
+    const [showStats, setShowStats] = useState(true);
     const [isFormOpen, setIsFormOpen] = useState(false);
     const [isDetailsOpen, setIsDetailsOpen] = useState(false);
     const [selectedClient, setSelectedClient] = useState(null);
@@ -582,6 +836,63 @@ function ClientesPage() {
         };
     }, [clients]);
 
+    // ===== Export Helpers (Clientes) =====
+    function downloadClientsCsv(rows) {
+      const headers = [
+        'Código','Nome','CPF/CNPJ','Telefone','Email','Aniversário','Status'
+      ];
+      const sep = ';';
+      const fmtDate = (v) => {
+        if (!v) return '';
+        try {
+          const d = new Date(v);
+          if (!isNaN(d)) {
+            const dd = String(d.getDate()).padStart(2,'0');
+            const mm = String(d.getMonth()+1).padStart(2,'0');
+            const yy = d.getFullYear();
+            return `${dd}/${mm}/${yy}`;
+          }
+        } catch {}
+        return String(v);
+      };
+      const escape = (val) => {
+        const v = val == null ? '' : String(val);
+        return /[";\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
+      };
+      const lines = [];
+      lines.push('\uFEFF' + headers.join(sep));
+      for (const c of rows) {
+        const record = [
+          c.codigo ?? '',
+          c.nome ?? '',
+          c.cpf || c.cnpj || '',
+          c.telefone || '',
+          c.email || '',
+          fmtDate(c.aniversario),
+          c.status === 'active' ? 'Ativo' : 'Inativo',
+        ].map(escape).join(sep);
+        lines.push(record);
+      }
+      const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'clientes.csv';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+
+    const handleExport = () => {
+      try {
+        downloadClientsCsv(filteredClients);
+        toast({ title: 'Exportação concluída', description: `${filteredClients.length} cliente(s) exportado(s).`, variant: 'success', className: 'bg-amber-500 text-black shadow-xl' });
+      } catch (err) {
+        toast({ title: 'Falha ao exportar', description: err?.message || 'Não foi possível gerar o arquivo.', variant: 'destructive' });
+      }
+    };
+
     const filteredClients = useMemo(() => {
       const today = new Date();
       const currentMonth = today.getMonth();
@@ -647,13 +958,21 @@ function ClientesPage() {
                         <h1 className="text-3xl font-black text-text-primary tracking-tighter">Controle de Clientes</h1>
                         <p className="text-text-secondary">controle financeiro dos seus clientes.</p>
                     </div>
-                    <Button onClick={handleAddNew}><Plus className="mr-2 h-4 w-4" /> Novo Cliente</Button>
+                    <div className="flex items-center gap-2">
+                      <Button variant="outline" size="icon" onClick={() => setShowStats(s => !s)} title={showStats ? 'Ocultar resumo' : 'Mostrar resumo'} aria-label={showStats ? 'Ocultar resumo' : 'Mostrar resumo'}>
+                        {showStats ? <EyeOff className="h-4 w-4"/> : <Eye className="h-4 w-4"/>}
+                      </Button>
+                      <Button variant="outline" onClick={handleExport}><Download className="mr-2 h-4 w-4" /> Exportar</Button>
+                      <Button onClick={handleAddNew}><Plus className="mr-2 h-4 w-4" /> Novo Cliente</Button>
+                    </div>
                 </motion.div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-6">
-                    <StatCard icon={Users} title="Total de Clientes" value={stats.total} color="text-brand" />
-                    <StatCard icon={Gift} title="Aniversariantes do Mês" value={stats.birthdays} color="text-info" />
-                </div>
+                {showStats && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-6">
+                      <StatCard icon={Users} title="Total de Clientes" value={stats.total} color="text-brand" />
+                      <StatCard icon={Gift} title="Aniversariantes do Mês" value={stats.birthdays} color="text-info" />
+                  </div>
+                )}
 
                 <motion.div initial={{opacity: 0, y: 20}} animate={{opacity: 1, y: 0}} transition={{delay: 0.2}}>
                     <div className="bg-surface rounded-lg border border-border">
