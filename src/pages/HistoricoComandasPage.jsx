@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/components/ui/use-toast';
 import { CalendarDays, FileText, Search, Loader2 } from 'lucide-react';
 import { listarComandas, listarItensDaComanda, listarTotaisPorComanda, listarPagamentos, listMesas, listarClientesDaComanda, listarFechamentosCaixa, listarResumoPeriodo, getCaixaResumo, listarMovimentacoesCaixa, listarClientesPorComandas, listarFinalizadorasPorComandas } from '@/lib/store';
@@ -410,7 +411,7 @@ export default function HistoricoComandasPage() {
       
       {tab === 'comandas' && (
       <motion.div variants={itemVariants} className="bg-surface rounded-lg border border-border p-4 mb-4">
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
           <div>
             <Label className="mb-1 block">Período Inicial</Label>
             <DateInput value={from} onChange={setFrom} />
@@ -428,23 +429,29 @@ export default function HistoricoComandasPage() {
           </div>
           <div>
             <Label className="mb-1 block">Status</Label>
-            <Tabs value={status} onValueChange={setStatus} className="w-full">
-              <TabsList className="grid grid-cols-3 text-xs">
-                <TabsTrigger value="closed" className="text-xs">Fechadas</TabsTrigger>
-                <TabsTrigger value="open" className="text-xs">Abertas</TabsTrigger>
-                <TabsTrigger value="awaiting-payment" className="text-xs">Pagamento</TabsTrigger>
-              </TabsList>
-            </Tabs>
+            <Select value={status} onValueChange={setStatus}>
+              <SelectTrigger className="w-full text-xs">
+                <SelectValue placeholder="Selecionar status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="closed">Fechadas</SelectItem>
+                <SelectItem value="open">Abertas</SelectItem>
+                <SelectItem value="awaiting-payment">Pagamento</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
           <div>
             <Label className="mb-1 block">Tipo</Label>
-            <Tabs value={tipo} onValueChange={setTipo} className="w-full">
-              <TabsList className="grid grid-cols-3 text-xs">
-                <TabsTrigger value="all" className="text-xs">Todos</TabsTrigger>
-                <TabsTrigger value="comanda" className="text-xs">Comandas</TabsTrigger>
-                <TabsTrigger value="balcao" className="text-xs">Balcão</TabsTrigger>
-              </TabsList>
-            </Tabs>
+            <Select value={tipo} onValueChange={setTipo}>
+              <SelectTrigger className="w-full text-xs">
+                <SelectValue placeholder="Selecionar tipo" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos</SelectItem>
+                <SelectItem value="comanda">Comandas</SelectItem>
+                <SelectItem value="balcao">Balcão</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         </div>
       </motion.div>
