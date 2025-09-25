@@ -428,12 +428,24 @@ function VendasPage() {
 
   const calculateTotal = (order) => order.reduce((acc, item) => acc + item.price * item.quantity, 0);
 
+  // Mapa de quantidades por produto (para badges no catálogo da esquerda)
+  const qtyByProductId = useMemo(() => {
+    const map = new Map();
+    const order = selectedTable?.order || [];
+    for (const it of order) {
+      const pid = it.productId;
+      if (!pid) continue;
+      map.set(pid, (map.get(pid) || 0) + Number(it.quantity || 0));
+    }
+    return map;
+  }, [selectedTable?.order]);
+
   // Utilitário: recarrega os detalhes (itens e clientes) da 'selectedTable'
   const refetchSelectedTableDetails = async (target) => {
     try {
       if (!target?.comandaId) return;
       const itens = await listarItensDaComanda({ comandaId: target.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
-      const order = (itens || []).map((it) => ({ id: it.id, name: it.descricao || 'Item', price: Number(it.preco_unitario || 0), quantity: Number(it.quantidade || 1) }));
+      const order = (itens || []).map((it) => ({ id: it.id, productId: it.produto_id, name: it.descricao || 'Item', price: Number(it.preco_unitario || 0), quantity: Number(it.quantidade || 1) }));
       let customer = target.customer || null;
       try {
         const vinculos = await listarClientesDaComanda({ comandaId: target.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
@@ -1107,20 +1119,24 @@ function VendasPage() {
                 <p>Comanda vazia. Adicione produtos na aba ao lado.</p>
               </div>
             ) : (
-              <ul className="space-y-4">
+              <ul className="space-y-3">
                 {table.order.map(item => (
-                  <li key={item.id} className="flex items-center gap-2">
-                    <div className="flex-1">
-                      <p className="text-sm font-semibold text-text-primary">{item.name}</p>
-                      <p className="text-xs text-text-muted">{item.quantity} x R$ {item.price.toFixed(2)}</p>
+                  <li key={item.id} className="p-2 rounded-md border border-border/30 bg-surface">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-text-primary truncate" title={item.name}>{item.name}</p>
                     </div>
-                    <div className="flex items-center gap-1">
-                      <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => changeQty(item, -1)}><Minus size={14} /></Button>
-                      <span className="w-8 text-center font-semibold">{item.quantity}</span>
-                      <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => changeQty(item, +1)}><Plus size={14} /></Button>
+                    <div className="mt-1 flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1">
+                        <Button variant="outline" size="icon" className="h-7 w-7" onClick={() => changeQty(item, -1)}><Minus size={12} /></Button>
+                        <span className="w-7 text-center font-semibold text-sm">{item.quantity}</span>
+                        <Button variant="outline" size="icon" className="h-7 w-7" onClick={() => changeQty(item, +1)}><Plus size={12} /></Button>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-text-primary whitespace-nowrap">R$ {(item.price * item.quantity).toFixed(2)}</span>
+                        <span className="inline-flex items-center justify-center text-[11px] px-1.5 py-0.5 rounded-full bg-surface text-text-secondary border border-border">x{item.quantity}</span>
+                        <Button variant="ghost" size="icon" className="text-danger/80 hover:text-danger h-7 w-7" onClick={() => removeLine(item)}><Trash2 size={14}/></Button>
+                      </div>
                     </div>
-                    <p className="font-bold text-text-primary w-24 text-right">R$ {(item.price * item.quantity).toFixed(2)}</p>
-                    <Button variant="ghost" size="icon" className="ml-1 text-danger/80 hover:text-danger h-8 w-8" onClick={() => removeLine(item)}><Trash2 size={16}/></Button>
                   </li>
                 ))}
               </ul>
@@ -1234,17 +1250,24 @@ function VendasPage() {
         return;
       }
       const price = Number(prod.salePrice ?? prod.price ?? 0);
-      await adicionarItem({
-        comandaId: selectedTable.comandaId,
-        produtoId: prod.id,
-        descricao: prod.name,
-        quantidade: 1,
-        precoUnitario: price,
-        codigoEmpresa: userProfile?.codigo_empresa,
-      });
+      // Consolidar: se já existe item deste produto, incrementa quantidade
+      let itens = await listarItensDaComanda({ comandaId: selectedTable.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
+      const same = (itens || []).find(it => it.produto_id === prod.id);
+      if (same) {
+        await atualizarQuantidadeItem({ itemId: same.id, quantidade: Number(same.quantidade || 0) + 1, codigoEmpresa: userProfile?.codigo_empresa });
+      } else {
+        await adicionarItem({
+          comandaId: selectedTable.comandaId,
+          produtoId: prod.id,
+          descricao: prod.name,
+          quantidade: 1,
+          precoUnitario: price,
+          codigoEmpresa: userProfile?.codigo_empresa,
+        });
+      }
       // Reload items
-      const itens = await listarItensDaComanda({ comandaId: selectedTable.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
-      const order = (itens || []).map((it) => ({ id: it.id, name: it.descricao || 'Item', price: Number(it.preco_unitario || 0), quantity: Number(it.quantidade || 1) }));
+      itens = await listarItensDaComanda({ comandaId: selectedTable.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
+      const order = (itens || []).map((it) => ({ id: it.id, productId: it.produto_id, name: it.descricao || 'Item', price: Number(it.preco_unitario || 0), quantity: Number(it.quantidade || 1) }));
       const updated = { ...selectedTable, order };
       setSelectedTable(updated);
       setTables((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
@@ -1264,15 +1287,28 @@ function VendasPage() {
        </div>
        <div className="flex-1 overflow-y-auto p-4 thin-scroll">
           <ul className="space-y-2">
-              {(products.length ? products : productsData).map(prod => (
-                  <li key={prod.id} className="flex items-center p-2 rounded-md hover:bg-surface-2 transition-colors">
-                      <div className="flex-1">
-                          <p className="font-semibold">{prod.name}</p>
+              {(products.length ? products : productsData).map(prod => {
+                  const q = qtyByProductId.get(prod.id) || 0;
+                  const stock = Number(prod.stock ?? prod.currentStock ?? 0);
+                  const remaining = Math.max(0, stock - q);
+                  return (
+                    <li key={prod.id} className="flex items-center p-2 rounded-md hover:bg-surface-2 transition-colors">
+                      <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <p className="font-semibold truncate">{prod.name}</p>
+                            {q > 0 && (
+                              <span className="inline-flex items-center justify-center text-[11px] px-1.5 py-0.5 rounded-full bg-brand/15 text-brand border border-brand/30 flex-shrink-0">x{q}</span>
+                            )}
+                            <span className="inline-flex items-center justify-center text-[11px] px-1.5 py-0.5 rounded-full bg-surface-2 text-text-secondary border border-border flex-shrink-0">Qtd {remaining}</span>
+                          </div>
                           <p className="text-sm text-text-muted">R$ {(Number(prod.salePrice ?? prod.price ?? 0)).toFixed(2)}</p>
                       </div>
-                      <Button size="sm" onClick={() => addProductToComanda(prod)}><Plus size={16} className="mr-1"/> Adicionar</Button>
-                  </li>
-              ))}
+                      <Button size="icon" variant="outline" className="flex-shrink-0" onClick={() => addProductToComanda(prod)} aria-label={`Adicionar ${prod.name}`}>
+                        <Plus size={16} />
+                      </Button>
+                    </li>
+                  );
+                })}
           </ul>
        </div>
     </div>
@@ -1291,7 +1327,7 @@ function VendasPage() {
   const counterReloadItems = async (comandaId) => {
     if (!comandaId) return;
     const itens = await listarItensDaComanda({ comandaId, codigoEmpresa: userProfile?.codigo_empresa });
-    const order = (itens || []).map((it) => ({ id: it.id, name: it.descricao || 'Item', price: Number(it.preco_unitario || 0), quantity: Number(it.quantidade || 1) }));
+    const order = (itens || []).map((it) => ({ id: it.id, productId: it.produto_id, name: it.descricao || 'Item', price: Number(it.preco_unitario || 0), quantity: Number(it.quantidade || 1) }));
     setCounterItems(order);
   };
 
@@ -1421,18 +1457,29 @@ function VendasPage() {
                   {(products.length ? products : productsData).filter(p => {
                     const s = counterSearch.trim().toLowerCase();
                     if (!s) return true;
-                    return (p.name?.toLowerCase()?.includes(s) || String(p.code||'').toLowerCase().includes(s));
-                  }).map(prod => (
-                    <li key={prod.id} className="flex items-center p-3 rounded-md bg-surface-2">
-                      <div className="flex-1">
-                        <p className="font-semibold">{prod.name}</p>
-                        <p className="text-sm text-text-muted">R$ {(Number(prod.salePrice ?? prod.price ?? 0)).toFixed(2)}</p>
-                      </div>
-                      <Button size="sm" onClick={() => addProductToCounter(prod)} disabled={!counterComandaId || counterLoading}>
-                        <Plus size={16} className="mr-1"/> Adicionar
-                      </Button>
-                    </li>
-                  ))}
+                    return (p.name || '').toLowerCase().includes(s);
+                  }).map((prod) => {
+            const qty = (counterItems || []).reduce((acc, it) => acc + (it.productId === prod.id ? Number(it.quantity || 0) : 0), 0);
+            const stock = Number(prod.stock ?? prod.currentStock ?? 0);
+            const remaining = Math.max(0, stock - qty);
+            return (
+              <li key={prod.id} className="flex items-center p-2 rounded-md hover:bg-surface-2 transition-colors">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <p className="font-semibold truncate">{prod.name}</p>
+                    {qty > 0 && (
+                      <span className="inline-flex items-center justify-center text-[11px] px-1.5 py-0.5 rounded-full bg-brand/15 text-brand border border-brand/30 flex-shrink-0">x{qty}</span>
+                    )}
+                    <span className="inline-flex items-center justify-center text-[11px] px-1.5 py-0.5 rounded-full bg-surface-2 text-text-secondary border border-border flex-shrink-0">Qtd {remaining}</span>
+                  </div>
+                  <p className="text-sm text-text-muted">R$ {(Number(prod.salePrice ?? prod.price ?? 0)).toFixed(2)}</p>
+                </div>
+                <Button size="icon" variant="outline" className="flex-shrink-0" onClick={() => addProductToCounter(prod)} aria-label={`Adicionar ${prod.name}`}>
+                  <Plus size={16} />
+                </Button>
+              </li>
+            );
+          })}
                 </ul>
               </div>
             </div>
