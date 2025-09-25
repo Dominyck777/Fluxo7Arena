@@ -46,6 +46,16 @@ const StatCard = ({ icon, title, value, color, onClick, isActive }) => {
 
 function ClientDetailsModal({ open, onOpenChange, client, onEdit, codigoEmpresa }) {
   const { toast } = useToast();
+  // Estilos de status de agendamento alinhados com AgendaPage.statusConfig
+  // scheduled: #3B82F6, confirmed: #22C55E, in_progress: #FACC15, finished: #6B7280, canceled: #EF4444, absent: #F97316
+  const bookingStatusStyles = {
+    scheduled:   { bg: 'bg-[#3B82F6]/10', text: 'text-[#3B82F6]', border: 'border-[#3B82F6]/30' },
+    confirmed:   { bg: 'bg-[#22C55E]/10', text: 'text-[#22C55E]', border: 'border-[#22C55E]/30' },
+    in_progress: { bg: 'bg-[#FACC15]/10', text: 'text-[#FACC15]', border: 'border-[#FACC15]/30' },
+    finished:    { bg: 'bg-[#6B7280]/10', text: 'text-[#6B7280]', border: 'border-[#6B7280]/30' },
+    canceled:    { bg: 'bg-[#EF4444]/10', text: 'text-[#EF4444]', border: 'border-[#EF4444]/30' },
+    absent:      { bg: 'bg-[#F97316]/10', text: 'text-[#F97316]', border: 'border-[#F97316]/30' },
+  };
 
   const handleNotImplemented = () => {
     toast({
@@ -547,12 +557,11 @@ function ClientDetailsModal({ open, onOpenChange, client, onEdit, codigoEmpresa 
                                 <>
                                   <span className={cn(
                                     "px-2 py-1 text-[11px] font-semibold rounded-full border",
-                                    item.data.status === 'finished' ? "bg-success/10 text-success border-success/30" :
-                                    item.data.status === 'canceled' ? "bg-danger/10 text-danger border-danger/30" :
-                                    item.data.status === 'in_progress' ? "bg-warning/10 text-warning border-warning/30" :
-                                    item.data.status === 'confirmed' ? "bg-info/10 text-info border-info/30" :
-                                    item.data.status === 'absent' ? "bg-rose-500/10 text-rose-400 border-rose-400/30" :
-                                    "bg-muted/10 text-text-secondary border-border/30"
+                                    (() => {
+                                      const st = String(item.data.status || 'scheduled');
+                                      const s = bookingStatusStyles[st] || bookingStatusStyles.scheduled;
+                                      return `${s.bg} ${s.text} ${s.border}`;
+                                    })()
                                   )}>
                                     {(() => {
                                       switch (item.data.status) {
