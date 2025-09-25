@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/components/ui/use-toast';
-import { Search, DollarSign, CheckCircle } from 'lucide-react';
+import { Search, Plus, CheckCircle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { listProducts } from '@/lib/products';
 import { useAuth } from '@/contexts/AuthContext';
@@ -82,7 +82,7 @@ export default function BalcaoPage() {
         const itens = await listarItensDaComanda({ comandaId: targetComandaId, codigoEmpresa });
         // Ignora respostas antigas
         if (reqId !== itemsReqIdRef.current) return;
-        const normalized = (itens || []).map((it) => ({ id: it.id, name: it.descricao || 'Item', price: Number(it.preco_unitario || 0), quantity: Number(it.quantidade || 1) }));
+        const normalized = (itens || []).map((it) => ({ id: it.id, productId: it.produto_id, name: it.descricao || 'Item', price: Number(it.preco_unitario || 0), quantity: Number(it.quantidade || 1) }));
         // Evita sobrescrever com vazio se já temos itens na UI (consistência eventual)
         if (normalized.length === 0 && (itemsRef.current || []).length > 0) {
           // mantém o estado atual e continua para tentar carregar clientes
@@ -314,6 +314,17 @@ export default function BalcaoPage() {
   }, [clientMode, clientSearch]);
 
   const total = useMemo(() => items.reduce((acc, it) => acc + Number(it.price || 0) * Number(it.quantity || 0), 0), [items]);
+  // Mapa de quantidades por produto para exibir badge na lista de produtos
+  const qtyByProductId = useMemo(() => {
+    const map = new Map();
+    for (const it of items || []) {
+      const pid = it.productId;
+      if (!pid) continue;
+      const q = Number(it.quantity || 0);
+      map.set(pid, (map.get(pid) || 0) + q);
+    }
+    return map;
+  }, [items]);
 
   const addProduct = async (prod, opts = {}) => {
     try {
@@ -355,7 +366,13 @@ export default function BalcaoPage() {
         }
       }
       const price = Number(prod.salePrice ?? prod.price ?? 0);
-      await adicionarItem({ comandaId: cid, produtoId: prod.id, descricao: prod.name, quantidade: 1, precoUnitario: price, codigoEmpresa });
+      // Se já existe item deste produto na comanda, apenas incrementa a quantidade
+      const existing = (itemsRef.current || []).find(it => it.productId === prod.id);
+      if (existing) {
+        await atualizarQuantidadeItem({ itemId: existing.id, quantidade: Number(existing.quantity || 0) + 1, codigoEmpresa });
+      } else {
+        await adicionarItem({ comandaId: cid, produtoId: prod.id, descricao: prod.name, quantidade: 1, precoUnitario: price, codigoEmpresa });
+      }
       // Se havia clientes selecionados em memória e a comanda acabou de ser criada, associar agora
       try {
         const ids = Array.from(new Set(selectedClientIds || []));
@@ -375,7 +392,7 @@ export default function BalcaoPage() {
         }
       } catch {}
       const itens = await listarItensDaComanda({ comandaId: cid, codigoEmpresa });
-      setItems((itens || []).map((it) => ({ id: it.id, name: it.descricao || 'Item', price: Number(it.preco_unitario || 0), quantity: Number(it.quantidade || 1) })));
+      setItems((itens || []).map((it) => ({ id: it.id, productId: it.produto_id, name: it.descricao || 'Item', price: Number(it.preco_unitario || 0), quantity: Number(it.quantidade || 1) })));
       // Avisos de estoque baixo/último
       if (stock - 1 <= 0) {
         toast({ title: 'Última unidade vendida', description: `"${prod.name}" esgotou após esta venda.`, variant: 'warning' });
@@ -510,15 +527,32 @@ export default function BalcaoPage() {
           </div>
           <div className="flex-1 overflow-y-auto p-4 thin-scroll">
             <ul className="space-y-2">
-              {(products || []).map(prod => (
-                <li key={prod.id} className="flex items-center p-2 rounded-md hover:bg-surface-2 transition-colors">
-                  <div className="flex-1">
-                    <p className="font-semibold">{prod.name}</p>
-                    <p className="text-sm text-text-muted">R$ {(Number(prod.salePrice ?? prod.price ?? 0)).toFixed(2)}</p>
-                  </div>
-                  <Button size="sm" onClick={() => addProduct(prod)}><DollarSign className="mr-2 h-4 w-4"/>Adicionar</Button>
-                </li>
-              ))}
+              {(products || []).map(prod => {
+                const qty = qtyByProductId.get(prod.id) || 0;
+                return (
+                  <li key={prod.id} className="flex items-center p-2 rounded-md hover:bg-surface-2 transition-colors">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <p className="font-semibold truncate">{prod.name}</p>
+                        {qty > 0 && (
+                          <span className="inline-flex items-center justify-center text-[11px] px-1.5 py-0.5 rounded-full bg-brand/15 text-brand border border-brand/30 flex-shrink-0">x{qty}</span>
+                        )}
+                        {(() => {
+                          const stock = Number(prod.stock ?? prod.currentStock ?? 0);
+                          const remaining = Math.max(0, stock - qty);
+                          return (
+                            <span className="inline-flex items-center justify-center text-[11px] px-1.5 py-0.5 rounded-full bg-surface-2 text-text-secondary border border-border flex-shrink-0">Qtd {remaining}</span>
+                          );
+                        })()}
+                      </div>
+                      <p className="text-sm text-text-muted">R$ {(Number(prod.salePrice ?? prod.price ?? 0)).toFixed(2)}</p>
+                    </div>
+                    <Button size="icon" variant="outline" className="flex-shrink-0" onClick={() => addProduct(prod)} aria-label={`Adicionar ${prod.name}`}>
+                      <Plus className="h-4 w-4" />
+                    </Button>
+                  </li>
+                );
+              })}
             </ul>
           </div>
         </div>
@@ -531,7 +565,7 @@ export default function BalcaoPage() {
             </div>
             <div className="flex items-center gap-2">
               {clientChosen ? (
-                <Button size="sm" variant="outline" onClick={() => setIsClientWizardOpen(true)}>+ Cliente</Button>
+                <Button size="sm" variant="outline" className="whitespace-nowrap" onClick={() => setIsClientWizardOpen(true)}>+ Cliente</Button>
               ) : (
                 <Button size="sm" onClick={() => setIsClientWizardOpen(true)}>+ Nova venda</Button>
               )}
@@ -547,15 +581,15 @@ export default function BalcaoPage() {
             ) : items.length === 0 ? (
               <div className="text-center text-text-muted pt-16">Comanda vazia. Adicione produtos ao lado.</div>
             ) : (
-              <ul className="space-y-2 pr-1">
+              <ul className="space-y-3 pr-1">
                 {items.map(it => (
-                  <li key={it.id} className="flex items-center justify-between gap-3">
+                  <li key={it.id} className="p-2 rounded-md border border-border/30 bg-surface">
                     <div className="min-w-0 flex-1">
-                      <div className="font-medium truncate">{it.name}</div>
-                      <div className="text-xs text-text-muted">Unit: R$ {Number(it.price).toFixed(2)}</div>
+                      <div className="font-medium truncate" title={it.name}>{it.name}</div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <Button size="icon" variant="outline" className="h-8 w-8" onClick={async () => {
+                    <div className="mt-1 flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1">
+                        <Button size="icon" variant="outline" className="h-7 w-7" onClick={async () => {
                         const codigoEmpresa = userProfile?.codigo_empresa;
                         if (!codigoEmpresa) { toast({ title: 'Empresa não definida', variant: 'destructive' }); return; }
                         const next = Number(it.quantity || 1) - 1;
@@ -574,7 +608,7 @@ export default function BalcaoPage() {
                           // Recarrega estado real se falhar
                           try {
                             const itens = await listarItensDaComanda({ comandaId, codigoEmpresa });
-                            setItems((itens || []).map((n) => ({ id: n.id, name: n.descricao || 'Item', price: Number(n.preco_unitario || 0), quantity: Number(n.quantidade || 1) })));
+                            setItems((itens || []).map((n) => ({ id: n.id, productId: n.produto_id, name: n.descricao || 'Item', price: Number(n.preco_unitario || 0), quantity: Number(n.quantidade || 1) })));
                           } catch {}
                           const msg = String(err?.message || '').toLowerCase();
                           if (err?.code === 'INSUFFICIENT_STOCK' || msg.includes('insuficiente')) {
@@ -584,8 +618,8 @@ export default function BalcaoPage() {
                           }
                         }
                       }}>-</Button>
-                      <span className="w-8 text-center font-semibold">{it.quantity}</span>
-                      <Button size="icon" variant="outline" className="h-8 w-8" onClick={async () => {
+                      <span className="w-7 text-center font-semibold text-sm">{it.quantity}</span>
+                      <Button size="icon" variant="outline" className="h-7 w-7" onClick={async () => {
                         const codigoEmpresa = userProfile?.codigo_empresa;
                         if (!codigoEmpresa) { toast({ title: 'Empresa não definida', variant: 'destructive' }); return; }
                         const next = Number(it.quantity || 1) + 1;
@@ -597,7 +631,7 @@ export default function BalcaoPage() {
                           // Recarrega estado real se falhar
                           try {
                             const itens = await listarItensDaComanda({ comandaId, codigoEmpresa });
-                            setItems((itens || []).map((n) => ({ id: n.id, name: n.descricao || 'Item', price: Number(n.preco_unitario || 0), quantity: Number(n.quantidade || 1) })));
+                            setItems((itens || []).map((n) => ({ id: n.id, productId: n.produto_id, name: n.descricao || 'Item', price: Number(n.preco_unitario || 0), quantity: Number(n.quantidade || 1) })));
                           } catch {}
                           const msg = String(err?.message || '').toLowerCase();
                           if (err?.code === 'INSUFFICIENT_STOCK' || msg.includes('insuficiente')) {
@@ -607,8 +641,12 @@ export default function BalcaoPage() {
                           }
                         }
                       }}>+</Button>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold whitespace-nowrap">R$ {(Number(it.quantity)*Number(it.price)).toFixed(2)}</span>
+                        <span className="inline-flex items-center justify-center text-[11px] px-1.5 py-0.5 rounded-full bg-surface text-text-secondary border border-border">x{it.quantity}</span>
+                      </div>
                     </div>
-                    <div className="font-semibold w-24 text-right">R$ {(Number(it.quantity)*Number(it.price)).toFixed(2)}</div>
                   </li>
                 ))}
               </ul>
@@ -677,55 +715,29 @@ export default function BalcaoPage() {
                 </div>
                 <div className="mt-2 max-h-48 overflow-auto border rounded-md thin-scroll">
                   <ul>
-                    {(clients || []).map(c => (
-                      <li key={c.id} className="p-2 flex items-center justify-between cursor-pointer hover:bg-surface-2" onClick={async () => {
-                        try {
-                          setLinking(true);
-                          const codigoEmpresa = userProfile?.codigo_empresa;
-                          if (!codigoEmpresa) { toast({ title: 'Empresa não definida', variant: 'destructive' }); return; }
-                          if (comandaId) {
-                            await adicionarClientesAComanda({ comandaId, clienteIds: [c.id], nomesLivres: [], codigoEmpresa });
-                            const vincs = await listarClientesDaComanda({ comandaId, codigoEmpresa });
-                            const nomes = (vincs || []).map(v => v?.nome).filter(Boolean);
-                            setCustomerName(nomes.length ? nomes.join(', ') : '');
-                            setClientChosen(true);
-                          } else {
-                            // Sem comanda ainda: guarda seleção para associar no primeiro item
+                    {(clients || []).map(c => {
+                      const isSelected = (selectedClientIds || []).includes(c.id);
+                      return (
+                        <li
+                          key={c.id}
+                          className={`p-2 flex items-center justify-between cursor-pointer hover:bg-surface-2 ${isSelected ? 'bg-surface-2' : ''}`}
+                          onClick={() => {
                             setSelectedClientIds(prev => {
-                              const arr = Array.from(new Set([...(prev||[]), c.id]));
+                              const set = new Set(prev || []);
+                              if (set.has(c.id)) set.delete(c.id); else set.add(c.id);
+                              const arr = Array.from(set);
                               try { localStorage.setItem(LS_KEY.pendingClientIds, JSON.stringify(arr)); } catch {}
                               return arr;
                             });
-                            setCustomerName(c.nome || '');
-                            setClientChosen(true);
-                            try {
-                              localStorage.setItem(LS_KEY.customerName, c.nome || '');
-                              localStorage.setItem(LS_KEY.clientChosen, 'true');
-                            } catch {}
-                          }
-                          setClientSearch('');
-                          setClients([]);
-                          // Fecha wizard primeiro para evitar competição de foco/modal
-                          setIsClientWizardOpen(false);
-                          toast({ title: 'Cliente selecionado', variant: 'success' });
-                          // Se havia um produto pendente, adiciona automaticamente após selecionar cliente
-                          if (pendingProduct) {
-                            const p = pendingProduct; setPendingProduct(null);
-                            await addProduct(p, { skipClientCheck: true });
-                          }
-                        } catch (e) {
-                          toast({ title: 'Falha ao selecionar cliente', description: e?.message || 'Tente novamente', variant: 'destructive' });
-                        } finally {
-                          setLinking(false);
-                        }
-                      }}>
-                        <div>
-                          <div className="font-medium">{c.nome}</div>
-                          <div className="text-xs text-text-muted">{c.email || '—'} {c.telefone ? `• ${c.telefone}` : ''}</div>
-                        </div>
-                        <CheckCircle size={16} className="text-success opacity-0 group-hover:opacity-100" />
-                      </li>
-                    ))}
+                          }}
+                        >
+                          <div>
+                            <div className="font-medium">{(c.codigo != null ? String(c.codigo) + ' - ' : '')}{c.nome}</div>
+                          </div>
+                          <CheckCircle size={16} className={isSelected ? 'text-success' : 'text-text-muted opacity-40'} />
+                        </li>
+                      );
+                    })}
                     {(!clients || clients.length === 0) && (
                       <li className="p-2 text-sm text-text-muted">Nenhum cliente encontrado.</li>
                     )}
@@ -753,9 +765,32 @@ export default function BalcaoPage() {
                     localStorage.setItem(LS_KEY.pendingClientIds, JSON.stringify([]));
                   } catch {}
                 } else {
-                  if (!customerName && (!selectedClientIds || selectedClientIds.length === 0)) { toast({ title: 'Selecione um cliente da lista', variant: 'warning' }); return; }
-                  // Cliente já selecionado (podendo não ter comanda ainda); apenas fechar
-                  setIsClientWizardOpen(false);
+                  const ids = Array.from(new Set(selectedClientIds || []));
+                  if (ids.length === 0) { toast({ title: 'Selecione pelo menos um cliente', variant: 'warning' }); return; }
+                  const codigoEmpresa = userProfile?.codigo_empresa;
+                  if (!comandaId) {
+                    // Sem comanda ainda: manter seleção pendente, exibir nomes já escolhidos e fechar
+                    const nomesEscolhidos = (clients || [])
+                      .filter(x => ids.includes(x.id))
+                      .map(x => x?.nome)
+                      .filter(Boolean);
+                    const nomeFinal = nomesEscolhidos.length ? nomesEscolhidos.join(', ') : '';
+                    setCustomerName(nomeFinal);
+                    setClientChosen(true);
+                    try {
+                      localStorage.setItem(LS_KEY.customerName, nomeFinal || '');
+                      localStorage.setItem(LS_KEY.clientChosen, 'true');
+                    } catch {}
+                    setIsClientWizardOpen(false);
+                  } else {
+                    // Comanda aberta: associar todos de uma vez
+                    await adicionarClientesAComanda({ comandaId, clienteIds: ids, nomesLivres: [], codigoEmpresa });
+                    const vincs = await listarClientesDaComanda({ comandaId, codigoEmpresa });
+                    const nomes = (vincs || []).map(v => v?.nome).filter(Boolean);
+                    setCustomerName(nomes.length ? nomes.join(', ') : '');
+                    setClientChosen(true);
+                    setIsClientWizardOpen(false);
+                  }
                 }
                 // Consumir produto pendente, se houver
                 if (pendingProduct) {
