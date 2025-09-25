@@ -194,7 +194,7 @@ export default function FinalizadorasPage() {
       await ativarDesativarFinalizadora(fin.id, !fin.ativo, userProfile?.codigo_empresa);
       try { console.log('success -> reload'); } catch {}
       await loadFinalizadoras();
-      toast({ title: `${!fin.ativo ? 'Ativada' : 'Desativada'}`, description: fin.nome, variant: 'info' });
+      toast({ title: `${!fin.ativo ? 'Ativada' : 'Desativada'}`, description: fin.nome, variant: 'success' });
     } catch (e) {
       try { console.error(trace + ' error', e); } catch {}
       toast({ title: 'Falha ao alterar status', description: e?.message || 'Tente novamente', variant: 'destructive' });

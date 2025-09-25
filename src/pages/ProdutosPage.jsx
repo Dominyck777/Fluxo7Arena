@@ -15,7 +15,7 @@ import { Calendar } from "@/components/ui/calendar";
 import { format, parseISO } from "date-fns";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Checkbox } from '@/components/ui/checkbox';
-import { listProducts, createProduct, updateProduct, deleteProduct, listCategories, createCategory, removeCategory, getMostSoldProductsToday } from '@/lib/products';
+import { listProducts, createProduct, updateProduct, deleteProduct, listCategories, createCategory, removeCategory, getMostSoldProductsToday, getSoldProductsByPeriod, adjustProductStock } from '@/lib/products';
 import { useAuth } from '@/contexts/AuthContext';
 
 const initialProducts = [];
@@ -222,6 +222,7 @@ const StatCard = ({ icon, title, value, subtitle, color, onClick, isActive }) =>
 
 function ProductFormModal({ open, onOpenChange, product, onSave, categories, onCreateCategory, suggestedCode }) {
   const { toast } = useToast();
+  const { userProfile } = useAuth();
   const [code, setCode] = useState(product?.code || '');
   const [name, setName] = useState(product?.name || '');
   const [category, setCategory] = useState(product?.category || '');
@@ -266,8 +267,8 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
   const [saving, setSaving] = useState(false);
   const [showNewCategory, setShowNewCategory] = useState(false);
   const [newCategory, setNewCategory] = useState('');
-  // Edição protegida: ao editar, começa bloqueado
-  const [editEnabled, setEditEnabled] = useState(!product);
+  // Edição: habilitada por padrão (edição inline sem botão Editar)
+  const [editEnabled, setEditEnabled] = useState(true);
   // Impostos / Fiscais
   const [useCsosn, setUseCsosn] = useState(!!(product?.csosnInterno || product?.csosnExterno));
   // ICMS
@@ -401,8 +402,8 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
     setNcm(product?.ncm || '');
     setNcmDescription(product?.ncmDescription || '');
     setCest(product?.cest || '');
-    // Controle de edição: novo produto pode editar; existente começa bloqueado
-    setEditEnabled(!product);
+    // Edição sempre habilitada
+    setEditEnabled(true);
     // Sugestão automática de código para novo produto
     if (!product && suggestedCode && !code) {
       setCode(suggestedCode);
@@ -539,11 +540,6 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
               <DialogTitle>{product ? 'Detalhes do Produto' : 'Novo Produto'}</DialogTitle>
               <DialogDescription>Preencha as informações e use as abas para navegar.</DialogDescription>
             </div>
-            {product && (
-              <Button type="button" variant={editEnabled ? 'secondary' : 'outline'} onClick={() => setEditEnabled(v => !v)}>
-                {editEnabled ? 'Bloquear edição' : 'Habilitar edição'}
-              </Button>
-            )}
           </div>
         </DialogHeader>
         <form onSubmit={handleSave} className="grid gap-4 py-2 flex-1 overflow-y-auto pr-1 fx-scroll">
@@ -693,25 +689,47 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
               <div className="grid grid-cols-2 gap-4">
                 <div className="grid grid-cols-2 items-center gap-4">
                   <Label htmlFor="stock" className="text-right">Estoque</Label>
-                  <Input id="stock" type="number" value={stock} onChange={(e)=>setStock(e.target.value)} disabled={!editEnabled} />
+                  <Input id="stock" value={stock} onChange={(e)=>setStock(e.target.value.replace(/[^0-9\-]/g, ''))} disabled={!editEnabled} />
                 </div>
                 <div className="grid grid-cols-2 items-center gap-4">
                   <Label htmlFor="minStock" className="text-right">Estoque Mín.</Label>
-                  <Input id="minStock" type="number" value={minStock} onChange={(e)=>setMinStock(e.target.value)} disabled={!editEnabled} />
+                  <Input id="minStock" value={minStock} onChange={(e)=>setMinStock(e.target.value.replace(/[^0-9\-]/g, ''))} disabled={!editEnabled} />
                 </div>
               </div>
+              {product && (
+                <div className="mt-2 p-3 border rounded-md bg-surface-2">
+                  <div className="text-sm font-semibold mb-2">Entrada de estoque (ajuste rápido)</div>
+                  <div className="grid grid-cols-4 gap-2 items-center">
+                    <Label htmlFor="aj-delta" className="col-span-1 text-right">Quantidade</Label>
+                    <Input id="aj-delta" className="col-span-2" placeholder="Ex.: 10" inputMode="numeric" onKeyDown={(e)=>{ if (e.key==='Enter') { document.getElementById('btn-ajustar-estoque')?.click(); } }} />
+                    <Button id="btn-ajustar-estoque" type="button" onClick={async ()=>{
+                      try {
+                        const el = document.getElementById('aj-delta');
+                        const delta = Number((el?.value || '').replace(/[^0-9\-]/g, '')) || 0;
+                        if (!delta) { toast({ title: 'Informe a quantidade', variant: 'warning' }); return; }
+                        const next = Number(stock || 0) + delta;
+                        await adjustProductStock({ productId: product.id, delta, codigoEmpresa: userProfile?.codigo_empresa });
+                        setStock(String(next));
+                        toast({ title: 'Estoque atualizado', description: `Novo estoque: ${next}`, variant: 'success' });
+                        if (el) el.value = '';
+                      } catch (err) {
+                        toast({ title: 'Falha ao ajustar estoque', description: err?.message || 'Tente novamente', variant: 'destructive' });
+                      }
+                    }}>Aplicar</Button>
+                  </div>
+                  <div className="text-xs text-text-muted mt-1">Use número positivo para entrada e negativo para saída/ajuste.</div>
+                </div>
+              )}
             </TabsContent>
 
             <TabsContent value="preco" className="space-y-3 mt-2">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="grid grid-cols-2 items-center gap-4">
-                  <Label htmlFor="costPrice" className="text-right">Preço de Custo (R$)</Label>
-                  <Input id="costPrice" inputMode="numeric" placeholder="Ex.: 10,00" value={`R$ ${costPrice || '0,00'}`} onChange={(e)=> setCostPrice(formatCurrencyBR(e.target.value))} disabled={!editEnabled} />
-                </div>
-                <div className="grid grid-cols-2 items-center gap-4">
-                  <Label htmlFor="salePrice" className="text-right">Preço de Venda (R$) {((!salePrice) || (currencyToNumber(salePrice) <= 0)) && (<span className="text-danger">*</span>)}</Label>
-                  <Input id="salePrice" inputMode="numeric" placeholder="Ex.: 15,00" value={`R$ ${salePrice || '0,00'}`} onChange={(e)=> setSalePrice(formatCurrencyBR(e.target.value))} disabled={!editEnabled} />
-                </div>
+              <div className="grid grid-cols-2 items-center gap-4">
+                <Label htmlFor="costPrice" className="text-right">Preço de Custo (R$)</Label>
+                <Input id="costPrice" inputMode="numeric" placeholder="Ex.: 10,00" value={`R$ ${costPrice || '0,00'}`} onChange={(e)=> setCostPrice(formatCurrencyBR(e.target.value))} disabled={!editEnabled} />
+              </div>
+              <div className="grid grid-cols-2 items-center gap-4">
+                <Label htmlFor="salePrice" className="text-right">Preço de Venda (R$) {((!salePrice) || (currencyToNumber(salePrice) <= 0)) && (<span className="text-danger">*</span>)}</Label>
+                <Input id="salePrice" inputMode="numeric" placeholder="Ex.: 15,00" value={`R$ ${salePrice || '0,00'}`} onChange={(e)=> setSalePrice(formatCurrencyBR(e.target.value))} disabled={!editEnabled} />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="grid grid-cols-2 items-center gap-4">

@@ -6,13 +6,14 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { useToast } from '@/components/ui/use-toast';
-import { Search, Plus, CheckCircle } from 'lucide-react';
+import { Search, Plus, CheckCircle, Unlock, Lock, Banknote } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { listProducts } from '@/lib/products';
 import { useAuth } from '@/contexts/AuthContext';
-import { getOrCreateComandaBalcao, listarComandaBalcaoAberta, criarComandaBalcao, listarItensDaComanda, adicionarItem, listarFinalizadoras, registrarPagamento, fecharComandaEMesa, listarClientes, adicionarClientesAComanda, atualizarQuantidadeItem, removerItem, listarClientesDaComanda, verificarEstoqueComanda } from '@/lib/store';
+import { getOrCreateComandaBalcao, listarComandaBalcaoAberta, criarComandaBalcao, listarItensDaComanda, adicionarItem, listarFinalizadoras, registrarPagamento, fecharComandaEMesa, listarClientes, adicionarClientesAComanda, atualizarQuantidadeItem, removerItem, listarClientesDaComanda, verificarEstoqueComanda, ensureCaixaAberto, fecharCaixa, listarResumoSessaoCaixaAtual, getCaixaAberto, listarMovimentacoesCaixa, listarComandasAbertas, criarMovimentacaoCaixa } from '@/lib/store';
 
 const pageVariants = { hidden: { opacity: 0 }, visible: { opacity: 1, transition: { staggerChildren: 0.1 } } };
 const itemVariants = { hidden: { opacity: 0, y: 20 }, visible: { opacity: 1, y: 0, transition: { duration: 0.5 } } };
@@ -31,6 +32,15 @@ export default function BalcaoPage() {
   const [addingProductId, setAddingProductId] = useState(null);
   const [pendingProduct, setPendingProduct] = useState(null);
   const [cancelLoading, setCancelLoading] = useState(false);
+  // Guarda se já existiram itens nesta sessão para detectar sumiço inesperado
+  const hadItemsRefFlag = useRef(false);
+
+  // Caixa
+  const [isCashierOpen, setIsCashierOpen] = useState(false);
+  const [isCashierDetailsOpen, setIsCashierDetailsOpen] = useState(false);
+  const [openCashDialogOpen, setOpenCashDialogOpen] = useState(false);
+  const [cashLoading, setCashLoading] = useState(false);
+  const [cashSummary, setCashSummary] = useState(null);
 
   // Pagamento
   const [isPayOpen, setIsPayOpen] = useState(false);
@@ -39,7 +49,7 @@ export default function BalcaoPage() {
   const [payLoading, setPayLoading] = useState(false);
 
   // Cliente
-  const [clientMode, setClientMode] = useState('consumidor'); // 'cadastrado' | 'consumidor'
+  const [clientMode, setClientMode] = useState('cadastrado'); // fixo: apenas 'cadastrado'
   const [clientSearch, setClientSearch] = useState('');
   const [clients, setClients] = useState([]);
   const [selectedClientIds, setSelectedClientIds] = useState([]);
@@ -59,6 +69,293 @@ export default function BalcaoPage() {
     mountedRef.current = true;
     return () => { mountedRef.current = false; };
   }, []);
+
+  // Marca quando já tivemos itens, para detectar quedas inesperadas para 0
+  useEffect(() => {
+    if ((items || []).length > 0) hadItemsRefFlag.current = true;
+  }, [items]);
+
+  // Se os itens zerarem inesperadamente com comanda aberta, tenta recarregar rapidamente
+  useEffect(() => {
+    if (comandaId && hadItemsRefFlag.current && (items || []).length === 0) {
+      refetchItemsAndCustomer(comandaId, 2);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [comandaId, items?.length]);
+
+  // Estado inicial do caixa
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const sess = await getCaixaAberto({ codigoEmpresa: userProfile?.codigo_empresa });
+        if (active) setIsCashierOpen(!!sess);
+      } catch { if (active) setIsCashierOpen(false); }
+    })();
+    return () => { active = false; };
+  }, [userProfile?.codigo_empresa]);
+
+  // ===== Caixa: funções iguais às de Vendas =====
+  const reloadCashSummary = async () => {
+    const codigoEmpresa = userProfile?.codigo_empresa || null;
+    try {
+      if (!codigoEmpresa) return;
+      setCashLoading(true);
+      const [summary, sess] = await Promise.all([
+        listarResumoSessaoCaixaAtual({ codigoEmpresa }).catch(() => null),
+        getCaixaAberto({ codigoEmpresa }).catch(() => null),
+      ]);
+      let totalSangria = 0;
+      try {
+        if (sess?.id) {
+          const movs = await listarMovimentacoesCaixa({ caixaSessaoId: sess.id, codigoEmpresa });
+          totalSangria = (movs || []).filter(m => (m?.tipo || '') === 'sangria').reduce((acc, m) => acc + Number(m?.valor || 0), 0);
+        }
+      } catch {}
+      const merged = {
+        ...(summary || {}),
+        saldo_inicial: (summary?.saldo_inicial ?? summary?.saldoInicial ?? sess?.saldo_inicial ?? 0),
+        totalSangria,
+      };
+      setCashSummary(merged);
+    } catch {
+      setCashSummary(null);
+    } finally {
+      setCashLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    const loadSummary = async () => {
+      try {
+        if (!isCashierDetailsOpen) return;
+        await reloadCashSummary();
+      } catch {}
+    };
+    loadSummary();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isCashierDetailsOpen, userProfile?.codigo_empresa]);
+
+  // Componentes utilitários (iguais aos de Vendas)
+  const OpenCashContent = () => {
+    const [openCashInitial, setOpenCashInitial] = useState('');
+    const inputRef = useRef(null);
+    useEffect(() => { const t = setTimeout(() => { try { inputRef.current?.focus(); } catch {} }, 0); return () => clearTimeout(t); }, []);
+    return (
+      <>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Abrir Caixa</AlertDialogTitle>
+          <AlertDialogDescription>Insira o valor inicial (suprimento) para abrir o caixa.</AlertDialogDescription>
+        </AlertDialogHeader>
+        <div className="py-4">
+          <Label className="mb-2 block" htmlFor="open-cash-initial">Saldo inicial</Label>
+          <Input id="open-cash-initial" ref={inputRef} inputMode="decimal" placeholder="0,00" value={openCashInitial} onChange={(e) => setOpenCashInitial(e.target.value.replace(/[^0-9,\.]/g, ''))} />
+          <div className="text-xs text-text-muted mt-1">Use vírgula ou ponto para decimais.</div>
+        </div>
+        <AlertDialogFooter>
+          <AlertDialogCancel onClick={() => setOpenCashDialogOpen(false)}>Cancelar</AlertDialogCancel>
+          <AlertDialogAction onClick={async () => {
+            try {
+              const v = Number(String(openCashInitial).replace(',', '.')) || 0;
+              await ensureCaixaAberto({ saldoInicial: v, codigoEmpresa: userProfile?.codigo_empresa });
+              setIsCashierOpen(true);
+              setOpenCashDialogOpen(false);
+              toast({ title: 'Caixa aberto com sucesso!', variant: 'success' });
+            } catch (e) {
+              toast({ title: 'Falha ao abrir caixa', description: e?.message || 'Tente novamente', variant: 'destructive' });
+            }
+          }}>Confirmar Abertura</AlertDialogAction>
+        </AlertDialogFooter>
+      </>
+    );
+  };
+
+  const OpenCashierDialog = () => (
+    <AlertDialog open={openCashDialogOpen} onOpenChange={setOpenCashDialogOpen}>
+      <AlertDialogTrigger asChild>
+        <Button variant="success" disabled={isCashierOpen} onClick={() => setOpenCashDialogOpen(true)}>
+          <Unlock className="mr-2 h-4 w-4"/> Abrir Caixa
+        </Button>
+      </AlertDialogTrigger>
+      <AlertDialogContent className="sm:max-w-[425px] animate-none" onKeyDown={(e) => e.stopPropagation()} onPointerDownOutside={(e) => { e.preventDefault(); e.stopPropagation(); }} onInteractOutside={(e) => { e.preventDefault(); e.stopPropagation(); }}>
+        <OpenCashContent />
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+
+  const CloseCashierDialog = () => {
+    const [closingData, setClosingData] = useState({ loading: false, saldoInicial: 0, resumo: null });
+    const handlePrepareClose = async () => {
+      try {
+        setClosingData({ loading: true, saldoInicial: 0, resumo: null });
+        const sess = await getCaixaAberto({ codigoEmpresa: userProfile?.codigo_empresa });
+        const sum = await listarResumoSessaoCaixaAtual({ codigoEmpresa: userProfile?.codigo_empresa });
+        setClosingData({ loading: false, saldoInicial: Number(sess?.saldo_inicial || 0), resumo: sum || { totalPorFinalizadora: {} } });
+      } catch (e) {
+        setClosingData({ loading: false, saldoInicial: 0, resumo: { totalPorFinalizadora: {} } });
+      }
+    };
+    const totalPorFinalizadora = closingData?.resumo?.totalPorFinalizadora || {};
+    const somaFinalizadoras = Object.values(totalPorFinalizadora).reduce((acc, v) => acc + Number(v || 0), 0);
+    const totalCaixa = Number(closingData.saldoInicial || 0) + somaFinalizadoras;
+    return (
+      <AlertDialog>
+        <AlertDialogTrigger asChild>
+          <Button variant="destructive" disabled={!isCashierOpen} onClick={handlePrepareClose}>
+            <Lock className="mr-2 h-4 w-4"/> Fechar Caixa
+          </Button>
+        </AlertDialogTrigger>
+        <AlertDialogContent className="animate-none" onKeyDown={(e) => e.stopPropagation()} onPointerDownOutside={(e) => { e.preventDefault(); e.stopPropagation(); }} onInteractOutside={(e) => { e.preventDefault(); e.stopPropagation(); }}>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Fechar Caixa</AlertDialogTitle>
+            <AlertDialogDescription>Confira os valores e confirme o fechamento do caixa. Esta ação é irreversível.</AlertDialogDescription>
+          </AlertDialogHeader>
+          {closingData.loading ? (
+            <div className="py-4 text-text-muted">Carregando resumo…</div>
+          ) : (
+            <div className="py-4 space-y-2">
+              <div className="flex justify-between"><span className="text-text-secondary">Valor Inicial:</span> <span className="font-mono">R$ {Number(closingData.saldoInicial||0).toFixed(2)}</span></div>
+              {Object.keys(totalPorFinalizadora).length === 0 ? (
+                <div className="text-sm text-text-muted">Sem pagamentos nesta sessão.</div>
+              ) : (
+                Object.entries(totalPorFinalizadora).map(([metodo, valor]) => (
+                  <div key={metodo} className="flex justify-between"><span className="text-text-secondary">{String(metodo)}:</span> <span className="font-mono">R$ {Number(valor||0).toFixed(2)}</span></div>
+                ))
+              )}
+              <div className="flex justify-between font-bold text-lg"><span className="text-text-primary">Total em Caixa:</span> <span className="font-mono text-success">R$ {Number(totalCaixa||0).toFixed(2)}</span></div>
+            </div>
+          )}
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={async () => {
+              try {
+                try {
+                  const abertas = await listarComandasAbertas({ codigoEmpresa: userProfile?.codigo_empresa });
+                  if (abertas && abertas.length > 0) {
+                    toast({ title: 'Fechamento bloqueado', description: `Existem ${abertas.length} comandas abertas (inclui balcão). Finalize-as antes de fechar o caixa.`, variant: 'warning' });
+                    return;
+                  }
+                } catch {}
+                await fecharCaixa({ codigoEmpresa: userProfile?.codigo_empresa });
+                setIsCashierOpen(false);
+                toast({ title: 'Caixa fechado!', description: 'O relatório de fechamento foi gerado.', variant: 'success' });
+              } catch (e) {
+                toast({ title: 'Falha ao fechar caixa', description: e?.message || 'Tente novamente', variant: 'destructive' });
+              }
+            }}>Confirmar Fechamento</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    );
+  };
+
+  const CashierDetailsDialog = () => {
+    const fmt = (v) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(v || 0));
+    const [isSangriaOpen, setIsSangriaOpen] = useState(false);
+    const [sangriaValor, setSangriaValor] = useState('');
+    const [sangriaObs, setSangriaObs] = useState('');
+    const [sangriaLoading, setSangriaLoading] = useState(false);
+    const performSangria = async () => {
+      try {
+        setSangriaLoading(true);
+        const valor = Number(String(sangriaValor).replace(',', '.')) || 0;
+        if (valor <= 0) { toast({ title: 'Valor inválido', description: 'Informe um valor positivo.', variant: 'warning' }); return; }
+        await ensureCaixaAberto({ codigoEmpresa: userProfile?.codigo_empresa });
+        await criarMovimentacaoCaixa({ tipo: 'sangria', valor, observacao: sangriaObs, codigoEmpresa: userProfile?.codigo_empresa });
+        setIsSangriaOpen(false);
+        setSangriaValor('');
+        setSangriaObs('');
+        await reloadCashSummary();
+        toast({ title: 'Sangria registrada', variant: 'success' });
+      } catch (e) {
+        toast({ title: 'Falha ao registrar sangria', description: e?.message || 'Tente novamente', variant: 'destructive' });
+      } finally { setSangriaLoading(false); }
+    };
+    return (
+      <Dialog open={isCashierDetailsOpen} onOpenChange={setIsCashierDetailsOpen}>
+        <DialogContent className="max-w-lg" onKeyDown={(e) => e.stopPropagation()}>
+          <DialogHeader>
+            <DialogTitle className="text-2xl font-bold">Detalhes do Caixa</DialogTitle>
+            <DialogDescription>
+              {cashLoading ? 'Carregando resumo...' : (cashSummary ? 'Resumo da sessão atual do caixa.' : 'Nenhuma sessão de caixa aberta.')}
+            </DialogDescription>
+          </DialogHeader>
+          {cashSummary ? (
+            <>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+                <div className="bg-surface-2 rounded-lg p-3 border border-border text-center">
+                  <div className="text-[12px] text-text-secondary whitespace-nowrap mb-1">Saldo Inicial</div>
+                  <div className="text-base md:text-lg font-bold tabular-nums leading-tight">{fmt(cashSummary.saldo_inicial)}</div>
+                </div>
+                <div className="bg-surface-2 rounded-lg p-3 border border-border text-center">
+                  <div className="text-[12px] text-text-secondary whitespace-nowrap mb-1">Entradas</div>
+                  <div className="text-base md:text-lg font-bold text-success tabular-nums leading-tight">{fmt(cashSummary.totalEntradas)}</div>
+                </div>
+                <div className="bg-surface-2 rounded-lg p-3 border border-border text-center">
+                  <div className="text-[12px] text-text-secondary whitespace-nowrap mb-1">Saídas</div>
+                  <div className="text-base md:text-lg font-bold text-danger tabular-nums leading-tight">{fmt(cashSummary.totalSangria)}</div>
+                </div>
+                <div className="bg-surface-2 rounded-lg p-3 border border-border text-center">
+                  <div className="text-[12px] text-text-secondary whitespace-nowrap mb-1">Saldo Atual</div>
+                  <div className="text-base md:text-lg font-bold tabular-nums leading-tight">{fmt((cashSummary.saldo_inicial || 0) + (cashSummary.totalEntradas || 0) - (cashSummary.totalSangria || 0))}</div>
+                </div>
+              </div>
+              <div className="mt-5">
+                <div className="flex items-center justify-between mb-3">
+                  <h4 className="text-sm font-semibold text-text-secondary">Totais por Finalizadora</h4>
+                </div>
+                {Object.keys(cashSummary.totalPorFinalizadora || {}).length === 0 ? (
+                  <div className="p-3 text-sm text-text-muted border rounded-md">Nenhuma finalizadora registrada ainda.</div>
+                ) : (
+                  <ul className="rounded-md border border-border overflow-hidden divide-y divide-border">
+                    {Object.entries(cashSummary.totalPorFinalizadora || {}).map(([nome, valor]) => (
+                      <li key={nome} className="bg-surface px-3 py-2 flex items-center justify-between">
+                        <span className="text-sm text-text-secondary truncate pr-3">{String(nome)}</span>
+                        <span className="text-sm font-semibold tabular-nums">{fmt(valor)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <div className="mt-2 rounded-md border border-border bg-surface px-3 py-2 flex items-center justify-between">
+                  <span className="text-sm text-text-secondary truncate pr-3">Sangrias</span>
+                  <span className="text-sm font-semibold tabular-nums text-danger">{fmt(cashSummary.totalSangria)}</span>
+                </div>
+              </div>
+              <DialogFooter className="flex items-center justify-between gap-2">
+                <div className="mr-auto" />
+                <Button variant="destructive" onClick={() => setIsSangriaOpen(true)}>Registrar Sangria</Button>
+                <Button variant="secondary" onClick={() => setIsCashierDetailsOpen(false)}>Fechar</Button>
+              </DialogFooter>
+              <Dialog open={isSangriaOpen} onOpenChange={setIsSangriaOpen}>
+                <DialogContent className="max-w-sm" onKeyDown={(e) => e.stopPropagation()}>
+                  <DialogHeader>
+                    <DialogTitle className="text-xl font-bold">Registrar Sangria</DialogTitle>
+                    <DialogDescription>Informe o valor a retirar do caixa e, opcionalmente, uma observação.</DialogDescription>
+                  </DialogHeader>
+                  <div className="space-y-3">
+                    <div>
+                      <Label htmlFor="s-valor">Valor</Label>
+                      <Input id="s-valor" placeholder="0,00" inputMode="decimal" value={sangriaValor} onChange={(e) => setSangriaValor(e.target.value.replace(/[^0-9,\.]/g, ''))} />
+                    </div>
+                    <div>
+                      <Label htmlFor="s-obs">Observação</Label>
+                      <Input id="s-obs" placeholder="Opcional" value={sangriaObs} onChange={(e) => setSangriaObs(e.target.value)} />
+                    </div>
+                  </div>
+                  <DialogFooter>
+                    <Button variant="outline" onClick={() => setIsSangriaOpen(false)} disabled={sangriaLoading}>Cancelar</Button>
+                    <Button onClick={performSangria} disabled={sangriaLoading}>{sangriaLoading ? 'Registrando...' : 'Confirmar'}</Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+            </>
+          ) : (
+            <div className="text-sm text-text-muted">Nenhuma sessão de caixa aberta.</div>
+          )}
+        </DialogContent>
+      </Dialog>
+    );
+  };
 
   // Chaves de cache por empresa
   const companyCode = userProfile?.codigo_empresa || 'anon';
@@ -303,7 +600,6 @@ export default function BalcaoPage() {
   useEffect(() => {
     let active = true;
     const t = setTimeout(async () => {
-      if (clientMode !== 'cadastrado') { setClients([]); return; }
       try {
         const rows = await listarClientes({ searchTerm: clientSearch, limit: 20, codigoEmpresa: userProfile?.codigo_empresa });
         if (!active) return;
@@ -311,7 +607,7 @@ export default function BalcaoPage() {
       } catch { if (active) setClients([]); }
     }, 250);
     return () => { active = false; clearTimeout(t); };
-  }, [clientMode, clientSearch]);
+  }, [clientSearch]);
 
   const total = useMemo(() => items.reduce((acc, it) => acc + Number(it.price || 0) * Number(it.quantity || 0), 0), [items]);
   // Mapa de quantidades por produto para exibir badge na lista de produtos
@@ -331,7 +627,7 @@ export default function BalcaoPage() {
       if (!clientChosen && !opts.skipClientCheck) {
         setPendingProduct(prod);
         setIsClientWizardOpen(true);
-        toast({ title: 'Selecione o cliente', description: 'Escolha Cliente cadastrado ou Consumidor antes de vender.', variant: 'warning' });
+        toast({ title: 'Selecione o cliente', description: 'Escolha um cliente cadastrado antes de vender.', variant: 'warning' });
         return;
       }
       const codigoEmpresa = userProfile?.codigo_empresa;
@@ -406,7 +702,7 @@ export default function BalcaoPage() {
       if (e?.code === 'OUT_OF_STOCK' || msg.includes('sem estoque')) {
         toast({ title: 'Sem estoque', description: 'Este produto está sem estoque.', variant: 'destructive' });
       } else if (e?.code === 'INSUFFICIENT_STOCK' || msg.includes('insuficiente')) {
-        toast({ title: 'Estoque insuficiente', description: e?.message || 'Quantidade maior que o disponível.', variant: 'warning' });
+        toast({ title: 'Estoque insuficiente', description: e?.message || 'Quantidade maior que o disponível.', variant: 'destructive' });
       } else {
         toast({ title: 'Falha ao adicionar', description: e?.message || 'Tente novamente', variant: 'destructive' });
       }
@@ -418,7 +714,7 @@ export default function BalcaoPage() {
   const openPay = async () => {
     try {
       setPayLoading(true);
-      if (!clientChosen) { setIsClientWizardOpen(true); toast({ title: 'Selecione o cliente', description: 'Escolha Cliente cadastrado ou Consumidor antes de pagar.', variant: 'warning' }); setPayLoading(false); return; }
+      if (!clientChosen) { setIsClientWizardOpen(true); toast({ title: 'Selecione o cliente', description: 'Escolha um cliente cadastrado antes de pagar.', variant: 'warning' }); setPayLoading(false); return; }
       const codigoEmpresa = userProfile?.codigo_empresa;
       if (!codigoEmpresa) { toast({ title: 'Empresa não definida', variant: 'destructive' }); return; }
       if (!comandaId) {
@@ -515,7 +811,16 @@ export default function BalcaoPage() {
             </TabsList>
           </Tabs>
         </div>
+        <div className="flex items-center gap-3 ml-auto">
+          <OpenCashierDialog />
+          <CloseCashierDialog />
+          <Button variant="outline" onClick={() => setIsCashierDetailsOpen(true)}>
+            <Banknote className="mr-2 h-4 w-4" /> Detalhes do Caixa
+          </Button>
+        </div>
       </motion.div>
+      {/* Detalhes do Caixa renderizado via componente único */}
+      <CashierDetailsDialog />
 
       <motion.div variants={itemVariants} className="grid grid-cols-1 md:grid-cols-2 gap-6 h-full overflow-hidden">
         <div className="flex flex-col border rounded-lg border-border overflow-hidden">
@@ -564,10 +869,8 @@ export default function BalcaoPage() {
               <div className="text-lg font-bold">Balcão{customerName ? ` • ${customerName}` : ''}</div>
             </div>
             <div className="flex items-center gap-2">
-              {clientChosen ? (
+              {clientChosen && (
                 <Button size="sm" variant="outline" className="whitespace-nowrap" onClick={() => setIsClientWizardOpen(true)}>+ Cliente</Button>
-              ) : (
-                <Button size="sm" onClick={() => setIsClientWizardOpen(true)}>+ Nova venda</Button>
               )}
               <Button size="sm" variant="outline" onClick={cancelSale} disabled={cancelLoading}>{cancelLoading ? 'Cancelando...' : 'Cancelar Venda'}</Button>
             </div>
@@ -699,100 +1002,80 @@ export default function BalcaoPage() {
         <DialogContent className="max-w-lg" onKeyDown={(e) => e.stopPropagation()}>
           <DialogHeader>
             <DialogTitle className="text-2xl font-bold">Identificar Cliente</DialogTitle>
-            <DialogDescription>Selecione o tipo de cliente para esta venda.</DialogDescription>
+            <DialogDescription>Selecione um cliente cadastrado para esta venda.</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
-            <div className="flex gap-2">
-              <Button type="button" variant="outline" onClick={() => setClientMode('cadastrado')}>Cliente cadastrado</Button>
-              <Button type="button" variant="outline" onClick={() => setClientMode('consumidor')}>Consumidor</Button>
-            </div>
-            {clientMode === 'cadastrado' ? (
-              <div>
-                <Label className="mb-1 block">Buscar cliente</Label>
-                <div className="relative">
+            <div className="w-full">
+              <Label className="mb-1 block">Buscar cliente</Label>
+              <div className="flex items-center gap-2 justify-between">
+                <div className="relative flex-1">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted" />
                   <Input placeholder="Nome, e-mail, telefone ou código" className="pl-9" value={clientSearch} onChange={(e) => setClientSearch(e.target.value)} />
                 </div>
-                <div className="mt-2 max-h-48 overflow-auto border rounded-md thin-scroll">
-                  <ul>
-                    {(clients || []).map(c => {
-                      const isSelected = (selectedClientIds || []).includes(c.id);
-                      return (
-                        <li
-                          key={c.id}
-                          className={`p-2 flex items-center justify-between cursor-pointer hover:bg-surface-2 ${isSelected ? 'bg-surface-2' : ''}`}
-                          onClick={() => {
-                            setSelectedClientIds(prev => {
-                              const set = new Set(prev || []);
-                              if (set.has(c.id)) set.delete(c.id); else set.add(c.id);
-                              const arr = Array.from(set);
-                              try { localStorage.setItem(LS_KEY.pendingClientIds, JSON.stringify(arr)); } catch {}
-                              return arr;
-                            });
-                          }}
-                        >
-                          <div>
-                            <div className="font-medium">{(c.codigo != null ? String(c.codigo) + ' - ' : '')}{c.nome}</div>
-                          </div>
-                          <CheckCircle size={16} className={isSelected ? 'text-success' : 'text-text-muted opacity-40'} />
-                        </li>
-                      );
-                    })}
-                    {(!clients || clients.length === 0) && (
-                      <li className="p-2 text-sm text-text-muted">Nenhum cliente encontrado.</li>
-                    )}
-                  </ul>
-                </div>
+                <Button type="button" size="icon" title="Cadastrar cliente" className="ml-2 bg-brand text-black hover:bg-brand/90 border border-brand" onClick={() => { window.location.href = '/clientes'; }}>
+                  <Plus className="h-4 w-4" />
+                </Button>
               </div>
-            ) : (
-              <div className="text-sm text-text-secondary">
-                Consumidor final (sem cadastro). Você pode prosseguir com a venda.
+              <div className="mt-2 max-h-48 overflow-auto border rounded-md thin-scroll">
+                <ul>
+                  {(clients || []).map(c => {
+                    const isSelected = (selectedClientIds || []).includes(c.id);
+                    return (
+                      <li
+                        key={c.id}
+                        className={`p-2 flex items-center justify-between cursor-pointer hover:bg-surface-2 ${isSelected ? 'bg-surface-2' : ''}`}
+                        onClick={() => {
+                          setSelectedClientIds(prev => {
+                            const set = new Set(prev || []);
+                            if (set.has(c.id)) set.delete(c.id); else set.add(c.id);
+                            const arr = Array.from(set);
+                            try { localStorage.setItem(LS_KEY.pendingClientIds, JSON.stringify(arr)); } catch {}
+                            return arr;
+                          });
+                        }}
+                      >
+                        <div>
+                          <div className="font-medium">{(c.codigo != null ? String(c.codigo) + ' - ' : '')}{c.nome}</div>
+                        </div>
+                        <CheckCircle size={16} className={isSelected ? 'text-success' : 'text-text-muted opacity-40'} />
+                      </li>
+                    );
+                  })}
+                  {(!clients || clients.length === 0) && (
+                    <li className="p-2 text-sm text-text-muted">Nenhum cliente encontrado.</li>
+                  )}
+                </ul>
               </div>
-            )}
+            </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => { setIsClientWizardOpen(false); }}>Fechar</Button>
+            <Button variant="outline" onClick={() => setIsClientWizardOpen(false)}>Fechar</Button>
             <Button onClick={async () => {
               try {
-                if (clientMode === 'consumidor') {
-                  // Apenas marcar; criaremos a comanda no primeiro item adicionado
-                  setCustomerName('');
+                const ids = Array.from(new Set(selectedClientIds || []));
+                if (ids.length === 0) { toast({ title: 'Selecione pelo menos um cliente', variant: 'warning' }); return; }
+                const codigoEmpresa = userProfile?.codigo_empresa;
+                if (!comandaId) {
+                  const nomesEscolhidos = (clients || [])
+                    .filter(x => ids.includes(x.id))
+                    .map(x => x?.nome)
+                    .filter(Boolean);
+                  const nomeFinal = nomesEscolhidos.length ? nomesEscolhidos.join(', ') : '';
+                  setCustomerName(nomeFinal);
+                  setClientChosen(true);
+                  try {
+                    localStorage.setItem(LS_KEY.customerName, nomeFinal || '');
+                    localStorage.setItem(LS_KEY.clientChosen, 'true');
+                  } catch {}
+                  setIsClientWizardOpen(false);
+                } else {
+                  await adicionarClientesAComanda({ comandaId, clienteIds: ids, nomesLivres: [], codigoEmpresa });
+                  const vincs = await listarClientesDaComanda({ comandaId, codigoEmpresa });
+                  const nomes = (vincs || []).map(v => v?.nome).filter(Boolean);
+                  setCustomerName(nomes.length ? nomes.join(', ') : '');
                   setClientChosen(true);
                   setIsClientWizardOpen(false);
-                  try {
-                    localStorage.setItem(LS_KEY.customerName, '');
-                    localStorage.setItem(LS_KEY.clientChosen, 'true');
-                    localStorage.setItem(LS_KEY.pendingClientIds, JSON.stringify([]));
-                  } catch {}
-                } else {
-                  const ids = Array.from(new Set(selectedClientIds || []));
-                  if (ids.length === 0) { toast({ title: 'Selecione pelo menos um cliente', variant: 'warning' }); return; }
-                  const codigoEmpresa = userProfile?.codigo_empresa;
-                  if (!comandaId) {
-                    // Sem comanda ainda: manter seleção pendente, exibir nomes já escolhidos e fechar
-                    const nomesEscolhidos = (clients || [])
-                      .filter(x => ids.includes(x.id))
-                      .map(x => x?.nome)
-                      .filter(Boolean);
-                    const nomeFinal = nomesEscolhidos.length ? nomesEscolhidos.join(', ') : '';
-                    setCustomerName(nomeFinal);
-                    setClientChosen(true);
-                    try {
-                      localStorage.setItem(LS_KEY.customerName, nomeFinal || '');
-                      localStorage.setItem(LS_KEY.clientChosen, 'true');
-                    } catch {}
-                    setIsClientWizardOpen(false);
-                  } else {
-                    // Comanda aberta: associar todos de uma vez
-                    await adicionarClientesAComanda({ comandaId, clienteIds: ids, nomesLivres: [], codigoEmpresa });
-                    const vincs = await listarClientesDaComanda({ comandaId, codigoEmpresa });
-                    const nomes = (vincs || []).map(v => v?.nome).filter(Boolean);
-                    setCustomerName(nomes.length ? nomes.join(', ') : '');
-                    setClientChosen(true);
-                    setIsClientWizardOpen(false);
-                  }
                 }
-                // Consumir produto pendente, se houver
                 if (pendingProduct) {
                   const p = pendingProduct; setPendingProduct(null);
                   await addProduct(p, { skipClientCheck: true });

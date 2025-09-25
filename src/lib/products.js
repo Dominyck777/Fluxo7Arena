@@ -92,6 +92,100 @@ function mapDbToUi(row) {
   }
 }
 
+// ===== Relatórios de vendas por período =====
+// Retorna agregação de vendidos por produto no intervalo [from, to]
+// Params: { from: Date|string, to: Date|string, codigoEmpresa }
+export async function getSoldProductsByPeriod({ from, to, codigoEmpresa, limit = 1000 } = {}) {
+  if (!from || !to) throw new Error('Período inválido');
+  const fromIso = (from instanceof Date ? from : new Date(from)).toISOString();
+  const toIso = (to instanceof Date ? to : new Date(to)).toISOString();
+  // 1) Busca itens no período
+  const { data: rows, error } = await withTimeout((signal) => {
+    let q = supabase
+      .from('comanda_itens')
+      .select('produto_id, quantidade, created_at')
+      .gte('created_at', fromIso)
+      .lte('created_at', toIso)
+      .limit(limit)
+      .abortSignal(signal);
+    if (codigoEmpresa) q = q.eq('codigo_empresa', codigoEmpresa);
+    return q;
+  }, 20000, 'Timeout getSoldProductsByPeriod (20s)');
+  if (error) throw error;
+  // 2) Agrega
+  const agg = new Map();
+  for (const r of rows || []) {
+    const pid = r.produto_id;
+    const qty = Number(r.quantidade || 0);
+    agg.set(pid, (agg.get(pid) || 0) + qty);
+  }
+  const entries = Array.from(agg.entries()).sort((a, b) => b[1] - a[1]);
+  if (entries.length === 0) return [];
+  const ids = entries.map(([id]) => id);
+  // 3) Buscar nomes
+  const { data: prods, error: perr } = await withTimeout((signal) => {
+    let qp = supabase
+      .from('produtos')
+      .select('id, nome')
+      .in('id', ids)
+      .abortSignal(signal);
+    if (codigoEmpresa) qp = qp.eq('codigo_empresa', codigoEmpresa);
+    return qp;
+  }, 15000, 'Timeout getSoldProductsByPeriod:produtos (15s)');
+  if (perr) throw perr;
+  const nameById = new Map((prods || []).map(p => [p.id, p.nome]));
+  return entries.map(([id, total]) => ({ id, name: nameById.get(id) || String(id), total }));
+}
+
+// ===== Ajustes de estoque =====
+// Incrementa o estoque de um produto (delta pode ser negativo ou positivo)
+export async function adjustProductStock({ productId, delta, codigoEmpresa }) {
+  const inc = Number(delta || 0);
+  if (!productId || !Number.isFinite(inc) || inc === 0) throw new Error('Parâmetros inválidos para ajuste de estoque');
+  const { data, error } = await withTimeout((signal) => {
+    let q = supabase
+      .from('produtos')
+      .update({
+        estoque: supabase.rpc ? undefined : undefined,
+      })
+      .eq('id', productId)
+      .select('id, estoque, estoque_atual')
+      .single()
+      .abortSignal(signal);
+    if (codigoEmpresa) q = q.eq('codigo_empresa', codigoEmpresa);
+    return q;
+  }, 10000, 'Timeout adjustProductStock (10s)');
+  // O PostgREST não suporta incremento atômico direto sem RPC; fazemos em 2 passos para simplicidade
+  if (error) {
+    // Tenta caminho de 2 passos: get + update
+    const { data: cur, error: gerr } = await withTimeout((signal) => {
+      let q = supabase
+        .from('produtos')
+        .select('id, estoque, estoque_atual')
+        .eq('id', productId)
+        .single()
+        .abortSignal(signal);
+      if (codigoEmpresa) q = q.eq('codigo_empresa', codigoEmpresa);
+      return q;
+    }, 8000, 'Timeout get current stock (8s)');
+    if (gerr) throw gerr;
+    const current = Number(cur?.estoque ?? cur?.estoque_atual ?? 0);
+    const next = current + inc;
+    const { error: uerr } = await withTimeout((signal) => {
+      let q = supabase
+        .from('produtos')
+        .update({ estoque: next, estoque_atual: next })
+        .eq('id', productId)
+        .abortSignal(signal);
+      if (codigoEmpresa) q = q.eq('codigo_empresa', codigoEmpresa);
+      return q;
+    }, 8000, 'Timeout update stock (8s)');
+    if (uerr) throw uerr;
+    return { id: productId, stock: next };
+  }
+  return { id: data?.id || productId };
+}
+
 // ===== Relatórios rápidos de produtos =====
 // Retorna os produtos mais vendidos no dia corrente (00:00 até agora), ordenados por quantidade descendente
 export async function getMostSoldProductsToday({ limit = 5, codigoEmpresa } = {}) {

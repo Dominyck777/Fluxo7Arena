@@ -1172,11 +1172,31 @@ export async function registrarPagamento({ comandaId, finalizadoraId, metodo, va
   const statusValido = (status && ['Pendente', 'Pago', 'Estornado', 'Cancelado'].includes(status)) 
     ? status 
     : 'Pago'
+  // Normaliza o método para o enum aceito pelo banco
+  const allowed = ['dinheiro', 'credito', 'debito', 'pix', 'voucher', 'outros']
+  const norm = (v) => {
+    if (!v) return 'outros'
+    const s = String(v).toLowerCase().trim()
+    // alguns aliases comuns
+    const map = {
+      'cartao credito': 'credito',
+      'cartão credito': 'credito',
+      'cartao debito': 'debito',
+      'cartão debito': 'debito',
+      'cartão de credito': 'credito',
+      'cartão de débito': 'debito',
+      'cartao de credito': 'credito',
+      'cartao de debito': 'debito',
+    }
+    const m = map[s] || s
+    return allowed.includes(m) ? m : 'outros'
+  }
+  const metodoNormalizado = norm(metodo)
   
   const payload = {
     comanda_id: comandaId,
     finalizadora_id: finalizadoraId,
-    metodo: (metodo && typeof metodo === 'string' && metodo.trim()) ? metodo.trim() : 'outros',
+    metodo: metodoNormalizado,
     valor: Math.max(0, Number(valor) || 0),
     status: statusValido,
     recebido_em: new Date().toISOString(),

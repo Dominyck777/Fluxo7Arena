@@ -105,7 +105,7 @@ export default function CadastrosPage() {
     try {
       await ativarDesativarFinalizadora(fin.id, !fin.ativo);
       await loadFinalizadoras();
-      toast({ title: `${!fin.ativo ? 'Ativada' : 'Desativada'}`, description: fin.nome, variant: 'info' });
+      toast({ title: `${!fin.ativo ? 'Ativada' : 'Desativada'}`, description: fin.nome, variant: 'success' });
     } catch (e) {
       toast({ title: 'Falha ao alterar status', description: e?.message || 'Tente novamente', variant: 'destructive' });
     }
