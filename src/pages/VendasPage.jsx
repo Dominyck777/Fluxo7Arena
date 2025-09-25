@@ -12,7 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger, } from "@/components/ui/alert-dialog"
 import { Label } from '@/components/ui/label';
-import { listMesas, ensureCaixaAberto, fecharCaixa, getOrCreateComandaForMesa, listarItensDaComanda, adicionarItem, atualizarQuantidadeItem, removerItem, listarFinalizadoras, registrarPagamento, fecharComandaEMesa, listarComandasAbertas, listarTotaisPorComanda, criarMesa, listarClientes, adicionarClientesAComanda, listarClientesDaComanda, getCaixaAberto, listarResumoSessaoCaixaAtual, criarMovimentacaoCaixa } from '@/lib/store';
+import { listMesas, ensureCaixaAberto, fecharCaixa, getOrCreateComandaForMesa, listarItensDaComanda, adicionarItem, atualizarQuantidadeItem, removerItem, listarFinalizadoras, registrarPagamento, fecharComandaEMesa, listarComandasAbertas, listarTotaisPorComanda, criarMesa, listarClientes, adicionarClientesAComanda, listarClientesDaComanda, getCaixaAberto, listarResumoSessaoCaixaAtual, criarMovimentacaoCaixa, listarMovimentacoesCaixa } from '@/lib/store';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -114,27 +114,44 @@ function VendasPage() {
     };
   }, [anyDialogOpen]);
 
+  // Recarrega e mescla resumo do caixa com saldo_inicial e total de sangrias
+  const reloadCashSummary = async () => {
+    const codigoEmpresa = userProfile?.codigo_empresa || null;
+    try {
+      if (!codigoEmpresa) return;
+      setCashLoading(true);
+      const [summary, sess] = await Promise.all([
+        listarResumoSessaoCaixaAtual({ codigoEmpresa }).catch(() => null),
+        getCaixaAberto({ codigoEmpresa }).catch(() => null),
+      ]);
+      let totalSangria = 0;
+      try {
+        if (sess?.id) {
+          const movs = await listarMovimentacoesCaixa({ caixaSessaoId: sess.id, codigoEmpresa });
+          totalSangria = (movs || []).filter(m => (m?.tipo || '') === 'sangria').reduce((acc, m) => acc + Number(m?.valor || 0), 0);
+        }
+      } catch {}
+      const merged = {
+        ...(summary || {}),
+        saldo_inicial: (summary?.saldo_inicial ?? summary?.saldoInicial ?? sess?.saldo_inicial ?? 0),
+        totalSangria,
+      };
+      setCashSummary(merged);
+    } catch {
+      setCashSummary(null);
+    } finally {
+      setCashLoading(false);
+    }
+  };
+
   // Carregar resumo do caixa quando abrir o diálogo
   useEffect(() => {
-    const codigoEmpresa = userProfile?.codigo_empresa || null;
     const loadSummary = async () => {
       try {
         if (!isCashierDetailsOpen) return;
-        if (!codigoEmpresa) return;
-        setCashLoading(true);
-        const [summary, sess] = await Promise.all([
-          listarResumoSessaoCaixaAtual({ codigoEmpresa }).catch(() => null),
-          getCaixaAberto({ codigoEmpresa }).catch(() => null),
-        ]);
-        const merged = {
-          ...(summary || {}),
-          saldo_inicial: (summary?.saldo_inicial ?? summary?.saldoInicial ?? sess?.saldo_inicial ?? 0),
-        };
-        setCashSummary(merged);
+        await reloadCashSummary();
       } catch {
-        setCashSummary(null);
-      } finally {
-        setCashLoading(false);
+        // ignore
       }
     };
     loadSummary();
@@ -819,15 +836,17 @@ function VendasPage() {
       try {
         setSangriaLoading(true);
         const valor = Number(String(sangriaValor).replace(',', '.')) || 0;
-        if (valor <= 0) { toast({ title: 'Valor inválido', description: 'Informe um valor positivo.', variant: 'warning' }); return; }
+        if (valor <= 0) {
+          toast({ title: 'Valor inválido', description: 'Informe um valor positivo.', variant: 'warning' });
+          return;
+        }
         await ensureCaixaAberto({ codigoEmpresa: userProfile?.codigo_empresa });
-        await criarMovimentacaoCaixa({ tipo: 'sangria', valor, observacao: sangriaObs || '', codigoEmpresa: userProfile?.codigo_empresa });
-        toast({ title: 'Sangria registrada', description: `R$ ${valor.toFixed(2)}`, variant: 'success' });
+        await criarMovimentacaoCaixa({ tipo: 'sangria', valor, observacao: sangriaObs, codigoEmpresa: userProfile?.codigo_empresa });
         setIsSangriaOpen(false);
         setSangriaValor('');
         setSangriaObs('');
-        // refresh resumo
-        try { const summary = await listarResumoSessaoCaixaAtual({ codigoEmpresa: userProfile?.codigo_empresa }); setCashSummary(summary); } catch {}
+        await reloadCashSummary();
+        toast({ title: 'Sangria registrada', variant: 'success' });
       } catch (e) {
         toast({ title: 'Falha ao registrar sangria', description: e?.message || 'Tente novamente', variant: 'destructive' });
       } finally {
@@ -850,45 +869,27 @@ function VendasPage() {
             </DialogDescription>
           </DialogHeader>
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
-            <div className="bg-surface-2 rounded-lg p-3 border border-border">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-[12px] text-text-secondary truncate min-w-0">Saldo Inicial</span>
-                <span className="text-base md:text-lg font-bold tabular-nums leading-tight">{fmt(saldoInicial)}</span>
-              </div>
+            <div className="bg-surface-2 rounded-lg p-3 border border-border text-center">
+              <div className="text-[12px] text-text-secondary whitespace-nowrap mb-1">Saldo Inicial</div>
+              <div className="text-base md:text-lg font-bold tabular-nums leading-tight">{fmt(saldoInicial)}</div>
             </div>
-            <div className="bg-surface-2 rounded-lg p-3 border border-border">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-[12px] text-text-secondary truncate min-w-0">Entradas</span>
-                <span className="text-base md:text-lg font-bold text-success tabular-nums leading-tight">{fmt(entradasCalc)}</span>
-              </div>
+            <div className="bg-surface-2 rounded-lg p-3 border border-border text-center">
+              <div className="text-[12px] text-text-secondary whitespace-nowrap mb-1">Entradas</div>
+              <div className="text-base md:text-lg font-bold text-success tabular-nums leading-tight">{fmt(entradasCalc)}</div>
             </div>
-            <div className="bg-surface-2 rounded-lg p-3 border border-border">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-[12px] text-text-secondary truncate min-w-0">Saídas</span>
-                <span className="text-base md:text-lg font-bold text-danger tabular-nums leading-tight">{fmt(saidas)}</span>
-              </div>
+            <div className="bg-surface-2 rounded-lg p-3 border border-border text-center">
+              <div className="text-[12px] text-text-secondary whitespace-nowrap mb-1">Saídas</div>
+              <div className="text-base md:text-lg font-bold text-danger tabular-nums leading-tight">{fmt(saidas)}</div>
             </div>
-            <div className="bg-surface-2 rounded-lg p-3 border border-border">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-[12px] text-text-secondary truncate min-w-0">Saldo Atual</span>
-                <span className="text-base md:text-lg font-bold tabular-nums leading-tight">{fmt(saldoAtual)}</span>
-              </div>
+            <div className="bg-surface-2 rounded-lg p-3 border border-border text-center">
+              <div className="text-[12px] text-text-secondary whitespace-nowrap mb-1">Saldo Atual</div>
+              <div className="text-base md:text-lg font-bold tabular-nums leading-tight">{fmt(saldoAtual)}</div>
             </div>
           </div>
           <div className="mt-5">
             <div className="flex items-center justify-between mb-3">
               <h4 className="text-sm font-semibold text-text-secondary">Totais por Finalizadora</h4>
-              <Button variant="outline" size="sm" className="h-8 px-3" onClick={async () => {
-                try {
-                  setCashLoading(true);
-                  const summary = await listarResumoSessaoCaixaAtual({ codigoEmpresa: userProfile?.codigo_empresa });
-                  setCashSummary(summary);
-                } catch (e) {
-                  toast({ title: 'Falha ao atualizar resumo', description: e?.message || 'Tente novamente', variant: 'destructive' });
-                } finally {
-                  setCashLoading(false);
-                }
-              }}>Atualizar</Button>
+              {/* Atualização automática já é feita ao abrir/registrar; botão removido para evitar inconsistência de saldo inicial */}
             </div>
             {cashLoading ? (
               <div className="text-sm text-text-muted">Atualizando...</div>
