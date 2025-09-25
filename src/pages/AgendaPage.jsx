@@ -1403,13 +1403,13 @@ function AgendaPage() {
                 )}
               </div>
               <div className={cn("flex items-center gap-2", isHalfHour ? "whitespace-nowrap shrink-0" : "flex-col items-end") }>
-                <span className={cn("text-text-muted whitespace-nowrap", isHalfHour ? "text-sm" : "text-base") } style={{ fontSize: timePx }}>
+                <span className={cn("text-text-muted whitespace-nowrap font-semibold", isHalfHour ? "text-base" : "text-base") } style={{ fontSize: namePx }}>
                   {format(booking.start, 'HH:mm')}–{format(booking.end, 'HH:mm')}
                 </span>
                 {isHalfHour ? (
                   <div className="flex items-center gap-1.5 whitespace-nowrap shrink-0">
                     <Icon className={cn(config.text)} style={{ width: iconPx, height: iconPx }} />
-                    <span className={cn("truncate", config.text, "text-xs")} style={{ fontSize: Math.max(12, Math.round(12 * (isLong ? scale : 1))) }}>{config.label}</span>
+                    <span className={cn("truncate font-semibold", config.text, "text-base")} style={{ fontSize: namePx }}>{config.label}</span>
                   </div>
                 ) : null}
                 {/* Indicador de pagamento de participantes (pago/total) — em layout meia hora fica ao lado do status (à direita) */}
@@ -1427,10 +1427,10 @@ function AgendaPage() {
                 </span>
               )}
               {!isHalfHour && (
-                <div className="flex items-center gap-2 text-sm">
+                <div className="flex items-center gap-2 text-base">
                   <div className="flex items-center gap-1.5">
                     <Icon className={cn(config.text)} style={{ width: iconPx, height: iconPx }} />
-                    <span className={cn("truncate", config.text)} style={{ fontSize: smallPx }}>{config.label}</span>
+                    <span className={cn("truncate font-semibold", config.text)} style={{ fontSize: namePx }}>{config.label}</span>
                   </div>
                   {/* Chip de pagamentos ao lado direito do status */}
                   {totalParticipants > 0 && (
@@ -2487,7 +2487,21 @@ function AgendaPage() {
             const { error: perr } = await supabase
               .from('agendamento_participantes')
               .insert(rows);
-            if (perr) { /* no console noise */ }
+            if (!perr) {
+              // Atualiza imediatamente o estado dos participantes para exibir o chip correto
+              const participantsForState = rows.map(row => ({
+                agendamento_id: row.agendamento_id,
+                cliente_id: row.cliente_id,
+                nome: form.selectedClients.find(c => c.id === row.cliente_id)?.nome || '',
+                valor_cota: row.valor_cota,
+                status_pagamento: row.status_pagamento,
+                status_pagamento_text: 'Pendente'
+              }));
+              setParticipantsByAgendamento(prev => ({
+                ...prev,
+                [data.id]: participantsForState
+              }));
+            }
           }
         } catch (pe) {
           /* swallow participants create console noise */
