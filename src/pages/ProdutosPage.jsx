@@ -288,14 +288,15 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
   // IPI
   const [cstIpi, setCstIpi] = useState(product?.cstIpi || '');
   const [aliqIpiPercent, setAliqIpiPercent] = useState(product?.aliqIpiPercent != null ? String(product.aliqIpiPercent).replace('.', ',') : '');
-  // FCP/MVA/Base Reduzida
   const [fcpPercent, setFcpPercent] = useState(product?.fcpPercent != null ? String(product.fcpPercent).replace('.', ',') : '');
   const [mvaPercent, setMvaPercent] = useState(product?.mvaPercent != null ? String(product.mvaPercent).replace('.', ',') : '');
   const [baseReduzidaPercent, setBaseReduzidaPercent] = useState(product?.baseReduzidaPercent != null ? String(product.baseReduzidaPercent).replace('.', ',') : '');
-  // NCM/CEST
   const [ncm, setNcm] = useState(product?.ncm || '');
   const [ncmDescription, setNcmDescription] = useState(product?.ncmDescription || '');
   const [cest, setCest] = useState(product?.cest || '');
+  // Ajuste de estoque (dialog)
+  const [isAdjustOpen, setIsAdjustOpen] = useState(false);
+  const [adjustDelta, setAdjustDelta] = useState('');
 
   const formatCurrencyBR = (value) => {
     const digits = String(value || '').replace(/\D/g, '');
@@ -685,11 +686,18 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
               </div>
             </TabsContent>
 
+            
+
             <TabsContent value="estoque" className="space-y-3 mt-2">
               <div className="grid grid-cols-2 gap-4">
-                <div className="grid grid-cols-2 items-center gap-4">
+                <div className="grid grid-cols-3 items-center gap-2">
                   <Label htmlFor="stock" className="text-right">Estoque</Label>
-                  <Input id="stock" value={stock} onChange={(e)=>setStock(e.target.value.replace(/[^0-9\-]/g, ''))} disabled={!editEnabled} />
+                  <Input id="stock" value={stock} readOnly disabled className="col-span-1" />
+                  {product && (
+                    <Button type="button" variant="secondary" className="col-span-1" onClick={()=>{ setAdjustDelta(''); setIsAdjustOpen(true); }}>
+                      Ajustar
+                    </Button>
+                  )}
                 </div>
                 <div className="grid grid-cols-2 items-center gap-4">
                   <Label htmlFor="minStock" className="text-right">Estoque Mín.</Label>
@@ -697,45 +705,66 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
                 </div>
               </div>
               {product && (
-                <div className="mt-2 p-3 border rounded-md bg-surface-2">
-                  <div className="text-sm font-semibold mb-2">Entrada de estoque (ajuste rápido)</div>
-                  <div className="grid grid-cols-4 gap-2 items-center">
-                    <Label htmlFor="aj-delta" className="col-span-1 text-right">Quantidade</Label>
-                    <Input id="aj-delta" className="col-span-2" placeholder="Ex.: 10" inputMode="numeric" onKeyDown={(e)=>{ if (e.key==='Enter') { document.getElementById('btn-ajustar-estoque')?.click(); } }} />
-                    <Button id="btn-ajustar-estoque" type="button" onClick={async ()=>{
-                      try {
-                        const el = document.getElementById('aj-delta');
-                        const delta = Number((el?.value || '').replace(/[^0-9\-]/g, '')) || 0;
-                        if (!delta) { toast({ title: 'Informe a quantidade', variant: 'warning' }); return; }
-                        const next = Number(stock || 0) + delta;
-                        await adjustProductStock({ productId: product.id, delta, codigoEmpresa: userProfile?.codigo_empresa });
-                        setStock(String(next));
-                        toast({ title: 'Estoque atualizado', description: `Novo estoque: ${next}`, variant: 'success' });
-                        if (el) el.value = '';
-                      } catch (err) {
-                        toast({ title: 'Falha ao ajustar estoque', description: err?.message || 'Tente novamente', variant: 'destructive' });
-                      }
-                    }}>Aplicar</Button>
-                  </div>
-                  <div className="text-xs text-text-muted mt-1">Use número positivo para entrada e negativo para saída/ajuste.</div>
-                </div>
+                <Dialog open={isAdjustOpen} onOpenChange={setIsAdjustOpen}>
+                  <DialogContent className="max-w-sm" onKeyDown={(e)=>e.stopPropagation()}>
+                    <DialogHeader>
+                      <DialogTitle className="text-xl font-bold">Ajustar Estoque</DialogTitle>
+                      <DialogDescription>Informe a quantidade a ajustar. Positivo para entrada, negativo para saída.</DialogDescription>
+                    </DialogHeader>
+                    <div className="grid grid-cols-4 items-center gap-2">
+                      <Label className="text-right">Qtd</Label>
+                      <Input className="col-span-3" value={adjustDelta} onChange={(e)=> setAdjustDelta(e.target.value.replace(/[^0-9\-]/g, ''))} placeholder="Ex.: 10 ou -2" inputMode="numeric" />
+                    </div>
+                    <div className="mt-2 text-sm text-text-secondary">
+                      {(() => {
+                        const cur = Number(stock || 0);
+                        const delta = Number(adjustDelta || 0) || 0;
+                        const next = cur + delta;
+                        const sign = delta > 0 ? '+' : '';
+                        return (
+                          <div className="flex items-center justify-between p-2 rounded-md bg-surface-2 border">
+                            <span>Estoque atual: <span className="font-mono">{cur}</span></span>
+                            <span>Ajuste: <span className={`font-mono ${delta > 0 ? 'text-success' : delta < 0 ? 'text-danger' : ''}`}>{sign}{delta}</span></span>
+                            <span>Novo estoque: <span className="font-mono font-semibold">{next}</span></span>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                    <DialogFooter>
+                      <DialogClose asChild>
+                        <Button type="button" variant="secondary">Cancelar</Button>
+                      </DialogClose>
+                      <Button type="button" onClick={async ()=>{
+                        try {
+                          const delta = Number(adjustDelta || 0);
+                          if (!delta) { toast({ title: 'Informe a quantidade', variant: 'warning' }); return; }
+                          const next = Number(stock || 0) + delta;
+                          await adjustProductStock({ productId: product.id, delta, codigoEmpresa: userProfile?.codigo_empresa });
+                          setStock(String(next));
+                          toast({ title: 'Estoque atualizado', description: `Novo estoque: ${next}`, variant: 'success' });
+                          setIsAdjustOpen(false);
+                        } catch (err) {
+                          toast({ title: 'Falha ao ajustar estoque', description: err?.message || 'Tente novamente', variant: 'destructive' });
+                        }
+                      }}>{`Aplicar (${Number(adjustDelta || 0) > 0 ? '+' : ''}${Number(adjustDelta || 0) || 0})`}</Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
               )}
             </TabsContent>
 
             <TabsContent value="preco" className="space-y-3 mt-2">
-              <div className="grid grid-cols-2 items-center gap-4">
+              <div className="grid grid-cols-4 items-center gap-4">
                 <Label htmlFor="costPrice" className="text-right">Preço de Custo (R$)</Label>
-                <Input id="costPrice" inputMode="numeric" placeholder="Ex.: 10,00" value={`R$ ${costPrice || '0,00'}`} onChange={(e)=> setCostPrice(formatCurrencyBR(e.target.value))} disabled={!editEnabled} />
+                <Input id="costPrice" inputMode="numeric" placeholder="Ex.: 10,00" value={`R$ ${costPrice || '0,00'}`} onChange={(e)=> setCostPrice(formatCurrencyBR(e.target.value))} disabled={!editEnabled} className="col-span-3" />
               </div>
-              <div className="grid grid-cols-2 items-center gap-4">
+              <div className="grid grid-cols-4 items-center gap-4">
                 <Label htmlFor="salePrice" className="text-right">Preço de Venda (R$) {((!salePrice) || (currencyToNumber(salePrice) <= 0)) && (<span className="text-danger">*</span>)}</Label>
-                <Input id="salePrice" inputMode="numeric" placeholder="Ex.: 15,00" value={`R$ ${salePrice || '0,00'}`} onChange={(e)=> setSalePrice(formatCurrencyBR(e.target.value))} disabled={!editEnabled} />
+                <Input id="salePrice" inputMode="numeric" placeholder="Ex.: 15,00" value={`R$ ${salePrice || '0,00'}`} onChange={(e)=> setSalePrice(formatCurrencyBR(e.target.value))} disabled={!editEnabled} className="col-span-3" />
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="grid grid-cols-2 items-center gap-4">
-                  <Label htmlFor="marginPercent" className="text-right">% de Lucro</Label>
-                  <Input id="marginPercent" inputMode="decimal" placeholder="Calculado" value={`${marginPercent || '0,00'} %`} onChange={(e)=> setMarginPercent(formatPercent(e.target.value))} disabled={!editEnabled} />
-                </div>
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="marginPercent" className="text-right">% de Lucro</Label>
+                <Input id="marginPercent" inputMode="decimal" placeholder="Calculado" value={`${marginPercent || '0,00'} %`} onChange={(e)=> setMarginPercent(formatPercent(e.target.value))} disabled={!editEnabled} className="col-span-3" />
               </div>
             </TabsContent>
 
@@ -1163,6 +1192,25 @@ function ProdutosPage() {
       return () => { active = false; };
     }, [userProfile?.codigo_empresa]);
 
+    // Modal: Vendas por Período (acionado pelo card "Mais Vendido (Dia)")
+    const [isSalesModalOpen, setIsSalesModalOpen] = useState(false);
+    const [salesFrom, setSalesFrom] = useState(() => { const d = new Date(); d.setHours(0,0,0,0); return d; });
+    const [salesTo, setSalesTo] = useState(() => new Date());
+    const [salesLoading, setSalesLoading] = useState(false);
+    const [salesItems, setSalesItems] = useState([]); // [{id,name,total}]
+
+    const loadSales = async () => {
+      try {
+        setSalesLoading(true);
+        const items = await getSoldProductsByPeriod({ from: salesFrom, to: salesTo, codigoEmpresa: userProfile?.codigo_empresa });
+        setSalesItems(items || []);
+      } catch (err) {
+        toast({ title: 'Falha ao carregar vendas do período', description: err?.message || 'Tente novamente', variant: 'destructive' });
+      } finally {
+        setSalesLoading(false);
+      }
+    };
+
     const stats = useMemo(() => {
         const today = new Date();
         return {
@@ -1234,6 +1282,13 @@ function ProdutosPage() {
 
     const handleStatCardClick = (filter) => {
         setActiveFilter(prev => prev === filter ? 'all' : filter);
+    };
+    const handleOpenSalesModal = () => {
+      setSalesFrom(() => { const d = new Date(); d.setHours(0,0,0,0); return d; });
+      setSalesTo(new Date());
+      setIsSalesModalOpen(true);
+      // carrega automaticamente para o dia atual
+      setTimeout(loadSales, 0);
     };
     
     const handleFilterChange = (filterType, value) => {
@@ -1429,13 +1484,102 @@ function ProdutosPage() {
 
             {showStats && (
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
-                  <StatCard icon={Trophy} title="Mais Vendido (Dia)" value={stats.mostSold} subtitle="Produto com mais saídas hoje" color="text-brand"/>
+                  <StatCard icon={Trophy} title="Mais Vendido (Dia)" value={stats.mostSold} subtitle="Produto com mais saídas hoje" color="text-brand" onClick={handleOpenSalesModal} />
                   <StatCard icon={AlertTriangle} title="Estoque Baixo" value={stats.lowStock} subtitle="Produtos precisando de reposição" color="text-warning" onClick={() => handleStatCardClick('low_stock')} isActive={activeFilter === 'low_stock'} />
                   <StatCard icon={CalendarX} title="Vencidos" value={stats.expired} subtitle="Produtos fora da data de validade" color="text-danger" onClick={() => handleStatCardClick('expired')} isActive={activeFilter === 'expired'} />
               </div>
             )}
 
-            <motion.div variants={itemVariants} className="bg-surface rounded-lg border border-border flex-1 flex flex-col overflow-hidden">
+            {/* Dialog deslocado para o escopo de ProdutosPage */}
+            <Dialog open={isSalesModalOpen} onOpenChange={setIsSalesModalOpen}>
+              <DialogContent className="max-w-2xl" onKeyDown={(e)=>e.stopPropagation()}>
+                <DialogHeader>
+                  <DialogTitle className="text-xl font-bold">Vendas por Período</DialogTitle>
+                  <DialogDescription>Selecione o intervalo de datas e visualize os produtos vendidos.</DialogDescription>
+                </DialogHeader>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
+                  <div>
+                    <Label className="mb-1 block">Início</Label>
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button variant="outline" className="w-full justify-start">
+                          <CalendarX className="mr-2 h-4 w-4" />
+                          {salesFrom ? format(salesFrom, 'dd/MM/yyyy') : 'Início'}
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="p-0 w-[300px]">
+                        <div className="w-[300px] min-h-[332px]">
+                          <Calendar mode="single" selected={salesFrom} onSelect={(d)=> d && setSalesFrom(d)} initialFocus fixedWeeks />
+                        </div>
+                      </PopoverContent>
+                    </Popover>
+                  </div>
+                  <div>
+                    <Label className="mb-1 block">Fim</Label>
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button variant="outline" className="w-full justify-start">
+                          <CalendarX className="mr-2 h-4 w-4" />
+                          {salesTo ? format(salesTo, 'dd/MM/yyyy') : 'Fim'}
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="p-0 w-[300px]">
+                        <div className="w-[300px] min-h-[332px]">
+                          <Calendar mode="single" selected={salesTo} onSelect={(d)=> d && setSalesTo(d)} initialFocus fixedWeeks />
+                        </div>
+                      </PopoverContent>
+                    </Popover>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button type="button" onClick={loadSales} disabled={salesLoading} className="w-full">{salesLoading ? 'Carregando...' : 'Aplicar'}</Button>
+                    <Button type="button" variant="secondary" onClick={()=>{
+                      try {
+                        const rows = salesItems || [];
+                        const sep = ';';
+                        const make = () => {
+                          const lines = ['Produto;Quantidade'];
+                          for (const r of rows) lines.push(`${(r.name||'').replace(/;/g, ',')}${sep}${Number(r.total||0)}`);
+                          return lines.join('\n');
+                        };
+                        const blob = new Blob(['\uFEFF' + make()], { type: 'text/csv;charset=utf-8;' });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url; a.download = 'vendas-periodo.csv'; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+                        toast({ title: 'Exportação concluída', description: `${rows.length} linha(s)`, variant: 'success' });
+                      } catch (e) { toast({ title: 'Falha ao exportar', description: e?.message || 'Tente novamente', variant: 'destructive' }); }
+                    }}>Exportar CSV</Button>
+                  </div>
+                </div>
+                <div className="mt-3 border rounded-md max-h-[50vh] overflow-auto thin-scroll">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="bg-surface-2">
+                        <th className="text-left p-2">Produto</th>
+                        <th className="text-right p-2">Quantidade</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(salesItems || []).length === 0 && !salesLoading && (
+                        <tr><td colSpan={2} className="p-3 text-text-muted">Nenhum item no período.</td></tr>
+                      )}
+                      {(salesItems || []).map(r => (
+                        <tr key={r.id} className="border-t border-border">
+                          <td className="p-2">{r.name}</td>
+                          <td className="p-2 text-right font-mono">{Number(r.total||0)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <DialogFooter>
+                  <DialogClose asChild>
+                    <Button type="button" variant="secondary">Fechar</Button>
+                  </DialogClose>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+
+            <motion.div variants={itemVariants} className="bg-surface rounded-lg border border-border flex-1 flex flex-col min-h-0">
                 <div className="p-4 flex flex-col sm:flex-row items-center justify-between border-b border-border gap-4">
                     <div className="relative w-full max-w-sm">
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted" />
@@ -1452,46 +1596,47 @@ function ProdutosPage() {
                     </div>
                 </div>
                 
-                <div className="flex-1 overflow-y-auto">
+                <div className="flex-1">
                     {sortedProducts.length === 0 ? (
                       <div className="p-10 text-center text-text-secondary">
                         <p className="text-lg mb-3">Nenhum produto cadastrado.</p>
                         <Button onClick={handleAddNew}><Plus className="mr-2 h-4 w-4" />Cadastrar primeiro produto</Button>
                       </div>
                     ) : viewMode === 'list' ? (
-                        <table className="w-full text-sm">
-                            <thead className="sticky top-0 bg-surface-2 z-10">
+                        <div className="rounded-lg border border-border overflow-hidden">
+                          <table className="w-full text-sm bg-surface table-fixed">
+                            <thead className="bg-surface-2 text-text-secondary">
                                 <tr className="border-b border-border">
-                                    <th className="p-3 text-left font-semibold text-text-secondary select-none cursor-pointer" onClick={() => toggleSort('code')}>
+                                    <th className="p-3 text-left font-semibold select-none cursor-pointer whitespace-nowrap w-[110px]" onClick={() => toggleSort('code')}>
                                       Código {sort.by === 'code' ? (sort.dir === 'asc' ? '▲' : '▼') : ''}
                                     </th>
-                                    <th className="p-3 text-left font-semibold text-text-secondary select-none cursor-pointer" onClick={() => toggleSort('name')}>
+                                    <th className="p-3 text-left font-semibold select-none cursor-pointer whitespace-nowrap w-[40%]" onClick={() => toggleSort('name')}>
                                       Produto {sort.by === 'name' ? (sort.dir === 'asc' ? '▲' : '▼') : ''}
                                     </th>
-                                    <th className="p-3 text-left font-semibold text-text-secondary">Categoria</th>
-                                    <th className="p-3 text-right font-semibold text-text-secondary">Preço</th>
-                                    <th className="p-3 text-right font-semibold text-text-secondary">Estoque</th>
-                                    <th className="p-3 text-center font-semibold text-text-secondary select-none cursor-pointer" onClick={() => toggleSort('validade')}>
+                                    <th className="p-3 text-left font-semibold whitespace-nowrap w-[18%]">Categoria</th>
+                                    <th className="p-3 text-right font-semibold whitespace-nowrap w-[120px]">Preço</th>
+                                    <th className="p-3 text-right font-semibold whitespace-nowrap w-[110px]">Estoque</th>
+                                    <th className="p-3 text-center font-semibold select-none cursor-pointer whitespace-nowrap w-[120px]" onClick={() => toggleSort('validade')}>
                                       Validade {sort.by === 'validade' ? (sort.dir === 'asc' ? '▲' : '▼') : ''}
                                     </th>
-                                    <th className="p-3 text-center font-semibold text-text-secondary">Status</th>
-                                    <th className="p-3 text-right font-semibold text-text-secondary">Ações</th>
+                                    <th className="p-3 text-center font-semibold whitespace-nowrap w-[140px]">Status</th>
+                                    <th className="p-3 text-right font-semibold whitespace-nowrap w-[90px]">Ações</th>
                                 </tr>
                             </thead>
-                            <tbody>
+                            <tbody className="text-text-primary divide-y divide-border">
                                 {sortedProducts.map(p => (
-                                    <tr key={p.id} className="border-b border-border hover:bg-surface-2 transition-colors group cursor-pointer" onClick={() => handleEdit(p)}>
-                                        <td className="p-3 font-mono text-sm text-text-secondary">{p.code || '-'}</td>
-                                        <td className="p-3 font-semibold">{p.name}</td>
-                                        <td className="p-3 text-text-secondary">{p.category}</td>
-                                        <td className="p-3 text-right font-mono tabular-nums">R$ {p.price.toFixed(2)}</td>
-                                        <td className="p-3 text-right font-mono tabular-nums">{p.stock}</td>
-                                        <td className="p-3 text-center font-mono tabular-nums">{(() => {
+                                    <tr key={p.id} className="hover:bg-surface-2 transition-colors group cursor-pointer align-middle">
+                                        <td className="p-3 font-mono text-sm text-text-secondary align-middle whitespace-nowrap" onClick={() => handleEdit(p)}>{p.code || '-'}</td>
+                                        <td className="p-3 font-semibold align-middle text-text-primary whitespace-nowrap overflow-hidden text-ellipsis" onClick={() => handleEdit(p)} title={p.name}>{p.name}</td>
+                                        <td className="p-3 text-text-secondary align-middle whitespace-nowrap" onClick={() => handleEdit(p)}>{p.category}</td>
+                                        <td className="p-3 text-right font-mono tabular-nums align-middle whitespace-nowrap" onClick={() => handleEdit(p)}>R$ {p.price.toFixed(2)}</td>
+                                        <td className="p-3 text-right font-mono tabular-nums align-middle whitespace-nowrap" onClick={() => handleEdit(p)}>{p.stock}</td>
+                                        <td className="p-3 text-center font-mono tabular-nums whitespace-nowrap" onClick={() => handleEdit(p)}>{(() => {
                   if (!p.validade) return '-';
                   const d = p.validade instanceof Date ? p.validade : parseISO(String(p.validade));
                   return isNaN(d) ? '-' : format(d, 'dd/MM/yy');
                 })()}</td>
-                                        <td className="p-3 text-center">
+                                        <td className="p-3 text-center whitespace-nowrap" onClick={() => handleEdit(p)}>
                                             <span className={cn(
                                                 "px-2 py-1 text-xs font-bold rounded-full",
                                                 p.status === 'active' && 'bg-success/10 text-success',
@@ -1499,12 +1644,9 @@ function ProdutosPage() {
                                                 p.status === 'inactive' && 'bg-danger/10 text-danger'
                                             )}>{p.status === 'active' ? 'Ativo' : p.status === 'low_stock' ? 'Estoque Baixo' : 'Inativo' }</span>
                                         </td>
-                                        <td className="p-3">
+                                        <td className="p-3 whitespace-nowrap">
                                             <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={(e) => { e.stopPropagation(); handleEdit(p); }}>
-                                                    <Edit size={14} />
-                                                </Button>
-                                                <Button variant="ghost" size="icon" className="h-8 w-8 text-danger/80 hover:text-danger" onClick={(e) => { e.stopPropagation(); handleAskDelete(p); }}>
+                                                <Button variant="ghost" size="icon" className="h-8 w-8 text-text-muted hover:text-danger" onClick={(e) => { e.stopPropagation(); handleAskDelete(p); }}>
                                                     <Trash2 size={14} />
                                                 </Button>
                                             </div>
@@ -1512,18 +1654,19 @@ function ProdutosPage() {
                                     </tr>
                                 ))}
                             </tbody>
-                        </table>
+                          </table>
+                        </div>
                     ) : (
                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 p-4">
-                           {sortedProducts.map(p => (
-                               <div key={p.id} className="bg-surface-2 rounded-lg border border-border p-4 flex flex-col text-center items-center gap-2 hover:border-brand transition-all">
-                                   <p className="font-bold mt-2">{p.name}</p>
-                                   <p className="text-sm text-text-secondary">{p.category}</p>
-                                   <p className="text-lg font-bold text-brand">R$ {p.price.toFixed(2)}</p>
+                            {sortedProducts.map(p => (
+                               <div key={p.id} className="bg-surface-2 rounded-lg border border-border p-4 flex flex-col text-center items-center gap-2 hover:border-border-hover hover:shadow-md cursor-pointer transition-all" onClick={() => handleEdit(p)}>
+                                   <p className="font-semibold mt-1 text-text-primary truncate w-full" title={p.name}>{p.name}</p>
+                                   <p className="text-xs text-text-secondary">{p.category || '—'}</p>
+                                   <p className="text-base font-bold text-text-primary">R$ {p.price.toFixed(2)}</p>
                                    <span className="text-xs text-text-muted">Estoque: {p.stock}</span>
                                </div>
-                           ))}
-                       </div>
+                            ))}
+                        </div>
                     )}
                 </div>
             </motion.div>

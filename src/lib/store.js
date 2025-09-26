@@ -26,6 +26,66 @@ function getCachedCompanyCode() {
   }
 }
 
+// ================= FINALIZADORAS (métodos de pagamento) =================
+// Tabela esperada: 'finalizadoras' com colunas:
+// id (uuid), codigo_empresa (int/varchar), nome (text), tipo (text), ativo (bool), taxa_percentual (numeric)
+// tipos comuns: dinheiro, credito, debito, pix, voucher, outros
+
+export async function listarFinalizadoras({ somenteAtivas = true, codigoEmpresa } = {}) {
+  const codigo = codigoEmpresa || getCachedCompanyCode()
+  let q = supabase
+    .from('finalizadoras')
+    .select('*')
+    .order('nome', { ascending: true })
+  if (codigo) q = q.eq('codigo_empresa', codigo)
+  if (somenteAtivas) q = q.eq('ativo', true)
+  const { data, error } = await q
+  if (error) throw error
+  return data || []
+}
+
+export async function criarFinalizadora(payload, codigoEmpresa) {
+  const codigo = codigoEmpresa || getCachedCompanyCode()
+  const row = {
+    nome: (payload?.nome || '').trim(),
+    tipo: payload?.tipo || 'outros',
+    ativo: payload?.ativo ?? true,
+    taxa_percentual: payload?.taxa_percentual == null ? null : Number(payload.taxa_percentual),
+  }
+  if (!row.nome) throw new Error('Nome é obrigatório')
+  if (codigo) row.codigo_empresa = codigo
+  const { data, error } = await supabase.from('finalizadoras').insert(row).select('*').single()
+  if (error) throw error
+  return data
+}
+
+export async function atualizarFinalizadora(id, payload, codigoEmpresa) {
+  if (!id) throw new Error('ID inválido')
+  const codigo = codigoEmpresa || getCachedCompanyCode()
+  const row = {
+    nome: (payload?.nome || '').trim(),
+    tipo: payload?.tipo || 'outros',
+    ativo: payload?.ativo ?? true,
+    taxa_percentual: payload?.taxa_percentual == null ? null : Number(payload.taxa_percentual),
+  }
+  if (!row.nome) throw new Error('Nome é obrigatório')
+  let q = supabase.from('finalizadoras').update(row).eq('id', id)
+  if (codigo) q = q.eq('codigo_empresa', codigo)
+  const { data, error } = await q.select('*').single()
+  if (error) throw error
+  return data
+}
+
+export async function ativarDesativarFinalizadora(id, ativo, codigoEmpresa) {
+  if (!id) throw new Error('ID inválido')
+  const codigo = codigoEmpresa || getCachedCompanyCode()
+  let q = supabase.from('finalizadoras').update({ ativo: !!ativo }).eq('id', id)
+  if (codigo) q = q.eq('codigo_empresa', codigo)
+  const { data, error } = await q.select('*').single()
+  if (error) throw error
+  return data
+}
+
 // Garante que há sessão de caixa aberta para a empresa atual
 // Lança erro com code = 'NO_OPEN_CASH_SESSION' se não houver
 export async function assertCaixaAberto({ codigoEmpresa } = {}) {
@@ -1043,117 +1103,13 @@ export async function removerItem({ itemId, codigoEmpresa }) {
 
 // Pagamentos
 // Finalizadoras (métodos de pagamento cadastráveis)
-export async function listarFinalizadoras({ somenteAtivas = true, codigoEmpresa } = {}) {
-  const codigo = codigoEmpresa || getCachedCompanyCode()
-  const trace = '[store.finalizadoras]'
-  try { console.group(trace); } catch {}
-  try { console.time?.(trace); } catch {}
-  try { console.log('start', { codigoEmpresa: codigo || null, somenteAtivas }); } catch {}
-  
-  // Debug: verificar se há finalizadoras sem filtros primeiro
-  try {
-    const { data: allFins, error: allError } = await supabase
-      .from('finalizadoras')
-      .select('*')
-      .limit(5)
-    console.log('[DEBUG] Finalizadoras sem filtros:', { count: allFins?.length || 0, error: allError, data: allFins })
-  } catch (debugErr) {
-    console.error('[DEBUG] Erro ao buscar finalizadoras sem filtros:', debugErr)
-  }
-  
-  const buildQuery = () => {
-    try {
-      let q = supabase.from('finalizadoras').select('*').order('nome', { ascending: true })
-      if (codigo) q = q.eq('codigo_empresa', codigo)
-      if (somenteAtivas) q = q.eq('ativo', true)
-      return q
-    } catch (err) {
-      console.error('[listarFinalizadoras] Error building query:', err)
-      throw err
-    }
-  }
+/* duplicate removed: listarFinalizadoras (see earlier definition) */
 
-  const executeWithTimeout = async (ms = 6000) => {
-    const controller = new AbortController()
-    const timer = setTimeout(() => { 
-      try { controller.abort(); } catch {} 
-    }, ms)
-    
-    try {
-      const query = buildQuery()
-      console.log('[listarFinalizadoras] Executing query:', { 
-        table: 'finalizadoras',
-        filters: {
-          codigo_empresa: codigo,
-          ativo: somenteAtivas ? true : undefined
-        }
-      })
-      
-      const { data, error, status, statusText } = await query.abortSignal(controller.signal)
-      
-      if (error) {
-        console.error('[listarFinalizadoras] Query error:', { 
-          error,
-          status,
-          statusText,
-          message: error.message
-        })
-        throw error
-      }
-      
-      console.log('[listarFinalizadoras] Query successful, items found:', Array.isArray(data) ? data.length : 0)
-      return Array.isArray(data) ? data : []
-    } catch (err) {
-      console.error('[listarFinalizadoras] Error in executeWithTimeout:', err)
-      throw err
-    } finally {
-      clearTimeout(timer)
-    }
-  }
-  try {
-    let data = await executeWithTimeout(6000)
-    try { console.log('ok', { size: Array.isArray(data) ? data.length : (data ? 1 : 0) }); } catch {}
-    return data
-  } catch (err) {
-    try { console.warn(trace + ' first attempt failed, retrying once...', err?.message || String(err)); } catch {}
-    // Retry once quickly
-    try {
-      const data = await executeWithTimeout(6000)
-      try { console.log('ok(after-retry)', { size: Array.isArray(data) ? data.length : (data ? 1 : 0) }); } catch {}
-      return data
-    } catch (err2) {
-      try { console.error(trace + ' error', err2); } catch {}
-      throw err2
-    }
-  } finally {
-    try { console.timeEnd?.(trace); } catch {}
-    try { console.groupEnd?.(); } catch {}
-  }
-}
+/* duplicate removed: criarFinalizadora (see earlier definition) */
 
-export async function criarFinalizadora(payload, codigoEmpresa) {
-  const codigo = codigoEmpresa || getCachedCompanyCode()
-  if (!codigo) throw new Error('Empresa não identificada (codigo_empresa ausente). Entre novamente ou selecione a empresa para cadastrar finalizadoras.')
-  const insert = { ...payload }
-  if (codigo) insert.codigo_empresa = codigo
-  const { data, error } = await supabase.from('finalizadoras').insert(insert).select('*').single()
-  if (error) throw error
-  return data
-}
+/* duplicate removed: atualizarFinalizadora (see earlier definition) */
 
-export async function atualizarFinalizadora(id, payload, codigoEmpresa) {
-  const codigo = codigoEmpresa || getCachedCompanyCode()
-  if (!codigo) throw new Error('Empresa não identificada (codigo_empresa ausente).')
-  let q = supabase.from('finalizadoras').update(payload).eq('id', id)
-  if (codigo) q = q.eq('codigo_empresa', codigo)
-  const { data, error } = await q.select('*').single()
-  if (error) throw error
-  return data
-}
-
-export async function ativarDesativarFinalizadora(id, ativo, codigoEmpresa) {
-  return atualizarFinalizadora(id, { ativo }, codigoEmpresa)
-}
+/* duplicate removed: ativarDesativarFinalizadora (see earlier definition) */
 
 // Pagamentos
 // Helper: detect enum cast error (e.g., invalid input value for enum ...)

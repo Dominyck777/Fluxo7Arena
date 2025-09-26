@@ -5,11 +5,11 @@ import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogClose } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { useToast } from '@/components/ui/use-toast';
-import { Search, Plus, CheckCircle, Unlock, Lock, Banknote } from 'lucide-react';
+import { Search, Plus, CheckCircle, Unlock, Lock, Banknote, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { listProducts } from '@/lib/products';
 import { useAuth } from '@/contexts/AuthContext';
@@ -47,6 +47,8 @@ export default function BalcaoPage() {
   const [payMethods, setPayMethods] = useState([]);
   const [selectedPayId, setSelectedPayId] = useState(null);
   const [payLoading, setPayLoading] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState(null);
+  const [selectedCommandItem, setSelectedCommandItem] = useState(null);
 
   // Cliente
   const [clientMode, setClientMode] = useState('cadastrado'); // fixo: apenas 'cadastrado'
@@ -631,7 +633,10 @@ export default function BalcaoPage() {
         return;
       }
       const codigoEmpresa = userProfile?.codigo_empresa;
-      if (!codigoEmpresa) { toast({ title: 'Empresa não definida', description: 'Faça login novamente.', variant: 'destructive' }); return; }
+      if (!codigoEmpresa) { 
+        toast({ title: 'Empresa não definida', description: 'Faça login novamente.', variant: 'destructive' }); 
+        return; 
+      }
       if (addingProductId) return;
 
       // Pré-validação no cliente para UX imediata (servidor também valida)
@@ -661,41 +666,85 @@ export default function BalcaoPage() {
           throw err;
         }
       }
+      
       const price = Number(prod.salePrice ?? prod.price ?? 0);
+      
       // Se já existe item deste produto na comanda, apenas incrementa a quantidade
       const existing = (itemsRef.current || []).find(it => it.productId === prod.id);
+      
       if (existing) {
-        await atualizarQuantidadeItem({ itemId: existing.id, quantidade: Number(existing.quantity || 0) + 1, codigoEmpresa });
+        await atualizarQuantidadeItem({ 
+          itemId: existing.id, 
+          quantidade: Number(existing.quantity || 0) + 1, 
+          codigoEmpresa 
+        });
       } else {
-        await adicionarItem({ comandaId: cid, produtoId: prod.id, descricao: prod.name, quantidade: 1, precoUnitario: price, codigoEmpresa });
+        await adicionarItem({ 
+          comandaId: cid, 
+          produtoId: prod.id, 
+          descricao: prod.name, 
+          quantidade: 1, 
+          precoUnitario: price, 
+          codigoEmpresa 
+        });
       }
+      
+      // Atualizar itens da comanda
+      await refetchItemsAndCustomer(cid);
+      
       // Se havia clientes selecionados em memória e a comanda acabou de ser criada, associar agora
-      try {
-        const ids = Array.from(new Set(selectedClientIds || []));
-        if (createdNow && ids.length > 0) {
-          await adicionarClientesAComanda({ comandaId: cid, clienteIds: ids, nomesLivres: [], codigoEmpresa });
-          // atualizar nome exibido
-          const vincs = await listarClientesDaComanda({ comandaId: cid, codigoEmpresa });
-          const nomes = (vincs || []).map(v => v?.nome).filter(Boolean);
-          setCustomerName(nomes.length ? nomes.join(', ') : '');
-          setClientChosen(true);
-          // Limpar pendências de cliente após associar
-          try {
-            localStorage.removeItem(LS_KEY.pendingClientIds);
-            localStorage.setItem(LS_KEY.customerName, (nomes.length ? nomes.join(', ') : ''));
-            localStorage.setItem(LS_KEY.clientChosen, 'true');
-          } catch {}
+      if (createdNow) {
+        try {
+          const ids = Array.from(new Set(selectedClientIds || []));
+          if (ids.length > 0) {
+            await adicionarClientesAComanda({ 
+              comandaId: cid, 
+              clienteIds: ids, 
+              nomesLivres: [], 
+              codigoEmpresa 
+            });
+            // Atualizar cliente após associação
+            await refetchItemsAndCustomer(cid);
+            
+            // Atualizar estado local
+            const vincs = await listarClientesDaComanda({ comandaId: cid, codigoEmpresa });
+            const nomes = (vincs || []).map(v => v?.nome).filter(Boolean);
+            setCustomerName(nomes.length ? nomes.join(', ') : '');
+            setClientChosen(true);
+            
+            // Atualizar cache local
+            try {
+              localStorage.removeItem(LS_KEY.pendingClientIds);
+              localStorage.setItem(LS_KEY.customerName, nomes.length ? nomes.join(', ') : '');
+              localStorage.setItem(LS_KEY.clientChosen, 'true');
+            } catch (error) {
+              console.error('Erro ao atualizar cache local:', error);
+            }
+          }
+        } catch (error) {
+          console.error('Erro ao associar clientes:', error);
         }
-      } catch {}
-      const itens = await listarItensDaComanda({ comandaId: cid, codigoEmpresa });
-      setItems((itens || []).map((it) => ({ id: it.id, productId: it.produto_id, name: it.descricao || 'Item', price: Number(it.preco_unitario || 0), quantity: Number(it.quantidade || 1) })));
+      }
+      
       // Avisos de estoque baixo/último
       if (stock - 1 <= 0) {
-        toast({ title: 'Última unidade vendida', description: `"${prod.name}" esgotou após esta venda.`, variant: 'warning' });
+        toast({ 
+          title: 'Última unidade vendida', 
+          description: `"${prod.name}" esgotou após esta venda.`, 
+          variant: 'warning' 
+        });
       } else if (stock - 1 <= minStock) {
-        toast({ title: 'Estoque baixo', description: `"${prod.name}" atingiu nível de estoque baixo.`, variant: 'warning' });
+        toast({ 
+          title: 'Estoque baixo', 
+          description: `"${prod.name}" atingiu nível de estoque baixo.`, 
+          variant: 'warning' 
+        });
       } else {
-        toast({ title: 'Produto adicionado', description: prod.name, variant: 'success' });
+        toast({ 
+          title: 'Produto adicionado', 
+          description: prod.name, 
+          variant: 'success' 
+        });
       }
     } catch (e) {
       const msg = String(e?.message || '').toLowerCase();
@@ -834,28 +883,49 @@ export default function BalcaoPage() {
             <ul className="space-y-2">
               {(products || []).map(prod => {
                 const qty = qtyByProductId.get(prod.id) || 0;
+                const stock = Number(prod.stock ?? prod.currentStock ?? 0);
+                const remaining = Math.max(0, stock - qty);
+                const price = Number(prod.salePrice ?? prod.price ?? 0);
+                
                 return (
-                  <li key={prod.id} className="flex items-center p-2 rounded-md hover:bg-surface-2 transition-colors">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <p className="font-semibold truncate">{prod.name}</p>
-                        {qty > 0 && (
-                          <span className="inline-flex items-center justify-center text-[11px] px-1.5 py-0.5 rounded-full bg-brand/15 text-brand border border-brand/30 flex-shrink-0">x{qty}</span>
-                        )}
-                        {(() => {
-                          const stock = Number(prod.stock ?? prod.currentStock ?? 0);
-                          const remaining = Math.max(0, stock - qty);
-                          return (
-                            <span className="inline-flex items-center justify-center text-[11px] px-1.5 py-0.5 rounded-full bg-surface-2 text-text-secondary border border-border flex-shrink-0">Qtd {remaining}</span>
-                          );
-                        })()}
+                  <React.Fragment key={prod.id}>
+                    <li className="flex items-center p-2 rounded-md hover:bg-surface-2 transition-colors">
+                      <div 
+                        className="flex-1 min-w-0 cursor-pointer"
+                        onClick={() => setSelectedProduct({
+                          ...prod,
+                          qty,
+                          remaining,
+                          price
+                        })}
+                      >
+                        <div className="flex items-center gap-2">
+                          <p className="font-semibold truncate max-w-[180px]" title={prod.name}>
+                            {prod.name.length > 25 ? `${prod.name.substring(0, 25)}...` : prod.name}
+                          </p>
+                          {qty > 0 && (
+                            <span className="inline-flex items-center justify-center text-[11px] px-1.5 py-0.5 rounded-full bg-brand/15 text-brand border border-brand/30 flex-shrink-0">x{qty}</span>
+                          )}
+                          <span className="inline-flex items-center justify-center text-[11px] px-1.5 py-0.5 rounded-full bg-surface-2 text-text-secondary border border-border flex-shrink-0">
+                            Qtd {remaining}
+                          </span>
+                        </div>
+                        <p className="text-sm text-text-muted">R$ {price.toFixed(2)}</p>
                       </div>
-                      <p className="text-sm text-text-muted">R$ {(Number(prod.salePrice ?? prod.price ?? 0)).toFixed(2)}</p>
-                    </div>
-                    <Button size="icon" variant="outline" className="flex-shrink-0" onClick={() => addProduct(prod)} aria-label={`Adicionar ${prod.name}`}>
-                      <Plus className="h-4 w-4" />
-                    </Button>
-                  </li>
+                      <Button 
+                        size="icon" 
+                        variant="outline" 
+                        className="flex-shrink-0" 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          addProduct(prod);
+                        }}
+                        aria-label={`Adicionar ${prod.name}`}
+                      >
+                        <Plus className="h-4 w-4" />
+                      </Button>
+                    </li>
+                  </React.Fragment>
                 );
               })}
             </ul>
@@ -886,9 +956,12 @@ export default function BalcaoPage() {
             ) : (
               <ul className="space-y-3 pr-1">
                 {items.map(it => (
-                  <li key={it.id} className="p-2 rounded-md border border-border/30 bg-surface">
+                  <li key={it.id} className="p-2 rounded-md border border-border/30 bg-surface hover:bg-surface-2 transition-colors cursor-pointer" 
+                    onClick={() => setSelectedCommandItem(it)}>
                     <div className="min-w-0 flex-1">
-                      <div className="font-medium truncate" title={it.name}>{it.name}</div>
+                      <div className="font-medium truncate" title={it.name}>
+                        {it.name.length > 25 ? `${it.name.substring(0, 25)}...` : it.name}
+                      </div>
                     </div>
                     <div className="mt-1 flex items-center justify-between gap-2">
                       <div className="flex items-center gap-1">
@@ -1085,6 +1158,211 @@ export default function BalcaoPage() {
               }
             }}>Confirmar</Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal de Detalhes do Produto */}
+      <Dialog open={!!selectedProduct} onOpenChange={(open) => !open && setSelectedProduct(null)}>
+        <DialogContent className="sm:max-w-[425px]">
+          {selectedProduct && (
+            <>
+              <DialogHeader>
+                <DialogTitle className="text-lg">{selectedProduct.name}</DialogTitle>
+                <DialogDescription className="text-sm">Detalhes do produto</DialogDescription>
+              </DialogHeader>
+              <div className="grid gap-4 py-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium">Preço</p>
+                    <p className="text-lg font-bold">R$ {selectedProduct.price.toFixed(2)}</p>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium">Estoque</p>
+                    <p className="text-lg">{selectedProduct.remaining} disponíveis</p>
+                  </div>
+                </div>
+                {selectedProduct.description && (
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium">Descrição</p>
+                    <p className="text-sm text-muted-foreground">{selectedProduct.description}</p>
+                  </div>
+                )}
+              </div>
+              <DialogFooter>
+                <Button 
+                  onClick={() => {
+                    addProduct(selectedProduct);
+                    setSelectedProduct(null);
+                  }}
+                  className="w-full"
+                >
+                  Adicionar ao Pedido
+                </Button>
+              </DialogFooter>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal de Detalhes do Item da Comanda */}
+      <Dialog open={!!selectedCommandItem} onOpenChange={(open) => !open && setSelectedCommandItem(null)}>
+        <DialogContent className="sm:max-w-[425px]">
+          {selectedCommandItem && (
+            <>
+              <DialogHeader>
+                <DialogTitle className="text-lg">{selectedCommandItem.name}</DialogTitle>
+                <DialogDescription className="text-sm">Detalhes do item</DialogDescription>
+              </DialogHeader>
+              <div className="grid gap-4 py-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium">Preço Unitário</p>
+                    <p className="text-lg font-bold">R$ {Number(selectedCommandItem.price).toFixed(2)}</p>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium">Quantidade</p>
+                    <div className="flex items-center gap-2">
+                      <Button 
+                        size="sm" 
+                        variant="outline" 
+                        className="h-8 w-8 p-0" 
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          const codigoEmpresa = userProfile?.codigo_empresa;
+                          if (!codigoEmpresa) { 
+                            toast({ title: 'Empresa não definida', variant: 'destructive' }); 
+                            return; 
+                          }
+                          const next = Math.max(0, selectedCommandItem.quantity - 1);
+                          try {
+                            if (next <= 0) {
+                              await removerItem({ itemId: selectedCommandItem.id, codigoEmpresa });
+                              setSelectedCommandItem(null);
+                            } else {
+                              await atualizarQuantidadeItem({ 
+                                itemId: selectedCommandItem.id, 
+                                quantidade: next, 
+                                codigoEmpresa 
+                              });
+                              setSelectedCommandItem({
+                                ...selectedCommandItem,
+                                quantity: next
+                              });
+                            }
+                            // Atualiza a lista de itens
+                            const itens = await listarItensDaComanda({ comandaId, codigoEmpresa });
+                            setItems((itens || []).map((n) => ({ 
+                              id: n.id, 
+                              productId: n.produto_id, 
+                              name: n.descricao || 'Item', 
+                              price: Number(n.preco_unitario || 0), 
+                              quantity: Number(n.quantidade || 1) 
+                            })));
+                          } catch (err) {
+                            toast({ 
+                              title: 'Erro ao atualizar quantidade', 
+                              description: err?.message || 'Tente novamente', 
+                              variant: 'destructive' 
+                            });
+                          }
+                        }}
+                      >
+                        -
+                      </Button>
+                      <span className="w-8 text-center font-semibold">
+                        {selectedCommandItem.quantity}
+                      </span>
+                      <Button 
+                        size="sm" 
+                        variant="outline" 
+                        className="h-8 w-8 p-0"
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          const codigoEmpresa = userProfile?.codigo_empresa;
+                          if (!codigoEmpresa) { 
+                            toast({ title: 'Empresa não definida', variant: 'destructive' }); 
+                            return; 
+                          }
+                          const next = selectedCommandItem.quantity + 1;
+                          try {
+                            await atualizarQuantidadeItem({ 
+                              itemId: selectedCommandItem.id, 
+                              quantidade: next, 
+                              codigoEmpresa 
+                            });
+                            setSelectedCommandItem({
+                              ...selectedCommandItem,
+                              quantity: next
+                            });
+                            // Atualiza a lista de itens
+                            const itens = await listarItensDaComanda({ comandaId, codigoEmpresa });
+                            setItems((itens || []).map((n) => ({ 
+                              id: n.id, 
+                              productId: n.produto_id, 
+                              name: n.descricao || 'Item', 
+                              price: Number(n.preco_unitario || 0), 
+                              quantity: Number(n.quantidade || 1) 
+                            })));
+                          } catch (err) {
+                            toast({ 
+                              title: 'Erro ao atualizar quantidade', 
+                              description: err?.message || 'Tente novamente', 
+                              variant: 'destructive' 
+                            });
+                          }
+                        }}
+                      >
+                        +
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <p className="text-sm font-medium">Subtotal</p>
+                  <p className="text-lg font-bold">
+                    R$ {(selectedCommandItem.quantity * selectedCommandItem.price).toFixed(2)}
+                  </p>
+                </div>
+              </div>
+              <DialogFooter>
+                <Button 
+                  variant="destructive"
+                  onClick={async () => {
+                    try {
+                      const codigoEmpresa = userProfile?.codigo_empresa;
+                      if (!codigoEmpresa) { 
+                        toast({ title: 'Empresa não definida', variant: 'destructive' }); 
+                        return; 
+                      }
+                      await removerItem({ 
+                        itemId: selectedCommandItem.id, 
+                        codigoEmpresa 
+                      });
+                      // Atualiza a lista de itens
+                      const itens = await listarItensDaComanda({ comandaId, codigoEmpresa });
+                      setItems((itens || []).map((n) => ({ 
+                        id: n.id, 
+                        productId: n.produto_id, 
+                        name: n.descricao || 'Item', 
+                        price: Number(n.preco_unitario || 0), 
+                        quantity: Number(n.quantidade || 1) 
+                      })));
+                      setSelectedCommandItem(null);
+                      toast({ title: 'Item removido', variant: 'success' });
+                    } catch (err) {
+                      toast({ 
+                        title: 'Falha ao remover item', 
+                        description: err?.message || 'Tente novamente', 
+                        variant: 'destructive' 
+                      });
+                    }
+                  }}
+                >
+                  Remover Item
+                </Button>
+              </DialogFooter>
+            </>
+          )}
         </DialogContent>
       </Dialog>
     </motion.div>

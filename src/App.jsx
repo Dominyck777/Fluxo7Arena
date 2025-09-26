@@ -14,7 +14,8 @@ import PlaceholderPage from '@/pages/PlaceholderPage';
 import FinanceiroPage from '@/pages/FinanceiroPage';
 import QuadrasPage from '@/pages/QuadrasPage';
 import EmpresasPage from '@/pages/EmpresasPage';
-import FinalizadorasPage from '@/pages/FinalizadorasPage';
+import FinalizadorasPage from '@/pages/FinalizadorasPage.new';
+import TestPage from '@/pages/TestPage';
 import ResetPasswordPage from '@/pages/ResetPasswordPage';
 import HistoricoComandasPage from '@/pages/HistoricoComandasPage';
 import { Helmet } from 'react-helmet';
@@ -46,6 +47,7 @@ function PrivateApp() {
             <Route path="/quadras" element={<QuadrasPage />} />
             <Route path="/empresas" element={<EmpresasPage />} />
             <Route path="/finalizadoras" element={<FinalizadorasPage />} />
+            <Route path="/test-page" element={<TestPage />} />
             <Route path="/historico" element={<HistoricoComandasPage />} />
             <Route path="/suporte" element={<PlaceholderPage title="Suporte" />} />
           </Routes>
