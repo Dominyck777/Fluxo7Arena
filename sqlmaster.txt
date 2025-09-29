@@ -1,385 +1,166 @@
-with
-schemas_included as (
-  select unnest(ARRAY['public','auth','storage','realtime','vault']::text[]) as schema
-),
-
-tables as (
-  select
-    n.nspname as schema,
-    c.relname as table_name,
-    c.oid     as table_oid,
-    obj_description(c.oid, 'pg_class') as table_comment,
-    c.relrowsecurity as rls_enabled,
-    c.relforcerowsecurity as rls_forced,
-    c.relkind
-  from pg_class c
-  join pg_namespace n on n.oid = c.relnamespace
-  join schemas_included s on s.schema = n.nspname
-  where c.relkind in ('r','p','v','m')
-),
-
-columns as (
-  select
-    n.nspname as schema,
-    c.relname as table_name,
-    a.attname as name,
-    pg_catalog.format_type(a.atttypid, a.atttypmod) as type,
-    col_description(c.oid, a.attnum) as comment,
-    pg_get_expr(ad.adbin, ad.adrelid) as default,
-    not a.attnotnull as nullable,
-    a.attnum as position,
-    a.attgenerated as generated_kind,
-    case when a.attidentity in ('a','d') then a.attidentity else null end as identity_generation
-  from pg_attribute a
-  join pg_class c on c.oid = a.attrelid
-  join pg_namespace n on n.oid = c.relnamespace
-  left join pg_attrdef ad on ad.adrelid = a.attrelid and ad.adnum = a.attnum
-  join schemas_included s on s.schema = n.nspname
-  where a.attnum > 0 and not a.attisdropped
-),
-
-indexes as (
-  select
-    n.nspname as schema,
-    t.relname as table_name,
-    i.relname as index_name,
-    ix.indisunique as is_unique,
-    ix.indisprimary as is_primary,
-    pg_get_indexdef(i.oid) as definition
-  from pg_index ix
-  join pg_class i on i.oid = ix.indexrelid
-  join pg_class t on t.oid = ix.indrelid
-  join pg_namespace n on n.oid = t.relnamespace
-  join schemas_included s on s.schema = n.nspname
-),
-
-constraints as (
-  select
-    n.nspname as schema,
-    c.relname as table_name,
-    con.conname as name,
-    con.contype as type,
-    pg_get_constraintdef(con.oid) as definition,
-    con.oid as con_oid,
-    con.confrelid,
-    con.conrelid
-  from pg_constraint con
-  join pg_class c on c.oid = con.conrelid
-  join pg_namespace n on n.oid = c.relnamespace
-  join schemas_included s on s.schema = n.nspname
-),
-
-fkeys as (
-  select
-    c.schema,
-    c.table_name,
-    c.name,
-    c.definition,
-    coalesce(n2.nspname, NULL) as ref_schema,
-    coalesce(t2.relname, NULL) as ref_table
-  from constraints c
-  left join pg_constraint con on con.oid = c.con_oid
-  left join pg_class t2 on t2.oid = con.confrelid
-  left join pg_namespace n2 on n2.oid = t2.relnamespace
-  where c.type = 'f'
-),
-
--- RLS policies: normalizar 'permissive' para boolean e alias para expressões
-rls_policies as (
-  select
-    pol.schemaname as schema,
-    pol.tablename as table_name,
-    pol.policyname as policy_name,
-    case
-      when lower(pol.permissive::text) in ('t','true','permissive') then true
-      else false
-    end as is_permissive_bool,
-    pol.cmd as command,
-    pol.roles as roles,
-    pol.qual as using_expr,
-    pol.with_check as with_check_expr
-  from pg_policies pol
-  join tables t on t.schema = pol.schemaname and t.table_name = pol.tablename
-),
-
--- DDL reconstruída para policies
-rls_policies_ddl as (
-  select string_agg(
-    'drop policy if exists ' || quote_ident(policy_name) || ' on ' ||
-    quote_ident(schema) || '.' || quote_ident(table_name) || ';
-
-create policy ' || quote_ident(policy_name) || ' on ' ||
-    quote_ident(schema) || '.' || quote_ident(table_name) || E'\n' ||
-    'as ' || case when is_permissive_bool then 'permissive' else 'restrictive' end || E'\n' ||
-    'for ' || lower(command) || E'\n' ||
-    case
-      when roles is not null and array_length(roles,1) > 0
-      then 'to ' || array_to_string( array(select quote_ident(r) from unnest(roles) as r), ', ')
-      else 'to public'
-    end || E'\n' ||
-    coalesce('using (' || using_expr || ')' || E'\n','') ||
-    coalesce('with check (' || with_check_expr || ')' || E'\n','')
-  , E'\n') as ddl
-  from rls_policies
-),
-
-triggers as (
-  select
-    n.nspname as schema,
-    c.relname as table_name,
-    t.tgname as trigger_name,
-    case when t.tgenabled = 'O' then true else false end as enabled,
-    pg_get_triggerdef(t.oid, true) as definition
-  from pg_trigger t
-  join pg_class c on c.oid = t.tgrelid
-  join pg_namespace n on n.oid = c.relnamespace
-  join schemas_included s on s.schema = n.nspname
-  where not t.tgisinternal
-),
-
-functions as (
-  select
-    n.nspname as schema,
-    p.proname as function_name,
-    pg_get_function_identity_arguments(p.oid) as args_identity,
-    pg_get_function_arguments(p.oid) as args_full,
-    pg_get_functiondef(p.oid) as definition,
-    l.lanname as language,
-    case when p.prosecdef then 'definer' else 'invoker' end as security,
-    p.provolatile as volatility,
-    pg_catalog.format_type(p.prorettype, null) as return_type
-  from pg_proc p
-  join pg_namespace n on n.oid = p.pronamespace
-  join pg_language l on l.oid = p.prolang
-  join schemas_included s on s.schema = n.nspname
-),
-
-table_grants as (
-  select
-    grantee,
-    table_schema as schema,
-    table_name,
-    string_agg(privilege_type, ', ' order by privilege_type) as privileges
-  from information_schema.table_privileges
-  where table_schema in (select schema from schemas_included)
-  group by grantee, table_schema, table_name
-),
-
-routine_grants as (
-  select
-    grantee,
-    routine_schema as schema,
-    routine_name,
-    string_agg(privilege_type, ', ' order by privilege_type) as privileges
-  from information_schema.routine_privileges
-  where routine_schema in (select schema from schemas_included)
-  group by grantee, routine_schema, routine_name
-),
-
-tables_agg as (
-  select
-    t.schema,
-    t.table_name,
-    t.relkind,
-    t.table_comment,
-    t.rls_enabled,
-    t.rls_forced,
-
-    coalesce((
-      select jsonb_agg(jsonb_build_object(
-        'name', c.name,
-        'type', c.type,
-        'comment', c.comment,
-        'default', c.default,
-        'nullable', c.nullable,
-        'position', c.position,
-        'generated_kind', case when c.generated_kind in ('s','d') then c.generated_kind else null end,
-        'identity_generation', c.identity_generation
-      ) order by c.position)
-      from columns c
-      where c.schema = t.schema and c.table_name = t.table_name
-    ), '[]'::jsonb) as columns,
-
-    coalesce((
-      select jsonb_agg(jsonb_build_object(
-        'name', i.index_name,
-        'is_unique', i.is_unique,
-        'definition', i.definition,
-        'is_primary', i.is_primary
-      ) order by i.index_name)
-      from indexes i
-      where i.schema = t.schema and i.table_name = t.table_name
-    ), '[]'::jsonb) as indexes,
-
-    -- PKs: corrigido para usar t.table_oid (sem referenciar pg_class no subselect)
-    coalesce((
-      select jsonb_agg(jsonb_build_object(
-        'name', con.name,
-        'columns', (
-          select jsonb_agg(sub.attname order by sub.attnum)
-          from (
-            select a.attname, a.attnum
-            from pg_attribute a
-            join pg_index ix on ix.indrelid = t.table_oid and ix.indisprimary
-            where a.attrelid = t.table_oid and a.attnum = any(ix.indkey)
-          ) sub
-        ),
-        'definition', con.definition
-      ))
-      from constraints con
-      where con.schema = t.schema and con.table_name = t.table_name and con.type = 'p'
-    ), '[]'::jsonb) as primary_keys,
-
-    coalesce((
-      select jsonb_agg(jsonb_build_object(
-        'name', con.name,
-        'definition', con.definition
-      ))
-      from constraints con
-      where con.schema = t.schema and con.table_name = t.table_name and con.type = 'u'
-    ), '[]'::jsonb) as unique_constraints,
-
-    coalesce((
-      select jsonb_agg(jsonb_build_object(
-        'name', con.name,
-        'definition', con.definition
-      ))
-      from constraints con
-      where con.schema = t.schema and con.table_name = t.table_name and con.type = 'c'
-    ), '[]'::jsonb) as check_constraints,
-
-    coalesce((
-      select jsonb_agg(jsonb_build_object(
-        'name', fk.name,
-        'definition', fk.definition,
-        'ref_schema', fk.ref_schema,
-        'ref_table', fk.ref_table
-      ))
-      from fkeys fk
-      where fk.schema = t.schema and fk.table_name = t.table_name
-    ), '[]'::jsonb) as foreign_keys
-
-  from tables t
-),
-
-rls_by_table as (
-  select
-    r.schema,
-    r.table_name,
-    jsonb_agg(jsonb_build_object(
-      'policy_name', r.policy_name,
-      'is_permissive', r.is_permissive_bool,
-      'command', r.command,
-      'roles', coalesce(r.roles, ARRAY[]::name[]),
-      'using', r.using_expr,
-      'with_check', r.with_check_expr
-    ) order by r.policy_name) as policies
-  from rls_policies r
-  group by r.schema, r.table_name
-),
-
-triggers_by_table as (
-  select
-    schema,
-    table_name,
-    jsonb_agg(jsonb_build_object(
-      'trigger_name', trigger_name,
-      'enabled', enabled,
-      'definition', definition
-    ) order by trigger_name) as triggers
-  from triggers
-  group by schema, table_name
+with schemas_included as (
+    select n.nspname as schema_name
+    from pg_namespace n
+    where n.nspname not like 'pg_%'
+      and n.nspname <> 'information_schema'
 )
 
-select jsonb_build_object(
-  'generated_at', now(),
-  'schemas', (
-    select jsonb_agg(jsonb_build_object(
-      'schema', s.schema,
-      'tables', coalesce((
-        select jsonb_agg(
-          jsonb_build_object(
-            'schema', ta.schema,
-            'table_name', ta.table_name,
-            'relkind', ta.relkind,
-            'table_comment', ta.table_comment,
-            'rls_enabled', ta.rls_enabled,
-            'rls_forced', ta.rls_forced,
-            'columns', ta.columns,
-            'indexes', ta.indexes,
-            'primary_keys', ta.primary_keys,
-            'unique_constraints', ta.unique_constraints,
-            'check_constraints', ta.check_constraints,
-            'foreign_keys', ta.foreign_keys,
-            'policies', coalesce(p.policies, '[]'::jsonb),
-            'triggers', coalesce(tr.triggers, '[]'::jsonb)
-          )
-          order by ta.table_name
-        )
-        from tables_agg ta
-        left join rls_by_table p on p.schema = ta.schema and p.table_name = ta.table_name
-        left join triggers_by_table tr on tr.schema = ta.schema and tr.table_name = ta.table_name
-        where ta.schema = s.schema
-      ), '[]'::jsonb)
-    ) order by s.schema)
-    from schemas_included s
-  ),
-  'rls_policies_json', (
-    select coalesce(jsonb_agg(jsonb_build_object(
-      'schema', r.schema,
-      'table_name', r.table_name,
-      'policy_name', r.policy_name,
-      'is_permissive', r.is_permissive_bool,
-      'command', r.command,
-      'roles', coalesce(r.roles, ARRAY[]::name[]),
-      'using', r.using_expr,
-      'with_check', r.with_check_expr
-    ) order by r.schema, r.table_name, r.policy_name), '[]'::jsonb)
-    from rls_policies r
-  ),
-  'rls_policies_ddl', (
-    select coalesce(ddl, '') from rls_policies_ddl
-  ),
-  'functions_json', (
-    select coalesce(jsonb_agg(jsonb_build_object(
-      'schema', f.schema,
-      'function_name', f.function_name,
-      'args_identity', f.args_identity,
-      'args_full', f.args_full,
-      'return_type', f.return_type,
-      'language', f.language,
-      'security', f.security,
-      'volatility', f.volatility,
-      'definition', f.definition
-    ) order by f.schema, f.function_name, f.args_identity), '[]'::jsonb)
-    from functions f
-  ),
-  'triggers_json', (
-    select coalesce(jsonb_agg(jsonb_build_object(
-      'schema', t.schema,
-      'table_name', t.table_name,
-      'trigger_name', t.trigger_name,
-      'enabled', t.enabled,
-      'definition', t.definition
-    ) order by t.schema, t.table_name, t.trigger_name), '[]'::jsonb)
-    from triggers t
-  ),
-  'table_grants_json', (
-    select coalesce(jsonb_agg(jsonb_build_object(
-      'schema', g.schema,
-      'table_name', g.table_name,
-      'grantee', g.grantee,
-      'privileges', g.privileges
-    ) order by g.schema, g.table_name, g.grantee), '[]'::jsonb)
-    from table_grants g
-  ),
-  'routine_grants_json', (
-    select coalesce(jsonb_agg(jsonb_build_object(
-      'schema', g.schema,
-      'routine_name', g.routine_name,
-      'grantee', g.grantee,
-      'privileges', g.privileges
-    ) order by g.schema, g.routine_name, g.grantee), '[]'::jsonb)
-    from routine_grants g
-  )
-) as snapshot_json;
+select 
+    'schema' as object_type,
+    n.nspname as schema_name,
+    n.nspname as object_name,
+    null as parent_object,
+    null as extra_info,
+    pg_get_userbyid(n.nspowner) as owner,
+    obj_description(n.oid, 'pg_namespace') as comment
+from pg_namespace n
+join schemas_included si on si.schema_name = n.nspname
+
+union all
+select 
+    'table',
+    n.nspname,
+    c.relname,
+    null,
+    case c.relkind
+        when 'r' then 'table'
+        when 'v' then 'view'
+        when 'm' then 'materialized_view'
+        else c.relkind::text
+    end,
+    pg_get_userbyid(c.relowner),
+    obj_description(c.oid, 'pg_class')
+from pg_class c
+join pg_namespace n on n.oid = c.relnamespace
+join schemas_included si on si.schema_name = n.nspname
+where c.relkind in ('r','v','m')
+
+union all
+select 
+    'column',
+    n.nspname,
+    a.attname,
+    c.relname,
+    pg_catalog.format_type(a.atttypid, a.atttypmod) 
+      || ' default ' || coalesce(pg_get_expr(d.adbin, d.adrelid), 'null'),
+    null,
+    col_description(a.attrelid, a.attnum)
+from pg_attribute a
+join pg_class c on c.oid = a.attrelid
+join pg_namespace n on n.oid = c.relnamespace
+left join pg_attrdef d on d.adrelid = a.attrelid and d.adnum = a.attnum
+join schemas_included si on si.schema_name = n.nspname
+where a.attnum > 0 and not a.attisdropped
+
+union all
+select 
+    'constraint',
+    n.nspname,
+    con.conname,
+    c.relname,
+    pg_get_constraintdef(con.oid),
+    null,
+    null
+from pg_constraint con
+join pg_class c on c.oid = con.conrelid
+join pg_namespace n on n.oid = c.relnamespace
+join schemas_included si on si.schema_name = n.nspname
+
+union all
+select
+    'index',
+    n.nspname,
+    i.relname,
+    t.relname,
+    pg_get_indexdef(ix.indexrelid),
+    null,
+    null
+from pg_index ix
+join pg_class t on t.oid = ix.indrelid
+join pg_class i on i.oid = ix.indexrelid
+join pg_namespace n on n.oid = t.relnamespace
+join schemas_included si on si.schema_name = n.nspname
+
+union all
+select
+    'trigger',
+    n.nspname,
+    t.tgname,
+    c.relname,
+    pg_get_triggerdef(t.oid),
+    null,
+    obj_description(t.oid, 'pg_trigger')
+from pg_trigger t
+join pg_class c on c.oid = t.tgrelid
+join pg_namespace n on n.oid = c.relnamespace
+join schemas_included si on si.schema_name = n.nspname
+where not t.tgisinternal
+
+union all
+select
+    'function',
+    n.nspname,
+    p.proname,
+    null,
+    '(' || pg_get_function_identity_arguments(p.oid) || ') returns ' || pg_get_function_result(p.oid),
+    pg_get_userbyid(p.proowner),
+    obj_description(p.oid, 'pg_proc')
+from pg_proc p
+join pg_namespace n on n.oid = p.pronamespace
+join schemas_included si on si.schema_name = n.nspname
+
+union all
+select
+    'sequence',
+    n.nspname,
+    c.relname,
+    null,
+    'increment ' || coalesce(seq.seqincrement::text, '?')
+        || ', min ' || coalesce(seq.seqmin::text, '?')
+        || ', max ' || coalesce(seq.seqmax::text, '?'),
+    pg_get_userbyid(c.relowner),
+    obj_description(c.oid, 'pg_class')
+from pg_class c
+join pg_namespace n on n.oid = c.relnamespace
+join schemas_included si on si.schema_name = n.nspname
+left join pg_sequence seq on seq.seqrelid = c.oid
+where c.relkind = 'S'
+
+union all
+select
+    'type',
+    n.nspname,
+    t.typname,
+    null,
+    pg_catalog.format_type(t.oid, null),
+    null,
+    obj_description(t.oid, 'pg_type')
+from pg_type t
+join pg_namespace n on n.oid = t.typnamespace
+join schemas_included si on si.schema_name = n.nspname
+where t.typtype in ('e','c','d')
+
+union all
+select
+    'extension',
+    n.nspname,
+    e.extname,
+    null,
+    e.extversion,
+    null,
+    obj_description(e.oid, 'pg_extension')
+from pg_extension e
+left join pg_namespace n on n.oid = e.extnamespace
+
+union all
+select
+    'grant',
+    n.nspname,
+    c.relname,
+    null,
+    pg_catalog.array_to_string(c.relacl, ','),
+    pg_get_userbyid(c.relowner),
+    null
+from pg_class c
+join pg_namespace n on n.oid = c.relnamespace
+join schemas_included si on si.schema_name = n.nspname;
