@@ -8,12 +8,14 @@ import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogClose } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/components/ui/use-toast';
-import { Search, Plus, CheckCircle, Unlock, Lock, Banknote, X } from 'lucide-react';
+import { Search, Plus, CheckCircle, Unlock, Lock, Banknote, X, FileText } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { listProducts } from '@/lib/products';
 import { useAuth } from '@/contexts/AuthContext';
 import { getOrCreateComandaBalcao, listarComandaBalcaoAberta, criarComandaBalcao, listarItensDaComanda, adicionarItem, listarFinalizadoras, registrarPagamento, fecharComandaEMesa, listarClientes, adicionarClientesAComanda, atualizarQuantidadeItem, removerItem, listarClientesDaComanda, verificarEstoqueComanda, ensureCaixaAberto, fecharCaixa, listarResumoSessaoCaixaAtual, getCaixaAberto, listarMovimentacoesCaixa, listarComandasAbertas, criarMovimentacaoCaixa } from '@/lib/store';
+import { supabase } from '@/lib/supabase';
 
 const pageVariants = { hidden: { opacity: 0 }, visible: { opacity: 1, transition: { staggerChildren: 0.1 } } };
 const itemVariants = { hidden: { opacity: 0, y: 20 }, visible: { opacity: 1, y: 0, transition: { duration: 0.5 } } };
@@ -47,7 +49,11 @@ export default function BalcaoPage() {
   const [payMethods, setPayMethods] = useState([]);
   const [selectedPayId, setSelectedPayId] = useState(null);
   const [payLoading, setPayLoading] = useState(false);
+  const [paymentLines, setPaymentLines] = useState([]); // {id, clientId, methodId, value}
+  const [nextPayLineId, setNextPayLineId] = useState(1);
+  const [payClients, setPayClients] = useState([]); // clientes carregados para o modal (id, nome, codigo)
   const [selectedProduct, setSelectedProduct] = useState(null);
+  const [isProductDetailsOpen, setIsProductDetailsOpen] = useState(false);
   const [selectedCommandItem, setSelectedCommandItem] = useState(null);
 
   // Cliente
@@ -119,12 +125,125 @@ export default function BalcaoPage() {
         saldo_inicial: (summary?.saldo_inicial ?? summary?.saldoInicial ?? sess?.saldo_inicial ?? 0),
         totalSangria,
       };
+
+  // Mantém clientes e linhas sincronizados quando o modal está aberto e a lista de clientes selecionados muda
+  useEffect(() => {
+    let active = true;
+    const sync = async () => {
+      try {
+        if (!isPayOpen || !comandaId) return;
+        const codigoEmpresa = userProfile?.codigo_empresa;
+        // Recarrega clientes vinculados
+        let normalized = [];
+        try {
+          const vinc = await listarClientesDaComanda({ comandaId, codigoEmpresa });
+          const arr = Array.isArray(vinc) ? vinc : [];
+          normalized = arr.map(r => {
+            const id = r?.clientes?.id ?? r?.cliente_id ?? r?.id ?? null;
+            const nome = r?.clientes?.nome ?? r?.nome ?? r?.nome_livre ?? '';
+            return id ? { id, nome } : null;
+          }).filter(Boolean);
+        } catch { normalized = []; }
+        if (!active) return;
+        setPayClients(normalized);
+
+        // Pool preferencial: selectedClientIds; fallback: normalized
+        const hasSelected = Array.isArray(selectedClientIds) && selectedClientIds.length > 0;
+        const pool = hasSelected ? selectedClientIds : normalized.map(c => c.id);
+        if (!Array.isArray(pool) || pool.length === 0) return;
+
+        // Garante que a primeira linha use o cliente principal
+        setPaymentLines(prev => {
+          let lines = prev && prev.length ? [...prev] : [{ id: 1, clientId: pool[0], methodId: (payMethods[0]?.id || ''), value: '' }];
+          // Ajusta primeira linha
+          if (!lines[0]) lines[0] = { id: 1, clientId: pool[0], methodId: (payMethods[0]?.id || ''), value: '' };
+          lines[0].clientId = pool[0];
+          // Para as demais, evita duplicados e preenche vazios com clientes restantes
+          const used = new Set([lines[0].clientId].filter(Boolean));
+          for (let i = 1; i < lines.length; i++) {
+            if (!lines[i].clientId || used.has(lines[i].clientId)) {
+              const candidate = (pool || []).find(id => !used.has(id));
+              lines[i].clientId = candidate || pool[0];
+            }
+            used.add(lines[i].clientId);
+          }
+          return lines;
+        });
+      } catch {}
+    };
+    sync();
+    return () => { active = false; };
+  }, [isPayOpen, selectedClientIds, comandaId, userProfile?.codigo_empresa]);
       setCashSummary(merged);
     } catch {
       setCashSummary(null);
     } finally {
       setCashLoading(false);
     }
+  };
+
+  // Confirmar pagamento no Balcão
+  const confirmPay = async () => {
+    try {
+      if (!comandaId) { toast({ title: 'Nenhuma comanda aberta', description: 'Adicione itens para abrir uma comanda.', variant: 'warning' }); return; }
+      const codigoEmpresa = userProfile?.codigo_empresa;
+      if (!codigoEmpresa) { toast({ title: 'Empresa não definida', variant: 'destructive' }); return; }
+      // validações de múltiplos pagamentos
+      if (!Array.isArray(paymentLines) || paymentLines.length === 0) { toast({ title: 'Informe os pagamentos', description: 'Adicione pelo menos uma forma de pagamento.', variant: 'warning' }); return; }
+      for (const ln of paymentLines) {
+        if (!ln.methodId) { toast({ title: 'Forma de pagamento faltando', description: 'Selecione a finalizadora em todas as linhas.', variant: 'warning' }); return; }
+        const digits = String(ln.value || '').replace(/\D/g, '');
+        if (!digits) { toast({ title: 'Valor inválido', description: 'Informe valores maiores que zero.', variant: 'warning' }); return; }
+      }
+      // Verificar total vs soma
+      let total = 0;
+      try {
+        const itens = await listarItensDaComanda({ comandaId, codigoEmpresa });
+        total = (itens || []).reduce((acc, it) => acc + Number(it.quantidade || 0) * Number(it.preco_unitario || 0), 0);
+      } catch {}
+      const sum = (paymentLines || []).reduce((acc, ln) => acc + (Number(String(ln.value||'').replace(/\D/g, ''))/100 || 0), 0);
+      if (Math.abs(sum - total) > 0.009) {
+        const diff = total - sum;
+        if (diff > 0) toast({ title: 'Valor insuficiente', description: `Faltam R$ ${diff.toFixed(2)} para fechar o total.`, variant: 'warning' });
+        else toast({ title: 'Valor excedente', description: `Excedeu em R$ ${Math.abs(diff).toFixed(2)}.`, variant: 'warning' });
+        return;
+      }
+      setPayLoading(true);
+      await ensureCaixaAberto({ codigoEmpresa });
+      for (const ln of paymentLines) {
+        const valor = Number(String(ln.value||'').replace(/\D/g, ''))/100 || 0;
+        const metodoTipo = (payMethods.find(m => m.id === ln.methodId)?.tipo || 'outros');
+        await registrarPagamento({ comandaId, finalizadoraId: ln.methodId, metodo: metodoTipo, valor, status: 'Pago', codigoEmpresa, clienteId: ln.clientId || null });
+      }
+      await fecharComandaEMesa({ comandaId, codigoEmpresa });
+      // Limpeza de estado e cache
+      setComandaId(null);
+      setItems([]);
+      setSelectedClientIds([]);
+      setCustomerName('');
+      setClientChosen(false);
+      setPaymentLines([]);
+      try {
+        localStorage.removeItem(LS_KEY.comandaId);
+        localStorage.removeItem(LS_KEY.items);
+        localStorage.removeItem(LS_KEY.customerName);
+      } catch {}
+      toast({ title: 'Pagamento concluído', description: `Total R$ ${total.toFixed(2)}`, variant: 'success' });
+      setIsPayOpen(false);
+    } catch (e) {
+      toast({ title: 'Falha ao concluir', description: e?.message || 'Tente novamente', variant: 'destructive' });
+    } finally { setPayLoading(false); }
+  };
+
+  // Soma atual das linhas de pagamento (lendo strings em formato BRL)
+  const sumPayments = () => {
+    try {
+      return (paymentLines || []).reduce((acc, ln) => {
+        const digits = String(ln?.value || '').replace(/\D/g, '');
+        const v = digits ? Number(digits) / 100 : 0;
+        return acc + v;
+      }, 0);
+    } catch { return 0; }
   };
 
   useEffect(() => {
@@ -151,14 +270,36 @@ export default function BalcaoPage() {
         </AlertDialogHeader>
         <div className="py-4">
           <Label className="mb-2 block" htmlFor="open-cash-initial">Saldo inicial</Label>
-          <Input id="open-cash-initial" ref={inputRef} inputMode="decimal" placeholder="0,00" value={openCashInitial} onChange={(e) => setOpenCashInitial(e.target.value.replace(/[^0-9,\.]/g, ''))} />
-          <div className="text-xs text-text-muted mt-1">Use vírgula ou ponto para decimais.</div>
+          <Input
+            id="open-cash-initial"
+            ref={inputRef}
+            type="text"
+            inputMode="numeric"
+            autoComplete="off"
+            placeholder="0,00"
+            value={openCashInitial}
+            onChange={(e) => {
+              const digits = (e.target.value || '').replace(/\D/g, '');
+              const cents = digits ? Number(digits) / 100 : 0;
+              const formatted = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(cents);
+              setOpenCashInitial(formatted);
+            }}
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              const allowed = ['Backspace','Delete','ArrowLeft','ArrowRight','Tab'];
+              if (allowed.includes(e.key)) return;
+              if (!/^[0-9]$/.test(e.key)) { e.preventDefault(); }
+            }}
+            onBeforeInput={(e) => { const data = e.data ?? ''; if (data && /\D/.test(data)) e.preventDefault(); }}
+          />
+          <div className="text-xs text-text-muted mt-1">Digite números; a máscara formata em reais automaticamente.</div>
         </div>
         <AlertDialogFooter>
           <AlertDialogCancel onClick={() => setOpenCashDialogOpen(false)}>Cancelar</AlertDialogCancel>
           <AlertDialogAction onClick={async () => {
             try {
-              const v = Number(String(openCashInitial).replace(',', '.')) || 0;
+              const digits = String(openCashInitial || '').replace(/\D/g, '');
+              const v = digits ? Number(digits) / 100 : 0;
               await ensureCaixaAberto({ saldoInicial: v, codigoEmpresa: userProfile?.codigo_empresa });
               setIsCashierOpen(true);
               setOpenCashDialogOpen(false);
@@ -260,7 +401,8 @@ export default function BalcaoPage() {
     const performSangria = async () => {
       try {
         setSangriaLoading(true);
-        const valor = Number(String(sangriaValor).replace(',', '.')) || 0;
+        const digits = String(sangriaValor || '').replace(/\D/g, '');
+        const valor = digits ? Number(digits) / 100 : 0;
         if (valor <= 0) { toast({ title: 'Valor inválido', description: 'Informe um valor positivo.', variant: 'warning' }); return; }
         await ensureCaixaAberto({ codigoEmpresa: userProfile?.codigo_empresa });
         await criarMovimentacaoCaixa({ tipo: 'sangria', valor, observacao: sangriaObs, codigoEmpresa: userProfile?.codigo_empresa });
@@ -337,7 +479,27 @@ export default function BalcaoPage() {
                   <div className="space-y-3">
                     <div>
                       <Label htmlFor="s-valor">Valor</Label>
-                      <Input id="s-valor" placeholder="0,00" inputMode="decimal" value={sangriaValor} onChange={(e) => setSangriaValor(e.target.value.replace(/[^0-9,\.]/g, ''))} />
+                      <Input
+                        id="s-valor"
+                        type="text"
+                        inputMode="numeric"
+                        autoComplete="off"
+                        placeholder="0,00"
+                        value={sangriaValor}
+                        onChange={(e) => {
+                          const digits = (e.target.value || '').replace(/\D/g, '');
+                          const cents = digits ? Number(digits) / 100 : 0;
+                          const formatted = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(cents);
+                          setSangriaValor(formatted);
+                        }}
+                        onKeyDown={(e) => {
+                          e.stopPropagation();
+                          const allowed = ['Backspace','Delete','ArrowLeft','ArrowRight','Tab'];
+                          if (allowed.includes(e.key)) return;
+                          if (!/^[0-9]$/.test(e.key)) { e.preventDefault(); }
+                        }}
+                        onBeforeInput={(e) => { const data = e.data ?? ''; if (data && /\D/.test(data)) e.preventDefault(); }}
+                      />
                     </div>
                     <div>
                       <Label htmlFor="s-obs">Observação</Label>
@@ -507,13 +669,19 @@ export default function BalcaoPage() {
     }
   };
 
-  // Cancelar venda atual (fecha comanda sem registrar pagamentos) e abre nova
+  // Cancelar venda atual (não deve ir para histórico): marca como 'canceled' e limpa UI
   const cancelSale = async () => {
     try {
       setCancelLoading(true);
       const codigoEmpresa = userProfile?.codigo_empresa;
       if (comandaId && codigoEmpresa) {
-        try { await fecharComandaEMesa({ comandaId, codigoEmpresa }); } catch { /* ignora e segue limpando UI */ }
+        try {
+          // 1) Apagar itens e vínculos de clientes da comanda
+          try { await supabase.from('comanda_itens').delete().eq('comanda_id', comandaId).eq('codigo_empresa', codigoEmpresa); } catch {}
+          try { await supabase.from('comanda_clientes').delete().eq('comanda_id', comandaId).eq('codigo_empresa', codigoEmpresa); } catch {}
+          // 2) Marcar comanda como cancelada (sem fechar)
+          await supabase.from('comandas').update({ status: 'canceled' }).eq('id', comandaId).eq('codigo_empresa', codigoEmpresa);
+        } catch { /* ignora e segue limpando UI */ }
       }
     } finally {
       // Limpa UI e cache independentemente do resultado do backend
@@ -793,50 +961,48 @@ export default function BalcaoPage() {
       }
       const fins = await listarFinalizadoras({ somenteAtivas: true, codigoEmpresa });
       setPayMethods(fins || []);
-      setIsPayOpen(true);
-    } catch (e) {
-      toast({ title: 'Falha ao iniciar pagamento', description: e?.message || 'Tente novamente', variant: 'destructive' });
-    } finally {
-      setPayLoading(false);
-    }
-  };
-
-  const confirmPay = async () => {
-    try {
-      if (!comandaId) { toast({ title: 'Nenhuma comanda aberta', description: 'Adicione itens para abrir uma comanda.', variant: 'warning' }); return; }
-      if (!selectedPayId) { toast({ title: 'Selecione uma finalizadora', variant: 'warning' }); return; }
-      setPayLoading(true);
-      // Vincula automaticamente os clientes selecionados antes de pagar
+      // carregar clientes vinculados à comanda para exibir nomes corretamente (normalizando para {id, nome})
+      let normalized = [];
       try {
-        const ids = clientMode === 'cadastrado' ? Array.from(new Set(selectedClientIds || [])) : [];
-        if (ids.length > 0) {
-          await adicionarClientesAComanda({ comandaId, clienteIds: ids, nomesLivres: [], codigoEmpresa: userProfile?.codigo_empresa });
+        const vinc = await listarClientesDaComanda({ comandaId, codigoEmpresa });
+        const arr = Array.isArray(vinc) ? vinc : [];
+        normalized = arr.map(r => {
+          // Use SEMPRE o cliente_id como chave principal; nunca o id da tabela de vínculo
+          const id = r?.cliente_id ?? r?.clientes?.id ?? null;
+          const nome = r?.clientes?.nome ?? r?.nome ?? r?.nome_livre ?? '';
+          return id ? { id, nome } : null;
+        }).filter(Boolean);
+      } catch { normalized = []; }
+      setPayClients(normalized);
+      // inicia com uma linha vazia pré-selecionando a primeira finalizadora e o cliente principal
+      const def = (fins && fins[0] && fins[0].id) ? fins[0].id : null;
+      const mainClientId = (selectedClientIds && selectedClientIds.length > 0)
+        ? selectedClientIds[0]
+        : (normalized[0]?.id || null);
+      setPaymentLines([{ id: 1, clientId: mainClientId, methodId: def, value: '' }]);
+      setNextPayLineId(2);
+      // Auto-preencher total se existir exatamente 1 cliente
+      try {
+        const itens = await listarItensDaComanda({ comandaId, codigoEmpresa });
+        const total = (itens || []).reduce((acc, it) => acc + Number(it.quantidade || 0) * Number(it.preco_unitario || 0), 0);
+        if ((normalized || []).length === 1 && total > 0) {
+          const formatted = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(total);
+          setPaymentLines([{ id: 1, clientId: mainClientId, methodId: def, value: formatted }]);
         }
-      } catch (e) {
-        // não bloqueia o pagamento se a associação falhar, mas informa
-        toast({ title: 'Aviso', description: 'Cliente não pôde ser associado. Prosseguindo com pagamento.', variant: 'warning' });
-      }
-      const fin = payMethods.find(m => m.id === selectedPayId);
-      const metodo = fin?.tipo || null; // enum esperado pelo banco
-      await registrarPagamento({ comandaId, finalizadoraId: selectedPayId, metodo, valor: total, codigoEmpresa: userProfile?.codigo_empresa });
-      await fecharComandaEMesa({ comandaId, codigoEmpresa: userProfile?.codigo_empresa });
-      // Não abre nova comanda automaticamente; deixa para quando adicionar o próximo item
-      setComandaId(null);
-      setItems([]);
-      setSelectedClientIds([]);
-      setCustomerName('');
-      setClientChosen(false);
-      // Limpar cache para não reidratar cliente antigo ao voltar
-      try {
-        localStorage.removeItem(LS_KEY.comandaId);
-        localStorage.removeItem(LS_KEY.items);
-        localStorage.removeItem(LS_KEY.customerName);
       } catch {}
-      toast({ title: 'Pagamento concluído', description: `Total R$ ${total.toFixed(2)}`, variant: 'success' });
-      setIsPayOpen(false);
-    } catch (e) {
-      toast({ title: 'Falha ao concluir', description: e?.message || 'Tente novamente', variant: 'destructive' });
-    } finally { setPayLoading(false); }
+      setIsPayOpen(true);
+      setPayLoading(false);
+      return;
+    } catch (err) {
+      if (err?.code === 'NO_OPEN_CASH_SESSION') {
+        toast({ title: 'Abra o caixa para pagar', description: 'É necessário abrir o caixa antes de iniciar/confirmar uma venda.', variant: 'warning' });
+        setPayLoading(false);
+        return;
+      }
+      toast({ title: 'Falha ao iniciar pagamento', description: err?.message || 'Tente novamente', variant: 'destructive' });
+    } finally {
+      // nada
+    }
   };
 
   return (
@@ -871,6 +1037,56 @@ export default function BalcaoPage() {
       {/* Detalhes do Caixa renderizado via componente único */}
       <CashierDetailsDialog />
 
+      {/* Detalhes do Produto (Balcão) */}
+      <Dialog open={isProductDetailsOpen} onOpenChange={(open) => { setIsProductDetailsOpen(open); if (!open) setSelectedProduct(null); }}>
+        <DialogContent className="sm:max-w-[420px] w-full max-h-[85vh] flex flex-col animate-none" onKeyDown={(e) => e.stopPropagation()} onPointerDownOutside={(e) => e.stopPropagation()} onInteractOutside={(e) => e.stopPropagation()}>
+          <DialogHeader>
+            <DialogTitle className="text-xl font-bold break-words" title={selectedProduct?.name || ''}>{selectedProduct?.name || 'Produto'}</DialogTitle>
+            <DialogDescription>Detalhes do produto e ações rápidas.</DialogDescription>
+          </DialogHeader>
+          {selectedProduct ? (
+            <div className="space-y-3 overflow-y-auto pr-1">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-text-secondary">Preço</span>
+                <span className="text-sm font-semibold">{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(selectedProduct.price ?? selectedProduct.salePrice ?? 0))}</span>
+              </div>
+              {selectedProduct.category ? (
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-text-secondary">Categoria</span>
+                  <span className="text-sm font-medium">{selectedProduct.category}</span>
+                </div>
+              ) : null}
+              <div className="grid grid-cols-3 gap-2 text-center">
+                {typeof selectedProduct.stock !== 'undefined' && (
+                  <div className="bg-surface-2 rounded-md p-3 border border-border">
+                    <div className="text-xs text-text-secondary">Estoque</div>
+                    <div className="text-base font-semibold">{selectedProduct.stock}</div>
+                  </div>
+                )}
+                {typeof selectedProduct.minStock !== 'undefined' && (
+                  <div className="bg-surface-2 rounded-md p-3 border border-border">
+                    <div className="text-xs text-text-secondary">Mínimo</div>
+                    <div className="text-base font-semibold">{selectedProduct.minStock}</div>
+                  </div>
+                )}
+                <div className="bg-surface-2 rounded-md p-3 border border-border">
+                  <div className="text-xs text-text-secondary">Na Comanda</div>
+                  <div className="text-base font-semibold">x{qtyByProductId.get(selectedProduct.id) || 0}</div>
+                </div>
+              </div>
+            </div>
+          ) : null}
+          <DialogFooter className="flex items-center justify-between gap-2">
+            <Button variant="ghost" size="sm" className="mr-auto inline-flex items-center gap-1" onClick={() => { if (selectedProduct) { navigate('/produtos', { state: { productId: selectedProduct.id, productName: selectedProduct.name } }); } }}>
+              <FileText className="w-4 h-4" />
+              <span>Info</span>
+            </Button>
+            <Button variant="outline" onClick={() => { setIsProductDetailsOpen(false); setSelectedProduct(null); }}>Fechar</Button>
+            <Button onClick={async () => { if (selectedProduct) { await addProduct(selectedProduct, { skipClientCheck: false }); setIsProductDetailsOpen(false); setSelectedProduct(null); } }}>Adicionar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <motion.div variants={itemVariants} className="grid grid-cols-1 md:grid-cols-2 gap-6 h-full overflow-hidden">
         <div className="flex flex-col border rounded-lg border-border overflow-hidden">
           <div className="p-4 border-b border-border">
@@ -892,12 +1108,7 @@ export default function BalcaoPage() {
                     <li className="flex items-center p-2 rounded-md hover:bg-surface-2 transition-colors">
                       <div 
                         className="flex-1 min-w-0 cursor-pointer"
-                        onClick={() => setSelectedProduct({
-                          ...prod,
-                          qty,
-                          remaining,
-                          price
-                        })}
+                        onClick={() => { setSelectedProduct({ ...prod, qty, remaining, price }); setIsProductDetailsOpen(true); }}
                       >
                         <div className="flex items-center gap-2">
                           <p className="font-semibold truncate max-w-[180px]" title={prod.name}>
@@ -1039,33 +1250,182 @@ export default function BalcaoPage() {
       </motion.div>
 
       <Dialog open={isPayOpen} onOpenChange={setIsPayOpen}>
-        <DialogContent className="max-w-md" onKeyDown={(e) => e.stopPropagation()}>
+        <DialogContent className="max-w-xl max-h-[85vh] flex flex-col overflow-hidden" onKeyDown={(e) => e.stopPropagation()}>
           <DialogHeader>
             <DialogTitle className="text-2xl font-bold">Fechar Conta</DialogTitle>
-            <DialogDescription>Selecione a finalizadora e confirme o pagamento.</DialogDescription>
+            <DialogDescription>Divida o pagamento entre clientes e várias finalizadoras, se necessário.</DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
             <div className="flex justify-between text-lg font-semibold">
               <span>Total</span>
               <span>R$ {total.toFixed(2)}</span>
             </div>
-            <div>
-              <Label className="mb-2 block">Finalizadora</Label>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {payMethods.map(m => (
-                  <Button key={m.id} type="button" variant={selectedPayId === m.id ? 'default' : 'outline'} onClick={() => setSelectedPayId(m.id)} className="justify-start">
-                    {m.nome}
-                  </Button>
-                ))}
-                {(!payMethods || payMethods.length === 0) && (
-                  <div className="text-sm text-text-muted">Nenhuma finalizadora ativa. Cadastre em Cadastros &gt; Finalizadoras.</div>
-                )}
+            <div className="flex-1 space-y-2 overflow-y-auto thin-scroll pr-1 max-h-[60vh]">
+              <Label className="block">Pagamentos</Label>
+              {/** Helper para resolver nome do cliente em qualquer cenário */}
+              {(() => null)()}
+              {/** Função local */}
+              {/**/}
+              {/** Não é executada, apenas declarada inline para manter escopo */}
+              {/* eslint-disable-next-line */}
+              {(() => { return null; })()}
+              {/* resolver nome */}
+              {/**/}
+              {/**/}
+              {/** Mantemos a função fora do JSX computado abaixo */}
+              {(paymentLines || []).map((ln, idx) => {
+                const resolveClientName = (cid) => {
+                  if (!cid) return customerName || 'Cliente';
+                  const sId = String(cid);
+                  const byPay = (payClients || []).find(c => String(c.id) === sId);
+                  if (byPay?.nome) return byPay.nome;
+                  const byClients = (clients || []).find(c => String(c.id) === sId);
+                  if (byClients?.nome) return byClients.nome;
+                  return customerName || 'Cliente';
+                };
+                const hasSelectedList = Array.isArray(selectedClientIds) && selectedClientIds.length > 0;
+                const baseClients = (payClients && payClients.length > 0) ? payClients : (clients || []).map(c => ({ id: c.id, nome: c.nome }));
+                const selectedClients = hasSelectedList
+                  ? baseClients.filter(c => (selectedClientIds || []).map(String).includes(String(c.id)))
+                  : baseClients; // fallback: usa os clientes vinculados à comanda
+                const hasMultiClients = (selectedClients || []).length > 1;
+                const primaryClient = hasSelectedList
+                  ? (baseClients.find(c => String(c.id) === String(selectedClientIds?.[0] || '')) || baseClients[0])
+                  : baseClients[0];
+                const primaryId = primaryClient?.id || ln.clientId;
+                const usedByOthers = new Set((paymentLines || []).filter(x => x.id !== ln.id).map(x => String(x.clientId)).filter(Boolean));
+                const remainingClients = selectedClients
+                  .filter(c => String(c.id) !== String(primaryClient?.id || ''))
+                  .filter(c => !usedByOthers.has(String(c.id)));
+                return (
+                <div key={ln.id} className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-center">
+                  {/* Remove button aligned to the LEFT */}
+                  <div className="sm:col-span-1 flex sm:justify-start">
+                    {paymentLines.length > 1 && idx > 0 && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        className="h-8 w-8"
+                        onClick={() => {
+                          setPaymentLines(prev => {
+                            // Remove a linha
+                            let lines = prev.filter(x => x.id !== ln.id).map(l => ({ ...l }));
+                            if (lines.length === 0) return [];
+                            // Define pool de clientes
+                            const hasSelected = Array.isArray(selectedClientIds) && selectedClientIds.length > 0;
+                            const pool = hasSelected ? selectedClientIds.map(String) : (payClients || []).map(c => String(c.id));
+                            if (!pool || pool.length === 0) return lines;
+                            // Garante cliente primário na primeira linha
+                            lines[0].clientId = pool[0];
+                            const used = new Set([String(lines[0].clientId || '')].filter(Boolean));
+                            for (let i = 1; i < lines.length; i++) {
+                              const cid = lines[i].clientId ? String(lines[i].clientId) : '';
+                              if (!cid || used.has(cid)) {
+                                const pick = pool.find(id => !used.has(String(id))) || pool[0] || '';
+                                lines[i].clientId = pick;
+                              }
+                              used.add(String(lines[i].clientId || ''));
+                            }
+                            return lines;
+                          });
+                        }}
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    )}
+                  </div>
+                  {(idx === 0) ? (
+                    // Primeira linha sempre mostra o cliente principal (somente leitura)
+                    <div className="sm:col-span-4">
+                      <div className="h-9 px-3 rounded-md border border-border bg-surface flex items-center text-sm truncate">
+                        {resolveClientName(primaryId)}
+                      </div>
+                    </div>
+                  ) : hasMultiClients ? (
+                    <div className="sm:col-span-4">
+                      <Select value={ln.clientId || ''} onValueChange={(v) => setPaymentLines(prev => prev.map(x => x.id === ln.id ? { ...x, clientId: v } : x))}>
+                        <SelectTrigger className="w-full truncate"><SelectValue placeholder="Cliente" /></SelectTrigger>
+                        <SelectContent>
+                          {remainingClients.map(c => (
+                            <SelectItem key={c.id} value={c.id}>{c.codigo != null ? `${c.codigo} - ${c.nome}` : c.nome}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  ) : (
+                    <div className="sm:col-span-4">
+                      <div className="h-9 px-3 rounded-md border border-border bg-surface flex items-center text-sm truncate">
+                        {resolveClientName(primaryId)}
+                      </div>
+                    </div>
+                  )}
+                  <div className="sm:col-span-4">
+                    <Select value={ln.methodId || ''} onValueChange={(v) => setPaymentLines(prev => prev.map(x => x.id === ln.id ? { ...x, methodId: v } : x))}>
+                      <SelectTrigger className="w-full truncate"><SelectValue placeholder="Forma de pagamento" /></SelectTrigger>
+                      <SelectContent>
+                        {(payMethods || []).map(m => (
+                          <SelectItem key={m.id} value={m.id}>{m.nome}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="sm:col-span-3">
+                    <Input
+                      placeholder="0,00"
+                      inputMode="numeric"
+                      value={ln.value}
+                      onChange={(e) => {
+                        const digits = (e.target.value || '').replace(/\D/g, '');
+                        const cents = digits ? Number(digits) / 100 : 0;
+                        const formatted = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(cents);
+                        setPaymentLines(prev => prev.map(x => x.id === ln.id ? { ...x, value: formatted } : x));
+                      }}
+                      onKeyDown={(e) => {
+                        e.stopPropagation();
+                        const allowed = ['Backspace','Delete','ArrowLeft','ArrowRight','Tab'];
+                        if (allowed.includes(e.key)) return;
+                        if (!/^[0-9]$/.test(e.key)) { e.preventDefault(); }
+                      }}
+                      onBeforeInput={(e) => { const data = e.data ?? ''; if (data && /\D/.test(data)) e.preventDefault(); }}
+                    />
+                  </div>
+                </div>
+                );
+              })}
+              <div>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    setPaymentLines(prev => {
+                      const hasSelected = Array.isArray(selectedClientIds) && selectedClientIds.length > 0;
+                      const pool = hasSelected ? selectedClientIds : (payClients || []).map(c => c.id);
+                      const used = new Set(prev.map(x => x.clientId).filter(Boolean));
+                      const candidates = (pool || []).filter(id => !used.has(id));
+                      const clientPick = candidates[0] || pool[0] || '';
+                      return [...prev, { id: nextPayLineId, clientId: clientPick, methodId: (payMethods[0]?.id || ''), value: '' }];
+                    });
+                    setNextPayLineId((n) => n + 1);
+                  }}
+                >
+                  Adicionar forma
+                </Button>
+              </div>
+              <div className="text-sm text-text-secondary flex justify-between">
+                <span>Soma</span>
+                <span>R$ {sumPayments().toFixed(2)}</span>
+              </div>
+              <div className="text-sm font-semibold flex justify-between">
+                <span>Restante</span>
+                <span className={Math.abs(total - sumPayments()) < 0.005 ? 'text-success' : 'text-warning'}>R$ {(total - sumPayments()).toFixed(2)}</span>
               </div>
             </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsPayOpen(false)} disabled={payLoading}>Cancelar</Button>
-            <Button onClick={confirmPay} disabled={payLoading || !selectedPayId || total <= 0}>{payLoading ? 'Processando...' : 'Confirmar'}</Button>
+            <Button onClick={confirmPay} disabled={payLoading}>{payLoading ? 'Processando...' : 'Confirmar Pagamento'}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1161,48 +1521,7 @@ export default function BalcaoPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Modal de Detalhes do Produto */}
-      <Dialog open={!!selectedProduct} onOpenChange={(open) => !open && setSelectedProduct(null)}>
-        <DialogContent className="sm:max-w-[425px]">
-          {selectedProduct && (
-            <>
-              <DialogHeader>
-                <DialogTitle className="text-lg">{selectedProduct.name}</DialogTitle>
-                <DialogDescription className="text-sm">Detalhes do produto</DialogDescription>
-              </DialogHeader>
-              <div className="grid gap-4 py-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1">
-                    <p className="text-sm font-medium">Preço</p>
-                    <p className="text-lg font-bold">R$ {selectedProduct.price.toFixed(2)}</p>
-                  </div>
-                  <div className="space-y-1">
-                    <p className="text-sm font-medium">Estoque</p>
-                    <p className="text-lg">{selectedProduct.remaining} disponíveis</p>
-                  </div>
-                </div>
-                {selectedProduct.description && (
-                  <div className="space-y-1">
-                    <p className="text-sm font-medium">Descrição</p>
-                    <p className="text-sm text-muted-foreground">{selectedProduct.description}</p>
-                  </div>
-                )}
-              </div>
-              <DialogFooter>
-                <Button 
-                  onClick={() => {
-                    addProduct(selectedProduct);
-                    setSelectedProduct(null);
-                  }}
-                  className="w-full"
-                >
-                  Adicionar ao Pedido
-                </Button>
-              </DialogFooter>
-            </>
-          )}
-        </DialogContent>
-      </Dialog>
+      
 
       {/* Modal de Detalhes do Item da Comanda */}
       <Dialog open={!!selectedCommandItem} onOpenChange={(open) => !open && setSelectedCommandItem(null)}>

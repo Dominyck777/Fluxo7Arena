@@ -10,6 +10,7 @@ import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger, } from "@/components/ui/alert-dialog"
 import { Label } from '@/components/ui/label';
 import { listMesas, ensureCaixaAberto, fecharCaixa, getOrCreateComandaForMesa, listarItensDaComanda, adicionarItem, atualizarQuantidadeItem, removerItem, listarFinalizadoras, registrarPagamento, fecharComandaEMesa, listarComandasAbertas, listarTotaisPorComanda, criarMesa, listarClientes, adicionarClientesAComanda, listarClientesDaComanda, getCaixaAberto, listarResumoSessaoCaixaAtual, criarMovimentacaoCaixa, listarMovimentacoesCaixa } from '@/lib/store';
@@ -62,6 +63,9 @@ function VendasPage() {
   const [isCashierDetailsOpen, setIsCashierDetailsOpen] = useState(false);
   const [cashLoading, setCashLoading] = useState(false);
   const [cashSummary, setCashSummary] = useState(null);
+  // Detalhes de produto (como no Balcão)
+  const [selectedProduct, setSelectedProduct] = useState(null);
+  const [isProductDetailsOpen, setIsProductDetailsOpen] = useState(false);
   const [isOrderDetailsOpen, setIsOrderDetailsOpen] = useState(false);
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -82,17 +86,26 @@ function VendasPage() {
   const [openCashDialogOpen, setOpenCashDialogOpen] = useState(false);
 
   // Evita movimentação do layout quando diálogos estão abertos (bloqueia scroll do fundo)
-  const anyDialogOpen = isCreateMesaOpen || isOpenTableDialog || isOrderDetailsOpen || isCashierDetailsOpen || isPayOpen || openCashDialogOpen || isCounterModeOpen;
+  const anyDialogOpen = isCreateMesaOpen || isOpenTableDialog || isOrderDetailsOpen || isCashierDetailsOpen || isPayOpen || openCashDialogOpen || isCounterModeOpen || isProductDetailsOpen;
   // Props dinâmicos para evitar reanimações enquanto um modal está aberto
   const pageVariantsActive = anyDialogOpen ? undefined : pageVariants;
   const itemVariantsActive = anyDialogOpen ? undefined : itemVariants;
   const prevOverflowRef = useRef(null);
   const prevAnyOpenRef = useRef(false);
+  const prevPaddingRightRef = useRef('');
   useEffect(() => {
-    const original = prevOverflowRef.current ?? document.body.style.overflow;
-    prevOverflowRef.current = original;
+    const originalOverflow = prevOverflowRef.current ?? document.body.style.overflow;
+    prevOverflowRef.current = originalOverflow;
     if (anyDialogOpen && !prevAnyOpenRef.current) {
+      // Lock scroll and compensate for scrollbar width to avoid layout shift
       document.body.style.overflow = 'hidden';
+      try {
+        const sw = window.innerWidth - document.documentElement.clientWidth;
+        if (sw > 0) {
+          prevPaddingRightRef.current = document.body.style.paddingRight || '';
+          document.body.style.paddingRight = `${sw}px`;
+        }
+      } catch {}
       try {
         const root = document.getElementById('root');
         if (root) root.setAttribute('inert', '');
@@ -100,7 +113,9 @@ function VendasPage() {
       try { document.documentElement.classList.add('no-dialog-anim'); } catch {}
     }
     if (!anyDialogOpen && prevAnyOpenRef.current) {
-      document.body.style.overflow = original || '';
+      // Restore scroll and padding
+      document.body.style.overflow = originalOverflow || '';
+      try { document.body.style.paddingRight = prevPaddingRightRef.current || ''; } catch {}
       try {
         const root = document.getElementById('root');
         if (root) root.removeAttribute('inert');
@@ -109,8 +124,9 @@ function VendasPage() {
     }
     prevAnyOpenRef.current = anyDialogOpen;
     return () => {
-      // restaura ao desmontar da página
-      document.body.style.overflow = original || '';
+      // restore on page unmount
+      document.body.style.overflow = originalOverflow || '';
+      try { document.body.style.paddingRight = prevPaddingRightRef.current || ''; } catch {}
       try { const root = document.getElementById('root'); if (root) root.removeAttribute('inert'); } catch {}
       try { document.documentElement.classList.remove('no-dialog-anim'); } catch {}
     };
@@ -314,74 +330,6 @@ function VendasPage() {
     return () => {};
   }, [authReady, userProfile?.codigo_empresa, anyDialogOpen]);
 
-  // Recarregar lista de mesas ao focar/ficar visível quando estagnado
-  useEffect(() => {
-    const codigoEmpresa = userProfile?.codigo_empresa || null;
-    const reloadIfStale = () => {
-      if (!authReady || !codigoEmpresa) return;
-      const elapsed = Date.now() - (lastTablesLoadTsRef.current || 0);
-      if (elapsed > 30000 || lastTablesSizeRef.current === 0) {
-        // Rehydrate cache immediately to avoid empty perception
-        try {
-          const cacheKey = `vendas:tables:${codigoEmpresa}`;
-          const cached = JSON.parse(localStorage.getItem(cacheKey) || '[]');
-          if (Array.isArray(cached) && cached.length > 0) setTables(cached);
-        } catch {}
-        // Trigger fresh load
-        // replicate inner load from effect by calling list functions inline to avoid closure issues
-        (async () => {
-          try {
-            const mesas = await listMesas(codigoEmpresa);
-            let openComandas = [];
-            try { openComandas = await listarComandasAbertas({ codigoEmpresa }); } catch {}
-            const totals = await (async () => { try { return await listarTotaisPorComanda((openComandas || []).map(c => c.id), codigoEmpresa); } catch { return {}; } })();
-            const namesByComanda = await (async () => {
-              try {
-                const entries = await Promise.all((openComandas || []).map(async (c) => {
-                  try {
-                    const vincs = await listarClientesDaComanda({ comandaId: c.id, codigoEmpresa });
-                    const nomes = (vincs || []).map(v => v?.nome).filter(Boolean);
-                    return [c.id, nomes.length ? nomes.join(', ') : null];
-                  } catch { return [c.id, null]; }
-                }));
-                return Object.fromEntries(entries);
-              } catch { return {}; }
-            })();
-            const byMesa = new Map();
-            (openComandas || []).forEach(c => byMesa.set(c.mesa_id, c));
-            const uiTables = (mesas || []).map((m) => {
-              const c = byMesa.get(m.id);
-              let status = mapStatus(m.status);
-              let comandaId = null;
-              let totalHint = 0;
-              let customer = null;
-              if (c) {
-                status = (c.status === 'awaiting-payment' || c.status === 'awaiting_payment') ? 'awaiting-payment' : 'in-use';
-                comandaId = c.id;
-                totalHint = Number(totals[c.id] || 0);
-                customer = namesByComanda[c.id] || null;
-              }
-              return { id: m.id, number: m.numero, name: m.nome || null, status, order: [], customer, comandaId, totalHint };
-            });
-            setTables(uiTables);
-            try { localStorage.setItem(`vendas:tables:${codigoEmpresa}`, JSON.stringify(uiTables)); } catch {}
-            lastTablesSizeRef.current = Array.isArray(uiTables) ? uiTables.length : 0;
-            lastTablesLoadTsRef.current = Date.now();
-          } catch {}
-        })();
-      }
-    };
-    const onFocus = () => { if (!anyDialogOpen) reloadIfStale(); };
-    const onVis = () => { if (!anyDialogOpen && document.visibilityState === 'visible') reloadIfStale(); };
-    window.addEventListener('focus', onFocus);
-    document.addEventListener('visibilitychange', onVis);
-    return () => {
-      window.removeEventListener('focus', onFocus);
-      document.removeEventListener('visibilitychange', onVis);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authReady, userProfile?.codigo_empresa]);
-
   // Persistir selectedTable no cache e, quando mudar para uma comanda, hidratar itens se necessário
   useEffect(() => {
     const codigoEmpresa = userProfile?.codigo_empresa || null;
@@ -487,8 +435,8 @@ function VendasPage() {
     }
   };
 
-  // Recarrega rapidamente o status das mesas (sem todos os detalhes), para refletir fechamento/liberação
-  const refreshTablesLight = async () => {
+  // Recarrega rapidamente o status das mesas (sem todos os detalhes). Opcionalmente exibe toast em erro.
+  const refreshTablesLight = async ({ showToast = false } = {}) => {
     try {
       const codigoEmpresa = userProfile?.codigo_empresa;
       if (!codigoEmpresa) {
@@ -508,9 +456,8 @@ function VendasPage() {
       } catch (err) {
         console.error('[refreshTablesLight] Erro ao carregar comandas:', err);
       }
-      
-      const byMesa = new Map();
-      (openComandas || []).forEach(c => byMesa.set(c.mesa_id, c));
+      // Índice auxiliar: comanda por mesa
+      const byMesa = new Map((openComandas || []).map(c => [c.mesa_id, c]));
       
       // Buscar nomes dos clientes e totais das comandas abertas
       const namesByComanda = {};
@@ -578,11 +525,13 @@ function VendasPage() {
       
     } catch (err) {
       console.error('[refreshTablesLight] Erro fatal:', err);
-      toast({ 
-        title: 'Erro ao atualizar mesas', 
-        description: 'Recarregue a página se o problema persistir', 
-        variant: 'destructive' 
-      });
+      if (showToast) {
+        toast({ 
+          title: 'Erro ao atualizar mesas', 
+          description: 'Recarregue a página se o problema persistir', 
+          variant: 'destructive' 
+        });
+      }
     }
   };
 
@@ -740,61 +689,142 @@ function VendasPage() {
           </div>
         )}
       </div>
-    )
+    );
   };
 
   // Define PayDialog before OrderPanel to avoid reference errors
   const PayDialog = () => {
     const total = selectedTable ? calculateTotal(selectedTable.order) : 0;
     const [payLoading, setPayLoading] = useState(false);
+    const [paymentLines, setPaymentLines] = useState([]); // {id, clientId, methodId, value}
+    const [nextPayLineId, setNextPayLineId] = useState(1);
+    const [payClients, setPayClients] = useState([]); // {id, nome}
+    const valueRefs = useRef(new Map());
+
+    const parseBRL = (s) => { const d = String(s || '').replace(/\D/g, ''); return d ? Number(d) / 100 : 0; };
+    const sumPayments = () => (paymentLines || []).reduce((acc, ln) => acc + parseBRL(ln.value), 0);
+
+    const focusNextValue = (currentEl, currentId) => {
+      try {
+        // 1) Tenta pelo array de linhas (lógico)
+        const idx = (paymentLines || []).findIndex(l => l.id === currentId);
+        if (idx >= 0) {
+          const next = (paymentLines || [])[idx + 1] || null;
+          if (next && valueRefs.current.get(next.id)) {
+            const el = valueRefs.current.get(next.id);
+            setTimeout(() => { try { el.focus(); el.select?.(); } catch {} }, 0);
+            return;
+          }
+        }
+        // 2) Fallback por DOM order (mais robusto quando a lista muda)
+        if (currentEl && currentEl instanceof HTMLElement) {
+          const list = Array.from(document.querySelectorAll('input[data-pay-value="1"]'));
+          const pos = list.indexOf(currentEl);
+          if (pos >= 0 && list[pos + 1]) {
+            const el = list[pos + 1];
+            setTimeout(() => { try { el.focus(); el.select?.(); } catch {} }, 0);
+            return;
+          }
+        }
+        // Se não existe próxima linha, cria uma e foca nela
+        setPaymentLines(prev => {
+          const used = new Set(prev.map(x => String(x.clientId)).filter(Boolean));
+          const remaining = (payClients || []).filter(c => !used.has(String(c.id)));
+          const pick = (remaining[0]?.id) || (payClients[0]?.id) || '';
+          const defMethod = (payMethods && payMethods[0] && payMethods[0].id) ? payMethods[0].id : null;
+          const newId = nextPayLineId;
+          const nextState = [...prev, { id: newId, clientId: pick, methodId: defMethod, value: '' }];
+          // agenda foco após render
+          setNextPayLineId(n => n + 1);
+          setTimeout(() => {
+            const el = valueRefs.current.get(newId);
+            if (el) try { el.focus(); el.select?.(); } catch {}
+          }, 0);
+          return nextState;
+        });
+      } catch {}
+    };
+
+    useEffect(() => {
+      let active = true;
+      const boot = async () => {
+        try {
+          if (!isPayOpen || !selectedTable?.comandaId) return;
+          let normalized = [];
+          try {
+            const vinc = await listarClientesDaComanda({ comandaId: selectedTable.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
+            const arr = Array.isArray(vinc) ? vinc : [];
+            normalized = arr.map(r => {
+              const id = r?.cliente_id ?? r?.clientes?.id ?? null;
+              const nome = r?.clientes?.nome ?? r?.nome ?? r?.nome_livre ?? '';
+              return id ? { id, nome } : null;
+            }).filter(Boolean);
+          } catch { normalized = []; }
+          if (!active) return;
+          setPayClients(normalized);
+          // criar linha base
+          let defMethod = (payMethods && payMethods[0] && payMethods[0].id) ? payMethods[0].id : null;
+          let primaryId = (normalized[0]?.id) || null;
+          let initialValue = '';
+          // auto-preencher se houver exatamente 1 cliente e total > 0
+          try {
+            const itens = await listarItensDaComanda({ comandaId: selectedTable.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
+            const total = (itens || []).reduce((acc, it) => acc + Number(it.quantidade || 0) * Number(it.preco_unitario || 0), 0);
+            if ((normalized || []).length === 1 && total > 0) {
+              initialValue = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(total);
+            }
+          } catch {}
+          setPaymentLines([{ id: 1, clientId: primaryId, methodId: defMethod, value: initialValue }]);
+          setNextPayLineId(2);
+        } catch {}
+      };
+      boot();
+      return () => { active = false; };
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isPayOpen, selectedTable?.comandaId]);
+
     const confirmPay = async () => {
       try {
         if (!selectedTable?.comandaId) return;
-        if (!selectedPayId) {
-          toast({ title: 'Selecione uma finalizadora', variant: 'warning' });
+        const codigoEmpresa = userProfile?.codigo_empresa;
+        if (!codigoEmpresa) { toast({ title: 'Empresa não definida', variant: 'destructive' }); return; }
+        if (!Array.isArray(paymentLines) || paymentLines.length === 0) {
+          toast({ title: 'Informe os pagamentos', description: 'Adicione pelo menos uma forma de pagamento.', variant: 'warning' });
           return;
         }
-        // sanity check de total: se zero, refaz carga rápida
-        let effTotal = total;
-        if (effTotal <= 0) {
+        for (const ln of paymentLines) {
+          if (!ln.methodId) { toast({ title: 'Forma de pagamento faltando', description: 'Selecione a finalizadora em todas as linhas.', variant: 'warning' }); return; }
+          if (parseBRL(ln.value) <= 0) { toast({ title: 'Valor inválido', description: 'Informe valores maiores que zero.', variant: 'warning' }); return; }
+        }
+        const effTotal = total > 0 ? total : 0;
+        const totalSum = sumPayments();
+        if (Math.abs(totalSum - effTotal) > 0.009) {
+          const remaining = effTotal - totalSum;
+          if (remaining > 0) toast({ title: 'Valor insuficiente', description: `Faltam R$ ${remaining.toFixed(2)} para fechar o total.`, variant: 'warning' });
+          else toast({ title: 'Valor excedente', description: `Excedeu em R$ ${Math.abs(remaining).toFixed(2)}. Ajuste os valores.`, variant: 'warning' });
+          return;
+        }
+        let refreshTotal = total;
+        if (refreshTotal <= 0) {
           try {
             const itens = await listarItensDaComanda({ comandaId: selectedTable.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
-            const order = (itens || []).map((it) => ({ id: it.id, productId: it.produto_id, name: it.descricao || 'Item', price: Number(it.preco_unitario || 0), quantity: Number(it.quantidade || 1) }));
-            const updated = { ...selectedTable, order };
-            setSelectedTable(updated);
-            setTables((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
-            effTotal = calculateTotal(order);
+            const t = (itens || []).reduce((acc, it) => acc + Number(it.quantidade||0) * Number(it.preco_unitario||0), 0);
+            refreshTotal = t;
           } catch {}
         }
-        if (effTotal <= 0) {
-          toast({ title: 'Sem itens na comanda', description: 'Adicione itens antes de fechar a conta.', variant: 'warning' });
-          return;
-        }
         setPayLoading(true);
-        try { console.log('[PayDialog.confirm]', { selectedPayId, effTotal }); } catch {}
-        // registra pagamento do total
-        const fin = payMethods.find((m) => m.id === selectedPayId);
-        const metodo = fin?.tipo || fin?.nome || 'outros';
-        await registrarPagamento({ comandaId: selectedTable.comandaId, finalizadoraId: selectedPayId, metodo, valor: effTotal, codigoEmpresa: userProfile?.codigo_empresa });
-        // fecha comanda e libera mesa
+        await ensureCaixaAberto({ codigoEmpresa: userProfile?.codigo_empresa });
+        for (const ln of paymentLines) {
+          const v = parseBRL(ln.value);
+          await registrarPagamento({ comandaId: selectedTable.comandaId, finalizadoraId: ln.methodId, metodo: (payMethods.find(m => m.id === ln.methodId)?.tipo || 'outros'), valor: v, status: 'Pago', codigoEmpresa, clienteId: ln.clientId || null });
+        }
         await fecharComandaEMesa({ comandaId: selectedTable.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
-        // atualizar UI: mesa disponível, limpa comanda
         setTables((prev) => prev.map((t) => (t.id === selectedTable.id ? { ...t, status: 'available', order: [], comandaId: null, customer: null, totalHint: 0 } : t)));
         setSelectedTable((prev) => prev ? { ...prev, status: 'available', order: [], comandaId: null, customer: null, totalHint: 0 } : prev);
-        
-        // FORÇAR RECARREGAMENTO COMPLETO das mesas para evitar bugs
-        console.log('[VendasPage] Forçando recarregamento completo após finalizar comanda');
-        try { 
-          if (userProfile?.codigo_empresa) {
-            localStorage.removeItem(`vendas:tables:${userProfile.codigo_empresa}`);
-          }
-        } catch {}
-        
-        // Recarregar mesas do servidor
+        try { if (userProfile?.codigo_empresa) localStorage.removeItem(`vendas:tables:${userProfile.codigo_empresa}`); } catch {}
         try {
           const mesas = await listMesas(userProfile?.codigo_empresa);
           const openComandas = await listarComandasAbertas({ codigoEmpresa: userProfile?.codigo_empresa });
-          
           const namesByComanda = {};
           await Promise.all((openComandas || []).map(async (c) => {
             try {
@@ -803,26 +833,13 @@ function VendasPage() {
               namesByComanda[c.id] = nomes.length ? nomes.join(', ') : null;
             } catch { namesByComanda[c.id] = null; }
           }));
-          
           const enrichedTables = (mesas || []).map((mesa) => {
             const comanda = (openComandas || []).find((c) => c.mesa_id === mesa.id);
-            return {
-              id: mesa.id,
-              name: mesa.nome || `Mesa ${mesa.numero}`,
-              status: comanda ? 'in-use' : 'available',
-              comandaId: comanda?.id || null,
-              customer: comanda ? namesByComanda[comanda.id] : null,
-              order: [],
-              totalHint: 0,
-            };
+            return { id: mesa.id, name: mesa.nome || `Mesa ${mesa.numero}`, status: comanda ? 'in-use' : 'available', comandaId: comanda?.id || null, customer: comanda ? namesByComanda[comanda.id] : null, order: [], totalHint: 0 };
           });
-          
           setTables(enrichedTables);
-          console.log('[VendasPage] Mesas recarregadas com sucesso:', enrichedTables.length);
-        } catch (err) {
-          console.error('[VendasPage] Erro ao recarregar mesas:', err);
-        }
-        toast({ title: 'Pagamento registrado', description: `Total R$ ${effTotal.toFixed(2)}`, variant: 'success' });
+        } catch {}
+        toast({ title: 'Pagamento registrado', description: `Total R$ ${refreshTotal.toFixed(2)}`, variant: 'success' });
         setIsPayOpen(false);
       } catch (e) {
         toast({ title: 'Falha ao registrar pagamento', description: e?.message || 'Tente novamente', variant: 'destructive' });
@@ -830,42 +847,111 @@ function VendasPage() {
         setPayLoading(false);
       }
     };
-    const canConfirm = !!selectedPayId && !payLoading;
+
+    const canConfirm = (paymentLines && paymentLines.length > 0) && !payLoading;
+
     return (
       <Dialog open={isPayOpen} onOpenChange={setIsPayOpen}>
-        <DialogContent
-          className="max-w-md animate-none"
-          onKeyDown={(e) => e.stopPropagation()}
-          onKeyDownCapture={(e) => e.stopPropagation()}
-          onPointerDownOutside={(e) => e.stopPropagation()}
-          onInteractOutside={(e) => e.stopPropagation()}
-        >
+        <DialogContent className="max-w-xl max-h-[85vh] animate-none flex flex-col overflow-hidden" onKeyDown={(e) => e.stopPropagation()} onKeyDownCapture={(e) => e.stopPropagation()} onPointerDownOutside={(e) => e.stopPropagation()} onInteractOutside={(e) => e.stopPropagation()}>
           <DialogHeader>
             <DialogTitle className="text-2xl font-bold">Fechar Conta</DialogTitle>
-            <DialogDescription>Selecione a finalizadora e confirme o pagamento.</DialogDescription>
+            <DialogDescription>Divida o pagamento entre clientes e várias finalizadoras, se necessário.</DialogDescription>
           </DialogHeader>
-          <div className="space-y-4">
-            <div className="flex justify-between text-lg font-semibold">
-              <span>Total</span>
-              <span>R$ {total.toFixed(2)}</span>
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="text-lg font-semibold">Total</div>
+              <div className="text-lg font-bold">R$ {total.toFixed(2)}</div>
             </div>
-            <div>
-              <Label className="mb-2 block">Finalizadora</Label>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {payMethods.map((m) => (
-                  <Button key={m.id} type="button" variant={selectedPayId === m.id ? 'default' : 'outline'} onClick={() => setSelectedPayId(m.id)} className="justify-start">
-                    {m.nome}
-                  </Button>
-                ))}
-                {(!payMethods || payMethods.length === 0) && (
-                  <div className="text-sm text-text-muted">Nenhuma finalizadora ativa. Cadastre em Cadastros &gt; Finalizadoras.</div>
-                )}
+            <div className="flex-1 space-y-2 overflow-y-auto thin-scroll pr-1 max-h-[60vh]">
+              <Label className="block">Pagamentos</Label>
+              {(paymentLines || []).map((ln, idx) => {
+                const resolveClientName = (cid) => {
+                  if (!cid) return 'Cliente';
+                  const byPay = (payClients || []).find(c => String(c.id) === String(cid));
+                  if (byPay?.nome) return byPay.nome;
+                  return 'Cliente';
+                };
+                const hasMultiClients = (payClients || []).length > 1;
+                const primary = (payClients || [])[0] || null;
+                const usedByOthers = new Set((paymentLines || []).filter(x => x.id !== ln.id).map(x => String(x.clientId)).filter(Boolean));
+                const remaining = (payClients || []).filter(c => String(c.id) !== String(primary?.id || '')).filter(c => !usedByOthers.has(String(c.id)));
+                return (
+                  <div key={ln.id} className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-center">
+                    <div className="sm:col-span-1 flex sm:justify-start">
+                      {paymentLines.length > 1 && idx > 0 && (
+                        <Button type="button" variant="outline" size="sm" className="h-8 w-8" onClick={() => setPaymentLines(prev => prev.filter(x => x.id !== ln.id))}>×</Button>
+                      )}
+                    </div>
+                    {(idx === 0) ? (
+                      <div className="sm:col-span-4">
+                        <div className="h-9 px-3 rounded-md border border-border bg-surface flex items-center text-sm truncate">{resolveClientName(primary?.id || ln.clientId)}</div>
+                      </div>
+                    ) : hasMultiClients ? (
+                      <div className="sm:col-span-4">
+                        <Select value={ln.clientId || ''} onValueChange={(v) => setPaymentLines(prev => prev.map(x => x.id === ln.id ? { ...x, clientId: v } : x))}>
+                          <SelectTrigger className="w-full truncate"><SelectValue placeholder="Cliente" /></SelectTrigger>
+                          <SelectContent>
+                            {remaining.map(c => (<SelectItem key={c.id} value={c.id}>{c.nome}</SelectItem>))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    ) : (
+                      <div className="sm:col-span-4">
+                        <div className="h-9 px-3 rounded-md border border-border bg-surface flex items-center text-sm truncate">{resolveClientName(primary?.id || ln.clientId)}</div>
+                      </div>
+                    )}
+                    <div className="sm:col-span-4">
+                      <Select value={ln.methodId || ''} onValueChange={(v) => setPaymentLines(prev => prev.map(x => x.id === ln.id ? { ...x, methodId: v } : x))}>
+                        <SelectTrigger className="w-full truncate"><SelectValue placeholder="Forma de pagamento" /></SelectTrigger>
+                        <SelectContent>
+                          {(payMethods || []).map(m => (<SelectItem key={m.id} value={m.id}>{m.nome}</SelectItem>))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="sm:col-span-3">
+                      <Input placeholder="0,00" inputMode="numeric" value={ln.value}
+                        data-pay-value="1"
+                        ref={(el) => {
+                          if (el) valueRefs.current.set(ln.id, el); else valueRefs.current.delete(ln.id);
+                        }}
+                        onChange={(e) => {
+                          const digits = (e.target.value || '').replace(/\D/g, '');
+                          const cents = digits ? Number(digits) / 100 : 0;
+                          const formatted = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(cents);
+                          setPaymentLines(prev => prev.map(x => x.id === ln.id ? { ...x, value: formatted } : x));
+                        }}
+                        onKeyDown={(e) => {
+                          e.stopPropagation();
+                          if (e.key === 'Enter') { e.preventDefault(); focusNextValue(e.currentTarget, ln.id); return; }
+                          const allowed = ['Backspace','Delete','ArrowLeft','ArrowRight','Tab'];
+                          if (allowed.includes(e.key)) return;
+                          if (!/^[0-9]$/.test(e.key)) { e.preventDefault(); }
+                        }}
+                        onBeforeInput={(e) => { const data = e.data ?? ''; if (data && /\D/.test(data)) e.preventDefault(); }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+              <div>
+                <Button type="button" variant="secondary" size="sm" onClick={() => {
+                  setPaymentLines(prev => {
+                    const used = new Set(prev.map(x => String(x.clientId)).filter(Boolean));
+                    const remaining = (payClients || []).filter(c => !used.has(String(c.id)));
+                    const pick = (remaining[0]?.id) || (payClients[0]?.id) || '';
+                    const defMethod = (payMethods && payMethods[0] && payMethods[0].id) ? payMethods[0].id : null;
+                    return [...prev, { id: nextPayLineId, clientId: pick, methodId: defMethod, value: '' }];
+                  });
+                  setNextPayLineId(n => n + 1);
+                }}>Adicionar forma</Button>
               </div>
+              <div className="text-sm text-text-secondary flex justify-between"><span>Soma</span><span>R$ {sumPayments().toFixed(2)}</span></div>
+              <div className="text-sm font-semibold flex justify-between"><span>Restante</span><span className={Math.abs(total - sumPayments()) < 0.005 ? 'text-success' : 'text-warning'}>R$ {(total - sumPayments()).toFixed(2)}</span></div>
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsPayOpen(false)} disabled={payLoading}>Cancelar</Button>
-            <Button onClick={confirmPay} disabled={!canConfirm}>{payLoading ? 'Processando...' : 'Confirmar'}</Button>
+            <Button type="button" variant="outline" onClick={() => setIsPayOpen(false)} disabled={payLoading}>Cancelar</Button>
+            <Button type="button" onClick={confirmPay} disabled={!((paymentLines && paymentLines.length > 0) && !payLoading)}>{payLoading ? 'Processando...' : 'Confirmar Pagamento'}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -890,7 +976,8 @@ function VendasPage() {
     const performSangria = async () => {
       try {
         setSangriaLoading(true);
-        const valor = Number(String(sangriaValor).replace(',', '.')) || 0;
+        const digits = String(sangriaValor || '').replace(/\D/g, '');
+        const valor = digits ? Number(digits) / 100 : 0;
         if (valor <= 0) {
           toast({ title: 'Valor inválido', description: 'Informe um valor positivo.', variant: 'warning' });
           return;
@@ -988,7 +1075,27 @@ function VendasPage() {
               <div className="space-y-3">
                 <div>
                   <Label htmlFor="sangria-valor">Valor</Label>
-                  <Input id="sangria-valor" placeholder="0,00" inputMode="decimal" value={sangriaValor} onChange={(e) => setSangriaValor(e.target.value.replace(/[^0-9,\.]/g, ''))} />
+                  <Input
+                    id="sangria-valor"
+                    type="text"
+                    inputMode="numeric"
+                    autoComplete="off"
+                    placeholder="0,00"
+                    value={sangriaValor}
+                    onChange={(e) => {
+                      const digits = (e.target.value || '').replace(/\D/g, '');
+                      const cents = digits ? Number(digits) / 100 : 0;
+                      const formatted = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(cents);
+                      setSangriaValor(formatted);
+                    }}
+                    onKeyDown={(e) => {
+                      e.stopPropagation();
+                      const allowed = ['Backspace','Delete','ArrowLeft','ArrowRight','Tab'];
+                      if (allowed.includes(e.key)) return;
+                      if (!/^[0-9]$/.test(e.key)) { e.preventDefault(); }
+                    }}
+                    onBeforeInput={(e) => { const data = e.data ?? ''; if (data && /\D/.test(data)) e.preventDefault(); }}
+                  />
                 </div>
                 <div>
                   <Label htmlFor="sangria-obs">Observação</Label>
@@ -1127,8 +1234,8 @@ function VendasPage() {
                       // Atualizar estado local imediatamente
                       setSelectedTable(null);
                       
-                      // Recarregar mesas
-                      await refreshTablesLight();
+                      // Recarregar mesas (com feedback)
+                      await refreshTablesLight({ showToast: true });
                       console.log('[Liberar Mesa] Mesas atualizadas');
                       
                       toast({ title: 'Mesa liberada', variant: 'success' });
@@ -1140,9 +1247,9 @@ function VendasPage() {
                         variant: 'destructive' 
                       });
                       
-                      // Em caso de erro, tentar recarregar as mesas para sincronizar
+                      // Em caso de erro, tentar recarregar as mesas para sincronizar (com feedback)
                       try {
-                        await refreshTablesLight();
+                        await refreshTablesLight({ showToast: true });
                       } catch (refreshErr) {
                         console.error('[Liberar Mesa] Erro ao recarregar após falha:', refreshErr);
                       }
@@ -1334,21 +1441,26 @@ function VendasPage() {
                   const q = qtyByProductId.get(prod.id) || 0;
                   const stock = Number(prod.stock ?? prod.currentStock ?? 0);
                   const remaining = Math.max(0, stock - q);
+                  const handleOpenDetails = () => { setSelectedProduct(prod); setIsProductDetailsOpen(true); };
                   return (
-                    <li key={prod.id} className="flex items-center p-2 rounded-md hover:bg-surface-2 transition-colors">
+                    <li
+                      key={prod.id}
+                      className="flex items-center gap-3 p-3 rounded-md border border-border bg-surface hover:bg-surface-2 transition-colors"
+                      onClick={handleOpenDetails}
+                    >
                       <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
-                            <p className="font-semibold truncate">{prod.name}</p>
-                            {q > 0 && (
-                              <span className="inline-flex items-center justify-center text-[11px] px-1.5 py-0.5 rounded-full bg-brand/15 text-brand border border-brand/30 flex-shrink-0">x{q}</span>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <p className="text-sm text-text-muted">R$ {(Number(prod.salePrice ?? prod.price ?? 0)).toFixed(2)}</p>
-                            <span className="inline-flex items-center justify-center text-[11px] px-1.5 py-0.5 rounded-full bg-surface-2 text-text-secondary border border-border flex-shrink-0">Qtd {remaining}</span>
-                          </div>
+                        <div className="flex items-center gap-2">
+                          <p className="font-semibold truncate" title={prod.name}>{prod.name}</p>
+                          {q > 0 && (
+                            <span className="inline-flex items-center justify-center text-[11px] px-1.5 py-0.5 rounded-full bg-brand/15 text-brand border border-brand/30 flex-shrink-0">x{q}</span>
+                          )}
+                        </div>
+                        <div className="mt-0.5 flex items-center gap-2">
+                          <p className="text-xs sm:text-sm text-text-muted">R$ {(Number(prod.salePrice ?? prod.price ?? 0)).toFixed(2)}</p>
+                          <span className="inline-flex items-center justify-center text-[10px] sm:text-[11px] px-1.5 py-0.5 rounded-full bg-surface-2 text-text-secondary border border-border flex-shrink-0">Qtd {remaining}</span>
+                        </div>
                       </div>
-                      <Button size="icon" variant="outline" className="flex-shrink-0" onClick={() => addProductToComanda(prod)} aria-label={`Adicionar ${prod.name}`}>
+                      <Button size="icon" variant="outline" className="flex-shrink-0" onClick={(e) => { e.stopPropagation(); addProductToComanda(prod); }} aria-label={`Adicionar ${prod.name}`}>
                         <Plus size={16} />
                       </Button>
                     </li>
@@ -1368,6 +1480,18 @@ function VendasPage() {
   const [counterClients, setCounterClients] = useState([]);
   const [counterClientsLoading, setCounterClientsLoading] = useState(false);
   const [counterSelectedClientId, setCounterSelectedClientId] = useState(null);
+  const [isCounterProductDetailsOpen, setIsCounterProductDetailsOpen] = useState(false);
+  const [selectedCounterProduct, setSelectedCounterProduct] = useState(null);
+
+  const counterQtyByProductId = useMemo(() => {
+    const map = new Map();
+    for (const it of counterItems || []) {
+      const pid = it.productId;
+      const q = Number(it.quantity || 0);
+      map.set(pid, (map.get(pid) || 0) + q);
+    }
+    return map;
+  }, [counterItems]);
 
   const counterReloadItems = async (comandaId) => {
     if (!comandaId) return;
@@ -1508,7 +1632,7 @@ function VendasPage() {
             const stock = Number(prod.stock ?? prod.currentStock ?? 0);
             const remaining = Math.max(0, stock - qty);
             return (
-              <li key={prod.id} className="flex items-center p-2 rounded-md hover:bg-surface-2 transition-colors">
+              <li key={prod.id} className="flex items-center p-2 rounded-md hover:bg-surface-2 transition-colors" onClick={() => { setSelectedCounterProduct(prod); setIsCounterProductDetailsOpen(true); }}>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <p className="font-semibold truncate">{prod.name}</p>
@@ -1521,7 +1645,7 @@ function VendasPage() {
                     <span className="inline-flex items-center justify-center text-[11px] px-1.5 py-0.5 rounded-full bg-surface-2 text-text-secondary border border-border flex-shrink-0">Qtd {remaining}</span>
                   </div>
                 </div>
-                <Button size="icon" variant="outline" className="flex-shrink-0" onClick={() => addProductToCounter(prod)} aria-label={`Adicionar ${prod.name}`}>
+                <Button size="icon" variant="outline" className="flex-shrink-0" onClick={(e) => { e.stopPropagation(); addProductToCounter(prod); }} aria-label={`Adicionar ${prod.name}`}>
                   <Plus size={16} />
                 </Button>
               </li>
@@ -1619,6 +1743,63 @@ function VendasPage() {
     );
   };
 
+  const CounterProductDetailsDialog = () => {
+    const prod = selectedCounterProduct;
+    const qInOrder = prod ? (counterQtyByProductId.get(prod.id) || 0) : 0;
+    const price = prod ? Number(prod.salePrice ?? prod.price ?? 0) : 0;
+    const fmt = (v) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(v || 0));
+    return (
+      <Dialog open={isCounterProductDetailsOpen} onOpenChange={(open) => { setIsCounterProductDetailsOpen(open); if (!open) setSelectedCounterProduct(null); }}>
+        <DialogContent className="sm:max-w-[420px] w-full max-h-[85vh] flex flex-col animate-none" onKeyDown={(e) => e.stopPropagation()} onPointerDownOutside={(e) => e.stopPropagation()} onInteractOutside={(e) => e.stopPropagation()}>
+          <DialogHeader>
+            <DialogTitle className="text-xl font-bold break-words" title={prod?.name || ''}>{prod?.name || 'Produto'}</DialogTitle>
+            <DialogDescription>Detalhes do produto e ações rápidas.</DialogDescription>
+          </DialogHeader>
+          {prod ? (
+            <div className="space-y-3 overflow-y-auto pr-1">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-text-secondary">Preço</span>
+                <span className="text-sm font-semibold">{fmt(price)}</span>
+              </div>
+              {prod.category ? (
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-text-secondary">Categoria</span>
+                  <span className="text-sm font-medium">{prod.category}</span>
+                </div>
+              ) : null}
+              <div className="grid grid-cols-3 gap-2 text-center">
+                {typeof prod.stock !== 'undefined' && (
+                  <div className="bg-surface-2 rounded-md p-3 border border-border">
+                    <div className="text-xs text-text-secondary">Estoque</div>
+                    <div className="text-base font-semibold">{prod.stock}</div>
+                  </div>
+                )}
+                {typeof prod.minStock !== 'undefined' && (
+                  <div className="bg-surface-2 rounded-md p-3 border border-border">
+                    <div className="text-xs text-text-secondary">Mínimo</div>
+                    <div className="text-base font-semibold">{prod.minStock}</div>
+                  </div>
+                )}
+                <div className="bg-surface-2 rounded-md p-3 border border-border">
+                  <div className="text-xs text-text-secondary">Na Comanda</div>
+                  <div className="text-base font-semibold">x{qInOrder}</div>
+                </div>
+              </div>
+            </div>
+          ) : null}
+          <DialogFooter className="flex items-center justify-between gap-2">
+            <Button variant="ghost" size="sm" className="mr-auto inline-flex items-center gap-1" onClick={() => { if (prod) { navigate('/produtos', { state: { productId: prod.id, productName: prod.name } }); } }}>
+              <FileText className="w-4 h-4" />
+              <span>Info</span>
+            </Button>
+            <Button variant="outline" onClick={() => { setIsCounterProductDetailsOpen(false); setSelectedCounterProduct(null); }}>Fechar</Button>
+            <Button onClick={async () => { if (prod) { await addProductToCounter(prod); setIsCounterProductDetailsOpen(false); setSelectedCounterProduct(null); } }}>Adicionar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    );
+  };
+
   const OpenTableDialog = () => {
     const [search, setSearch] = useState('');
     const [loadingClients, setLoadingClients] = useState(false);
@@ -1632,7 +1813,8 @@ function VendasPage() {
           setLoadingClients(true);
           const rows = await listarClientes({ searchTerm: search, limit: 20 });
           if (!active) return;
-          setClients(rows);
+          const sorted = (rows || []).slice().sort((a, b) => Number(a?.codigo || 0) - Number(b?.codigo || 0));
+          setClients(sorted);
         } catch {
           if (!active) return;
           setClients([]);
@@ -1659,8 +1841,8 @@ function VendasPage() {
         // Pega nomes confirmados do backend APÓS limpar e adicionar novos
         let displayName = null;
         try {
-          const vincs = await listarClientesDaComanda({ comandaId: comanda.id, codigoEmpresa: userProfile?.codigo_empresa });
-          const nomes = (vincs || []).map(v => v?.nome).filter(Boolean);
+          const vinculos = await listarClientesDaComanda({ comandaId: comanda.id, codigoEmpresa: userProfile?.codigo_empresa });
+          const nomes = (vinculos || []).map(v => v?.nome).filter(Boolean);
           displayName = nomes.length ? nomes.join(', ') : null;
         } catch {}
         if (!displayName) {
@@ -1819,33 +2001,36 @@ function VendasPage() {
               id="initial-value"
               ref={inputRef}
               type="text"
-              inputMode="decimal"
+              inputMode="numeric"
               pattern="[0-9.,]*"
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="none"
+              spellCheck={false}
+              name="cash-open-initial"
               placeholder="0,00"
               className="pl-9 font-semibold"
               value={openCashInitial}
               onChange={(e) => {
-                const raw = e.target.value;
-                const cleaned = raw.replace(/[^0-9,\.]/g, '');
-                let sepSeen = false;
-                let out = '';
-                for (const ch of cleaned) {
-                  if (/[0-9]/.test(ch)) { out += ch; continue; }
-                  if ((ch === ',' || ch === '.') && !sepSeen) { out += ','; sepSeen = true; }
-                }
-                setOpenCashInitial(out);
+                // Máscara BRL centavos-primeiro: digita 1 -> 0,01; 12 -> 0,12; 123 -> 1,23
+                const digits = (e.target.value || '').replace(/\D/g, '');
+                const cents = digits ? Number(digits) / 100 : 0;
+                const formatted = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(cents);
+                setOpenCashInitial(formatted);
               }}
               onKeyDown={(e) => {
                 e.stopPropagation();
-                if (/^[a-zA-Z]$/.test(e.key)) {
+                // Permitir apenas números, backspace, delete, setas e tab
+                const allowed = ['Backspace','Delete','ArrowLeft','ArrowRight','Tab'];
+                if (allowed.includes(e.key)) return;
+                if (!/^[0-9]$/.test(e.key)) {
                   e.preventDefault();
                 }
               }}
               onBeforeInput={(e) => {
+                // bloqueia qualquer caractere não numérico
                 const data = e.data ?? '';
-                if (data && /[^0-9,\.]/.test(data)) {
-                  e.preventDefault();
-                }
+                if (data && /\D/.test(data)) e.preventDefault();
               }}
               onMouseDown={(e) => e.stopPropagation()}
             />
@@ -1855,7 +2040,8 @@ function VendasPage() {
           <AlertDialogCancel onClick={() => setOpenCashDialogOpen(false)}>Cancelar</AlertDialogCancel>
           <AlertDialogAction onClick={async () => {
             try {
-              const v = Number(String(openCashInitial).replace(',', '.')) || 0;
+              const cleaned = String(openCashInitial).replace(/\./g, '').replace(',', '.');
+              const v = Number(cleaned) || 0;
               await ensureCaixaAberto({ saldoInicial: v });
               setIsCashierOpen(true);
               setOpenCashDialogOpen(false);
@@ -1965,6 +2151,63 @@ function VendasPage() {
     )
   };
 
+  const ProductDetailsDialog = () => {
+    const prod = selectedProduct;
+    const qInOrder = prod ? (qtyByProductId.get(prod.id) || 0) : 0;
+    const price = prod ? Number(prod.salePrice ?? prod.price ?? 0) : 0;
+    const fmt = (v) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(v || 0));
+    return (
+      <Dialog open={isProductDetailsOpen} onOpenChange={(open) => { setIsProductDetailsOpen(open); if (!open) setSelectedProduct(null); }}>
+        <DialogContent className="sm:max-w-[420px] w-full max-h-[85vh] flex flex-col animate-none" onKeyDown={(e) => e.stopPropagation()} onPointerDownOutside={(e) => e.stopPropagation()} onInteractOutside={(e) => e.stopPropagation()}>
+          <DialogHeader>
+            <DialogTitle className="text-xl font-bold break-words" title={prod?.name || ''}>{prod?.name || 'Produto'}</DialogTitle>
+            <DialogDescription>Detalhes do produto e ações rápidas.</DialogDescription>
+          </DialogHeader>
+          {prod ? (
+            <div className="space-y-3 overflow-y-auto pr-1">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-text-secondary">Preço</span>
+                <span className="text-sm font-semibold">{fmt(price)}</span>
+              </div>
+              {prod.category ? (
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-text-secondary">Categoria</span>
+                  <span className="text-sm font-medium">{prod.category}</span>
+                </div>
+              ) : null}
+              <div className="grid grid-cols-3 gap-2 text-center">
+                {typeof prod.stock !== 'undefined' && (
+                  <div className="bg-surface-2 rounded-md p-3 border border-border">
+                    <div className="text-xs text-text-secondary">Estoque</div>
+                    <div className="text-base font-semibold">{prod.stock}</div>
+                  </div>
+                )}
+                {typeof prod.minStock !== 'undefined' && (
+                  <div className="bg-surface-2 rounded-md p-3 border border-border">
+                    <div className="text-xs text-text-secondary">Mínimo</div>
+                    <div className="text-base font-semibold">{prod.minStock}</div>
+                  </div>
+                )}
+                <div className="bg-surface-2 rounded-md p-3 border border-border">
+                  <div className="text-xs text-text-secondary">Na Comanda</div>
+                  <div className="text-base font-semibold">x{qInOrder}</div>
+                </div>
+              </div>
+            </div>
+          ) : null}
+          <DialogFooter className="flex items-center justify-between gap-2">
+            <Button variant="ghost" size="sm" className="mr-auto inline-flex items-center gap-1" onClick={() => { if (prod) { navigate('/produtos', { state: { productId: prod.id, productName: prod.name } }); } }}>
+              <FileText className="w-4 h-4" />
+              <span>Info</span>
+            </Button>
+            <Button variant="outline" onClick={() => { setIsProductDetailsOpen(false); setSelectedProduct(null); }}>Fechar</Button>
+            <Button onClick={async () => { if (prod) { await addProductToComanda(prod); setIsProductDetailsOpen(false); setSelectedProduct(null); } }}>Adicionar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    );
+  };
+
   return (
     <>
       <Helmet>
@@ -1981,6 +2224,8 @@ function VendasPage() {
           `}</style>
         )}
       </Helmet>
+      <ProductDetailsDialog />
+      <CounterProductDetailsDialog />
       <motion.div variants={pageVariantsActive} initial={false} animate={anyDialogOpen ? false : "visible"} layout={false} className="h-full flex flex-col">
         <motion.div variants={itemVariantsActive} initial={false} animate={anyDialogOpen ? false : undefined} layout={false} className="flex items-center justify-between mb-6 gap-4 flex-wrap">
           <div className="flex items-center gap-3">

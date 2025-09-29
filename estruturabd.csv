@@ -1,0 +1,1999 @@
+object_type,schema_name,object_name,parent_object,extra_info,owner,comment
+schema,realtime,realtime,null,null,supabase_admin,null
+schema,public,public,null,null,pg_database_owner,standard public schema
+schema,extensions,extensions,null,null,postgres,null
+schema,vault,vault,null,null,supabase_admin,null
+schema,graphql_public,graphql_public,null,null,supabase_admin,null
+schema,graphql,graphql,null,null,supabase_admin,null
+schema,supabase_migrations,supabase_migrations,null,null,postgres,null
+schema,auth,auth,null,null,supabase_admin,null
+schema,storage,storage,null,null,supabase_admin,null
+table,extensions,pg_stat_statements_info,null,view,postgres,null
+table,extensions,pg_stat_statements,null,view,postgres,null
+table,auth,sso_domains,null,table,supabase_auth_admin,Auth: Manages SSO email address domain mapping to an SSO Identity Provider.
+table,auth,saml_providers,null,table,supabase_auth_admin,Auth: Manages SAML Identity Provider connections.
+table,auth,sso_providers,null,table,supabase_auth_admin,Auth: Manages SSO identity provider information; see saml_providers for SAML.
+table,supabase_migrations,schema_migrations,null,table,postgres,null
+table,supabase_migrations,seed_files,null,table,postgres,null
+table,auth,schema_migrations,null,table,supabase_auth_admin,Auth: Manages updates to the auth system.
+table,auth,instances,null,table,supabase_auth_admin,Auth: Manages users across multiple sites.
+table,public,produtos,null,table,postgres,null
+table,auth,users,null,table,supabase_auth_admin,Auth: Stores user login data within a secure schema.
+table,auth,audit_log_entries,null,table,supabase_auth_admin,Auth: Audit trail for user actions.
+table,public,produto_categorias,null,table,postgres,null
+table,public,usuarios,null,table,postgres,null
+table,storage,migrations,null,table,supabase_storage_admin,null
+table,storage,buckets,null,table,supabase_storage_admin,null
+table,storage,objects,null,table,supabase_storage_admin,null
+table,auth,refresh_tokens,null,table,supabase_auth_admin,Auth: Store of tokens used to refresh JWT tokens once they expire.
+table,vault,secrets,null,table,supabase_admin,Table with encrypted `secret` column for storing sensitive information on disk.
+table,vault,decrypted_secrets,null,view,supabase_admin,null
+table,auth,saml_relay_states,null,table,supabase_auth_admin,Auth: Contains SAML Relay State information for each Service Provider initiated login.
+table,auth,flow_state,null,table,supabase_auth_admin,stores metadata for pkce logins
+table,auth,identities,null,table,supabase_auth_admin,Auth: Stores identities associated to a user.
+table,auth,sessions,null,table,supabase_auth_admin,Auth: Stores session data associated to a user.
+table,auth,mfa_amr_claims,null,table,supabase_auth_admin,auth: stores authenticator method reference claims for multi factor authentication
+table,auth,one_time_tokens,null,table,supabase_auth_admin,null
+table,auth,mfa_factors,null,table,supabase_auth_admin,auth: stores metadata about factors
+table,auth,mfa_challenges,null,table,supabase_auth_admin,auth: stores metadata about challenge requests made
+table,public,vendas,null,table,postgres,null
+table,public,itens_venda,null,table,postgres,null
+table,realtime,schema_migrations,null,table,supabase_admin,null
+table,realtime,subscription,null,table,supabase_admin,null
+table,public,v_agendamento_participantes,null,view,postgres,null
+table,public,empresas,null,table,postgres,null
+table,storage,s3_multipart_uploads_parts,null,table,supabase_storage_admin,null
+table,storage,s3_multipart_uploads,null,table,supabase_storage_admin,null
+table,public,agendamento_participantes,null,table,postgres,Cotas de valor por participante do agendamento
+table,realtime,messages_2025_09_24,null,table,supabase_admin,null
+table,public,quadras,null,table,postgres,null
+table,public,estoque_baixa_log,null,table,postgres,null
+table,public,agendamentos,null,table,postgres,null
+table,public,empresa_counters,null,table,postgres,null
+table,storage,buckets_analytics,null,table,supabase_storage_admin,null
+table,storage,prefixes,null,table,supabase_storage_admin,null
+table,public,colaboradores,null,table,postgres,null
+table,realtime,messages_2025_09_28,null,table,supabase_admin,null
+table,public,movimentos_saldo,null,table,postgres,null
+table,realtime,messages_2025_09_25,null,table,supabase_admin,null
+table,realtime,messages_2025_09_22,null,table,supabase_admin,null
+table,realtime,messages_2025_09_26,null,table,supabase_admin,null
+table,public,pagamentos,null,table,postgres,null
+table,public,mesas,null,table,postgres,null
+table,public,comanda_itens,null,table,postgres,null
+table,public,caixa_sessoes,null,table,postgres,null
+table,public,caixa_movimentos,null,table,postgres,null
+table,public,comanda_clientes,null,table,postgres,null
+table,public,finalizadoras,null,table,postgres,null
+table,auth,oauth_clients,null,table,supabase_auth_admin,null
+table,public,agenda_settings,null,table,postgres,Configurações de automação da agenda por empresa (1:1 com empresas).
+table,public,caixa_resumos,null,table,postgres,null
+table,public,caixa_movimentacoes,null,table,postgres,null
+table,public,clientes,null,table,postgres,null
+table,realtime,messages_2025_09_23,null,table,supabase_admin,null
+table,public,comandas,null,table,postgres,null
+table,realtime,messages_2025_09_27,null,table,supabase_admin,null
+column,public,lower,idx_produtos_categoria,text default null,null,null
+column,auth,id,sso_providers_pkey,uuid default null,null,null
+column,auth,lower,sso_providers_resource_id_idx,text default null,null,null
+column,auth,id,sso_domains_pkey,uuid default null,null,null
+column,auth,sso_provider_id,sso_domains_sso_provider_id_idx,uuid default null,null,null
+column,auth,lower,sso_domains_domain_idx,text default null,null,null
+column,extensions,dealloc,pg_stat_statements_info,bigint default null,null,null
+column,extensions,stats_reset,pg_stat_statements_info,timestamp with time zone default null,null,null
+column,extensions,userid,pg_stat_statements,oid default null,null,null
+column,extensions,dbid,pg_stat_statements,oid default null,null,null
+column,extensions,toplevel,pg_stat_statements,boolean default null,null,null
+column,extensions,queryid,pg_stat_statements,bigint default null,null,null
+column,extensions,query,pg_stat_statements,text default null,null,null
+column,extensions,plans,pg_stat_statements,bigint default null,null,null
+column,extensions,total_plan_time,pg_stat_statements,double precision default null,null,null
+column,extensions,min_plan_time,pg_stat_statements,double precision default null,null,null
+column,extensions,max_plan_time,pg_stat_statements,double precision default null,null,null
+column,extensions,mean_plan_time,pg_stat_statements,double precision default null,null,null
+column,extensions,stddev_plan_time,pg_stat_statements,double precision default null,null,null
+column,extensions,calls,pg_stat_statements,bigint default null,null,null
+column,extensions,total_exec_time,pg_stat_statements,double precision default null,null,null
+column,extensions,min_exec_time,pg_stat_statements,double precision default null,null,null
+column,extensions,max_exec_time,pg_stat_statements,double precision default null,null,null
+column,extensions,mean_exec_time,pg_stat_statements,double precision default null,null,null
+column,extensions,stddev_exec_time,pg_stat_statements,double precision default null,null,null
+column,extensions,rows,pg_stat_statements,bigint default null,null,null
+column,extensions,shared_blks_hit,pg_stat_statements,bigint default null,null,null
+column,extensions,shared_blks_read,pg_stat_statements,bigint default null,null,null
+column,extensions,shared_blks_dirtied,pg_stat_statements,bigint default null,null,null
+column,extensions,shared_blks_written,pg_stat_statements,bigint default null,null,null
+column,extensions,local_blks_hit,pg_stat_statements,bigint default null,null,null
+column,extensions,local_blks_read,pg_stat_statements,bigint default null,null,null
+column,extensions,local_blks_dirtied,pg_stat_statements,bigint default null,null,null
+column,extensions,local_blks_written,pg_stat_statements,bigint default null,null,null
+column,extensions,temp_blks_read,pg_stat_statements,bigint default null,null,null
+column,extensions,temp_blks_written,pg_stat_statements,bigint default null,null,null
+column,extensions,shared_blk_read_time,pg_stat_statements,double precision default null,null,null
+column,extensions,shared_blk_write_time,pg_stat_statements,double precision default null,null,null
+column,extensions,local_blk_read_time,pg_stat_statements,double precision default null,null,null
+column,extensions,local_blk_write_time,pg_stat_statements,double precision default null,null,null
+column,extensions,temp_blk_read_time,pg_stat_statements,double precision default null,null,null
+column,extensions,temp_blk_write_time,pg_stat_statements,double precision default null,null,null
+column,extensions,wal_records,pg_stat_statements,bigint default null,null,null
+column,extensions,wal_fpi,pg_stat_statements,bigint default null,null,null
+column,extensions,wal_bytes,pg_stat_statements,numeric default null,null,null
+column,extensions,jit_functions,pg_stat_statements,bigint default null,null,null
+column,extensions,jit_generation_time,pg_stat_statements,double precision default null,null,null
+column,extensions,jit_inlining_count,pg_stat_statements,bigint default null,null,null
+column,extensions,jit_inlining_time,pg_stat_statements,double precision default null,null,null
+column,extensions,jit_optimization_count,pg_stat_statements,bigint default null,null,null
+column,extensions,jit_optimization_time,pg_stat_statements,double precision default null,null,null
+column,extensions,jit_emission_count,pg_stat_statements,bigint default null,null,null
+column,extensions,jit_emission_time,pg_stat_statements,double precision default null,null,null
+column,extensions,jit_deform_count,pg_stat_statements,bigint default null,null,null
+column,extensions,jit_deform_time,pg_stat_statements,double precision default null,null,null
+column,extensions,stats_since,pg_stat_statements,timestamp with time zone default null,null,null
+column,extensions,minmax_stats_since,pg_stat_statements,timestamp with time zone default null,null,null
+column,graphql,last_value,seq_schema_version,bigint default null,null,null
+column,graphql,log_cnt,seq_schema_version,bigint default null,null,null
+column,graphql,is_called,seq_schema_version,boolean default null,null,null
+column,auth,id,amr_id_pk,uuid default null,null,null
+column,auth,user_id,user_id_created_at_idx,uuid default null,null,null
+column,auth,created_at,user_id_created_at_idx,timestamp with time zone default null,null,null
+column,auth,user_id,factor_id_created_at_idx,uuid default null,null,null
+column,auth,created_at,factor_id_created_at_idx,timestamp with time zone default null,null,null
+column,auth,user_id,sessions_user_id_idx,uuid default null,null,null
+column,auth,session_id,refresh_tokens_session_id_revoked_idx,uuid default null,null,null
+column,auth,revoked,refresh_tokens_session_id_revoked_idx,boolean default null,null,null
+column,auth,id,sso_domains,uuid default null,null,null
+column,auth,sso_provider_id,sso_domains,uuid default null,null,null
+column,auth,domain,sso_domains,text default null,null,null
+column,auth,created_at,sso_domains,timestamp with time zone default null,null,null
+column,auth,updated_at,sso_domains,timestamp with time zone default null,null,null
+column,auth,id,saml_providers_pkey,uuid default null,null,null
+column,auth,entity_id,saml_providers_entity_id_key,text default null,null,null
+column,supabase_migrations,version,schema_migrations_pkey,text default null,null,null
+column,auth,sso_provider_id,saml_providers_sso_provider_id_idx,uuid default null,null,null
+column,auth,id,saml_providers,uuid default null,null,null
+column,auth,sso_provider_id,saml_providers,uuid default null,null,null
+column,auth,entity_id,saml_providers,text default null,null,null
+column,auth,metadata_xml,saml_providers,text default null,null,null
+column,auth,metadata_url,saml_providers,text default null,null,null
+column,auth,attribute_mapping,saml_providers,jsonb default null,null,null
+column,auth,created_at,saml_providers,timestamp with time zone default null,null,null
+column,auth,updated_at,saml_providers,timestamp with time zone default null,null,null
+column,auth,name_id_format,saml_providers,text default null,null,null
+column,auth,id,sso_providers,uuid default null,null,null
+column,auth,resource_id,sso_providers,text default null,null,"Auth: Uniquely identifies a SSO provider according to a user-chosen resource ID (case insensitive), useful in infrastructure as code."
+column,auth,created_at,sso_providers,timestamp with time zone default null,null,null
+column,auth,updated_at,sso_providers,timestamp with time zone default null,null,null
+column,auth,disabled,sso_providers,boolean default null,null,null
+column,supabase_migrations,version,schema_migrations,text default null,null,null
+column,supabase_migrations,statements,schema_migrations,text[] default null,null,null
+column,supabase_migrations,name,schema_migrations,text default null,null,null
+column,supabase_migrations,path,seed_files,text default null,null,null
+column,supabase_migrations,hash,seed_files,text default null,null,null
+column,supabase_migrations,path,seed_files_pkey,text default null,null,null
+column,auth,version,schema_migrations,character varying(255) default null,null,null
+column,realtime,entity,ix_realtime_subscription_entity,regclass default null,null,null
+column,public,id,agendamento_participantes_pkey,uuid default null,null,null
+column,realtime,id,messages_pkey,uuid default null,null,null
+column,realtime,inserted_at,messages_pkey,timestamp without time zone default null,null,null
+column,auth,id,refresh_tokens_pkey,bigint default null,null,null
+column,auth,instance_id,refresh_tokens_instance_id_idx,uuid default null,null,null
+column,auth,instance_id,refresh_tokens_instance_id_user_id_idx,uuid default null,null,null
+column,auth,user_id,refresh_tokens_instance_id_user_id_idx,character varying(255) default null,null,null
+column,auth,id,users_pkey,uuid default null,null,null
+column,auth,id,instances,uuid default null,null,null
+column,auth,uuid,instances,uuid default null,null,null
+column,auth,raw_base_config,instances,text default null,null,null
+column,auth,created_at,instances,timestamp with time zone default null,null,null
+column,auth,updated_at,instances,timestamp with time zone default null,null,null
+column,public,id,produto_categorias_pkey,uuid default null,null,null
+column,public,id,companies_pkey,uuid default null,null,null
+column,auth,token,refresh_tokens_token_unique,character varying(255) default null,null,null
+column,public,company_code,companies_company_code_key,character varying(10) default null,null,null
+column,public,codigo_empresa,ux_produto_categorias_empresa_nome,text default null,null,null
+column,public,lower,ux_produto_categorias_empresa_nome,text default null,null,null
+column,auth,id,audit_log_entries_pkey,uuid default null,null,null
+column,auth,instance_id,audit_logs_instance_id_idx,uuid default null,null,null
+column,auth,id,instances_pkey,uuid default null,null,null
+column,public,id,produtos,uuid default gen_random_uuid(),null,null
+column,public,nome,produtos,character varying(255) default null,null,null
+column,public,valor_venda,produtos,"numeric(10,2) default null",null,null
+column,public,categoria,produtos,character varying(100) default null,null,null
+column,public,status,produtos,character varying(20) default 'active'::character varying,null,null
+column,public,criado_em,produtos,timestamp with time zone default now(),null,null
+column,public,codigo_empresa,produtos,character varying(10) default null,null,null
+column,public,valor_custo,produtos,"numeric(10,2) default 0",null,null
+column,public,validade,produtos,date default null,null,null
+column,public,estoque,produtos,integer default 0,null,null
+column,public,estoque_minimo,produtos,integer default 0,null,null
+column,public,tipo_produto,produtos,character varying(20) default 'venda'::character varying,null,null
+column,public,codigo_produto,produtos,text default null,null,null
+column,public,codigo_barras,produtos,character varying(13) default null,null,null
+column,public,codigo_barras_caixa,produtos,character varying(13) default null,null,null
+column,public,referencia,produtos,character varying(100) default null,null,null
+column,public,marca,produtos,character varying(100) default null,null,null
+column,public,grupo,produtos,character varying(100) default null,null,null
+column,public,unidade,produtos,character varying(10) default null,null,null
+column,public,estoque_inicial,produtos,integer default null,null,null
+column,public,estoque_atual,produtos,integer default null,null,null
+column,public,peso,produtos,"numeric(10,3) default null",null,null
+column,public,preco_compra,produtos,"numeric(12,2) default null",null,null
+column,public,custos_percent,produtos,"numeric(7,4) default null",null,null
+column,public,preco_custo,produtos,"numeric(12,2) default null",null,null
+column,public,lucro_percent,produtos,"numeric(7,4) default null",null,null
+column,public,preco_venda,produtos,"numeric(12,2) default null",null,null
+column,public,qtd_atacado,produtos,integer default null,null,null
+column,public,preco_atacado,produtos,"numeric(12,2) default null",null,null
+column,public,comissao_percent,produtos,"numeric(7,4) default null",null,null
+column,public,desconto_percent,produtos,"numeric(7,4) default null",null,null
+column,public,cfop_interno,produtos,character(4) default null,null,null
+column,public,cst_icms_interno,produtos,character(3) default null,null,null
+column,public,csosn_interno,produtos,character(3) default null,null,null
+column,public,aliquota_icms_interno,produtos,"numeric(7,4) default null",null,null
+column,public,cfop_externo,produtos,character(4) default null,null,null
+column,public,cst_icms_externo,produtos,character(3) default null,null,null
+column,public,csosn_externo,produtos,character(3) default null,null,null
+column,public,aliquota_icms_externo,produtos,"numeric(7,4) default null",null,null
+column,public,cst_pis_entrada,produtos,character(2) default null,null,null
+column,public,cst_pis_saida,produtos,character(2) default null,null,null
+column,public,aliquota_pis_percent,produtos,"numeric(7,4) default null",null,null
+column,public,aliquota_cofins_percent,produtos,"numeric(7,4) default null",null,null
+column,public,cst_ipi,produtos,character(2) default null,null,null
+column,public,aliquota_ipi_percent,produtos,"numeric(7,4) default null",null,null
+column,public,fcp_percent,produtos,"numeric(7,4) default null",null,null
+column,public,mva_percent,produtos,"numeric(7,4) default null",null,null
+column,public,base_reduzida_percent,produtos,"numeric(7,4) default null",null,null
+column,public,ncm,produtos,character varying(10) default null,null,null
+column,public,descricao_ncm,produtos,text default null,null,null
+column,public,cest,produtos,character(7) default null,null,null
+column,public,ativo,produtos,boolean default true,null,null
+column,public,permite_venda,produtos,boolean default true,null,null
+column,public,paga_comissao,produtos,boolean default false,null,null
+column,public,preco_variavel,produtos,boolean default false,null,null
+column,public,composicao,produtos,boolean default false,null,null
+column,public,servico,produtos,boolean default false,null,null
+column,public,grade,produtos,boolean default false,null,null
+column,public,usar_tabela_preco,produtos,boolean default false,null,null
+column,public,combustivel,produtos,boolean default false,null,null
+column,public,usa_imei,produtos,boolean default false,null,null
+column,public,controle_estoque_por_grade,produtos,boolean default false,null,null
+column,public,mostrar_no_app,produtos,boolean default false,null,null
+column,auth,version,schema_migrations_pkey,character varying(255) default null,null,null
+column,auth,id,sessions_pkey,uuid default null,null,null
+column,public,codigo_barras,idx_produtos_codigo_barras,character varying(13) default null,null,null
+column,auth,instance_id,users_instance_id_idx,uuid default null,null,null
+column,auth,last_value,refresh_tokens_id_seq,bigint default null,null,null
+column,auth,log_cnt,refresh_tokens_id_seq,bigint default null,null,null
+column,auth,is_called,refresh_tokens_id_seq,boolean default null,null,null
+column,public,ncm,idx_produtos_ncm,character varying(10) default null,null,null
+column,public,marca,idx_produtos_marca,character varying(100) default null,null,null
+column,public,grupo,idx_produtos_grupo,character varying(100) default null,null,null
+column,auth,confirmation_token,confirmation_token_idx,character varying(255) default null,null,null
+column,auth,parent,refresh_tokens_parent_idx,character varying(255) default null,null,null
+column,auth,recovery_token,recovery_token_idx,character varying(255) default null,null,null
+column,auth,instance_id,users_instance_id_email_idx,uuid default null,null,null
+column,auth,lower,users_instance_id_email_idx,text default null,null,null
+column,auth,email_change_token_new,email_change_token_new_idx,character varying(255) default null,null,null
+column,auth,reauthentication_token,reauthentication_token_idx,character varying(255) default null,null,null
+column,auth,email_change_token_current,email_change_token_current_idx,character varying(255) default null,null,null
+column,auth,instance_id,users,uuid default null,null,null
+column,auth,id,users,uuid default null,null,null
+column,auth,aud,users,character varying(255) default null,null,null
+column,auth,role,users,character varying(255) default null,null,null
+column,auth,email,users,character varying(255) default null,null,null
+column,auth,encrypted_password,users,character varying(255) default null,null,null
+column,auth,email_confirmed_at,users,timestamp with time zone default null,null,null
+column,auth,invited_at,users,timestamp with time zone default null,null,null
+column,auth,confirmation_token,users,character varying(255) default null,null,null
+column,auth,confirmation_sent_at,users,timestamp with time zone default null,null,null
+column,auth,recovery_token,users,character varying(255) default null,null,null
+column,auth,recovery_sent_at,users,timestamp with time zone default null,null,null
+column,auth,email_change_token_new,users,character varying(255) default null,null,null
+column,auth,email_change,users,character varying(255) default null,null,null
+column,auth,email_change_sent_at,users,timestamp with time zone default null,null,null
+column,auth,last_sign_in_at,users,timestamp with time zone default null,null,null
+column,auth,raw_app_meta_data,users,jsonb default null,null,null
+column,auth,raw_user_meta_data,users,jsonb default null,null,null
+column,auth,is_super_admin,users,boolean default null,null,null
+column,auth,created_at,users,timestamp with time zone default null,null,null
+column,auth,updated_at,users,timestamp with time zone default null,null,null
+column,auth,phone,users,text default NULL::character varying,null,null
+column,auth,phone_confirmed_at,users,timestamp with time zone default null,null,null
+column,auth,phone_change,users,text default ''::character varying,null,null
+column,auth,phone_change_token,users,character varying(255) default ''::character varying,null,null
+column,auth,phone_change_sent_at,users,timestamp with time zone default null,null,null
+column,auth,confirmed_at,users,"timestamp with time zone default LEAST(email_confirmed_at, phone_confirmed_at)",null,null
+column,auth,email_change_token_current,users,character varying(255) default ''::character varying,null,null
+column,auth,email_change_confirm_status,users,smallint default 0,null,null
+column,auth,banned_until,users,timestamp with time zone default null,null,null
+column,auth,reauthentication_token,users,character varying(255) default ''::character varying,null,null
+column,auth,reauthentication_sent_at,users,timestamp with time zone default null,null,null
+column,auth,is_sso_user,users,boolean default false,null,Auth: Set this column to true when the account comes from SSO. These accounts can have duplicate emails.
+column,auth,deleted_at,users,timestamp with time zone default null,null,null
+column,auth,is_anonymous,users,boolean default false,null,null
+column,auth,instance_id,audit_log_entries,uuid default null,null,null
+column,auth,id,audit_log_entries,uuid default null,null,null
+column,auth,payload,audit_log_entries,json default null,null,null
+column,auth,created_at,audit_log_entries,timestamp with time zone default null,null,null
+column,auth,ip_address,audit_log_entries,character varying(64) default ''::character varying,null,null
+column,public,id,produto_categorias,uuid default gen_random_uuid(),null,null
+column,public,codigo_empresa,produto_categorias,text default null,null,null
+column,public,nome,produto_categorias,text default null,null,null
+column,public,descricao,produto_categorias,text default null,null,null
+column,public,ativa,produto_categorias,boolean default true,null,null
+column,public,created_at,produto_categorias,timestamp with time zone default now(),null,null
+column,public,updated_at,produto_categorias,timestamp with time zone default now(),null,null
+column,public,id,users_pkey,uuid default null,null,null
+column,public,id,usuarios,uuid default null,null,null
+column,public,nome,usuarios,character varying(255) default null,null,null
+column,public,email,usuarios,character varying(255) default null,null,null
+column,public,papel,usuarios,character varying(50) default 'user'::character varying,null,null
+column,public,criado_em,usuarios,timestamp with time zone default now(),null,null
+column,public,atualizado_em,usuarios,timestamp with time zone default now(),null,null
+column,public,codigo_empresa,usuarios,character varying(10) default null,null,null
+column,storage,id,migrations,integer default null,null,null
+column,storage,name,migrations,character varying(100) default null,null,null
+column,storage,hash,migrations,character varying(40) default null,null,null
+column,storage,executed_at,migrations,timestamp without time zone default CURRENT_TIMESTAMP,null,null
+column,auth,id,mfa_factors_pkey,uuid default null,null,null
+column,storage,id,buckets,text default null,null,null
+column,storage,name,buckets,text default null,null,null
+column,storage,owner,buckets,uuid default null,null,"Field is deprecated, use owner_id instead"
+column,storage,created_at,buckets,timestamp with time zone default now(),null,null
+column,storage,updated_at,buckets,timestamp with time zone default now(),null,null
+column,storage,public,buckets,boolean default false,null,null
+column,storage,avif_autodetection,buckets,boolean default false,null,null
+column,storage,file_size_limit,buckets,bigint default null,null,null
+column,storage,allowed_mime_types,buckets,text[] default null,null,null
+column,storage,owner_id,buckets,text default null,null,null
+column,storage,type,buckets,storage.buckettype default 'STANDARD'::storage.buckettype,null,null
+column,storage,id,objects,uuid default gen_random_uuid(),null,null
+column,storage,bucket_id,objects,text default null,null,null
+column,storage,name,objects,text default null,null,null
+column,storage,owner,objects,uuid default null,null,"Field is deprecated, use owner_id instead"
+column,storage,created_at,objects,timestamp with time zone default now(),null,null
+column,storage,updated_at,objects,timestamp with time zone default now(),null,null
+column,storage,last_accessed_at,objects,timestamp with time zone default now(),null,null
+column,storage,metadata,objects,jsonb default null,null,null
+column,storage,path_tokens,objects,"text[] default string_to_array(name, '/'::text)",null,null
+column,storage,version,objects,text default null,null,null
+column,storage,owner_id,objects,text default null,null,null
+column,storage,user_metadata,objects,jsonb default null,null,null
+column,storage,level,objects,integer default null,null,null
+column,storage,id,migrations_pkey,integer default null,null,null
+column,storage,name,migrations_name_key,character varying(100) default null,null,null
+column,auth,friendly_name,mfa_factors_user_friendly_name_unique,text default null,null,null
+column,auth,user_id,mfa_factors_user_friendly_name_unique,uuid default null,null,null
+column,storage,id,objects_pkey,uuid default null,null,null
+column,auth,id,mfa_challenges_pkey,uuid default null,null,null
+column,auth,instance_id,refresh_tokens,uuid default null,null,null
+column,auth,id,refresh_tokens,bigint default nextval('auth.refresh_tokens_id_seq'::regclass),null,null
+column,auth,token,refresh_tokens,character varying(255) default null,null,null
+column,auth,user_id,refresh_tokens,character varying(255) default null,null,null
+column,auth,revoked,refresh_tokens,boolean default null,null,null
+column,auth,created_at,refresh_tokens,timestamp with time zone default null,null,null
+column,auth,updated_at,refresh_tokens,timestamp with time zone default null,null,null
+column,auth,parent,refresh_tokens,character varying(255) default null,null,null
+column,auth,session_id,refresh_tokens,uuid default null,null,null
+column,storage,bucket_id,bucketid_objname,text default null,null,null
+column,storage,name,bucketid_objname,text default null,null,null
+column,storage,name,name_prefix_search,text default null,null,null
+column,public,codigo_empresa,ux_agendamentos_empresa_codigo,text default null,null,null
+column,public,codigo,ux_agendamentos_empresa_codigo,bigint default null,null,null
+column,vault,id,secrets_pkey,uuid default null,null,null
+column,vault,name,secrets_name_idx,text default null,null,null
+column,public,codigo_empresa,idx_caixa_sessoes_empresa,text default null,null,null
+column,auth,session_id,mfa_amr_claims_session_id_authentication_method_pkey,uuid default null,null,null
+column,auth,authentication_method,mfa_amr_claims_session_id_authentication_method_pkey,text default null,null,null
+column,vault,id,secrets,uuid default gen_random_uuid(),null,null
+column,vault,name,secrets,text default null,null,null
+column,vault,description,secrets,text default ''::text,null,null
+column,vault,secret,secrets,text default null,null,null
+column,vault,key_id,secrets,uuid default null,null,null
+column,vault,nonce,secrets,bytea default vault._crypto_aead_det_noncegen(),null,null
+column,vault,created_at,secrets,timestamp with time zone default CURRENT_TIMESTAMP,null,null
+column,vault,updated_at,secrets,timestamp with time zone default CURRENT_TIMESTAMP,null,null
+column,vault,id,decrypted_secrets,uuid default null,null,null
+column,vault,name,decrypted_secrets,text default null,null,null
+column,vault,description,decrypted_secrets,text default null,null,null
+column,vault,secret,decrypted_secrets,text default null,null,null
+column,vault,decrypted_secret,decrypted_secrets,text default null,null,null
+column,vault,key_id,decrypted_secrets,uuid default null,null,null
+column,vault,nonce,decrypted_secrets,bytea default null,null,null
+column,vault,created_at,decrypted_secrets,timestamp with time zone default null,null,null
+column,vault,updated_at,decrypted_secrets,timestamp with time zone default null,null,null
+column,auth,id,saml_relay_states_pkey,uuid default null,null,null
+column,public,id,customers_pkey,uuid default null,null,null
+column,auth,sso_provider_id,saml_relay_states_sso_provider_id_idx,uuid default null,null,null
+column,auth,for_email,saml_relay_states_for_email_idx,text default null,null,null
+column,public,mesa_id,idx_comandas_mesa_status,uuid default null,null,null
+column,public,status,idx_comandas_mesa_status,text default null,null,null
+column,public,id,products_pkey,uuid default null,null,null
+column,realtime,id,messages_2025_09_24_pkey,uuid default null,null,null
+column,realtime,inserted_at,messages_2025_09_24_pkey,timestamp without time zone default null,null,null
+column,auth,email,users_email_partial_key,character varying(255) default null,null,null
+column,auth,user_id,mfa_factors_user_id_idx,uuid default null,null,null
+column,public,id,sales_pkey,uuid default null,null,null
+column,auth,phone,users_phone_key,text default null,null,null
+column,auth,id,flow_state_pkey,uuid default null,null,null
+column,auth,auth_code,idx_auth_code,text default null,null,null
+column,public,id,bookings_pkey,uuid default null,null,null
+column,auth,user_id,idx_user_id_auth_method,uuid default null,null,null
+column,auth,authentication_method,idx_user_id_auth_method,text default null,null,null
+column,auth,updated_at,refresh_tokens_updated_at_idx,timestamp with time zone default null,null,null
+column,auth,created_at,flow_state_created_at_idx,timestamp with time zone default null,null,null
+column,auth,created_at,saml_relay_states_created_at_idx,timestamp with time zone default null,null,null
+column,auth,not_after,sessions_not_after_idx,timestamp with time zone default null,null,null
+column,auth,created_at,mfa_challenge_created_at_idx,timestamp with time zone default null,null,null
+column,auth,user_id,identities_user_id_idx,uuid default null,null,null
+column,auth,email,identities_email_idx,text default null,null,null
+column,auth,id,identities_pkey,uuid default null,null,null
+column,auth,id,saml_relay_states,uuid default null,null,null
+column,auth,sso_provider_id,saml_relay_states,uuid default null,null,null
+column,auth,request_id,saml_relay_states,text default null,null,null
+column,auth,for_email,saml_relay_states,text default null,null,null
+column,auth,redirect_to,saml_relay_states,text default null,null,null
+column,auth,created_at,saml_relay_states,timestamp with time zone default null,null,null
+column,auth,updated_at,saml_relay_states,timestamp with time zone default null,null,null
+column,auth,flow_state_id,saml_relay_states,uuid default null,null,null
+column,auth,id,flow_state,uuid default null,null,null
+column,auth,user_id,flow_state,uuid default null,null,null
+column,auth,auth_code,flow_state,text default null,null,null
+column,auth,code_challenge_method,flow_state,auth.code_challenge_method default null,null,null
+column,auth,code_challenge,flow_state,text default null,null,null
+column,auth,provider_type,flow_state,text default null,null,null
+column,auth,provider_access_token,flow_state,text default null,null,null
+column,auth,provider_refresh_token,flow_state,text default null,null,null
+column,auth,created_at,flow_state,timestamp with time zone default null,null,null
+column,auth,updated_at,flow_state,timestamp with time zone default null,null,null
+column,auth,authentication_method,flow_state,text default null,null,null
+column,auth,auth_code_issued_at,flow_state,timestamp with time zone default null,null,null
+column,auth,provider_id,identities,text default null,null,null
+column,auth,user_id,identities,uuid default null,null,null
+column,auth,identity_data,identities,jsonb default null,null,null
+column,auth,provider,identities,text default null,null,null
+column,auth,last_sign_in_at,identities,timestamp with time zone default null,null,null
+column,auth,created_at,identities,timestamp with time zone default null,null,null
+column,auth,updated_at,identities,timestamp with time zone default null,null,null
+column,auth,email,identities,text default lower((identity_data ->> 'email'::text)),null,Auth: Email is a generated column that references the optional email property in the identity_data
+column,auth,id,identities,uuid default gen_random_uuid(),null,null
+column,auth,provider_id,identities_provider_id_provider_unique,text default null,null,null
+column,auth,provider,identities_provider_id_provider_unique,text default null,null,null
+column,auth,is_anonymous,users_is_anonymous_idx,boolean default null,null,null
+column,public,codigo_empresa,idx_mesas_codigo_empresa,text default null,null,null
+column,auth,id,one_time_tokens_pkey,uuid default null,null,null
+column,auth,token_hash,one_time_tokens_token_hash_hash_idx,integer default null,null,null
+column,auth,relates_to,one_time_tokens_relates_to_hash_idx,integer default null,null,null
+column,auth,user_id,one_time_tokens_user_id_token_type_key,uuid default null,null,null
+column,auth,token_type,one_time_tokens_user_id_token_type_key,auth.one_time_token_type default null,null,null
+column,auth,id,sessions,uuid default null,null,null
+column,auth,user_id,sessions,uuid default null,null,null
+column,auth,created_at,sessions,timestamp with time zone default null,null,null
+column,auth,updated_at,sessions,timestamp with time zone default null,null,null
+column,auth,factor_id,sessions,uuid default null,null,null
+column,auth,aal,sessions,auth.aal_level default null,null,null
+column,auth,not_after,sessions,timestamp with time zone default null,null,Auth: Not after is a nullable column that contains a timestamp after which the session should be regarded as expired.
+column,auth,refreshed_at,sessions,timestamp without time zone default null,null,null
+column,auth,user_agent,sessions,text default null,null,null
+column,auth,ip,sessions,inet default null,null,null
+column,auth,tag,sessions,text default null,null,null
+column,public,codigo_empresa,uq_mesas_empresa_numero,text default null,null,null
+column,public,numero,uq_mesas_empresa_numero,integer default null,null,null
+column,auth,session_id,mfa_amr_claims,uuid default null,null,null
+column,auth,created_at,mfa_amr_claims,timestamp with time zone default null,null,null
+column,auth,updated_at,mfa_amr_claims,timestamp with time zone default null,null,null
+column,auth,authentication_method,mfa_amr_claims,text default null,null,null
+column,auth,id,mfa_amr_claims,uuid default null,null,null
+column,auth,id,one_time_tokens,uuid default null,null,null
+column,auth,user_id,one_time_tokens,uuid default null,null,null
+column,auth,token_type,one_time_tokens,auth.one_time_token_type default null,null,null
+column,auth,token_hash,one_time_tokens,text default null,null,null
+column,auth,relates_to,one_time_tokens,text default null,null,null
+column,auth,created_at,one_time_tokens,timestamp without time zone default now(),null,null
+column,auth,updated_at,one_time_tokens,timestamp without time zone default now(),null,null
+column,public,id,sale_items_pkey,uuid default null,null,null
+column,public,produto_id,idx_comanda_itens_produto,uuid default null,null,null
+column,auth,last_challenged_at,mfa_factors_last_challenged_at_key,timestamp with time zone default null,null,null
+column,auth,user_id,unique_phone_factor_per_user,uuid default null,null,null
+column,auth,phone,unique_phone_factor_per_user,text default null,null,null
+column,auth,id,mfa_factors,uuid default null,null,null
+column,auth,user_id,mfa_factors,uuid default null,null,null
+column,auth,friendly_name,mfa_factors,text default null,null,null
+column,auth,factor_type,mfa_factors,auth.factor_type default null,null,null
+column,auth,status,mfa_factors,auth.factor_status default null,null,null
+column,auth,created_at,mfa_factors,timestamp with time zone default null,null,null
+column,auth,updated_at,mfa_factors,timestamp with time zone default null,null,null
+column,auth,secret,mfa_factors,text default null,null,null
+column,auth,phone,mfa_factors,text default null,null,null
+column,auth,last_challenged_at,mfa_factors,timestamp with time zone default null,null,null
+column,auth,web_authn_credential,mfa_factors,jsonb default null,null,null
+column,auth,web_authn_aaguid,mfa_factors,uuid default null,null,null
+column,auth,id,mfa_challenges,uuid default null,null,null
+column,auth,factor_id,mfa_challenges,uuid default null,null,null
+column,auth,created_at,mfa_challenges,timestamp with time zone default null,null,null
+column,auth,verified_at,mfa_challenges,timestamp with time zone default null,null,null
+column,auth,ip_address,mfa_challenges,inet default null,null,null
+column,auth,otp_code,mfa_challenges,text default null,null,null
+column,auth,web_authn_session_data,mfa_challenges,jsonb default null,null,null
+column,auth,resource_id,sso_providers_resource_id_pattern_idx,text default null,null,null
+column,realtime,version,schema_migrations_pkey,bigint default null,null,null
+column,storage,id,s3_multipart_uploads_pkey,text default null,null,null
+column,public,codigo_empresa,uq_finalizadoras_empresa_nome,text default null,null,null
+column,public,lower,uq_finalizadoras_empresa_nome,text default null,null,null
+column,storage,id,buckets_pkey,text default null,null,null
+column,storage,name,bname,text default null,null,null
+column,storage,bucket_id,idx_objects_bucket_id_name,text default null,null,null
+column,storage,name,idx_objects_bucket_id_name,text default null,null,null
+column,public,codigo_empresa,idx_comanda_clientes_empresa,text default null,null,null
+column,public,id,vendas,uuid default gen_random_uuid(),null,null
+column,public,cliente_id,vendas,uuid default null,null,null
+column,public,numero_mesa,vendas,integer default null,null,null
+column,public,valor_total,vendas,"numeric(10,2) default null",null,null
+column,public,status,vendas,character varying(20) default 'pending'::character varying,null,null
+column,public,criado_em,vendas,timestamp with time zone default now(),null,null
+column,public,codigo_empresa,vendas,character varying(10) default null,null,null
+column,storage,bucket_id,idx_multipart_uploads_list,text default null,null,null
+column,storage,key,idx_multipart_uploads_list,text default null,null,null
+column,storage,created_at,idx_multipart_uploads_list,timestamp with time zone default null,null,null
+column,public,id,courts_pkey,uuid default null,null,null
+column,public,id,itens_venda,uuid default gen_random_uuid(),null,null
+column,public,venda_id,itens_venda,uuid default null,null,null
+column,public,produto_id,itens_venda,uuid default null,null,null
+column,public,quantidade,itens_venda,integer default null,null,null
+column,public,preco_unitario,itens_venda,"numeric(10,2) default null",null,null
+column,public,preco_total,itens_venda,"numeric(10,2) default null",null,null
+column,public,codigo_empresa,itens_venda,character varying(10) default null,null,null
+column,storage,id,s3_multipart_uploads_parts_pkey,uuid default null,null,null
+column,realtime,wal,wal_rls,jsonb default null,null,null
+column,realtime,is_rls_enabled,wal_rls,boolean default null,null,null
+column,realtime,subscription_ids,wal_rls,uuid[] default null,null,null
+column,realtime,errors,wal_rls,text[] default null,null,null
+column,realtime,version,schema_migrations,bigint default null,null,null
+column,realtime,inserted_at,schema_migrations,timestamp(0) without time zone default null,null,null
+column,realtime,id,subscription,bigint default null,null,null
+column,realtime,subscription_id,subscription,uuid default null,null,null
+column,realtime,entity,subscription,regclass default null,null,null
+column,realtime,filters,subscription,realtime.user_defined_filter[] default '{}'::realtime.user_defined_filter[],null,null
+column,realtime,claims,subscription,jsonb default null,null,null
+column,realtime,claims_role,subscription,regrole default realtime.to_regrole((claims ->> 'role'::text)),null,null
+column,realtime,created_at,subscription,"timestamp without time zone default timezone('utc'::text, now())",null,null
+column,public,codigo_empresa,idx_caixa_empresa,text default null,null,null
+column,public,agendamento_id,agendamento_participantes_agendamento_id_idx,uuid default null,null,null
+column,public,id,v_agendamento_participantes,uuid default null,null,null
+column,public,agendamento_id,v_agendamento_participantes,uuid default null,null,null
+column,public,codigo_empresa,v_agendamento_participantes,character varying(10) default null,null,null
+column,public,cliente_id,v_agendamento_participantes,uuid default null,null,null
+column,public,nome,v_agendamento_participantes,character varying(255) default null,null,null
+column,public,valor_cota,v_agendamento_participantes,"numeric(10,2) default null",null,null
+column,public,status_pagamento_text,v_agendamento_participantes,text default null,null,null
+column,public,status_pagamento,v_agendamento_participantes,payment_status default null,null,null
+column,public,id,empresas,uuid default gen_random_uuid(),null,null
+column,public,codigo_empresa,empresas,character varying(10) default null,null,null
+column,public,nome,empresas,character varying(255) default null,null,null
+column,public,telefone,empresas,character varying(20) default null,null,null
+column,public,endereco,empresas,text default null,null,null
+column,public,criado_em,empresas,timestamp with time zone default now(),null,null
+column,public,atualizado_em,empresas,timestamp with time zone default now(),null,null
+column,public,razao_social,empresas,text default null,null,null
+column,public,nome_fantasia,empresas,text default null,null,null
+column,public,cnpj,empresas,character varying(18) default null,null,null
+column,public,email,empresas,text default null,null,null
+column,public,logo_url,empresas,text default null,null,null
+column,public,codigo_empresa,uq_caixa_aberto_por_empresa,text default null,null,null
+column,storage,id,s3_multipart_uploads_parts,uuid default gen_random_uuid(),null,null
+column,storage,upload_id,s3_multipart_uploads_parts,text default null,null,null
+column,storage,size,s3_multipart_uploads_parts,bigint default 0,null,null
+column,storage,part_number,s3_multipart_uploads_parts,integer default null,null,null
+column,storage,bucket_id,s3_multipart_uploads_parts,text default null,null,null
+column,storage,key,s3_multipart_uploads_parts,text default null,null,null
+column,storage,etag,s3_multipart_uploads_parts,text default null,null,null
+column,storage,owner_id,s3_multipart_uploads_parts,text default null,null,null
+column,storage,version,s3_multipart_uploads_parts,text default null,null,null
+column,storage,created_at,s3_multipart_uploads_parts,timestamp with time zone default now(),null,null
+column,storage,id,s3_multipart_uploads,text default null,null,null
+column,storage,in_progress_size,s3_multipart_uploads,bigint default 0,null,null
+column,storage,upload_signature,s3_multipart_uploads,text default null,null,null
+column,storage,bucket_id,s3_multipart_uploads,text default null,null,null
+column,storage,key,s3_multipart_uploads,text default null,null,null
+column,storage,version,s3_multipart_uploads,text default null,null,null
+column,storage,owner_id,s3_multipart_uploads,text default null,null,null
+column,storage,created_at,s3_multipart_uploads,timestamp with time zone default now(),null,null
+column,storage,user_metadata,s3_multipart_uploads,jsonb default null,null,null
+column,realtime,column_name,user_defined_filter,text default null,null,null
+column,realtime,op,user_defined_filter,realtime.equality_op default null,null,null
+column,realtime,value,user_defined_filter,text default null,null,null
+column,public,caixa_id,idx_pagamentos_caixa,uuid default null,null,null
+column,public,nome,gin_trgm_clientes_nome,integer default null,null,null
+column,public,id,agendamento_participantes,uuid default gen_random_uuid(),null,null
+column,public,agendamento_id,agendamento_participantes,uuid default null,null,null
+column,public,cliente_id,agendamento_participantes,uuid default null,null,null
+column,public,nome,agendamento_participantes,text default null,null,null
+column,public,valor_cota,agendamento_participantes,"numeric(10,2) default 0",null,Valor atribuído ao participante
+column,public,status_pagamento,agendamento_participantes,payment_status default 'Pendente'::payment_status,null,null
+column,public,pago_em,agendamento_participantes,timestamp with time zone default null,null,null
+column,public,metodo_pagamento,agendamento_participantes,text default null,null,null
+column,public,codigo_empresa,agendamento_participantes,character varying(10) default null,null,null
+column,public,created_at,agendamento_participantes,timestamp with time zone default now(),null,null
+column,public,updated_at,agendamento_participantes,timestamp with time zone default now(),null,null
+column,public,email,gin_trgm_clientes_email,integer default null,null,null
+column,public,telefone,gin_trgm_clientes_telefone,integer default null,null,null
+column,realtime,topic,messages_2025_09_24,text default null,null,null
+column,realtime,extension,messages_2025_09_24,text default null,null,null
+column,realtime,payload,messages_2025_09_24,jsonb default null,null,null
+column,realtime,event,messages_2025_09_24,text default null,null,null
+column,realtime,private,messages_2025_09_24,boolean default false,null,null
+column,realtime,updated_at,messages_2025_09_24,timestamp without time zone default now(),null,null
+column,realtime,inserted_at,messages_2025_09_24,timestamp without time zone default now(),null,null
+column,realtime,id,messages_2025_09_24,uuid default gen_random_uuid(),null,null
+column,realtime,name,wal_column,text default null,null,null
+column,realtime,type_name,wal_column,text default null,null,null
+column,realtime,type_oid,wal_column,oid default null,null,null
+column,realtime,value,wal_column,jsonb default null,null,null
+column,realtime,is_pkey,wal_column,boolean default null,null,null
+column,realtime,is_selectable,wal_column,boolean default null,null,null
+column,public,codigo_empresa,idx_colaboradores_codigo_empresa,text default null,null,null
+column,public,id,quadras,uuid default gen_random_uuid(),null,null
+column,public,nome,quadras,character varying(255) default null,null,null
+column,public,modalidades,quadras,text[] default null,null,null
+column,public,tipo,quadras,character varying(50) default null,null,null
+column,public,status,quadras,character varying(20) default 'Ativa'::character varying,null,null
+column,public,criado_em,quadras,timestamp with time zone default now(),null,null
+column,public,valor,quadras,"numeric(10,2) default null",null,Preço por meia hora (R$) para locação da quadra
+column,public,hora_inicio,quadras,time without time zone default null,null,Horário padrão de abertura da quadra
+column,public,hora_fim,quadras,time without time zone default null,null,Horário padrão de fechamento da quadra
+column,public,codigo_empresa,quadras,text default null,null,null
+column,realtime,id,pk_subscription,bigint default null,null,null
+column,realtime,subscription_id,subscription_subscription_id_entity_filters_key,uuid default null,null,null
+column,realtime,entity,subscription_subscription_id_entity_filters_key,regclass default null,null,null
+column,realtime,filters,subscription_subscription_id_entity_filters_key,realtime.user_defined_filter[] default null,null,null
+column,realtime,last_value,subscription_id_seq,bigint default null,null,null
+column,realtime,log_cnt,subscription_id_seq,bigint default null,null,null
+column,realtime,is_called,subscription_id_seq,boolean default null,null,null
+column,public,comanda_id,estoque_baixa_log,uuid default null,null,null
+column,public,baixado_em,estoque_baixa_log,timestamp with time zone default now(),null,null
+column,storage,bucket_id,idx_prefixes_lower_name,text default null,null,null
+column,storage,level,idx_prefixes_lower_name,integer default null,null,null
+column,storage,string_to_array,idx_prefixes_lower_name,text default null,null,null
+column,storage,lower,idx_prefixes_lower_name,text default null,null,null
+column,public,comanda_id,estoque_baixa_log_pkey,uuid default null,null,null
+column,realtime,topic,messages,text default null,null,null
+column,realtime,extension,messages,text default null,null,null
+column,realtime,payload,messages,jsonb default null,null,null
+column,realtime,event,messages,text default null,null,null
+column,realtime,private,messages,boolean default false,null,null
+column,realtime,updated_at,messages,timestamp without time zone default now(),null,null
+column,realtime,inserted_at,messages,timestamp without time zone default now(),null,null
+column,realtime,id,messages,uuid default gen_random_uuid(),null,null
+column,public,id,user_profiles_pkey,uuid default null,null,null
+column,public,id,agendamentos,uuid default gen_random_uuid(),null,null
+column,public,quadra_id,agendamentos,uuid default null,null,null
+column,public,cliente_id,agendamentos,uuid default null,null,null
+column,public,clientes,agendamentos,text[] default null,null,Participantes do agendamento (nomes livres)
+column,public,inicio,agendamentos,timestamp with time zone default null,null,null
+column,public,fim,agendamentos,timestamp with time zone default null,null,null
+column,public,modalidade,agendamentos,character varying(100) default null,null,null
+column,public,status,agendamentos,character varying(20) default 'scheduled'::character varying,null,null
+column,public,valor_total,agendamentos,"numeric(10,2) default null",null,Preço total do agendamento para meia hora (R$)
+column,public,criado_em,agendamentos,timestamp with time zone default now(),null,null
+column,public,codigo_empresa,agendamentos,text default null,null,null
+column,public,auto_disabled,agendamentos,boolean default false,null,"Quando true, desativa QUALQUER automação (auto-confirmar, auto-iniciar, auto-finalizar) para este agendamento."
+column,public,codigo,agendamentos,bigint default null,null,null
+column,public,empresa_id,empresa_counters,uuid default null,null,null
+column,public,next_cliente_codigo,empresa_counters,integer default 1,null,null
+column,public,next_agendamento_codigo,empresa_counters,bigint default 1,null,null
+column,public,cliente_id,idx_comanda_clientes_cliente,uuid default null,null,null
+column,public,comanda_id,comanda_clientes_comanda_idx,uuid default null,null,null
+column,public,codigo_empresa,empresas_codigo_empresa_unique,character varying(10) default null,null,null
+column,public,ativo,idx_colaboradores_ativo,boolean default null,null,null
+column,storage,id,buckets_analytics_pkey,text default null,null,null
+column,public,empresa_id,empresa_counters_pkey,uuid default null,null,null
+column,public,codigo_empresa,usuarios_codigo_empresa_idx,character varying(10) default null,null,null
+column,public,codigo_empresa,quadras_codigo_empresa_idx,text default null,null,null
+column,storage,bucket_id,prefixes_pkey,text default null,null,null
+column,storage,level,prefixes_pkey,integer default null,null,null
+column,storage,name,prefixes_pkey,text default null,null,null
+column,storage,id,buckets_analytics,text default null,null,null
+column,storage,type,buckets_analytics,storage.buckettype default 'ANALYTICS'::storage.buckettype,null,null
+column,storage,format,buckets_analytics,text default 'ICEBERG'::text,null,null
+column,storage,created_at,buckets_analytics,timestamp with time zone default now(),null,null
+column,storage,updated_at,buckets_analytics,timestamp with time zone default now(),null,null
+column,storage,bucket_id,prefixes,text default null,null,null
+column,storage,name,prefixes,text default null,null,null
+column,storage,level,prefixes,integer default storage.get_level(name),null,null
+column,storage,created_at,prefixes,timestamp with time zone default now(),null,null
+column,storage,updated_at,prefixes,timestamp with time zone default now(),null,null
+column,storage,name,idx_name_bucket_level_unique,text default null,null,null
+column,storage,bucket_id,idx_name_bucket_level_unique,text default null,null,null
+column,storage,level,idx_name_bucket_level_unique,integer default null,null,null
+column,storage,bucket_id,objects_bucket_id_level_idx,text default null,null,null
+column,storage,level,objects_bucket_id_level_idx,integer default null,null,null
+column,storage,name,objects_bucket_id_level_idx,text default null,null,null
+column,storage,path_tokens,idx_objects_lower_name,text default null,null,null
+column,storage,lower,idx_objects_lower_name,text default null,null,null
+column,storage,bucket_id,idx_objects_lower_name,text default null,null,null
+column,storage,level,idx_objects_lower_name,integer default null,null,null
+column,public,id,colaboradores,uuid default gen_random_uuid(),null,null
+column,public,nome,colaboradores,character varying(255) default null,null,null
+column,public,cargo,colaboradores,character varying(50) default 'user'::character varying,null,null
+column,public,criado_em,colaboradores,timestamp with time zone default now(),null,null
+column,public,atualizado_em,colaboradores,timestamp with time zone default now(),null,null
+column,public,ativo,colaboradores,boolean default true,null,null
+column,public,codigo_empresa,colaboradores,text default null,null,null
+column,public,codigo_empresa,companies_code_idx,character varying(10) default null,null,null
+column,public,codigo_empresa,clientes_codigo_empresa_idx,text default null,null,null
+column,public,codigo_empresa,colaboradores_codigo_empresa_idx,text default null,null,null
+column,public,codigo_empresa,agendamentos_codigo_empresa_idx,text default null,null,null
+column,public,codigo_empresa,idx_agp_codigo_empresa,character varying(10) default null,null,null
+column,public,comanda_id,idx_comanda_clientes_comanda,uuid default null,null,null
+column,realtime,id,messages_2025_09_28_pkey,uuid default null,null,null
+column,realtime,inserted_at,messages_2025_09_28_pkey,timestamp without time zone default null,null,null
+column,public,codigo_empresa,produtos_codigo_empresa_nome_unique,character varying(10) default null,null,null
+column,public,lower,produtos_codigo_empresa_nome_unique,text default null,null,null
+column,public,codigo_empresa,idx_produtos_codigo_empresa,character varying(10) default null,null,null
+column,realtime,inserted_at,messages_2025_09_28_inserted_at_topic_idx,timestamp without time zone default null,null,null
+column,realtime,topic,messages_2025_09_28_inserted_at_topic_idx,text default null,null,null
+column,public,codigo_empresa,ux_produtos_empresa_codigo_produto,character varying(10) default null,null,null
+column,public,lower,ux_produtos_empresa_codigo_produto,text default null,null,null
+column,realtime,topic,messages_2025_09_28,text default null,null,null
+column,realtime,extension,messages_2025_09_28,text default null,null,null
+column,realtime,payload,messages_2025_09_28,jsonb default null,null,null
+column,realtime,event,messages_2025_09_28,text default null,null,null
+column,realtime,private,messages_2025_09_28,boolean default false,null,null
+column,realtime,updated_at,messages_2025_09_28,timestamp without time zone default now(),null,null
+column,realtime,inserted_at,messages_2025_09_28,timestamp without time zone default now(),null,null
+column,realtime,id,messages_2025_09_28,uuid default gen_random_uuid(),null,null
+column,public,id,movimentos_saldo_pkey,uuid default null,null,null
+column,public,codigo_empresa,idx_mov_saldo_empresa,text default null,null,null
+column,public,cliente_id,idx_mov_saldo_cliente,uuid default null,null,null
+column,public,agendamento_id,idx_mov_saldo_agendamento,uuid default null,null,null
+column,public,id,movimentos_saldo,uuid default gen_random_uuid(),null,null
+column,public,codigo_empresa,movimentos_saldo,text default null,null,null
+column,public,cliente_id,movimentos_saldo,uuid default null,null,null
+column,public,agendamento_id,movimentos_saldo,uuid default null,null,null
+column,public,tipo,movimentos_saldo,text default null,null,null
+column,public,valor,movimentos_saldo,"numeric(12,2) default null",null,null
+column,public,motivo,movimentos_saldo,text default null,null,null
+column,public,created_at,movimentos_saldo,timestamp with time zone default now(),null,null
+column,public,comanda_id,idx_pagamentos_comanda_id,uuid default null,null,null
+column,public,comanda_id,idx_pagamentos_comanda,uuid default null,null,null
+column,realtime,id,messages_2025_09_25_pkey,uuid default null,null,null
+column,realtime,inserted_at,messages_2025_09_25_pkey,timestamp without time zone default null,null,null
+column,realtime,topic,messages_2025_09_25,text default null,null,null
+column,realtime,extension,messages_2025_09_25,text default null,null,null
+column,realtime,payload,messages_2025_09_25,jsonb default null,null,null
+column,realtime,event,messages_2025_09_25,text default null,null,null
+column,realtime,private,messages_2025_09_25,boolean default false,null,null
+column,realtime,updated_at,messages_2025_09_25,timestamp without time zone default now(),null,null
+column,realtime,inserted_at,messages_2025_09_25,timestamp without time zone default now(),null,null
+column,realtime,id,messages_2025_09_25,uuid default gen_random_uuid(),null,null
+column,realtime,id,messages_2025_09_22_pkey,uuid default null,null,null
+column,realtime,inserted_at,messages_2025_09_22_pkey,timestamp without time zone default null,null,null
+column,realtime,topic,messages_2025_09_22,text default null,null,null
+column,realtime,extension,messages_2025_09_22,text default null,null,null
+column,realtime,payload,messages_2025_09_22,jsonb default null,null,null
+column,realtime,event,messages_2025_09_22,text default null,null,null
+column,realtime,private,messages_2025_09_22,boolean default false,null,null
+column,realtime,updated_at,messages_2025_09_22,timestamp without time zone default now(),null,null
+column,realtime,inserted_at,messages_2025_09_22,timestamp without time zone default now(),null,null
+column,realtime,id,messages_2025_09_22,uuid default gen_random_uuid(),null,null
+column,realtime,id,messages_2025_09_26_pkey,uuid default null,null,null
+column,realtime,inserted_at,messages_2025_09_26_pkey,timestamp without time zone default null,null,null
+column,realtime,topic,messages_2025_09_26,text default null,null,null
+column,realtime,extension,messages_2025_09_26,text default null,null,null
+column,realtime,payload,messages_2025_09_26,jsonb default null,null,null
+column,realtime,event,messages_2025_09_26,text default null,null,null
+column,realtime,private,messages_2025_09_26,boolean default false,null,null
+column,realtime,updated_at,messages_2025_09_26,timestamp without time zone default now(),null,null
+column,realtime,inserted_at,messages_2025_09_26,timestamp without time zone default now(),null,null
+column,realtime,id,messages_2025_09_26,uuid default gen_random_uuid(),null,null
+column,public,codigo_empresa,finalizadoras_empresa_nome_unique,text default null,null,null
+column,public,nome,finalizadoras_empresa_nome_unique,text default null,null,null
+column,public,id,pagamentos,uuid default gen_random_uuid(),null,null
+column,public,codigo_empresa,pagamentos,text default get_my_company_code(),null,null
+column,public,comanda_id,pagamentos,uuid default null,null,null
+column,public,caixa_id,pagamentos,uuid default null,null,null
+column,public,metodo,pagamentos,text default null,null,null
+column,public,valor,pagamentos,"numeric(12,2) default null",null,null
+column,public,status,pagamentos,text default 'Pago'::text,null,null
+column,public,recebido_em,pagamentos,timestamp with time zone default now(),null,null
+column,public,created_at,pagamentos,timestamp with time zone default now(),null,null
+column,public,updated_at,pagamentos,timestamp with time zone default now(),null,null
+column,public,finalizadora_id,pagamentos,uuid default null,null,null
+column,public,id,pagamentos_pkey,uuid default null,null,null
+column,public,codigo_empresa,idx_pagamentos_empresa,text default null,null,null
+column,public,id,mesas,uuid default gen_random_uuid(),null,null
+column,public,codigo_empresa,mesas,text default get_my_company_code(),null,null
+column,public,numero,mesas,integer default null,null,null
+column,public,nome,mesas,text default null,null,Nome amigável da mesa (ex.: Pátio 1)
+column,public,status,mesas,mesa_status default 'available'::mesa_status,null,null
+column,public,created_at,mesas,timestamp with time zone default now(),null,null
+column,public,updated_at,mesas,timestamp with time zone default now(),null,null
+column,public,id,comanda_itens,uuid default gen_random_uuid(),null,null
+column,public,codigo_empresa,comanda_itens,text default get_my_company_code(),null,null
+column,public,comanda_id,comanda_itens,uuid default null,null,null
+column,public,produto_id,comanda_itens,uuid default null,null,null
+column,public,descricao,comanda_itens,text default null,null,null
+column,public,quantidade,comanda_itens,"numeric(12,3) default null",null,null
+column,public,preco_unitario,comanda_itens,"numeric(12,2) default null",null,null
+column,public,desconto,comanda_itens,"numeric(12,2) default 0",null,null
+column,public,total,comanda_itens,"numeric(12,2) default ((quantidade * preco_unitario) - desconto)",null,null
+column,public,created_at,comanda_itens,timestamp with time zone default now(),null,null
+column,public,updated_at,comanda_itens,timestamp with time zone default now(),null,null
+column,public,id,caixa_sessoes,uuid default gen_random_uuid(),null,null
+column,public,codigo_empresa,caixa_sessoes,text default get_my_company_code(),null,null
+column,public,usuario_id,caixa_sessoes,uuid default null,null,null
+column,public,aberto_em,caixa_sessoes,timestamp with time zone default now(),null,null
+column,public,fechado_em,caixa_sessoes,timestamp with time zone default null,null,null
+column,public,status,caixa_sessoes,text default 'open'::text,null,null
+column,public,saldo_inicial,caixa_sessoes,"numeric(12,2) default 0",null,null
+column,public,saldo_final,caixa_sessoes,"numeric(12,2) default null",null,null
+column,public,observacao,caixa_sessoes,text default null,null,null
+column,public,created_at,caixa_sessoes,timestamp with time zone default now(),null,null
+column,public,updated_at,caixa_sessoes,timestamp with time zone default now(),null,null
+column,public,id,caixa_sessoes_pkey,uuid default null,null,null
+column,public,codigo_empresa,idx_caixa_sessoes_empresa_status,text default null,null,null
+column,public,status,idx_caixa_sessoes_empresa_status,text default null,null,null
+column,public,id,comanda_itens_pkey,uuid default null,null,null
+column,public,comanda_id,idx_comanda_itens_comanda,uuid default null,null,null
+column,public,codigo_empresa,idx_comanda_itens_empresa,text default null,null,null
+column,public,id,mesas_pkey,uuid default null,null,null
+column,public,codigo_empresa,mesas_codigo_empresa_numero_key,text default null,null,null
+column,public,numero,mesas_codigo_empresa_numero_key,integer default null,null,null
+column,public,codigo_empresa,idx_clientes_empresa_nome,text default null,null,null
+column,public,nome,idx_clientes_empresa_nome,character varying(255) default null,null,null
+column,public,codigo_empresa,idx_clientes_empresa_aniversario,text default null,null,null
+column,public,aniversario,idx_clientes_empresa_aniversario,date default null,null,null
+column,public,id,caixa_movimentos_pkey,uuid default null,null,null
+column,public,id,caixa_movimentos,uuid default gen_random_uuid(),null,null
+column,public,codigo_empresa,caixa_movimentos,text default get_my_company_code(),null,null
+column,public,caixa_id,caixa_movimentos,uuid default null,null,null
+column,public,tipo,caixa_movimentos,caixa_mov_tipo default null,null,null
+column,public,origem,caixa_movimentos,text default null,null,null
+column,public,metodo,caixa_movimentos,payment_method default null,null,null
+column,public,valor,caixa_movimentos,"numeric(12,2) default null",null,null
+column,public,referencia_id,caixa_movimentos,uuid default null,null,null
+column,public,observacao,caixa_movimentos,text default null,null,null
+column,public,created_at,caixa_movimentos,timestamp with time zone default now(),null,null
+column,public,updated_at,caixa_movimentos,timestamp with time zone default now(),null,null
+column,public,caixa_id,idx_caixa_movimentos_caixa,uuid default null,null,null
+column,public,codigo_empresa,idx_caixa_movimentos_empresa,text default null,null,null
+column,public,codigo_empresa,idx_clientes_empresa_telefone,text default null,null,null
+column,public,telefone,idx_clientes_empresa_telefone,character varying(20) default null,null,null
+column,public,codigo_empresa,uq_clientes_empresa_codigo,text default null,null,null
+column,public,codigo,uq_clientes_empresa_codigo,integer default null,null,null
+column,public,codigo_empresa,uq_clientes_empresa_cpf,text default null,null,null
+column,public,cpf,uq_clientes_empresa_cpf,character varying(14) default null,null,null
+column,public,codigo_empresa,uq_clientes_empresa_email_lower,text default null,null,null
+column,public,lower,uq_clientes_empresa_email_lower,text default null,null,null
+column,public,id,comanda_clientes,uuid default gen_random_uuid(),null,null
+column,public,comanda_id,comanda_clientes,uuid default null,null,null
+column,public,cliente_id,comanda_clientes,uuid default null,null,null
+column,public,nome_livre,comanda_clientes,text default null,null,null
+column,public,codigo_empresa,comanda_clientes,text default null,null,null
+column,public,created_at,comanda_clientes,timestamp with time zone default now(),null,null
+column,public,id,comanda_clientes_pkey,uuid default null,null,null
+column,public,id,finalizadoras_pkey,uuid default null,null,null
+column,public,codigo_empresa,idx_finalizadoras_empresa,text default null,null,null
+column,public,ativo,idx_finalizadoras_ativo,boolean default null,null,null
+column,public,ordem,idx_finalizadoras_ordem,integer default null,null,null
+column,public,cliente_id,comanda_clientes_cliente_idx,uuid default null,null,null
+column,public,codigo_empresa,comanda_clientes_empresa_idx,text default null,null,null
+column,public,finalizadora_id,idx_pagamentos_finalizadora,uuid default null,null,null
+column,public,recebido_em,idx_pagamentos_recebido_em,timestamp with time zone default null,null,null
+column,public,id,finalizadoras,uuid default gen_random_uuid(),null,null
+column,public,codigo_empresa,finalizadoras,text default null,null,null
+column,public,nome,finalizadoras,text default null,null,null
+column,public,tipo,finalizadoras,text default 'outros'::text,null,null
+column,public,ativo,finalizadoras,boolean default true,null,null
+column,public,ordem,finalizadoras,integer default 0,null,null
+column,public,taxa_percentual,finalizadoras,"numeric(8,4) default null",null,null
+column,public,observacao,finalizadoras,text default null,null,null
+column,public,created_at,finalizadoras,timestamp with time zone default now(),null,null
+column,public,updated_at,finalizadoras,timestamp with time zone default now(),null,null
+column,auth,id,oauth_clients_pkey,uuid default null,null,null
+column,auth,client_id,oauth_clients_client_id_key,text default null,null,null
+column,auth,client_id,oauth_clients_client_id_idx,text default null,null,null
+column,auth,deleted_at,oauth_clients_deleted_at_idx,timestamp with time zone default null,null,null
+column,realtime,inserted_at,messages_inserted_at_topic_index,timestamp without time zone default null,null,null
+column,realtime,topic,messages_inserted_at_topic_index,text default null,null,null
+column,realtime,inserted_at,messages_2025_09_22_inserted_at_topic_idx,timestamp without time zone default null,null,null
+column,realtime,topic,messages_2025_09_22_inserted_at_topic_idx,text default null,null,null
+column,realtime,inserted_at,messages_2025_09_23_inserted_at_topic_idx,timestamp without time zone default null,null,null
+column,realtime,topic,messages_2025_09_23_inserted_at_topic_idx,text default null,null,null
+column,realtime,inserted_at,messages_2025_09_24_inserted_at_topic_idx,timestamp without time zone default null,null,null
+column,realtime,topic,messages_2025_09_24_inserted_at_topic_idx,text default null,null,null
+column,realtime,inserted_at,messages_2025_09_25_inserted_at_topic_idx,timestamp without time zone default null,null,null
+column,realtime,topic,messages_2025_09_25_inserted_at_topic_idx,text default null,null,null
+column,realtime,inserted_at,messages_2025_09_26_inserted_at_topic_idx,timestamp without time zone default null,null,null
+column,realtime,topic,messages_2025_09_26_inserted_at_topic_idx,text default null,null,null
+column,public,empresa_id,agenda_settings_pkey,uuid default null,null,null
+column,auth,id,oauth_clients,uuid default null,null,null
+column,auth,client_id,oauth_clients,text default null,null,null
+column,auth,client_secret_hash,oauth_clients,text default null,null,null
+column,auth,registration_type,oauth_clients,auth.oauth_registration_type default null,null,null
+column,auth,redirect_uris,oauth_clients,text default null,null,null
+column,auth,grant_types,oauth_clients,text default null,null,null
+column,auth,client_name,oauth_clients,text default null,null,null
+column,auth,client_uri,oauth_clients,text default null,null,null
+column,auth,logo_uri,oauth_clients,text default null,null,null
+column,auth,created_at,oauth_clients,timestamp with time zone default now(),null,null
+column,auth,updated_at,oauth_clients,timestamp with time zone default now(),null,null
+column,auth,deleted_at,oauth_clients,timestamp with time zone default null,null,null
+column,public,empresa_id,agenda_settings,uuid default null,null,null
+column,public,auto_confirm_enabled,agenda_settings,boolean default false,null,null
+column,public,auto_confirm_hours,agenda_settings,integer default null,null,null
+column,public,auto_cancel_if_not_confirmed_enabled,agenda_settings,boolean default false,null,null
+column,public,auto_cancel_hours,agenda_settings,integer default null,null,null
+column,public,auto_start_enabled,agenda_settings,boolean default true,null,null
+column,public,auto_finish_enabled,agenda_settings,boolean default true,null,null
+column,public,created_at,agenda_settings,timestamp with time zone default now(),null,null
+column,public,updated_at,agenda_settings,timestamp with time zone default now(),null,null
+column,public,codigo_empresa,idx_pagamentos_codigo_empresa,text default null,null,null
+column,public,aberto_em,idx_comandas_aberto_em,timestamp with time zone default null,null,null
+column,public,codigo_empresa,idx_comandas_codigo_empresa,text default null,null,null
+column,public,comanda_id,idx_comanda_itens_comanda_id,uuid default null,null,null
+column,public,codigo_empresa,idx_comanda_itens_codigo_empresa,text default null,null,null
+column,public,id,caixa_movimentacoes_pkey,bigint default null,null,null
+column,public,codigo_empresa,idx_caixa_mov_empresa_sessao,text default null,null,null
+column,public,caixa_sessao_id,idx_caixa_mov_empresa_sessao,uuid default null,null,null
+column,public,last_value,caixa_resumos_id_seq,bigint default null,null,null
+column,public,log_cnt,caixa_resumos_id_seq,bigint default null,null,null
+column,public,is_called,caixa_resumos_id_seq,boolean default null,null,null
+column,public,id,caixa_resumos_pkey,bigint default null,null,null
+column,public,codigo_empresa,idx_caixa_resumos_empresa_sessao,text default null,null,null
+column,public,caixa_sessao_id,idx_caixa_resumos_empresa_sessao,uuid default null,null,null
+column,public,periodo_de,idx_caixa_resumos_periodo,timestamp with time zone default null,null,null
+column,public,periodo_ate,idx_caixa_resumos_periodo,timestamp with time zone default null,null,null
+column,public,last_value,caixa_movimentacoes_id_seq,bigint default null,null,null
+column,public,log_cnt,caixa_movimentacoes_id_seq,bigint default null,null,null
+column,public,is_called,caixa_movimentacoes_id_seq,boolean default null,null,null
+column,public,tipo,idx_caixa_mov_tipo,text default null,null,null
+column,public,id,caixa_resumos,bigint default nextval('caixa_resumos_id_seq'::regclass),null,null
+column,public,codigo_empresa,caixa_resumos,text default null,null,null
+column,public,caixa_sessao_id,caixa_resumos,uuid default null,null,null
+column,public,periodo_de,caixa_resumos,timestamp with time zone default null,null,null
+column,public,periodo_ate,caixa_resumos,timestamp with time zone default null,null,null
+column,public,total_bruto,caixa_resumos,"numeric(14,2) default 0",null,null
+column,public,total_descontos,caixa_resumos,"numeric(14,2) default 0",null,null
+column,public,total_liquido,caixa_resumos,"numeric(14,2) default 0",null,null
+column,public,total_entradas,caixa_resumos,"numeric(14,2) default 0",null,null
+column,public,por_finalizadora,caixa_resumos,jsonb default '{}'::jsonb,null,null
+column,public,criado_em,caixa_resumos,timestamp with time zone default now(),null,null
+column,public,id,caixa_movimentacoes,bigint default nextval('caixa_movimentacoes_id_seq'::regclass),null,null
+column,public,codigo_empresa,caixa_movimentacoes,text default null,null,null
+column,public,caixa_sessao_id,caixa_movimentacoes,uuid default null,null,null
+column,public,tipo,caixa_movimentacoes,text default null,null,null
+column,public,valor,caixa_movimentacoes,"numeric(14,2) default null",null,null
+column,public,observacao,caixa_movimentacoes,text default null,null,null
+column,public,criado_em,caixa_movimentacoes,timestamp with time zone default now(),null,null
+column,public,id,clientes,uuid default gen_random_uuid(),null,null
+column,public,nome,clientes,character varying(255) default null,null,null
+column,public,cpf,clientes,character varying(14) default null,null,null
+column,public,email,clientes,character varying(255) default null,null,null
+column,public,telefone,clientes,character varying(20) default null,null,null
+column,public,saldo,clientes,"numeric(10,2) default 0.00",null,null
+column,public,status,clientes,character varying(20) default 'active'::character varying,null,null
+column,public,aniversario,clientes,date default null,null,null
+column,public,criado_em,clientes,timestamp with time zone default now(),null,null
+column,public,atualizado_em,clientes,timestamp with time zone default now(),null,null
+column,public,codigo,clientes,integer default null,null,null
+column,public,codigo_empresa,clientes,text default null,null,null
+column,public,tipo_pessoa,clientes,text default null,null,null
+column,public,apelido,clientes,text default null,null,null
+column,public,cnpj,clientes,text default null,null,null
+column,public,rg,clientes,text default null,null,null
+column,public,ie,clientes,text default null,null,null
+column,public,flag_cliente,clientes,boolean default true,null,null
+column,public,flag_fornecedor,clientes,boolean default false,null,null
+column,public,flag_funcionario,clientes,boolean default false,null,null
+column,public,flag_administradora,clientes,boolean default false,null,null
+column,public,flag_parceiro,clientes,boolean default false,null,null
+column,public,flag_ccf_spc,clientes,boolean default false,null,null
+column,public,fone2,clientes,text default null,null,null
+column,public,celular1,clientes,text default null,null,null
+column,public,celular2,clientes,text default null,null,null
+column,public,whatsapp,clientes,text default null,null,null
+column,public,cep,clientes,text default null,null,null
+column,public,endereco,clientes,text default null,null,null
+column,public,numero,clientes,text default null,null,null
+column,public,complemento,clientes,text default null,null,null
+column,public,bairro,clientes,text default null,null,null
+column,public,cidade,clientes,text default null,null,null
+column,public,uf,clientes,text default null,null,null
+column,public,cidade_ibge,clientes,text default null,null,null
+column,public,limite_credito,clientes,"numeric(12,2) default 0",null,null
+column,public,tipo_recebimento,clientes,text default null,null,null
+column,public,regime_tributario,clientes,text default null,null,null
+column,public,tipo_contribuinte,clientes,text default null,null,null
+column,public,sexo,clientes,text default null,null,null
+column,public,estado_civil,clientes,text default null,null,null
+column,public,nome_mae,clientes,text default null,null,null
+column,public,nome_pai,clientes,text default null,null,null
+column,public,observacoes,clientes,text default null,null,null
+column,public,id,comandas_pkey,uuid default null,null,null
+column,realtime,id,messages_2025_09_23_pkey,uuid default null,null,null
+column,realtime,inserted_at,messages_2025_09_23_pkey,timestamp without time zone default null,null,null
+column,public,mesa_id,idx_comandas_mesa,uuid default null,null,null
+column,realtime,topic,messages_2025_09_23,text default null,null,null
+column,realtime,extension,messages_2025_09_23,text default null,null,null
+column,realtime,payload,messages_2025_09_23,jsonb default null,null,null
+column,realtime,event,messages_2025_09_23,text default null,null,null
+column,realtime,private,messages_2025_09_23,boolean default false,null,null
+column,realtime,updated_at,messages_2025_09_23,timestamp without time zone default now(),null,null
+column,realtime,inserted_at,messages_2025_09_23,timestamp without time zone default now(),null,null
+column,realtime,id,messages_2025_09_23,uuid default gen_random_uuid(),null,null
+column,realtime,id,messages_2025_09_27_pkey,uuid default null,null,null
+column,realtime,inserted_at,messages_2025_09_27_pkey,timestamp without time zone default null,null,null
+column,realtime,inserted_at,messages_2025_09_27_inserted_at_topic_idx,timestamp without time zone default null,null,null
+column,realtime,topic,messages_2025_09_27_inserted_at_topic_idx,text default null,null,null
+column,public,id,comandas,uuid default gen_random_uuid(),null,null
+column,public,codigo_empresa,comandas,text default get_my_company_code(),null,null
+column,public,mesa_id,comandas,uuid default null,null,null
+column,public,cliente_id,comandas,uuid default null,null,null
+column,public,aberto_em,comandas,timestamp with time zone default now(),null,null
+column,public,fechado_em,comandas,timestamp with time zone default null,null,null
+column,public,observacao,comandas,text default null,null,null
+column,public,created_at,comandas,timestamp with time zone default now(),null,null
+column,public,updated_at,comandas,timestamp with time zone default now(),null,null
+column,public,is_balcao,comandas,boolean default (mesa_id IS NULL),null,True quando a comanda não possui mesa (Balcão).
+column,public,tipo,comandas,"text default 
+CASE
+    WHEN (mesa_id IS NULL) THEN 'balcao'::text
+    ELSE 'comanda'::text
+END",null,Tipo da comanda: balcao | comanda
+column,public,status,comandas,text default 'open'::text,null,null
+column,public,to_tsvector,idx_mesas_nome,text default null,null,null
+column,realtime,topic,messages_2025_09_27,text default null,null,null
+column,realtime,extension,messages_2025_09_27,text default null,null,null
+column,realtime,payload,messages_2025_09_27,jsonb default null,null,null
+column,realtime,event,messages_2025_09_27,text default null,null,null
+column,realtime,private,messages_2025_09_27,boolean default false,null,null
+column,realtime,updated_at,messages_2025_09_27,timestamp without time zone default now(),null,null
+column,realtime,inserted_at,messages_2025_09_27,timestamp without time zone default now(),null,null
+column,realtime,id,messages_2025_09_27,uuid default gen_random_uuid(),null,null
+constraint,auth,domain not empty,sso_domains,CHECK ((char_length(domain) > 0)),null,null
+constraint,auth,sso_domains_pkey,sso_domains,PRIMARY KEY (id),null,null
+constraint,auth,sso_domains_sso_provider_id_fkey,sso_domains,FOREIGN KEY (sso_provider_id) REFERENCES auth.sso_providers(id) ON DELETE CASCADE,null,null
+constraint,auth,entity_id not empty,saml_providers,CHECK ((char_length(entity_id) > 0)),null,null
+constraint,auth,metadata_url not empty,saml_providers,CHECK (((metadata_url = NULL::text) OR (char_length(metadata_url) > 0))),null,null
+constraint,auth,metadata_xml not empty,saml_providers,CHECK ((char_length(metadata_xml) > 0)),null,null
+constraint,auth,saml_providers_entity_id_key,saml_providers,UNIQUE (entity_id),null,null
+constraint,auth,saml_providers_pkey,saml_providers,PRIMARY KEY (id),null,null
+constraint,auth,saml_providers_sso_provider_id_fkey,saml_providers,FOREIGN KEY (sso_provider_id) REFERENCES auth.sso_providers(id) ON DELETE CASCADE,null,null
+constraint,auth,resource_id not empty,sso_providers,CHECK (((resource_id = NULL::text) OR (char_length(resource_id) > 0))),null,null
+constraint,auth,sso_providers_pkey,sso_providers,PRIMARY KEY (id),null,null
+constraint,supabase_migrations,schema_migrations_pkey,schema_migrations,PRIMARY KEY (version),null,null
+constraint,supabase_migrations,seed_files_pkey,seed_files,PRIMARY KEY (path),null,null
+constraint,auth,schema_migrations_pkey,schema_migrations,PRIMARY KEY (version),null,null
+constraint,auth,instances_pkey,instances,PRIMARY KEY (id),null,null
+constraint,public,products_pkey,produtos,PRIMARY KEY (id),null,null
+constraint,public,produtos_company_code_fkey,produtos,FOREIGN KEY (codigo_empresa) REFERENCES empresas(codigo_empresa) ON UPDATE CASCADE ON DELETE RESTRICT,null,null
+constraint,public,produtos_estoque_check,produtos,CHECK ((estoque >= 0)),null,null
+constraint,public,produtos_estoque_minimo_check,produtos,CHECK ((estoque_minimo >= 0)),null,null
+constraint,public,produtos_tipo_produto_check,produtos,"CHECK (((tipo_produto)::text = ANY ((ARRAY['venda'::character varying, 'uso_interno'::character varying])::text[])))",null,null
+constraint,public,produtos_valor_custo_check,produtos,CHECK ((valor_custo >= (0)::numeric)),null,null
+constraint,auth,users_email_change_confirm_status_check,users,CHECK (((email_change_confirm_status >= 0) AND (email_change_confirm_status <= 2))),null,null
+constraint,auth,users_phone_key,users,UNIQUE (phone),null,null
+constraint,auth,users_pkey,users,PRIMARY KEY (id),null,null
+constraint,auth,audit_log_entries_pkey,audit_log_entries,PRIMARY KEY (id),null,null
+constraint,public,produto_categorias_pkey,produto_categorias,PRIMARY KEY (id),null,null
+constraint,public,users_id_fkey,usuarios,FOREIGN KEY (id) REFERENCES auth.users(id),null,null
+constraint,public,users_pkey,usuarios,PRIMARY KEY (id),null,null
+constraint,public,usuarios_codigo_empresa_fkey,usuarios,FOREIGN KEY (codigo_empresa) REFERENCES empresas(codigo_empresa) ON UPDATE CASCADE ON DELETE RESTRICT,null,null
+constraint,storage,migrations_name_key,migrations,UNIQUE (name),null,null
+constraint,storage,migrations_pkey,migrations,PRIMARY KEY (id),null,null
+constraint,storage,buckets_pkey,buckets,PRIMARY KEY (id),null,null
+constraint,storage,objects_bucketId_fkey,objects,FOREIGN KEY (bucket_id) REFERENCES storage.buckets(id),null,null
+constraint,storage,objects_pkey,objects,PRIMARY KEY (id),null,null
+constraint,auth,refresh_tokens_pkey,refresh_tokens,PRIMARY KEY (id),null,null
+constraint,auth,refresh_tokens_session_id_fkey,refresh_tokens,FOREIGN KEY (session_id) REFERENCES auth.sessions(id) ON DELETE CASCADE,null,null
+constraint,auth,refresh_tokens_token_unique,refresh_tokens,UNIQUE (token),null,null
+constraint,vault,secrets_pkey,secrets,PRIMARY KEY (id),null,null
+constraint,auth,request_id not empty,saml_relay_states,CHECK ((char_length(request_id) > 0)),null,null
+constraint,auth,saml_relay_states_flow_state_id_fkey,saml_relay_states,FOREIGN KEY (flow_state_id) REFERENCES auth.flow_state(id) ON DELETE CASCADE,null,null
+constraint,auth,saml_relay_states_pkey,saml_relay_states,PRIMARY KEY (id),null,null
+constraint,auth,saml_relay_states_sso_provider_id_fkey,saml_relay_states,FOREIGN KEY (sso_provider_id) REFERENCES auth.sso_providers(id) ON DELETE CASCADE,null,null
+constraint,auth,flow_state_pkey,flow_state,PRIMARY KEY (id),null,null
+constraint,auth,identities_pkey,identities,PRIMARY KEY (id),null,null
+constraint,auth,identities_provider_id_provider_unique,identities,"UNIQUE (provider_id, provider)",null,null
+constraint,auth,identities_user_id_fkey,identities,FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE,null,null
+constraint,auth,sessions_pkey,sessions,PRIMARY KEY (id),null,null
+constraint,auth,sessions_user_id_fkey,sessions,FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE,null,null
+constraint,auth,amr_id_pk,mfa_amr_claims,PRIMARY KEY (id),null,null
+constraint,auth,mfa_amr_claims_session_id_authentication_method_pkey,mfa_amr_claims,"UNIQUE (session_id, authentication_method)",null,null
+constraint,auth,mfa_amr_claims_session_id_fkey,mfa_amr_claims,FOREIGN KEY (session_id) REFERENCES auth.sessions(id) ON DELETE CASCADE,null,null
+constraint,auth,one_time_tokens_pkey,one_time_tokens,PRIMARY KEY (id),null,null
+constraint,auth,one_time_tokens_token_hash_check,one_time_tokens,CHECK ((char_length(token_hash) > 0)),null,null
+constraint,auth,one_time_tokens_user_id_fkey,one_time_tokens,FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE,null,null
+constraint,auth,mfa_factors_last_challenged_at_key,mfa_factors,UNIQUE (last_challenged_at),null,null
+constraint,auth,mfa_factors_pkey,mfa_factors,PRIMARY KEY (id),null,null
+constraint,auth,mfa_factors_user_id_fkey,mfa_factors,FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE,null,null
+constraint,auth,mfa_challenges_auth_factor_id_fkey,mfa_challenges,FOREIGN KEY (factor_id) REFERENCES auth.mfa_factors(id) ON DELETE CASCADE,null,null
+constraint,auth,mfa_challenges_pkey,mfa_challenges,PRIMARY KEY (id),null,null
+constraint,public,sales_customer_id_fkey,vendas,FOREIGN KEY (cliente_id) REFERENCES clientes(id),null,null
+constraint,public,sales_pkey,vendas,PRIMARY KEY (id),null,null
+constraint,public,vendas_company_code_fkey,vendas,FOREIGN KEY (codigo_empresa) REFERENCES empresas(codigo_empresa) ON UPDATE CASCADE ON DELETE RESTRICT,null,null
+constraint,public,sale_items_pkey,itens_venda,PRIMARY KEY (id),null,null
+constraint,public,sale_items_product_id_fkey,itens_venda,FOREIGN KEY (produto_id) REFERENCES produtos(id),null,null
+constraint,public,sale_items_sale_id_fkey,itens_venda,FOREIGN KEY (venda_id) REFERENCES vendas(id),null,null
+constraint,realtime,schema_migrations_pkey,schema_migrations,PRIMARY KEY (version),null,null
+constraint,realtime,pk_subscription,subscription,PRIMARY KEY (id),null,null
+constraint,public,companies_company_code_key,empresas,UNIQUE (codigo_empresa),null,null
+constraint,public,companies_pkey,empresas,PRIMARY KEY (id),null,null
+constraint,public,empresas_codigo_empresa_unique,empresas,UNIQUE (codigo_empresa),null,null
+constraint,storage,s3_multipart_uploads_parts_bucket_id_fkey,s3_multipart_uploads_parts,FOREIGN KEY (bucket_id) REFERENCES storage.buckets(id),null,null
+constraint,storage,s3_multipart_uploads_parts_pkey,s3_multipart_uploads_parts,PRIMARY KEY (id),null,null
+constraint,storage,s3_multipart_uploads_parts_upload_id_fkey,s3_multipart_uploads_parts,FOREIGN KEY (upload_id) REFERENCES storage.s3_multipart_uploads(id) ON DELETE CASCADE,null,null
+constraint,storage,s3_multipart_uploads_bucket_id_fkey,s3_multipart_uploads,FOREIGN KEY (bucket_id) REFERENCES storage.buckets(id),null,null
+constraint,storage,s3_multipart_uploads_pkey,s3_multipart_uploads,PRIMARY KEY (id),null,null
+constraint,public,agendamento_participantes_agendamento_id_fkey,agendamento_participantes,FOREIGN KEY (agendamento_id) REFERENCES agendamentos(id) ON DELETE CASCADE,null,null
+constraint,public,agendamento_participantes_cliente_id_fkey,agendamento_participantes,FOREIGN KEY (cliente_id) REFERENCES clientes(id) ON UPDATE CASCADE ON DELETE RESTRICT,null,null
+constraint,public,agendamento_participantes_pkey,agendamento_participantes,PRIMARY KEY (id),null,null
+constraint,public,agendamento_participantes_valor_cota_check,agendamento_participantes,CHECK ((valor_cota >= (0)::numeric)),null,null
+constraint,public,agp_codigo_empresa_fkey,agendamento_participantes,FOREIGN KEY (codigo_empresa) REFERENCES empresas(codigo_empresa) ON UPDATE CASCADE ON DELETE RESTRICT,null,null
+constraint,public,fk_agp_cliente,agendamento_participantes,FOREIGN KEY (cliente_id) REFERENCES clientes(id) ON UPDATE CASCADE ON DELETE RESTRICT,null,null
+constraint,realtime,messages_2025_09_24_pkey,messages_2025_09_24,"PRIMARY KEY (id, inserted_at)",null,null
+constraint,public,courts_pkey,quadras,PRIMARY KEY (id),null,null
+constraint,public,quadras_codigo_empresa_fkey,quadras,FOREIGN KEY (codigo_empresa) REFERENCES empresas(codigo_empresa) ON UPDATE CASCADE ON DELETE RESTRICT,null,null
+constraint,public,quadras_horario_valido,quadras,CHECK ((hora_fim > hora_inicio)),null,null
+constraint,public,quadras_valor_nonneg,quadras,CHECK (((valor IS NULL) OR (valor >= (0)::numeric))),null,null
+constraint,public,estoque_baixa_log_pkey,estoque_baixa_log,PRIMARY KEY (comanda_id),null,null
+constraint,realtime,messages_pkey,messages,"PRIMARY KEY (id, inserted_at)",null,null
+constraint,public,agendamentos_codigo_empresa_fkey,agendamentos,FOREIGN KEY (codigo_empresa) REFERENCES empresas(codigo_empresa) ON UPDATE CASCADE ON DELETE RESTRICT,null,null
+constraint,public,agendamentos_valor_nonneg,agendamentos,CHECK (((valor_total IS NULL) OR (valor_total >= (0)::numeric))),null,null
+constraint,public,bookings_court_id_fkey,agendamentos,FOREIGN KEY (quadra_id) REFERENCES quadras(id),null,null
+constraint,public,bookings_customer_id_fkey,agendamentos,FOREIGN KEY (cliente_id) REFERENCES clientes(id),null,null
+constraint,public,bookings_pkey,agendamentos,PRIMARY KEY (id),null,null
+constraint,public,empresa_counters_pkey,empresa_counters,PRIMARY KEY (empresa_id),null,null
+constraint,storage,buckets_analytics_pkey,buckets_analytics,PRIMARY KEY (id),null,null
+constraint,storage,prefixes_bucketId_fkey,prefixes,FOREIGN KEY (bucket_id) REFERENCES storage.buckets(id),null,null
+constraint,storage,prefixes_pkey,prefixes,"PRIMARY KEY (bucket_id, level, name)",null,null
+constraint,public,colaboradores_codigo_empresa_fkey,colaboradores,FOREIGN KEY (codigo_empresa) REFERENCES empresas(codigo_empresa) ON DELETE RESTRICT,null,null
+constraint,public,user_profiles_pkey,colaboradores,PRIMARY KEY (id),null,null
+constraint,realtime,messages_2025_09_28_pkey,messages_2025_09_28,"PRIMARY KEY (id, inserted_at)",null,null
+constraint,public,fk_mov_saldo_agendamento,movimentos_saldo,FOREIGN KEY (agendamento_id) REFERENCES agendamentos(id) ON DELETE CASCADE,null,null
+constraint,public,fk_mov_saldo_cliente,movimentos_saldo,FOREIGN KEY (cliente_id) REFERENCES clientes(id) ON DELETE CASCADE,null,null
+constraint,public,movimentos_saldo_pkey,movimentos_saldo,PRIMARY KEY (id),null,null
+constraint,public,movimentos_saldo_tipo_check,movimentos_saldo,"CHECK ((tipo = ANY (ARRAY['credito'::text, 'debito'::text])))",null,null
+constraint,public,movimentos_saldo_valor_check,movimentos_saldo,CHECK ((valor > (0)::numeric)),null,null
+constraint,realtime,messages_2025_09_25_pkey,messages_2025_09_25,"PRIMARY KEY (id, inserted_at)",null,null
+constraint,realtime,messages_2025_09_22_pkey,messages_2025_09_22,"PRIMARY KEY (id, inserted_at)",null,null
+constraint,realtime,messages_2025_09_26_pkey,messages_2025_09_26,"PRIMARY KEY (id, inserted_at)",null,null
+constraint,public,fk_pagamentos_caixa,pagamentos,FOREIGN KEY (caixa_id) REFERENCES caixa_sessoes(id) ON DELETE SET NULL,null,null
+constraint,public,fk_pagamentos_finalizadora,pagamentos,FOREIGN KEY (finalizadora_id) REFERENCES finalizadoras(id) ON DELETE SET NULL,null,null
+constraint,public,pagamentos_caixa_id_fkey,pagamentos,FOREIGN KEY (caixa_id) REFERENCES caixa_sessoes(id) ON DELETE SET NULL,null,null
+constraint,public,pagamentos_comanda_id_fkey,pagamentos,FOREIGN KEY (comanda_id) REFERENCES comandas(id) ON DELETE CASCADE,null,null
+constraint,public,pagamentos_finalizadora_id_fkey,pagamentos,FOREIGN KEY (finalizadora_id) REFERENCES finalizadoras(id) ON UPDATE CASCADE ON DELETE SET NULL,null,null
+constraint,public,pagamentos_pkey,pagamentos,PRIMARY KEY (id),null,null
+constraint,public,pagamentos_valor_check,pagamentos,CHECK ((valor >= (0)::numeric)),null,null
+constraint,public,mesas_codigo_empresa_numero_key,mesas,"UNIQUE (codigo_empresa, numero)",null,null
+constraint,public,mesas_pkey,mesas,PRIMARY KEY (id),null,null
+constraint,public,comanda_itens_comanda_id_fkey,comanda_itens,FOREIGN KEY (comanda_id) REFERENCES comandas(id) ON DELETE CASCADE,null,null
+constraint,public,comanda_itens_desconto_check,comanda_itens,CHECK ((desconto >= (0)::numeric)),null,null
+constraint,public,comanda_itens_pkey,comanda_itens,PRIMARY KEY (id),null,null
+constraint,public,comanda_itens_preco_unitario_check,comanda_itens,CHECK ((preco_unitario >= (0)::numeric)),null,null
+constraint,public,comanda_itens_produto_id_fkey,comanda_itens,FOREIGN KEY (produto_id) REFERENCES produtos(id) ON DELETE RESTRICT,null,null
+constraint,public,comanda_itens_quantidade_check,comanda_itens,CHECK ((quantidade > (0)::numeric)),null,null
+constraint,public,fk_comanda_itens_comanda,comanda_itens,FOREIGN KEY (comanda_id) REFERENCES comandas(id) ON DELETE CASCADE,null,null
+constraint,public,fk_comanda_itens_produto,comanda_itens,FOREIGN KEY (produto_id) REFERENCES produtos(id) ON DELETE SET NULL,null,null
+constraint,public,caixa_sessoes_pkey,caixa_sessoes,PRIMARY KEY (id),null,null
+constraint,public,caixa_sessoes_status_check,caixa_sessoes,"CHECK ((status = ANY (ARRAY['open'::text, 'closed'::text])))",null,null
+constraint,public,caixa_movimentos_caixa_id_fkey,caixa_movimentos,FOREIGN KEY (caixa_id) REFERENCES caixa_sessoes(id) ON DELETE CASCADE,null,null
+constraint,public,caixa_movimentos_pkey,caixa_movimentos,PRIMARY KEY (id),null,null
+constraint,public,caixa_movimentos_valor_check,caixa_movimentos,CHECK ((valor >= (0)::numeric)),null,null
+constraint,public,comanda_clientes_ck_nome,comanda_clientes,CHECK (((cliente_id IS NOT NULL) OR ((nome_livre IS NOT NULL) AND (length(TRIM(BOTH FROM nome_livre)) > 0)))),null,null
+constraint,public,comanda_clientes_cliente_id_fkey,comanda_clientes,FOREIGN KEY (cliente_id) REFERENCES clientes(id) ON DELETE SET NULL,null,null
+constraint,public,comanda_clientes_comanda_id_fkey,comanda_clientes,FOREIGN KEY (comanda_id) REFERENCES comandas(id) ON DELETE CASCADE,null,null
+constraint,public,comanda_clientes_pkey,comanda_clientes,PRIMARY KEY (id),null,null
+constraint,public,fk_comanda_clientes_cliente,comanda_clientes,FOREIGN KEY (cliente_id) REFERENCES clientes(id) ON DELETE SET NULL,null,null
+constraint,public,finalizadoras_empresa_nome_unique,finalizadoras,"UNIQUE (codigo_empresa, nome)",null,null
+constraint,public,finalizadoras_pkey,finalizadoras,PRIMARY KEY (id),null,null
+constraint,public,finalizadoras_tipo_check,finalizadoras,"CHECK ((tipo = ANY (ARRAY['dinheiro'::text, 'credito'::text, 'debito'::text, 'pix'::text, 'voucher'::text, 'outros'::text])))",null,null
+constraint,auth,oauth_clients_client_id_key,oauth_clients,UNIQUE (client_id),null,null
+constraint,auth,oauth_clients_client_name_length,oauth_clients,CHECK ((char_length(client_name) <= 1024)),null,null
+constraint,auth,oauth_clients_client_uri_length,oauth_clients,CHECK ((char_length(client_uri) <= 2048)),null,null
+constraint,auth,oauth_clients_logo_uri_length,oauth_clients,CHECK ((char_length(logo_uri) <= 2048)),null,null
+constraint,auth,oauth_clients_pkey,oauth_clients,PRIMARY KEY (id),null,null
+constraint,public,agenda_settings_auto_cancel_hours_check,agenda_settings,CHECK (((auto_cancel_hours IS NULL) OR ((auto_cancel_hours >= 0) AND (auto_cancel_hours <= 168)))),null,null
+constraint,public,agenda_settings_auto_confirm_hours_check,agenda_settings,CHECK (((auto_confirm_hours IS NULL) OR ((auto_confirm_hours >= 0) AND (auto_confirm_hours <= 168)))),null,null
+constraint,public,agenda_settings_empresa_id_fkey,agenda_settings,FOREIGN KEY (empresa_id) REFERENCES empresas(id) ON DELETE CASCADE,null,null
+constraint,public,agenda_settings_pkey,agenda_settings,PRIMARY KEY (empresa_id),null,null
+constraint,public,caixa_resumos_caixa_sessao_id_fkey,caixa_resumos,FOREIGN KEY (caixa_sessao_id) REFERENCES caixa_sessoes(id) ON DELETE CASCADE,null,null
+constraint,public,caixa_resumos_pkey,caixa_resumos,PRIMARY KEY (id),null,null
+constraint,public,caixa_movimentacoes_caixa_sessao_id_fkey,caixa_movimentacoes,FOREIGN KEY (caixa_sessao_id) REFERENCES caixa_sessoes(id) ON DELETE CASCADE,null,null
+constraint,public,caixa_movimentacoes_pkey,caixa_movimentacoes,PRIMARY KEY (id),null,null
+constraint,public,caixa_movimentacoes_tipo_check,caixa_movimentacoes,"CHECK ((tipo = ANY (ARRAY['sangria'::text, 'suprimento'::text, 'troco'::text, 'ajuste'::text])))",null,null
+constraint,public,clientes_codigo_empresa_fkey,clientes,FOREIGN KEY (codigo_empresa) REFERENCES empresas(codigo_empresa) ON UPDATE CASCADE ON DELETE RESTRICT,null,null
+constraint,public,customers_pkey,clientes,PRIMARY KEY (id),null,null
+constraint,realtime,messages_2025_09_23_pkey,messages_2025_09_23,"PRIMARY KEY (id, inserted_at)",null,null
+constraint,public,chk_comandas_status_valid,comandas,"CHECK ((status = ANY (ARRAY['open'::text, 'closed'::text, 'cancelled'::text])))",null,null
+constraint,public,comandas_mesa_id_fkey,comandas,FOREIGN KEY (mesa_id) REFERENCES mesas(id) ON DELETE SET NULL,null,null
+constraint,public,comandas_pkey,comandas,PRIMARY KEY (id),null,null
+constraint,public,fk_comandas_mesa,comandas,FOREIGN KEY (mesa_id) REFERENCES mesas(id) ON DELETE SET NULL,null,null
+constraint,realtime,messages_2025_09_27_pkey,messages_2025_09_27,"PRIMARY KEY (id, inserted_at)",null,null
+index,auth,sso_domains_pkey,sso_domains,CREATE UNIQUE INDEX sso_domains_pkey ON auth.sso_domains USING btree (id),null,null
+index,auth,sso_domains_sso_provider_id_idx,sso_domains,CREATE INDEX sso_domains_sso_provider_id_idx ON auth.sso_domains USING btree (sso_provider_id),null,null
+index,auth,sso_domains_domain_idx,sso_domains,CREATE UNIQUE INDEX sso_domains_domain_idx ON auth.sso_domains USING btree (lower(domain)),null,null
+index,auth,saml_providers_pkey,saml_providers,CREATE UNIQUE INDEX saml_providers_pkey ON auth.saml_providers USING btree (id),null,null
+index,auth,saml_providers_entity_id_key,saml_providers,CREATE UNIQUE INDEX saml_providers_entity_id_key ON auth.saml_providers USING btree (entity_id),null,null
+index,auth,saml_providers_sso_provider_id_idx,saml_providers,CREATE INDEX saml_providers_sso_provider_id_idx ON auth.saml_providers USING btree (sso_provider_id),null,null
+index,auth,sso_providers_pkey,sso_providers,CREATE UNIQUE INDEX sso_providers_pkey ON auth.sso_providers USING btree (id),null,null
+index,auth,sso_providers_resource_id_idx,sso_providers,CREATE UNIQUE INDEX sso_providers_resource_id_idx ON auth.sso_providers USING btree (lower(resource_id)),null,null
+index,auth,sso_providers_resource_id_pattern_idx,sso_providers,CREATE INDEX sso_providers_resource_id_pattern_idx ON auth.sso_providers USING btree (resource_id text_pattern_ops),null,null
+index,supabase_migrations,schema_migrations_pkey,schema_migrations,CREATE UNIQUE INDEX schema_migrations_pkey ON supabase_migrations.schema_migrations USING btree (version),null,null
+index,supabase_migrations,seed_files_pkey,seed_files,CREATE UNIQUE INDEX seed_files_pkey ON supabase_migrations.seed_files USING btree (path),null,null
+index,auth,schema_migrations_pkey,schema_migrations,CREATE UNIQUE INDEX schema_migrations_pkey ON auth.schema_migrations USING btree (version),null,null
+index,auth,instances_pkey,instances,CREATE UNIQUE INDEX instances_pkey ON auth.instances USING btree (id),null,null
+index,public,products_pkey,produtos,CREATE UNIQUE INDEX products_pkey ON public.produtos USING btree (id),null,null
+index,public,produtos_codigo_empresa_nome_unique,produtos,"CREATE UNIQUE INDEX produtos_codigo_empresa_nome_unique ON public.produtos USING btree (codigo_empresa, lower((nome)::text))",null,null
+index,public,idx_produtos_codigo_empresa,produtos,CREATE INDEX idx_produtos_codigo_empresa ON public.produtos USING btree (codigo_empresa),null,null
+index,public,ux_produtos_empresa_codigo_produto,produtos,"CREATE UNIQUE INDEX ux_produtos_empresa_codigo_produto ON public.produtos USING btree (codigo_empresa, lower(codigo_produto)) WHERE (codigo_produto IS NOT NULL)",null,null
+index,public,idx_produtos_categoria,produtos,CREATE INDEX idx_produtos_categoria ON public.produtos USING btree (lower((categoria)::text)),null,null
+index,public,idx_produtos_codigo_barras,produtos,CREATE INDEX idx_produtos_codigo_barras ON public.produtos USING btree (codigo_barras),null,null
+index,public,idx_produtos_ncm,produtos,CREATE INDEX idx_produtos_ncm ON public.produtos USING btree (ncm),null,null
+index,public,idx_produtos_marca,produtos,CREATE INDEX idx_produtos_marca ON public.produtos USING btree (marca),null,null
+index,public,idx_produtos_grupo,produtos,CREATE INDEX idx_produtos_grupo ON public.produtos USING btree (grupo),null,null
+index,auth,users_pkey,users,CREATE UNIQUE INDEX users_pkey ON auth.users USING btree (id),null,null
+index,auth,users_instance_id_idx,users,CREATE INDEX users_instance_id_idx ON auth.users USING btree (instance_id),null,null
+index,auth,users_instance_id_email_idx,users,"CREATE INDEX users_instance_id_email_idx ON auth.users USING btree (instance_id, lower((email)::text))",null,null
+index,auth,confirmation_token_idx,users,CREATE UNIQUE INDEX confirmation_token_idx ON auth.users USING btree (confirmation_token) WHERE ((confirmation_token)::text !~ '^[0-9 ]*$'::text),null,null
+index,auth,recovery_token_idx,users,CREATE UNIQUE INDEX recovery_token_idx ON auth.users USING btree (recovery_token) WHERE ((recovery_token)::text !~ '^[0-9 ]*$'::text),null,null
+index,auth,email_change_token_current_idx,users,CREATE UNIQUE INDEX email_change_token_current_idx ON auth.users USING btree (email_change_token_current) WHERE ((email_change_token_current)::text !~ '^[0-9 ]*$'::text),null,null
+index,auth,email_change_token_new_idx,users,CREATE UNIQUE INDEX email_change_token_new_idx ON auth.users USING btree (email_change_token_new) WHERE ((email_change_token_new)::text !~ '^[0-9 ]*$'::text),null,null
+index,auth,reauthentication_token_idx,users,CREATE UNIQUE INDEX reauthentication_token_idx ON auth.users USING btree (reauthentication_token) WHERE ((reauthentication_token)::text !~ '^[0-9 ]*$'::text),null,null
+index,auth,users_email_partial_key,users,CREATE UNIQUE INDEX users_email_partial_key ON auth.users USING btree (email) WHERE (is_sso_user = false),null,null
+index,auth,users_phone_key,users,CREATE UNIQUE INDEX users_phone_key ON auth.users USING btree (phone),null,null
+index,auth,users_is_anonymous_idx,users,CREATE INDEX users_is_anonymous_idx ON auth.users USING btree (is_anonymous),null,null
+index,auth,audit_log_entries_pkey,audit_log_entries,CREATE UNIQUE INDEX audit_log_entries_pkey ON auth.audit_log_entries USING btree (id),null,null
+index,auth,audit_logs_instance_id_idx,audit_log_entries,CREATE INDEX audit_logs_instance_id_idx ON auth.audit_log_entries USING btree (instance_id),null,null
+index,public,produto_categorias_pkey,produto_categorias,CREATE UNIQUE INDEX produto_categorias_pkey ON public.produto_categorias USING btree (id),null,null
+index,public,ux_produto_categorias_empresa_nome,produto_categorias,"CREATE UNIQUE INDEX ux_produto_categorias_empresa_nome ON public.produto_categorias USING btree (codigo_empresa, lower(nome))",null,null
+index,public,users_pkey,usuarios,CREATE UNIQUE INDEX users_pkey ON public.usuarios USING btree (id),null,null
+index,public,usuarios_codigo_empresa_idx,usuarios,CREATE INDEX usuarios_codigo_empresa_idx ON public.usuarios USING btree (codigo_empresa),null,null
+index,storage,migrations_pkey,migrations,CREATE UNIQUE INDEX migrations_pkey ON storage.migrations USING btree (id),null,null
+index,storage,migrations_name_key,migrations,CREATE UNIQUE INDEX migrations_name_key ON storage.migrations USING btree (name),null,null
+index,storage,buckets_pkey,buckets,CREATE UNIQUE INDEX buckets_pkey ON storage.buckets USING btree (id),null,null
+index,storage,bname,buckets,CREATE UNIQUE INDEX bname ON storage.buckets USING btree (name),null,null
+index,storage,objects_pkey,objects,CREATE UNIQUE INDEX objects_pkey ON storage.objects USING btree (id),null,null
+index,storage,bucketid_objname,objects,"CREATE UNIQUE INDEX bucketid_objname ON storage.objects USING btree (bucket_id, name)",null,null
+index,storage,name_prefix_search,objects,CREATE INDEX name_prefix_search ON storage.objects USING btree (name text_pattern_ops),null,null
+index,storage,idx_objects_bucket_id_name,objects,"CREATE INDEX idx_objects_bucket_id_name ON storage.objects USING btree (bucket_id, name COLLATE ""C"")",null,null
+index,storage,idx_name_bucket_level_unique,objects,"CREATE UNIQUE INDEX idx_name_bucket_level_unique ON storage.objects USING btree (name COLLATE ""C"", bucket_id, level)",null,null
+index,storage,objects_bucket_id_level_idx,objects,"CREATE UNIQUE INDEX objects_bucket_id_level_idx ON storage.objects USING btree (bucket_id, level, name COLLATE ""C"")",null,null
+index,storage,idx_objects_lower_name,objects,"CREATE INDEX idx_objects_lower_name ON storage.objects USING btree ((path_tokens[level]), lower(name) text_pattern_ops, bucket_id, level)",null,null
+index,auth,refresh_tokens_pkey,refresh_tokens,CREATE UNIQUE INDEX refresh_tokens_pkey ON auth.refresh_tokens USING btree (id),null,null
+index,auth,refresh_tokens_instance_id_idx,refresh_tokens,CREATE INDEX refresh_tokens_instance_id_idx ON auth.refresh_tokens USING btree (instance_id),null,null
+index,auth,refresh_tokens_instance_id_user_id_idx,refresh_tokens,"CREATE INDEX refresh_tokens_instance_id_user_id_idx ON auth.refresh_tokens USING btree (instance_id, user_id)",null,null
+index,auth,refresh_tokens_token_unique,refresh_tokens,CREATE UNIQUE INDEX refresh_tokens_token_unique ON auth.refresh_tokens USING btree (token),null,null
+index,auth,refresh_tokens_parent_idx,refresh_tokens,CREATE INDEX refresh_tokens_parent_idx ON auth.refresh_tokens USING btree (parent),null,null
+index,auth,refresh_tokens_session_id_revoked_idx,refresh_tokens,"CREATE INDEX refresh_tokens_session_id_revoked_idx ON auth.refresh_tokens USING btree (session_id, revoked)",null,null
+index,auth,refresh_tokens_updated_at_idx,refresh_tokens,CREATE INDEX refresh_tokens_updated_at_idx ON auth.refresh_tokens USING btree (updated_at DESC),null,null
+index,vault,secrets_pkey,secrets,CREATE UNIQUE INDEX secrets_pkey ON vault.secrets USING btree (id),null,null
+index,vault,secrets_name_idx,secrets,CREATE UNIQUE INDEX secrets_name_idx ON vault.secrets USING btree (name) WHERE (name IS NOT NULL),null,null
+index,auth,saml_relay_states_pkey,saml_relay_states,CREATE UNIQUE INDEX saml_relay_states_pkey ON auth.saml_relay_states USING btree (id),null,null
+index,auth,saml_relay_states_sso_provider_id_idx,saml_relay_states,CREATE INDEX saml_relay_states_sso_provider_id_idx ON auth.saml_relay_states USING btree (sso_provider_id),null,null
+index,auth,saml_relay_states_for_email_idx,saml_relay_states,CREATE INDEX saml_relay_states_for_email_idx ON auth.saml_relay_states USING btree (for_email),null,null
+index,auth,saml_relay_states_created_at_idx,saml_relay_states,CREATE INDEX saml_relay_states_created_at_idx ON auth.saml_relay_states USING btree (created_at DESC),null,null
+index,auth,flow_state_pkey,flow_state,CREATE UNIQUE INDEX flow_state_pkey ON auth.flow_state USING btree (id),null,null
+index,auth,idx_auth_code,flow_state,CREATE INDEX idx_auth_code ON auth.flow_state USING btree (auth_code),null,null
+index,auth,idx_user_id_auth_method,flow_state,"CREATE INDEX idx_user_id_auth_method ON auth.flow_state USING btree (user_id, authentication_method)",null,null
+index,auth,flow_state_created_at_idx,flow_state,CREATE INDEX flow_state_created_at_idx ON auth.flow_state USING btree (created_at DESC),null,null
+index,auth,identities_user_id_idx,identities,CREATE INDEX identities_user_id_idx ON auth.identities USING btree (user_id),null,null
+index,auth,identities_email_idx,identities,CREATE INDEX identities_email_idx ON auth.identities USING btree (email text_pattern_ops),null,null
+index,auth,identities_pkey,identities,CREATE UNIQUE INDEX identities_pkey ON auth.identities USING btree (id),null,null
+index,auth,identities_provider_id_provider_unique,identities,"CREATE UNIQUE INDEX identities_provider_id_provider_unique ON auth.identities USING btree (provider_id, provider)",null,null
+index,auth,sessions_pkey,sessions,CREATE UNIQUE INDEX sessions_pkey ON auth.sessions USING btree (id),null,null
+index,auth,user_id_created_at_idx,sessions,"CREATE INDEX user_id_created_at_idx ON auth.sessions USING btree (user_id, created_at)",null,null
+index,auth,sessions_user_id_idx,sessions,CREATE INDEX sessions_user_id_idx ON auth.sessions USING btree (user_id),null,null
+index,auth,sessions_not_after_idx,sessions,CREATE INDEX sessions_not_after_idx ON auth.sessions USING btree (not_after DESC),null,null
+index,auth,mfa_amr_claims_session_id_authentication_method_pkey,mfa_amr_claims,"CREATE UNIQUE INDEX mfa_amr_claims_session_id_authentication_method_pkey ON auth.mfa_amr_claims USING btree (session_id, authentication_method)",null,null
+index,auth,amr_id_pk,mfa_amr_claims,CREATE UNIQUE INDEX amr_id_pk ON auth.mfa_amr_claims USING btree (id),null,null
+index,auth,one_time_tokens_pkey,one_time_tokens,CREATE UNIQUE INDEX one_time_tokens_pkey ON auth.one_time_tokens USING btree (id),null,null
+index,auth,one_time_tokens_token_hash_hash_idx,one_time_tokens,CREATE INDEX one_time_tokens_token_hash_hash_idx ON auth.one_time_tokens USING hash (token_hash),null,null
+index,auth,one_time_tokens_relates_to_hash_idx,one_time_tokens,CREATE INDEX one_time_tokens_relates_to_hash_idx ON auth.one_time_tokens USING hash (relates_to),null,null
+index,auth,one_time_tokens_user_id_token_type_key,one_time_tokens,"CREATE UNIQUE INDEX one_time_tokens_user_id_token_type_key ON auth.one_time_tokens USING btree (user_id, token_type)",null,null
+index,auth,mfa_factors_pkey,mfa_factors,CREATE UNIQUE INDEX mfa_factors_pkey ON auth.mfa_factors USING btree (id),null,null
+index,auth,mfa_factors_user_friendly_name_unique,mfa_factors,"CREATE UNIQUE INDEX mfa_factors_user_friendly_name_unique ON auth.mfa_factors USING btree (friendly_name, user_id) WHERE (TRIM(BOTH FROM friendly_name) <> ''::text)",null,null
+index,auth,factor_id_created_at_idx,mfa_factors,"CREATE INDEX factor_id_created_at_idx ON auth.mfa_factors USING btree (user_id, created_at)",null,null
+index,auth,mfa_factors_user_id_idx,mfa_factors,CREATE INDEX mfa_factors_user_id_idx ON auth.mfa_factors USING btree (user_id),null,null
+index,auth,unique_phone_factor_per_user,mfa_factors,"CREATE UNIQUE INDEX unique_phone_factor_per_user ON auth.mfa_factors USING btree (user_id, phone)",null,null
+index,auth,mfa_factors_last_challenged_at_key,mfa_factors,CREATE UNIQUE INDEX mfa_factors_last_challenged_at_key ON auth.mfa_factors USING btree (last_challenged_at),null,null
+index,auth,mfa_challenges_pkey,mfa_challenges,CREATE UNIQUE INDEX mfa_challenges_pkey ON auth.mfa_challenges USING btree (id),null,null
+index,auth,mfa_challenge_created_at_idx,mfa_challenges,CREATE INDEX mfa_challenge_created_at_idx ON auth.mfa_challenges USING btree (created_at DESC),null,null
+index,public,sales_pkey,vendas,CREATE UNIQUE INDEX sales_pkey ON public.vendas USING btree (id),null,null
+index,public,sale_items_pkey,itens_venda,CREATE UNIQUE INDEX sale_items_pkey ON public.itens_venda USING btree (id),null,null
+index,realtime,schema_migrations_pkey,schema_migrations,CREATE UNIQUE INDEX schema_migrations_pkey ON realtime.schema_migrations USING btree (version),null,null
+index,realtime,pk_subscription,subscription,CREATE UNIQUE INDEX pk_subscription ON realtime.subscription USING btree (id),null,null
+index,realtime,subscription_subscription_id_entity_filters_key,subscription,"CREATE UNIQUE INDEX subscription_subscription_id_entity_filters_key ON realtime.subscription USING btree (subscription_id, entity, filters)",null,null
+index,realtime,ix_realtime_subscription_entity,subscription,CREATE INDEX ix_realtime_subscription_entity ON realtime.subscription USING btree (entity),null,null
+index,public,companies_pkey,empresas,CREATE UNIQUE INDEX companies_pkey ON public.empresas USING btree (id),null,null
+index,public,companies_company_code_key,empresas,CREATE UNIQUE INDEX companies_company_code_key ON public.empresas USING btree (codigo_empresa),null,null
+index,public,companies_code_idx,empresas,CREATE INDEX companies_code_idx ON public.empresas USING btree (codigo_empresa),null,null
+index,public,empresas_codigo_empresa_unique,empresas,CREATE UNIQUE INDEX empresas_codigo_empresa_unique ON public.empresas USING btree (codigo_empresa),null,null
+index,storage,s3_multipart_uploads_parts_pkey,s3_multipart_uploads_parts,CREATE UNIQUE INDEX s3_multipart_uploads_parts_pkey ON storage.s3_multipart_uploads_parts USING btree (id),null,null
+index,storage,s3_multipart_uploads_pkey,s3_multipart_uploads,CREATE UNIQUE INDEX s3_multipart_uploads_pkey ON storage.s3_multipart_uploads USING btree (id),null,null
+index,storage,idx_multipart_uploads_list,s3_multipart_uploads,"CREATE INDEX idx_multipart_uploads_list ON storage.s3_multipart_uploads USING btree (bucket_id, key, created_at)",null,null
+index,public,agendamento_participantes_pkey,agendamento_participantes,CREATE UNIQUE INDEX agendamento_participantes_pkey ON public.agendamento_participantes USING btree (id),null,null
+index,public,agendamento_participantes_agendamento_id_idx,agendamento_participantes,CREATE INDEX agendamento_participantes_agendamento_id_idx ON public.agendamento_participantes USING btree (agendamento_id),null,null
+index,public,idx_agp_codigo_empresa,agendamento_participantes,CREATE INDEX idx_agp_codigo_empresa ON public.agendamento_participantes USING btree (codigo_empresa),null,null
+index,realtime,messages_2025_09_24_pkey,messages_2025_09_24,"CREATE UNIQUE INDEX messages_2025_09_24_pkey ON realtime.messages_2025_09_24 USING btree (id, inserted_at)",null,null
+index,realtime,messages_2025_09_24_inserted_at_topic_idx,messages_2025_09_24,"CREATE INDEX messages_2025_09_24_inserted_at_topic_idx ON realtime.messages_2025_09_24 USING btree (inserted_at DESC, topic) WHERE ((extension = 'broadcast'::text) AND (private IS TRUE))",null,null
+index,public,courts_pkey,quadras,CREATE UNIQUE INDEX courts_pkey ON public.quadras USING btree (id),null,null
+index,public,quadras_codigo_empresa_idx,quadras,CREATE INDEX quadras_codigo_empresa_idx ON public.quadras USING btree (codigo_empresa),null,null
+index,public,estoque_baixa_log_pkey,estoque_baixa_log,CREATE UNIQUE INDEX estoque_baixa_log_pkey ON public.estoque_baixa_log USING btree (comanda_id),null,null
+index,realtime,messages_pkey,messages,"CREATE UNIQUE INDEX messages_pkey ON ONLY realtime.messages USING btree (id, inserted_at)",null,null
+index,realtime,messages_inserted_at_topic_index,messages,"CREATE INDEX messages_inserted_at_topic_index ON ONLY realtime.messages USING btree (inserted_at DESC, topic) WHERE ((extension = 'broadcast'::text) AND (private IS TRUE))",null,null
+index,public,bookings_pkey,agendamentos,CREATE UNIQUE INDEX bookings_pkey ON public.agendamentos USING btree (id),null,null
+index,public,agendamentos_codigo_empresa_idx,agendamentos,CREATE INDEX agendamentos_codigo_empresa_idx ON public.agendamentos USING btree (codigo_empresa),null,null
+index,public,ux_agendamentos_empresa_codigo,agendamentos,"CREATE UNIQUE INDEX ux_agendamentos_empresa_codigo ON public.agendamentos USING btree (codigo_empresa, codigo)",null,null
+index,public,empresa_counters_pkey,empresa_counters,CREATE UNIQUE INDEX empresa_counters_pkey ON public.empresa_counters USING btree (empresa_id),null,null
+index,storage,buckets_analytics_pkey,buckets_analytics,CREATE UNIQUE INDEX buckets_analytics_pkey ON storage.buckets_analytics USING btree (id),null,null
+index,storage,prefixes_pkey,prefixes,"CREATE UNIQUE INDEX prefixes_pkey ON storage.prefixes USING btree (bucket_id, level, name)",null,null
+index,storage,idx_prefixes_lower_name,prefixes,"CREATE INDEX idx_prefixes_lower_name ON storage.prefixes USING btree (bucket_id, level, ((string_to_array(name, '/'::text))[level]), lower(name) text_pattern_ops)",null,null
+index,public,user_profiles_pkey,colaboradores,CREATE UNIQUE INDEX user_profiles_pkey ON public.colaboradores USING btree (id),null,null
+index,public,idx_colaboradores_codigo_empresa,colaboradores,CREATE INDEX idx_colaboradores_codigo_empresa ON public.colaboradores USING btree (codigo_empresa),null,null
+index,public,idx_colaboradores_ativo,colaboradores,CREATE INDEX idx_colaboradores_ativo ON public.colaboradores USING btree (ativo),null,null
+index,public,colaboradores_codigo_empresa_idx,colaboradores,CREATE INDEX colaboradores_codigo_empresa_idx ON public.colaboradores USING btree (codigo_empresa),null,null
+index,realtime,messages_2025_09_28_pkey,messages_2025_09_28,"CREATE UNIQUE INDEX messages_2025_09_28_pkey ON realtime.messages_2025_09_28 USING btree (id, inserted_at)",null,null
+index,realtime,messages_2025_09_28_inserted_at_topic_idx,messages_2025_09_28,"CREATE INDEX messages_2025_09_28_inserted_at_topic_idx ON realtime.messages_2025_09_28 USING btree (inserted_at DESC, topic) WHERE ((extension = 'broadcast'::text) AND (private IS TRUE))",null,null
+index,public,idx_mov_saldo_empresa,movimentos_saldo,CREATE INDEX idx_mov_saldo_empresa ON public.movimentos_saldo USING btree (codigo_empresa),null,null
+index,public,movimentos_saldo_pkey,movimentos_saldo,CREATE UNIQUE INDEX movimentos_saldo_pkey ON public.movimentos_saldo USING btree (id),null,null
+index,public,idx_mov_saldo_cliente,movimentos_saldo,CREATE INDEX idx_mov_saldo_cliente ON public.movimentos_saldo USING btree (cliente_id),null,null
+index,public,idx_mov_saldo_agendamento,movimentos_saldo,CREATE INDEX idx_mov_saldo_agendamento ON public.movimentos_saldo USING btree (agendamento_id),null,null
+index,realtime,messages_2025_09_25_pkey,messages_2025_09_25,"CREATE UNIQUE INDEX messages_2025_09_25_pkey ON realtime.messages_2025_09_25 USING btree (id, inserted_at)",null,null
+index,realtime,messages_2025_09_25_inserted_at_topic_idx,messages_2025_09_25,"CREATE INDEX messages_2025_09_25_inserted_at_topic_idx ON realtime.messages_2025_09_25 USING btree (inserted_at DESC, topic) WHERE ((extension = 'broadcast'::text) AND (private IS TRUE))",null,null
+index,realtime,messages_2025_09_22_pkey,messages_2025_09_22,"CREATE UNIQUE INDEX messages_2025_09_22_pkey ON realtime.messages_2025_09_22 USING btree (id, inserted_at)",null,null
+index,realtime,messages_2025_09_22_inserted_at_topic_idx,messages_2025_09_22,"CREATE INDEX messages_2025_09_22_inserted_at_topic_idx ON realtime.messages_2025_09_22 USING btree (inserted_at DESC, topic) WHERE ((extension = 'broadcast'::text) AND (private IS TRUE))",null,null
+index,realtime,messages_2025_09_26_pkey,messages_2025_09_26,"CREATE UNIQUE INDEX messages_2025_09_26_pkey ON realtime.messages_2025_09_26 USING btree (id, inserted_at)",null,null
+index,realtime,messages_2025_09_26_inserted_at_topic_idx,messages_2025_09_26,"CREATE INDEX messages_2025_09_26_inserted_at_topic_idx ON realtime.messages_2025_09_26 USING btree (inserted_at DESC, topic) WHERE ((extension = 'broadcast'::text) AND (private IS TRUE))",null,null
+index,public,pagamentos_pkey,pagamentos,CREATE UNIQUE INDEX pagamentos_pkey ON public.pagamentos USING btree (id),null,null
+index,public,idx_pagamentos_empresa,pagamentos,CREATE INDEX idx_pagamentos_empresa ON public.pagamentos USING btree (codigo_empresa),null,null
+index,public,idx_pagamentos_finalizadora,pagamentos,CREATE INDEX idx_pagamentos_finalizadora ON public.pagamentos USING btree (finalizadora_id),null,null
+index,public,idx_pagamentos_recebido_em,pagamentos,CREATE INDEX idx_pagamentos_recebido_em ON public.pagamentos USING btree (recebido_em),null,null
+index,public,idx_pagamentos_codigo_empresa,pagamentos,CREATE INDEX idx_pagamentos_codigo_empresa ON public.pagamentos USING btree (codigo_empresa),null,null
+index,public,idx_pagamentos_caixa,pagamentos,CREATE INDEX idx_pagamentos_caixa ON public.pagamentos USING btree (caixa_id),null,null
+index,public,idx_pagamentos_comanda_id,pagamentos,CREATE INDEX idx_pagamentos_comanda_id ON public.pagamentos USING btree (comanda_id),null,null
+index,public,idx_pagamentos_comanda,pagamentos,CREATE INDEX idx_pagamentos_comanda ON public.pagamentos USING btree (comanda_id),null,null
+index,public,mesas_pkey,mesas,CREATE UNIQUE INDEX mesas_pkey ON public.mesas USING btree (id),null,null
+index,public,mesas_codigo_empresa_numero_key,mesas,"CREATE UNIQUE INDEX mesas_codigo_empresa_numero_key ON public.mesas USING btree (codigo_empresa, numero)",null,null
+index,public,idx_mesas_nome,mesas,"CREATE INDEX idx_mesas_nome ON public.mesas USING gin (to_tsvector('simple'::regconfig, COALESCE(nome, ''::text)))",null,null
+index,public,idx_mesas_codigo_empresa,mesas,CREATE INDEX idx_mesas_codigo_empresa ON public.mesas USING btree (codigo_empresa),null,null
+index,public,uq_mesas_empresa_numero,mesas,"CREATE UNIQUE INDEX uq_mesas_empresa_numero ON public.mesas USING btree (codigo_empresa, numero)",null,null
+index,public,comanda_itens_pkey,comanda_itens,CREATE UNIQUE INDEX comanda_itens_pkey ON public.comanda_itens USING btree (id),null,null
+index,public,idx_comanda_itens_comanda,comanda_itens,CREATE INDEX idx_comanda_itens_comanda ON public.comanda_itens USING btree (comanda_id),null,null
+index,public,idx_comanda_itens_empresa,comanda_itens,CREATE INDEX idx_comanda_itens_empresa ON public.comanda_itens USING btree (codigo_empresa),null,null
+index,public,idx_comanda_itens_comanda_id,comanda_itens,CREATE INDEX idx_comanda_itens_comanda_id ON public.comanda_itens USING btree (comanda_id),null,null
+index,public,idx_comanda_itens_codigo_empresa,comanda_itens,CREATE INDEX idx_comanda_itens_codigo_empresa ON public.comanda_itens USING btree (codigo_empresa),null,null
+index,public,idx_comanda_itens_produto,comanda_itens,CREATE INDEX idx_comanda_itens_produto ON public.comanda_itens USING btree (produto_id),null,null
+index,public,idx_caixa_sessoes_empresa,caixa_sessoes,CREATE INDEX idx_caixa_sessoes_empresa ON public.caixa_sessoes USING btree (codigo_empresa),null,null
+index,public,caixa_sessoes_pkey,caixa_sessoes,CREATE UNIQUE INDEX caixa_sessoes_pkey ON public.caixa_sessoes USING btree (id),null,null
+index,public,idx_caixa_sessoes_empresa_status,caixa_sessoes,"CREATE INDEX idx_caixa_sessoes_empresa_status ON public.caixa_sessoes USING btree (codigo_empresa, status)",null,null
+index,public,idx_caixa_empresa,caixa_sessoes,CREATE INDEX idx_caixa_empresa ON public.caixa_sessoes USING btree (codigo_empresa),null,null
+index,public,uq_caixa_aberto_por_empresa,caixa_sessoes,CREATE UNIQUE INDEX uq_caixa_aberto_por_empresa ON public.caixa_sessoes USING btree (codigo_empresa) WHERE (status = 'open'::text),null,null
+index,public,caixa_movimentos_pkey,caixa_movimentos,CREATE UNIQUE INDEX caixa_movimentos_pkey ON public.caixa_movimentos USING btree (id),null,null
+index,public,idx_caixa_movimentos_caixa,caixa_movimentos,CREATE INDEX idx_caixa_movimentos_caixa ON public.caixa_movimentos USING btree (caixa_id),null,null
+index,public,idx_caixa_movimentos_empresa,caixa_movimentos,CREATE INDEX idx_caixa_movimentos_empresa ON public.caixa_movimentos USING btree (codigo_empresa),null,null
+index,public,comanda_clientes_pkey,comanda_clientes,CREATE UNIQUE INDEX comanda_clientes_pkey ON public.comanda_clientes USING btree (id),null,null
+index,public,comanda_clientes_cliente_idx,comanda_clientes,CREATE INDEX comanda_clientes_cliente_idx ON public.comanda_clientes USING btree (cliente_id),null,null
+index,public,comanda_clientes_empresa_idx,comanda_clientes,CREATE INDEX comanda_clientes_empresa_idx ON public.comanda_clientes USING btree (codigo_empresa),null,null
+index,public,comanda_clientes_comanda_idx,comanda_clientes,CREATE INDEX comanda_clientes_comanda_idx ON public.comanda_clientes USING btree (comanda_id),null,null
+index,public,idx_comanda_clientes_comanda,comanda_clientes,CREATE INDEX idx_comanda_clientes_comanda ON public.comanda_clientes USING btree (comanda_id),null,null
+index,public,idx_comanda_clientes_empresa,comanda_clientes,CREATE INDEX idx_comanda_clientes_empresa ON public.comanda_clientes USING btree (codigo_empresa),null,null
+index,public,idx_comanda_clientes_cliente,comanda_clientes,CREATE INDEX idx_comanda_clientes_cliente ON public.comanda_clientes USING btree (cliente_id),null,null
+index,public,finalizadoras_pkey,finalizadoras,CREATE UNIQUE INDEX finalizadoras_pkey ON public.finalizadoras USING btree (id),null,null
+index,public,idx_finalizadoras_empresa,finalizadoras,CREATE INDEX idx_finalizadoras_empresa ON public.finalizadoras USING btree (codigo_empresa),null,null
+index,public,idx_finalizadoras_ativo,finalizadoras,CREATE INDEX idx_finalizadoras_ativo ON public.finalizadoras USING btree (ativo),null,null
+index,public,idx_finalizadoras_ordem,finalizadoras,CREATE INDEX idx_finalizadoras_ordem ON public.finalizadoras USING btree (ordem),null,null
+index,public,finalizadoras_empresa_nome_unique,finalizadoras,"CREATE UNIQUE INDEX finalizadoras_empresa_nome_unique ON public.finalizadoras USING btree (codigo_empresa, nome)",null,null
+index,public,uq_finalizadoras_empresa_nome,finalizadoras,"CREATE UNIQUE INDEX uq_finalizadoras_empresa_nome ON public.finalizadoras USING btree (codigo_empresa, lower(nome))",null,null
+index,auth,oauth_clients_pkey,oauth_clients,CREATE UNIQUE INDEX oauth_clients_pkey ON auth.oauth_clients USING btree (id),null,null
+index,auth,oauth_clients_client_id_key,oauth_clients,CREATE UNIQUE INDEX oauth_clients_client_id_key ON auth.oauth_clients USING btree (client_id),null,null
+index,auth,oauth_clients_client_id_idx,oauth_clients,CREATE INDEX oauth_clients_client_id_idx ON auth.oauth_clients USING btree (client_id),null,null
+index,auth,oauth_clients_deleted_at_idx,oauth_clients,CREATE INDEX oauth_clients_deleted_at_idx ON auth.oauth_clients USING btree (deleted_at),null,null
+index,public,agenda_settings_pkey,agenda_settings,CREATE UNIQUE INDEX agenda_settings_pkey ON public.agenda_settings USING btree (empresa_id),null,null
+index,public,caixa_resumos_pkey,caixa_resumos,CREATE UNIQUE INDEX caixa_resumos_pkey ON public.caixa_resumos USING btree (id),null,null
+index,public,idx_caixa_resumos_empresa_sessao,caixa_resumos,"CREATE INDEX idx_caixa_resumos_empresa_sessao ON public.caixa_resumos USING btree (codigo_empresa, caixa_sessao_id)",null,null
+index,public,idx_caixa_resumos_periodo,caixa_resumos,"CREATE INDEX idx_caixa_resumos_periodo ON public.caixa_resumos USING btree (periodo_de, periodo_ate)",null,null
+index,public,caixa_movimentacoes_pkey,caixa_movimentacoes,CREATE UNIQUE INDEX caixa_movimentacoes_pkey ON public.caixa_movimentacoes USING btree (id),null,null
+index,public,idx_caixa_mov_empresa_sessao,caixa_movimentacoes,"CREATE INDEX idx_caixa_mov_empresa_sessao ON public.caixa_movimentacoes USING btree (codigo_empresa, caixa_sessao_id)",null,null
+index,public,idx_caixa_mov_tipo,caixa_movimentacoes,CREATE INDEX idx_caixa_mov_tipo ON public.caixa_movimentacoes USING btree (tipo),null,null
+index,public,customers_pkey,clientes,CREATE UNIQUE INDEX customers_pkey ON public.clientes USING btree (id),null,null
+index,public,gin_trgm_clientes_nome,clientes,CREATE INDEX gin_trgm_clientes_nome ON public.clientes USING gin (nome gin_trgm_ops),null,null
+index,public,gin_trgm_clientes_email,clientes,CREATE INDEX gin_trgm_clientes_email ON public.clientes USING gin (email gin_trgm_ops),null,null
+index,public,gin_trgm_clientes_telefone,clientes,CREATE INDEX gin_trgm_clientes_telefone ON public.clientes USING gin (telefone gin_trgm_ops),null,null
+index,public,clientes_codigo_empresa_idx,clientes,CREATE INDEX clientes_codigo_empresa_idx ON public.clientes USING btree (codigo_empresa),null,null
+index,public,idx_clientes_empresa_nome,clientes,"CREATE INDEX idx_clientes_empresa_nome ON public.clientes USING btree (codigo_empresa, nome)",null,null
+index,public,idx_clientes_empresa_telefone,clientes,"CREATE INDEX idx_clientes_empresa_telefone ON public.clientes USING btree (codigo_empresa, telefone)",null,null
+index,public,idx_clientes_empresa_aniversario,clientes,"CREATE INDEX idx_clientes_empresa_aniversario ON public.clientes USING btree (codigo_empresa, aniversario)",null,null
+index,public,uq_clientes_empresa_codigo,clientes,"CREATE UNIQUE INDEX uq_clientes_empresa_codigo ON public.clientes USING btree (codigo_empresa, codigo)",null,null
+index,public,uq_clientes_empresa_cpf,clientes,"CREATE UNIQUE INDEX uq_clientes_empresa_cpf ON public.clientes USING btree (codigo_empresa, cpf) WHERE (cpf IS NOT NULL)",null,null
+index,public,uq_clientes_empresa_email_lower,clientes,"CREATE UNIQUE INDEX uq_clientes_empresa_email_lower ON public.clientes USING btree (codigo_empresa, lower((email)::text)) WHERE (email IS NOT NULL)",null,null
+index,realtime,messages_2025_09_23_pkey,messages_2025_09_23,"CREATE UNIQUE INDEX messages_2025_09_23_pkey ON realtime.messages_2025_09_23 USING btree (id, inserted_at)",null,null
+index,realtime,messages_2025_09_23_inserted_at_topic_idx,messages_2025_09_23,"CREATE INDEX messages_2025_09_23_inserted_at_topic_idx ON realtime.messages_2025_09_23 USING btree (inserted_at DESC, topic) WHERE ((extension = 'broadcast'::text) AND (private IS TRUE))",null,null
+index,public,idx_comandas_mesa_status,comandas,"CREATE INDEX idx_comandas_mesa_status ON public.comandas USING btree (mesa_id, status) WHERE (fechado_em IS NULL)",null,null
+index,public,comandas_pkey,comandas,CREATE UNIQUE INDEX comandas_pkey ON public.comandas USING btree (id),null,null
+index,public,idx_comandas_mesa,comandas,CREATE INDEX idx_comandas_mesa ON public.comandas USING btree (mesa_id),null,null
+index,public,idx_comandas_aberto_em,comandas,CREATE INDEX idx_comandas_aberto_em ON public.comandas USING btree (aberto_em DESC),null,null
+index,public,idx_comandas_codigo_empresa,comandas,CREATE INDEX idx_comandas_codigo_empresa ON public.comandas USING btree (codigo_empresa),null,null
+index,realtime,messages_2025_09_27_pkey,messages_2025_09_27,"CREATE UNIQUE INDEX messages_2025_09_27_pkey ON realtime.messages_2025_09_27 USING btree (id, inserted_at)",null,null
+index,realtime,messages_2025_09_27_inserted_at_topic_idx,messages_2025_09_27,"CREATE INDEX messages_2025_09_27_inserted_at_topic_idx ON realtime.messages_2025_09_27 USING btree (inserted_at DESC, topic) WHERE ((extension = 'broadcast'::text) AND (private IS TRUE))",null,null
+trigger,public,trg_ag_participantes_set_empresa,agendamento_participantes,CREATE TRIGGER trg_ag_participantes_set_empresa BEFORE INSERT OR UPDATE OF agendamento_id ON public.agendamento_participantes FOR EACH ROW EXECUTE FUNCTION set_ag_participantes_codigo_empresa(),null,null
+trigger,public,trg_mov_saldo_apply,movimentos_saldo,CREATE TRIGGER trg_mov_saldo_apply AFTER INSERT OR DELETE OR UPDATE ON public.movimentos_saldo FOR EACH ROW EXECUTE FUNCTION fn_mov_saldo_apply(),null,null
+trigger,public,trg_mesas_updated_at,mesas,CREATE TRIGGER trg_mesas_updated_at BEFORE UPDATE ON public.mesas FOR EACH ROW EXECUTE FUNCTION set_updated_at(),null,null
+trigger,public,trg_comandas_updated_at,comandas,CREATE TRIGGER trg_comandas_updated_at BEFORE UPDATE ON public.comandas FOR EACH ROW EXECUTE FUNCTION set_updated_at(),null,null
+trigger,public,trg_produtos_set_company_code,produtos,CREATE TRIGGER trg_produtos_set_company_code BEFORE INSERT ON public.produtos FOR EACH ROW EXECUTE FUNCTION produtos_set_company_code(),null,null
+trigger,public,trg_produtos_autocode,produtos,CREATE TRIGGER trg_produtos_autocode BEFORE INSERT ON public.produtos FOR EACH ROW EXECUTE FUNCTION gen_codigo_produto(),null,null
+trigger,public,trg_produtos_normalize,produtos,CREATE TRIGGER trg_produtos_normalize BEFORE INSERT OR UPDATE ON public.produtos FOR EACH ROW EXECUTE FUNCTION normalize_codigo_produto(),null,null
+trigger,storage,update_objects_updated_at,objects,CREATE TRIGGER update_objects_updated_at BEFORE UPDATE ON storage.objects FOR EACH ROW EXECUTE FUNCTION storage.update_updated_at_column(),null,null
+trigger,realtime,tr_check_filters,subscription,CREATE TRIGGER tr_check_filters BEFORE INSERT OR UPDATE ON realtime.subscription FOR EACH ROW EXECUTE FUNCTION realtime.subscription_check_filters(),null,null
+trigger,public,clientes_set_empresa_from_user,clientes,CREATE TRIGGER clientes_set_empresa_from_user BEFORE INSERT ON public.clientes FOR EACH ROW EXECUTE FUNCTION set_empresa_from_user(),null,null
+trigger,public,trg_produto_categorias_set_empresa,produto_categorias,CREATE TRIGGER trg_produto_categorias_set_empresa BEFORE INSERT ON public.produto_categorias FOR EACH ROW EXECUTE FUNCTION set_empresa_produto_categorias(),null,null
+trigger,public,trg_produto_categorias_touch,produto_categorias,CREATE TRIGGER trg_produto_categorias_touch BEFORE UPDATE ON public.produto_categorias FOR EACH ROW EXECUTE FUNCTION touch_updated_at(),null,null
+trigger,public,trg_colaboradores_updated_at,colaboradores,CREATE TRIGGER trg_colaboradores_updated_at BEFORE UPDATE ON public.colaboradores FOR EACH ROW EXECUTE FUNCTION set_updated_at(),null,null
+trigger,public,clientes_set_timestamp,clientes,CREATE TRIGGER clientes_set_timestamp BEFORE UPDATE ON public.clientes FOR EACH ROW EXECUTE FUNCTION set_timestamp(),null,null
+trigger,public,zz_clientes_set_codigo,clientes,CREATE TRIGGER zz_clientes_set_codigo BEFORE INSERT ON public.clientes FOR EACH ROW EXECUTE FUNCTION clientes_set_codigo_fn(),null,null
+trigger,public,empresas_set_updated_at,empresas,CREATE TRIGGER empresas_set_updated_at BEFORE UPDATE ON public.empresas FOR EACH ROW EXECUTE FUNCTION set_updated_at(),null,null
+trigger,public,trg_caixa_sessoes_updated_at,caixa_sessoes,CREATE TRIGGER trg_caixa_sessoes_updated_at BEFORE UPDATE ON public.caixa_sessoes FOR EACH ROW EXECUTE FUNCTION set_updated_at(),null,null
+trigger,storage,prefixes_delete_hierarchy,prefixes,CREATE TRIGGER prefixes_delete_hierarchy AFTER DELETE ON storage.prefixes FOR EACH ROW EXECUTE FUNCTION storage.delete_prefix_hierarchy_trigger(),null,null
+trigger,storage,objects_insert_create_prefix,objects,CREATE TRIGGER objects_insert_create_prefix BEFORE INSERT ON storage.objects FOR EACH ROW EXECUTE FUNCTION storage.objects_insert_prefix_trigger(),null,null
+trigger,storage,objects_delete_delete_prefix,objects,CREATE TRIGGER objects_delete_delete_prefix AFTER DELETE ON storage.objects FOR EACH ROW EXECUTE FUNCTION storage.delete_prefix_hierarchy_trigger(),null,null
+trigger,storage,prefixes_create_hierarchy,prefixes,CREATE TRIGGER prefixes_create_hierarchy BEFORE INSERT ON storage.prefixes FOR EACH ROW WHEN ((pg_trigger_depth() < 1)) EXECUTE FUNCTION storage.prefixes_insert_trigger(),null,null
+trigger,storage,objects_update_create_prefix,objects,CREATE TRIGGER objects_update_create_prefix BEFORE UPDATE ON storage.objects FOR EACH ROW WHEN (((new.name <> old.name) OR (new.bucket_id <> old.bucket_id))) EXECUTE FUNCTION storage.objects_update_prefix_trigger(),null,null
+trigger,storage,enforce_bucket_name_length_trigger,buckets,CREATE TRIGGER enforce_bucket_name_length_trigger BEFORE INSERT OR UPDATE OF name ON storage.buckets FOR EACH ROW EXECUTE FUNCTION storage.enforce_bucket_name_length(),null,null
+trigger,public,agendamentos_set_empresa_from_user,agendamentos,CREATE TRIGGER agendamentos_set_empresa_from_user BEFORE INSERT ON public.agendamentos FOR EACH ROW EXECUTE FUNCTION set_agendamento_empresa_from_user(),null,null
+trigger,public,set_updated_at_agp,agendamento_participantes,CREATE TRIGGER set_updated_at_agp BEFORE UPDATE ON public.agendamento_participantes FOR EACH ROW EXECUTE FUNCTION set_timestamp_updated_at(),null,null
+trigger,public,trg_comanda_itens_updated_at,comanda_itens,CREATE TRIGGER trg_comanda_itens_updated_at BEFORE UPDATE ON public.comanda_itens FOR EACH ROW EXECUTE FUNCTION set_updated_at(),null,null
+trigger,public,trg_caixa_movimentos_updated_at,caixa_movimentos,CREATE TRIGGER trg_caixa_movimentos_updated_at BEFORE UPDATE ON public.caixa_movimentos FOR EACH ROW EXECUTE FUNCTION set_updated_at(),null,null
+trigger,public,trg_finalizadoras_updated_at,finalizadoras,CREATE TRIGGER trg_finalizadoras_updated_at BEFORE UPDATE ON public.finalizadoras FOR EACH ROW EXECUTE FUNCTION set_updated_at(),null,null
+trigger,public,trg_agenda_settings_set_updated_at,agenda_settings,CREATE TRIGGER trg_agenda_settings_set_updated_at BEFORE UPDATE ON public.agenda_settings FOR EACH ROW EXECUTE FUNCTION set_updated_at(),null,null
+trigger,public,trg_clientes_set_timestamp,clientes,CREATE TRIGGER trg_clientes_set_timestamp BEFORE UPDATE ON public.clientes FOR EACH ROW EXECUTE FUNCTION tg_set_timestamp(),null,null
+trigger,public,trg_clientes_set_codigo,clientes,CREATE TRIGGER trg_clientes_set_codigo BEFORE INSERT ON public.clientes FOR EACH ROW EXECUTE FUNCTION clientes_next_codigo(),null,null
+trigger,public,trg_pagamentos_updated_at,pagamentos,CREATE TRIGGER trg_pagamentos_updated_at BEFORE UPDATE ON public.pagamentos FOR EACH ROW EXECUTE FUNCTION set_updated_at(),null,null
+trigger,public,trg_baixa_estoque_on_close,comandas,CREATE TRIGGER trg_baixa_estoque_on_close AFTER UPDATE ON public.comandas FOR EACH ROW EXECUTE FUNCTION trg_comandas_baixar_estoque(),null,null
+trigger,public,zz_agendamentos_set_codigo,agendamentos,CREATE TRIGGER zz_agendamentos_set_codigo BEFORE INSERT ON public.agendamentos FOR EACH ROW EXECUTE FUNCTION agendamentos_set_codigo_fn(),null,null
+trigger,public,trg_set_company_code_comandas,comandas,CREATE TRIGGER trg_set_company_code_comandas BEFORE INSERT ON public.comandas FOR EACH ROW EXECUTE FUNCTION set_company_code_default(),null,null
+trigger,public,trg_set_company_code_comanda_itens,comanda_itens,CREATE TRIGGER trg_set_company_code_comanda_itens BEFORE INSERT ON public.comanda_itens FOR EACH ROW EXECUTE FUNCTION set_company_code_default(),null,null
+trigger,public,trg_set_company_code_comanda_clientes,comanda_clientes,CREATE TRIGGER trg_set_company_code_comanda_clientes BEFORE INSERT ON public.comanda_clientes FOR EACH ROW EXECUTE FUNCTION set_company_code_default(),null,null
+trigger,public,trg_set_company_code_pagamentos,pagamentos,CREATE TRIGGER trg_set_company_code_pagamentos BEFORE INSERT ON public.pagamentos FOR EACH ROW EXECUTE FUNCTION set_company_code_default(),null,null
+trigger,public,trg_set_company_code_finalizadoras,finalizadoras,CREATE TRIGGER trg_set_company_code_finalizadoras BEFORE INSERT ON public.finalizadoras FOR EACH ROW EXECUTE FUNCTION set_company_code_default(),null,null
+trigger,public,trg_set_company_code_mesas,mesas,CREATE TRIGGER trg_set_company_code_mesas BEFORE INSERT ON public.mesas FOR EACH ROW EXECUTE FUNCTION set_company_code_default(),null,null
+trigger,public,trg_set_company_code_caixa,caixa_sessoes,CREATE TRIGGER trg_set_company_code_caixa BEFORE INSERT ON public.caixa_sessoes FOR EACH ROW EXECUTE FUNCTION set_company_code_default(),null,null
+function,public,tg_set_timestamp,null,() returns trigger,postgres,null
+function,public,clientes_next_codigo,null,() returns trigger,postgres,null
+function,public,agendamentos_set_codigo_fn,null,() returns trigger,postgres,null
+function,extensions,gen_salt,null,(text) returns text,postgres,null
+function,extensions,encrypt,null,"(bytea, bytea, text) returns bytea",postgres,null
+function,extensions,decrypt,null,"(bytea, bytea, text) returns bytea",postgres,null
+function,extensions,pg_stat_statements_info,null,"(OUT dealloc bigint, OUT stats_reset timestamp with time zone) returns record",postgres,null
+function,extensions,gen_salt,null,"(text, integer) returns text",postgres,null
+function,extensions,pg_stat_statements_reset,null,"(userid oid, dbid oid, queryid bigint, minmax_only boolean) returns timestamp with time zone",postgres,null
+function,extensions,uuid_nil,null,() returns uuid,postgres,null
+function,extensions,uuid_ns_dns,null,() returns uuid,postgres,null
+function,extensions,uuid_ns_url,null,() returns uuid,postgres,null
+function,extensions,uuid_ns_oid,null,() returns uuid,postgres,null
+function,public,set_limit,null,(real) returns real,supabase_admin,null
+function,auth,uid,null,() returns uuid,supabase_auth_admin,Deprecated. Use auth.jwt() -> 'sub' instead.
+function,auth,role,null,() returns text,supabase_auth_admin,Deprecated. Use auth.jwt() -> 'role' instead.
+function,auth,email,null,() returns text,supabase_auth_admin,Deprecated. Use auth.jwt() -> 'email' instead.
+function,public,show_limit,null,() returns real,supabase_admin,null
+function,public,show_trgm,null,(text) returns text[],supabase_admin,null
+function,extensions,uuid_ns_x500,null,() returns uuid,postgres,null
+function,extensions,uuid_generate_v1,null,() returns uuid,postgres,null
+function,public,similarity,null,"(text, text) returns real",supabase_admin,null
+function,public,similarity_op,null,"(text, text) returns boolean",supabase_admin,null
+function,public,word_similarity,null,"(text, text) returns real",supabase_admin,null
+function,public,word_similarity_op,null,"(text, text) returns boolean",supabase_admin,null
+function,public,word_similarity_commutator_op,null,"(text, text) returns boolean",supabase_admin,null
+function,public,similarity_dist,null,"(text, text) returns real",supabase_admin,null
+function,public,word_similarity_dist_op,null,"(text, text) returns real",supabase_admin,null
+function,public,word_similarity_dist_commutator_op,null,"(text, text) returns real",supabase_admin,null
+function,public,gtrgm_in,null,(cstring) returns gtrgm,supabase_admin,null
+function,public,gtrgm_out,null,(gtrgm) returns cstring,supabase_admin,null
+function,public,gtrgm_consistent,null,"(internal, text, smallint, oid, internal) returns boolean",supabase_admin,null
+function,public,gtrgm_distance,null,"(internal, text, smallint, oid, internal) returns double precision",supabase_admin,null
+function,public,gtrgm_compress,null,(internal) returns internal,supabase_admin,null
+function,public,gtrgm_decompress,null,(internal) returns internal,supabase_admin,null
+function,public,gtrgm_penalty,null,"(internal, internal, internal) returns internal",supabase_admin,null
+function,public,gtrgm_picksplit,null,"(internal, internal) returns internal",supabase_admin,null
+function,public,gtrgm_union,null,"(internal, internal) returns gtrgm",supabase_admin,null
+function,public,gtrgm_same,null,"(gtrgm, gtrgm, internal) returns internal",supabase_admin,null
+function,public,gin_extract_value_trgm,null,"(text, internal) returns internal",supabase_admin,null
+function,public,gin_extract_query_trgm,null,"(text, internal, smallint, internal, internal, internal, internal) returns internal",supabase_admin,null
+function,public,gin_trgm_consistent,null,"(internal, smallint, text, integer, internal, internal, internal, internal) returns boolean",supabase_admin,null
+function,public,gin_trgm_triconsistent,null,"(internal, smallint, text, integer, internal, internal, internal) returns ""char""",supabase_admin,null
+function,public,strict_word_similarity,null,"(text, text) returns real",supabase_admin,null
+function,public,strict_word_similarity_op,null,"(text, text) returns boolean",supabase_admin,null
+function,public,strict_word_similarity_commutator_op,null,"(text, text) returns boolean",supabase_admin,null
+function,public,strict_word_similarity_dist_op,null,"(text, text) returns real",supabase_admin,null
+function,public,strict_word_similarity_dist_commutator_op,null,"(text, text) returns real",supabase_admin,null
+function,public,gtrgm_options,null,(internal) returns void,supabase_admin,null
+function,public,set_updated_at,null,() returns trigger,postgres,null
+function,public,fix_invalid_comanda_status,null,(target_comanda_id uuid) returns void,postgres,null
+function,public,payment_status_eq_text,null,"(a payment_status, b text) returns boolean",postgres,null
+function,public,text_eq_payment_status,null,"(a text, b payment_status) returns boolean",postgres,null
+function,extensions,uuid_generate_v1mc,null,() returns uuid,postgres,null
+function,extensions,uuid_generate_v3,null,"(namespace uuid, name text) returns uuid",postgres,null
+function,extensions,uuid_generate_v4,null,() returns uuid,postgres,null
+function,extensions,uuid_generate_v5,null,"(namespace uuid, name text) returns uuid",postgres,null
+function,extensions,digest,null,"(text, text) returns bytea",postgres,null
+function,extensions,digest,null,"(bytea, text) returns bytea",postgres,null
+function,extensions,hmac,null,"(text, text, text) returns bytea",postgres,null
+function,extensions,hmac,null,"(bytea, bytea, text) returns bytea",postgres,null
+function,extensions,crypt,null,"(text, text) returns text",postgres,null
+function,extensions,encrypt_iv,null,"(bytea, bytea, bytea, text) returns bytea",postgres,null
+function,extensions,decrypt_iv,null,"(bytea, bytea, bytea, text) returns bytea",postgres,null
+function,public,get_my_company_id,null,() returns uuid,postgres,null
+function,public,set_agendamento_empresa_from_user,null,() returns trigger,postgres,null
+function,public,set_ag_participantes_codigo_empresa,null,() returns trigger,postgres,null
+function,extensions,gen_random_bytes,null,(integer) returns bytea,postgres,null
+function,public,colaboradores_enforce_codigo_empresa,null,() returns trigger,postgres,null
+function,extensions,pgp_pub_decrypt,null,"(bytea, bytea, text) returns text",postgres,null
+function,extensions,pgp_pub_decrypt_bytea,null,"(bytea, bytea, text) returns bytea",postgres,null
+function,extensions,pgp_pub_decrypt,null,"(bytea, bytea, text, text) returns text",postgres,null
+function,extensions,pgp_pub_decrypt_bytea,null,"(bytea, bytea, text, text) returns bytea",postgres,null
+function,extensions,pgp_key_id,null,(bytea) returns text,postgres,null
+function,extensions,armor,null,(bytea) returns text,postgres,null
+function,extensions,armor,null,"(bytea, text[], text[]) returns text",postgres,null
+function,extensions,dearmor,null,(text) returns bytea,postgres,null
+function,extensions,pgp_armor_headers,null,"(text, OUT key text, OUT value text) returns SETOF record",postgres,null
+function,public,clientes_set_codigo_fn,null,() returns trigger,postgres,null
+function,storage,get_level,null,(name text) returns integer,supabase_storage_admin,null
+function,extensions,pgrst_ddl_watch,null,() returns event_trigger,supabase_admin,null
+function,storage,get_prefix,null,(name text) returns text,supabase_storage_admin,null
+function,storage,get_prefixes,null,(name text) returns text[],supabase_storage_admin,null
+function,storage,add_prefixes,null,"(_bucket_id text, _name text) returns void",supabase_storage_admin,null
+function,storage,delete_prefix,null,"(_bucket_id text, _name text) returns boolean",supabase_storage_admin,null
+function,storage,prefixes_insert_trigger,null,() returns trigger,supabase_storage_admin,null
+function,storage,objects_insert_prefix_trigger,null,() returns trigger,supabase_storage_admin,null
+function,storage,delete_prefix_hierarchy_trigger,null,() returns trigger,supabase_storage_admin,null
+function,storage,search_v2,null,"(prefix text, bucket_name text, limits integer, levels integer, start_after text) returns TABLE(key text, name text, id uuid, updated_at timestamp with time zone, created_at timestamp with time zone, metadata jsonb)",supabase_storage_admin,null
+function,public,set_company_code_default,null,() returns trigger,postgres,null
+function,extensions,grant_pg_graphql_access,null,() returns event_trigger,supabase_admin,Grants access to pg_graphql
+function,storage,search_v1_optimised,null,"(prefix text, bucketname text, limits integer, levels integer, offsets integer, search text, sortcolumn text, sortorder text) returns TABLE(name text, id uuid, updated_at timestamp with time zone, created_at timestamp with time zone, last_accessed_at timestamp with time zone, metadata jsonb)",supabase_storage_admin,null
+function,storage,search_legacy_v1,null,"(prefix text, bucketname text, limits integer, levels integer, offsets integer, search text, sortcolumn text, sortorder text) returns TABLE(name text, id uuid, updated_at timestamp with time zone, created_at timestamp with time zone, last_accessed_at timestamp with time zone, metadata jsonb)",supabase_storage_admin,null
+function,graphql,get_schema_version,null,() returns integer,supabase_admin,null
+function,graphql,comment_directive,null,(comment_ text) returns jsonb,supabase_admin,null
+function,graphql,_internal_resolve,null,"(query text, variables jsonb, ""operationName"" text, extensions jsonb) returns jsonb",supabase_admin,null
+function,graphql,resolve,null,"(query text, variables jsonb, ""operationName"" text, extensions jsonb) returns jsonb",supabase_admin,null
+function,storage,search,null,"(prefix text, bucketname text, limits integer, levels integer, offsets integer, search text, sortcolumn text, sortorder text) returns TABLE(name text, id uuid, updated_at timestamp with time zone, created_at timestamp with time zone, last_accessed_at timestamp with time zone, metadata jsonb)",supabase_storage_admin,null
+function,storage,get_size_by_bucket,null,"() returns TABLE(size bigint, bucket_id text)",supabase_storage_admin,null
+function,storage,objects_update_prefix_trigger,null,() returns trigger,supabase_storage_admin,null
+function,storage,enforce_bucket_name_length,null,() returns trigger,supabase_storage_admin,null
+function,vault,_crypto_aead_det_encrypt,null,"(message bytea, additional bytea, key_id bigint, context bytea, nonce bytea) returns bytea",supabase_admin,null
+function,public,gen_codigo_produto,null,() returns trigger,postgres,null
+function,public,normalize_codigo_produto,null,() returns trigger,postgres,null
+function,vault,_crypto_aead_det_noncegen,null,() returns bytea,supabase_admin,null
+function,public,fn_mov_saldo_apply,null,() returns trigger,postgres,null
+function,storage,can_insert_object,null,"(bucketid text, name text, owner uuid, metadata jsonb) returns void",supabase_storage_admin,null
+function,storage,list_objects_with_delimiter,null,"(bucket_id text, prefix_param text, delimiter_param text, max_keys integer, start_after text, next_token text) returns TABLE(name text, id uuid, metadata jsonb, updated_at timestamp with time zone)",supabase_storage_admin,null
+function,storage,list_multipart_uploads_with_delimiter,null,"(bucket_id text, prefix_param text, delimiter_param text, max_keys integer, next_key_token text, next_upload_token text) returns TABLE(key text, id text, created_at timestamp with time zone)",supabase_storage_admin,null
+function,storage,operation,null,() returns text,supabase_storage_admin,null
+function,vault,create_secret,null,"(new_secret text, new_name text, new_description text, new_key_id uuid) returns uuid",supabase_admin,null
+function,vault,update_secret,null,"(secret_id uuid, new_secret text, new_name text, new_description text, new_key_id uuid) returns void",supabase_admin,null
+function,vault,_crypto_aead_det_decrypt,null,"(message bytea, additional bytea, key_id bigint, context bytea, nonce bytea) returns bytea",supabase_admin,null
+function,extensions,gen_random_uuid,null,() returns uuid,postgres,null
+function,extensions,pgp_sym_encrypt,null,"(text, text) returns bytea",postgres,null
+function,extensions,pgp_sym_encrypt_bytea,null,"(bytea, text) returns bytea",postgres,null
+function,extensions,pgp_sym_encrypt,null,"(text, text, text) returns bytea",postgres,null
+function,extensions,pgp_sym_encrypt_bytea,null,"(bytea, text, text) returns bytea",postgres,null
+function,extensions,pgp_sym_decrypt,null,"(bytea, text) returns text",postgres,null
+function,extensions,pgp_sym_decrypt_bytea,null,"(bytea, text) returns bytea",postgres,null
+function,extensions,pgp_sym_decrypt,null,"(bytea, text, text) returns text",postgres,null
+function,extensions,pgp_sym_decrypt_bytea,null,"(bytea, text, text) returns bytea",postgres,null
+function,extensions,pgp_pub_encrypt,null,"(text, bytea) returns bytea",postgres,null
+function,extensions,pgp_pub_encrypt_bytea,null,"(bytea, bytea) returns bytea",postgres,null
+function,extensions,pgp_pub_encrypt,null,"(text, bytea, text) returns bytea",postgres,null
+function,extensions,pgp_pub_encrypt_bytea,null,"(bytea, bytea, text) returns bytea",postgres,null
+function,extensions,pgp_pub_decrypt,null,"(bytea, bytea) returns text",postgres,null
+function,extensions,pgp_pub_decrypt_bytea,null,"(bytea, bytea) returns bytea",postgres,null
+function,extensions,pg_stat_statements,null,"(showtext boolean, OUT userid oid, OUT dbid oid, OUT toplevel boolean, OUT queryid bigint, OUT query text, OUT plans bigint, OUT total_plan_time double precision, OUT min_plan_time double precision, OUT max_plan_time double precision, OUT mean_plan_time double precision, OUT stddev_plan_time double precision, OUT calls bigint, OUT total_exec_time double precision, OUT min_exec_time double precision, OUT max_exec_time double precision, OUT mean_exec_time double precision, OUT stddev_exec_time double precision, OUT rows bigint, OUT shared_blks_hit bigint, OUT shared_blks_read bigint, OUT shared_blks_dirtied bigint, OUT shared_blks_written bigint, OUT local_blks_hit bigint, OUT local_blks_read bigint, OUT local_blks_dirtied bigint, OUT local_blks_written bigint, OUT temp_blks_read bigint, OUT temp_blks_written bigint, OUT shared_blk_read_time double precision, OUT shared_blk_write_time double precision, OUT local_blk_read_time double precision, OUT local_blk_write_time double precision, OUT temp_blk_read_time double precision, OUT temp_blk_write_time double precision, OUT wal_records bigint, OUT wal_fpi bigint, OUT wal_bytes numeric, OUT jit_functions bigint, OUT jit_generation_time double precision, OUT jit_inlining_count bigint, OUT jit_inlining_time double precision, OUT jit_optimization_count bigint, OUT jit_optimization_time double precision, OUT jit_emission_count bigint, OUT jit_emission_time double precision, OUT jit_deform_count bigint, OUT jit_deform_time double precision, OUT stats_since timestamp with time zone, OUT minmax_stats_since timestamp with time zone) returns SETOF record",postgres,null
+function,extensions,pgrst_drop_watch,null,() returns event_trigger,supabase_admin,null
+function,extensions,set_graphql_placeholder,null,() returns event_trigger,supabase_admin,Reintroduces placeholder function for graphql_public.graphql
+function,extensions,grant_pg_net_access,null,() returns event_trigger,supabase_admin,Grants access to pg_net
+function,public,current_empresa_id,null,() returns uuid,postgres,null
+function,public,produtos_set_company_code,null,() returns trigger,postgres,null
+function,graphql_public,graphql,null,"(""operationName"" text, query text, variables jsonb, extensions jsonb) returns jsonb",supabase_admin,null
+function,graphql,exception,null,(message text) returns text,supabase_admin,null
+function,graphql,increment_schema_version,null,() returns event_trigger,supabase_admin,null
+function,public,set_empresa_from_user,null,() returns trigger,postgres,null
+function,extensions,grant_pg_cron_access,null,() returns event_trigger,supabase_admin,Grants access to pg_cron
+function,auth,jwt,null,() returns jsonb,supabase_auth_admin,null
+function,storage,filename,null,(name text) returns text,supabase_storage_admin,null
+function,storage,foldername,null,(name text) returns text[],supabase_storage_admin,null
+function,storage,extension,null,(name text) returns text,supabase_storage_admin,null
+function,storage,update_updated_at_column,null,() returns trigger,supabase_storage_admin,null
+function,realtime,quote_wal2json,null,(entity regclass) returns text,supabase_admin,null
+function,public,current_codigo_empresa,null,() returns text,postgres,null
+function,public,_ensure_policy,null,"(tbl regclass, pol_name text, cmd text) returns void",postgres,null
+function,public,baixar_estoque_por_comanda,null,(p_comanda_id uuid) returns void,postgres,null
+function,realtime,cast,null,"(val text, type_ regtype) returns jsonb",supabase_admin,null
+function,realtime,list_changes,null,"(publication name, slot_name name, max_changes integer, max_record_bytes integer) returns SETOF realtime.wal_rls",supabase_admin,null
+function,realtime,check_equality_op,null,"(op realtime.equality_op, type_ regtype, val_1 text, val_2 text) returns boolean",supabase_admin,null
+function,realtime,to_regrole,null,(role_name text) returns regrole,supabase_admin,null
+function,realtime,subscription_check_filters,null,() returns trigger,supabase_admin,null
+function,public,set_timestamp,null,() returns trigger,postgres,null
+function,realtime,apply_rls,null,"(wal jsonb, max_record_bytes integer) returns SETOF realtime.wal_rls",supabase_admin,null
+function,public,set_timestamp_updated_at,null,() returns trigger,postgres,null
+function,public,trg_comandas_baixar_estoque,null,() returns trigger,postgres,null
+function,realtime,build_prepared_statement_sql,null,"(prepared_statement_name text, entity regclass, columns realtime.wal_column[]) returns text",supabase_admin,null
+function,realtime,broadcast_changes,null,"(topic_name text, event_name text, operation text, table_name text, table_schema text, new record, old record, level text) returns void",supabase_admin,null
+function,realtime,send,null,"(payload jsonb, event text, topic text, private boolean) returns void",supabase_admin,null
+function,realtime,is_visible_through_filters,null,"(columns realtime.wal_column[], filters realtime.user_defined_filter[]) returns boolean",supabase_admin,null
+function,realtime,topic,null,() returns text,supabase_realtime_admin,null
+function,public,get_my_company_code,null,() returns text,postgres,null
+function,public,set_empresa_produto_categorias,null,() returns trigger,postgres,null
+function,public,touch_updated_at,null,() returns trigger,postgres,null
+sequence,graphql,seq_schema_version,null,"increment 1, min 1, max 2147483647",supabase_admin,null
+sequence,auth,refresh_tokens_id_seq,null,"increment 1, min 1, max 9223372036854775807",supabase_auth_admin,null
+sequence,realtime,subscription_id_seq,null,"increment 1, min 1, max 9223372036854775807",supabase_admin,null
+sequence,public,caixa_resumos_id_seq,null,"increment 1, min 1, max 9223372036854775807",postgres,null
+sequence,public,caixa_movimentacoes_id_seq,null,"increment 1, min 1, max 9223372036854775807",postgres,null
+type,extensions,pg_stat_statements_info,null,pg_stat_statements_info,null,null
+type,extensions,pg_stat_statements,null,pg_stat_statements,null,null
+type,auth,users,null,auth.users,null,null
+type,auth,refresh_tokens,null,auth.refresh_tokens,null,null
+type,auth,audit_log_entries,null,auth.audit_log_entries,null,null
+type,auth,instances,null,auth.instances,null,null
+type,auth,schema_migrations,null,auth.schema_migrations,null,null
+type,storage,objects,null,storage.objects,null,null
+type,storage,buckets,null,storage.buckets,null,null
+type,storage,migrations,null,storage.migrations,null,null
+type,vault,secrets,null,vault.secrets,null,null
+type,vault,decrypted_secrets,null,vault.decrypted_secrets,null,null
+type,public,estoque_baixa_log,null,estoque_baixa_log,null,null
+type,auth,identities,null,auth.identities,null,null
+type,auth,sessions,null,auth.sessions,null,null
+type,auth,factor_type,null,auth.factor_type,null,null
+type,auth,factor_status,null,auth.factor_status,null,null
+type,auth,aal_level,null,auth.aal_level,null,null
+type,auth,mfa_factors,null,auth.mfa_factors,null,null
+type,auth,mfa_challenges,null,auth.mfa_challenges,null,null
+type,auth,mfa_amr_claims,null,auth.mfa_amr_claims,null,null
+type,auth,sso_providers,null,auth.sso_providers,null,null
+type,auth,sso_domains,null,auth.sso_domains,null,null
+type,auth,saml_providers,null,auth.saml_providers,null,null
+type,auth,saml_relay_states,null,auth.saml_relay_states,null,null
+type,auth,code_challenge_method,null,auth.code_challenge_method,null,null
+type,auth,flow_state,null,auth.flow_state,null,null
+type,auth,one_time_token_type,null,auth.one_time_token_type,null,null
+type,auth,one_time_tokens,null,auth.one_time_tokens,null,null
+type,realtime,schema_migrations,null,realtime.schema_migrations,null,null
+type,storage,s3_multipart_uploads,null,storage.s3_multipart_uploads,null,null
+type,storage,s3_multipart_uploads_parts,null,storage.s3_multipart_uploads_parts,null,null
+type,realtime,action,null,realtime.action,null,null
+type,realtime,wal_rls,null,realtime.wal_rls,null,null
+type,realtime,wal_column,null,realtime.wal_column,null,null
+type,public,empresa_counters,null,empresa_counters,null,null
+type,realtime,equality_op,null,realtime.equality_op,null,null
+type,realtime,user_defined_filter,null,realtime.user_defined_filter,null,null
+type,realtime,subscription,null,realtime.subscription,null,null
+type,storage,prefixes,null,storage.prefixes,null,null
+type,storage,buckettype,null,storage.buckettype,null,null
+type,storage,buckets_analytics,null,storage.buckets_analytics,null,null
+type,realtime,messages_2025_09_24,null,realtime.messages_2025_09_24,null,null
+type,realtime,messages_2025_09_27,null,realtime.messages_2025_09_27,null,null
+type,public,caixa_sessoes,null,caixa_sessoes,null,null
+type,public,payment_method,null,payment_method,null,null
+type,public,mesas,null,mesas,null,null
+type,supabase_migrations,schema_migrations,null,supabase_migrations.schema_migrations,null,null
+type,supabase_migrations,seed_files,null,supabase_migrations.seed_files,null,null
+type,public,finalizadoras,null,finalizadoras,null,null
+type,auth,oauth_registration_type,null,auth.oauth_registration_type,null,null
+type,auth,oauth_clients,null,auth.oauth_clients,null,null
+type,public,agenda_settings,null,agenda_settings,null,null
+type,public,movimentos_saldo,null,movimentos_saldo,null,null
+type,realtime,messages_2025_09_22,null,realtime.messages_2025_09_22,null,null
+type,realtime,messages,null,realtime.messages,null,null
+type,public,payment_status,null,payment_status,null,null
+type,public,produto_categorias,null,produto_categorias,null,null
+type,public,empresas,null,empresas,null,null
+type,public,quadras,null,quadras,null,null
+type,public,clientes,null,clientes,null,null
+type,public,produtos,null,produtos,null,null
+type,public,itens_venda,null,itens_venda,null,null
+type,public,vendas,null,vendas,null,null
+type,public,usuarios,null,usuarios,null,null
+type,public,colaboradores,null,colaboradores,null,null
+type,public,agendamentos,null,agendamentos,null,null
+type,realtime,messages_2025_09_25,null,realtime.messages_2025_09_25,null,null
+type,realtime,messages_2025_09_28,null,realtime.messages_2025_09_28,null,null
+type,public,mesa_status,null,mesa_status,null,null
+type,public,comanda_status,null,comanda_status,null,null
+type,public,caixa_mov_tipo,null,caixa_mov_tipo,null,null
+type,public,comandas,null,comandas,null,null
+type,public,comanda_itens,null,comanda_itens,null,null
+type,public,pagamentos,null,pagamentos,null,null
+type,public,caixa_movimentos,null,caixa_movimentos,null,null
+type,public,v_agendamento_participantes,null,v_agendamento_participantes,null,null
+type,public,agendamento_participantes,null,agendamento_participantes,null,null
+type,public,comanda_clientes,null,comanda_clientes,null,null
+type,realtime,messages_2025_09_23,null,realtime.messages_2025_09_23,null,null
+type,realtime,messages_2025_09_26,null,realtime.messages_2025_09_26,null,null
+type,public,caixa_resumos,null,caixa_resumos,null,null
+type,public,caixa_movimentacoes,null,caixa_movimentacoes,null,null
+extension,pg_catalog,plpgsql,null,1.0,null,PL/pgSQL procedural language
+extension,extensions,pg_stat_statements,null,1.11,null,track planning and execution statistics of all SQL statements executed
+extension,extensions,uuid-ossp,null,1.1,null,generate universally unique identifiers (UUIDs)
+extension,extensions,pgcrypto,null,1.3,null,cryptographic functions
+extension,vault,supabase_vault,null,0.3.1,null,Supabase Vault Extension
+extension,graphql,pg_graphql,null,1.5.11,null,pg_graphql: GraphQL support
+extension,public,pg_trgm,null,1.6,null,text similarity measurement and index searching based on trigrams
+grant,public,idx_produtos_categoria,null,null,postgres,null
+grant,auth,sso_providers_pkey,null,null,supabase_auth_admin,null
+grant,auth,sso_providers_resource_id_idx,null,null,supabase_auth_admin,null
+grant,auth,sso_domains_pkey,null,null,supabase_auth_admin,null
+grant,auth,sso_domains_sso_provider_id_idx,null,null,supabase_auth_admin,null
+grant,auth,sso_domains_domain_idx,null,null,supabase_auth_admin,null
+grant,extensions,pg_stat_statements_info,null,"postgres=a*r*w*d*D*x*t*m*/postgres,=r/postgres,dashboard_user=arwdDxtm/postgres",postgres,null
+grant,extensions,pg_stat_statements,null,"postgres=a*r*w*d*D*x*t*m*/postgres,=r/postgres,dashboard_user=arwdDxtm/postgres",postgres,null
+grant,graphql,seq_schema_version,null,"supabase_admin=rwU/supabase_admin,postgres=rwU/supabase_admin,anon=rwU/supabase_admin,authenticated=rwU/supabase_admin,service_role=rwU/supabase_admin",supabase_admin,null
+grant,auth,amr_id_pk,null,null,supabase_auth_admin,null
+grant,auth,user_id_created_at_idx,null,null,supabase_auth_admin,null
+grant,auth,factor_id_created_at_idx,null,null,supabase_auth_admin,null
+grant,auth,sessions_user_id_idx,null,null,supabase_auth_admin,null
+grant,auth,refresh_tokens_session_id_revoked_idx,null,null,supabase_auth_admin,null
+grant,auth,sso_domains,null,"postgres=ar*wdDxtm/supabase_auth_admin,supabase_auth_admin=arwdDxtm/supabase_auth_admin,dashboard_user=arwdDxtm/supabase_auth_admin",supabase_auth_admin,null
+grant,auth,saml_providers_pkey,null,null,supabase_auth_admin,null
+grant,auth,saml_providers_entity_id_key,null,null,supabase_auth_admin,null
+grant,supabase_migrations,schema_migrations_pkey,null,null,postgres,null
+grant,auth,saml_providers_sso_provider_id_idx,null,null,supabase_auth_admin,null
+grant,auth,saml_providers,null,"postgres=ar*wdDxtm/supabase_auth_admin,supabase_auth_admin=arwdDxtm/supabase_auth_admin,dashboard_user=arwdDxtm/supabase_auth_admin",supabase_auth_admin,null
+grant,auth,sso_providers,null,"postgres=ar*wdDxtm/supabase_auth_admin,supabase_auth_admin=arwdDxtm/supabase_auth_admin,dashboard_user=arwdDxtm/supabase_auth_admin",supabase_auth_admin,null
+grant,supabase_migrations,schema_migrations,null,null,postgres,null
+grant,supabase_migrations,seed_files,null,null,postgres,null
+grant,supabase_migrations,seed_files_pkey,null,null,postgres,null
+grant,auth,schema_migrations,null,supabase_auth_admin=arwdDxtm/supabase_auth_admin,supabase_auth_admin,null
+grant,realtime,ix_realtime_subscription_entity,null,null,supabase_admin,null
+grant,public,agendamento_participantes_pkey,null,null,postgres,null
+grant,realtime,messages_pkey,null,null,supabase_realtime_admin,null
+grant,auth,refresh_tokens_pkey,null,null,supabase_auth_admin,null
+grant,auth,refresh_tokens_instance_id_idx,null,null,supabase_auth_admin,null
+grant,auth,refresh_tokens_instance_id_user_id_idx,null,null,supabase_auth_admin,null
+grant,auth,users_pkey,null,null,supabase_auth_admin,null
+grant,auth,instances,null,"supabase_auth_admin=arwdDxtm/supabase_auth_admin,dashboard_user=arwdDxtm/supabase_auth_admin,postgres=ar*wdDxtm/supabase_auth_admin",supabase_auth_admin,null
+grant,public,produto_categorias_pkey,null,null,postgres,null
+grant,public,companies_pkey,null,null,postgres,null
+grant,auth,refresh_tokens_token_unique,null,null,supabase_auth_admin,null
+grant,public,companies_company_code_key,null,null,postgres,null
+grant,public,ux_produto_categorias_empresa_nome,null,null,postgres,null
+grant,auth,audit_log_entries_pkey,null,null,supabase_auth_admin,null
+grant,auth,audit_logs_instance_id_idx,null,null,supabase_auth_admin,null
+grant,auth,instances_pkey,null,null,supabase_auth_admin,null
+grant,public,produtos,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
+grant,auth,schema_migrations_pkey,null,null,supabase_auth_admin,null
+grant,auth,sessions_pkey,null,null,supabase_auth_admin,null
+grant,public,idx_produtos_codigo_barras,null,null,postgres,null
+grant,auth,users_instance_id_idx,null,null,supabase_auth_admin,null
+grant,auth,refresh_tokens_id_seq,null,"supabase_auth_admin=rwU/supabase_auth_admin,dashboard_user=rwU/supabase_auth_admin,postgres=rwU/supabase_auth_admin",supabase_auth_admin,null
+grant,public,idx_produtos_ncm,null,null,postgres,null
+grant,public,idx_produtos_marca,null,null,postgres,null
+grant,public,idx_produtos_grupo,null,null,postgres,null
+grant,auth,confirmation_token_idx,null,null,supabase_auth_admin,null
+grant,auth,refresh_tokens_parent_idx,null,null,supabase_auth_admin,null
+grant,auth,recovery_token_idx,null,null,supabase_auth_admin,null
+grant,auth,users_instance_id_email_idx,null,null,supabase_auth_admin,null
+grant,auth,email_change_token_new_idx,null,null,supabase_auth_admin,null
+grant,auth,reauthentication_token_idx,null,null,supabase_auth_admin,null
+grant,auth,email_change_token_current_idx,null,null,supabase_auth_admin,null
+grant,auth,users,null,"supabase_auth_admin=arwdDxtm/supabase_auth_admin,dashboard_user=arwdDxtm/supabase_auth_admin,postgres=ar*wdDxtm/supabase_auth_admin",supabase_auth_admin,null
+grant,auth,audit_log_entries,null,"supabase_auth_admin=arwdDxtm/supabase_auth_admin,dashboard_user=arwdDxtm/supabase_auth_admin,postgres=ar*wdDxtm/supabase_auth_admin",supabase_auth_admin,null
+grant,public,produto_categorias,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
+grant,public,users_pkey,null,null,postgres,null
+grant,public,usuarios,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
+grant,storage,migrations,null,supabase_storage_admin=arwdDxtm/supabase_storage_admin,supabase_storage_admin,null
+grant,auth,mfa_factors_pkey,null,null,supabase_auth_admin,null
+grant,storage,buckets,null,"supabase_storage_admin=arwdDxtm/supabase_storage_admin,anon=arwdDxtm/supabase_storage_admin,authenticated=arwdDxtm/supabase_storage_admin,service_role=arwdDxtm/supabase_storage_admin,postgres=a*r*w*d*D*x*t*m*/supabase_storage_admin",supabase_storage_admin,null
+grant,storage,objects,null,"supabase_storage_admin=arwdDxtm/supabase_storage_admin,anon=arwdDxtm/supabase_storage_admin,authenticated=arwdDxtm/supabase_storage_admin,service_role=arwdDxtm/supabase_storage_admin,postgres=a*r*w*d*D*x*t*m*/supabase_storage_admin",supabase_storage_admin,null
+grant,storage,migrations_pkey,null,null,supabase_storage_admin,null
+grant,storage,migrations_name_key,null,null,supabase_storage_admin,null
+grant,auth,mfa_factors_user_friendly_name_unique,null,null,supabase_auth_admin,null
+grant,storage,objects_pkey,null,null,supabase_storage_admin,null
+grant,auth,mfa_challenges_pkey,null,null,supabase_auth_admin,null
+grant,auth,refresh_tokens,null,"supabase_auth_admin=arwdDxtm/supabase_auth_admin,dashboard_user=arwdDxtm/supabase_auth_admin,postgres=ar*wdDxtm/supabase_auth_admin",supabase_auth_admin,null
+grant,storage,bucketid_objname,null,null,supabase_storage_admin,null
+grant,storage,name_prefix_search,null,null,supabase_storage_admin,null
+grant,public,ux_agendamentos_empresa_codigo,null,null,postgres,null
+grant,vault,secrets_pkey,null,null,supabase_admin,null
+grant,vault,secrets_name_idx,null,null,supabase_admin,null
+grant,public,idx_caixa_sessoes_empresa,null,null,postgres,null
+grant,auth,mfa_amr_claims_session_id_authentication_method_pkey,null,null,supabase_auth_admin,null
+grant,vault,secrets,null,"supabase_admin=arwdDxtm/supabase_admin,postgres=r*d*D*x*/supabase_admin,service_role=rd/supabase_admin",supabase_admin,null
+grant,vault,decrypted_secrets,null,"supabase_admin=arwdDxtm/supabase_admin,postgres=r*d*D*x*/supabase_admin,service_role=rd/supabase_admin",supabase_admin,null
+grant,auth,saml_relay_states_pkey,null,null,supabase_auth_admin,null
+grant,public,customers_pkey,null,null,postgres,null
+grant,auth,saml_relay_states_sso_provider_id_idx,null,null,supabase_auth_admin,null
+grant,auth,saml_relay_states_for_email_idx,null,null,supabase_auth_admin,null
+grant,public,idx_comandas_mesa_status,null,null,postgres,null
+grant,public,products_pkey,null,null,postgres,null
+grant,realtime,messages_2025_09_24_pkey,null,null,supabase_admin,null
+grant,auth,users_email_partial_key,null,null,supabase_auth_admin,null
+grant,auth,mfa_factors_user_id_idx,null,null,supabase_auth_admin,null
+grant,public,sales_pkey,null,null,postgres,null
+grant,auth,users_phone_key,null,null,supabase_auth_admin,null
+grant,auth,flow_state_pkey,null,null,supabase_auth_admin,null
+grant,auth,idx_auth_code,null,null,supabase_auth_admin,null
+grant,public,bookings_pkey,null,null,postgres,null
+grant,auth,idx_user_id_auth_method,null,null,supabase_auth_admin,null
+grant,auth,refresh_tokens_updated_at_idx,null,null,supabase_auth_admin,null
+grant,auth,flow_state_created_at_idx,null,null,supabase_auth_admin,null
+grant,auth,saml_relay_states_created_at_idx,null,null,supabase_auth_admin,null
+grant,auth,sessions_not_after_idx,null,null,supabase_auth_admin,null
+grant,auth,mfa_challenge_created_at_idx,null,null,supabase_auth_admin,null
+grant,auth,identities_user_id_idx,null,null,supabase_auth_admin,null
+grant,auth,identities_email_idx,null,null,supabase_auth_admin,null
+grant,auth,identities_pkey,null,null,supabase_auth_admin,null
+grant,auth,saml_relay_states,null,"postgres=ar*wdDxtm/supabase_auth_admin,supabase_auth_admin=arwdDxtm/supabase_auth_admin,dashboard_user=arwdDxtm/supabase_auth_admin",supabase_auth_admin,null
+grant,auth,flow_state,null,"postgres=ar*wdDxtm/supabase_auth_admin,supabase_auth_admin=arwdDxtm/supabase_auth_admin,dashboard_user=arwdDxtm/supabase_auth_admin",supabase_auth_admin,null
+grant,auth,identities,null,"postgres=ar*wdDxtm/supabase_auth_admin,supabase_auth_admin=arwdDxtm/supabase_auth_admin,dashboard_user=arwdDxtm/supabase_auth_admin",supabase_auth_admin,null
+grant,auth,identities_provider_id_provider_unique,null,null,supabase_auth_admin,null
+grant,auth,users_is_anonymous_idx,null,null,supabase_auth_admin,null
+grant,public,idx_mesas_codigo_empresa,null,null,postgres,null
+grant,auth,one_time_tokens_pkey,null,null,supabase_auth_admin,null
+grant,auth,one_time_tokens_token_hash_hash_idx,null,null,supabase_auth_admin,null
+grant,auth,one_time_tokens_relates_to_hash_idx,null,null,supabase_auth_admin,null
+grant,auth,one_time_tokens_user_id_token_type_key,null,null,supabase_auth_admin,null
+grant,auth,sessions,null,"postgres=ar*wdDxtm/supabase_auth_admin,supabase_auth_admin=arwdDxtm/supabase_auth_admin,dashboard_user=arwdDxtm/supabase_auth_admin",supabase_auth_admin,null
+grant,public,uq_mesas_empresa_numero,null,null,postgres,null
+grant,auth,mfa_amr_claims,null,"postgres=ar*wdDxtm/supabase_auth_admin,supabase_auth_admin=arwdDxtm/supabase_auth_admin,dashboard_user=arwdDxtm/supabase_auth_admin",supabase_auth_admin,null
+grant,auth,one_time_tokens,null,"postgres=ar*wdDxtm/supabase_auth_admin,supabase_auth_admin=arwdDxtm/supabase_auth_admin,dashboard_user=arwdDxtm/supabase_auth_admin",supabase_auth_admin,null
+grant,public,sale_items_pkey,null,null,postgres,null
+grant,public,idx_comanda_itens_produto,null,null,postgres,null
+grant,auth,mfa_factors_last_challenged_at_key,null,null,supabase_auth_admin,null
+grant,auth,unique_phone_factor_per_user,null,null,supabase_auth_admin,null
+grant,auth,mfa_factors,null,"postgres=ar*wdDxtm/supabase_auth_admin,supabase_auth_admin=arwdDxtm/supabase_auth_admin,dashboard_user=arwdDxtm/supabase_auth_admin",supabase_auth_admin,null
+grant,auth,mfa_challenges,null,"postgres=ar*wdDxtm/supabase_auth_admin,supabase_auth_admin=arwdDxtm/supabase_auth_admin,dashboard_user=arwdDxtm/supabase_auth_admin",supabase_auth_admin,null
+grant,auth,sso_providers_resource_id_pattern_idx,null,null,supabase_auth_admin,null
+grant,realtime,schema_migrations_pkey,null,null,supabase_admin,null
+grant,storage,s3_multipart_uploads_pkey,null,null,supabase_storage_admin,null
+grant,public,uq_finalizadoras_empresa_nome,null,null,postgres,null
+grant,storage,buckets_pkey,null,null,supabase_storage_admin,null
+grant,storage,bname,null,null,supabase_storage_admin,null
+grant,storage,idx_objects_bucket_id_name,null,null,supabase_storage_admin,null
+grant,public,idx_comanda_clientes_empresa,null,null,postgres,null
+grant,public,vendas,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
+grant,storage,idx_multipart_uploads_list,null,null,supabase_storage_admin,null
+grant,public,courts_pkey,null,null,postgres,null
+grant,public,itens_venda,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
+grant,storage,s3_multipart_uploads_parts_pkey,null,null,supabase_storage_admin,null
+grant,realtime,wal_rls,null,null,supabase_admin,null
+grant,realtime,schema_migrations,null,"supabase_admin=arwdDxtm/supabase_admin,postgres=arwdDxtm/supabase_admin,dashboard_user=arwdDxtm/supabase_admin,anon=r/supabase_admin,authenticated=r/supabase_admin,service_role=r/supabase_admin,supabase_realtime_admin=arwdDxtm/supabase_admin",supabase_admin,null
+grant,realtime,subscription,null,"supabase_admin=arwdDxtm/supabase_admin,postgres=arwdDxtm/supabase_admin,dashboard_user=arwdDxtm/supabase_admin,anon=r/supabase_admin,authenticated=r/supabase_admin,service_role=r/supabase_admin,supabase_realtime_admin=arwdDxtm/supabase_admin",supabase_admin,null
+grant,public,idx_caixa_empresa,null,null,postgres,null
+grant,public,agendamento_participantes_agendamento_id_idx,null,null,postgres,null
+grant,public,v_agendamento_participantes,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
+grant,public,empresas,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
+grant,public,uq_caixa_aberto_por_empresa,null,null,postgres,null
+grant,storage,s3_multipart_uploads_parts,null,"supabase_storage_admin=arwdDxtm/supabase_storage_admin,service_role=arwdDxtm/supabase_storage_admin,authenticated=r/supabase_storage_admin,anon=r/supabase_storage_admin",supabase_storage_admin,null
+grant,storage,s3_multipart_uploads,null,"supabase_storage_admin=arwdDxtm/supabase_storage_admin,service_role=arwdDxtm/supabase_storage_admin,authenticated=r/supabase_storage_admin,anon=r/supabase_storage_admin",supabase_storage_admin,null
+grant,realtime,user_defined_filter,null,null,supabase_admin,null
+grant,public,idx_pagamentos_caixa,null,null,postgres,null
+grant,public,gin_trgm_clientes_nome,null,null,postgres,null
+grant,public,agendamento_participantes,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
+grant,public,gin_trgm_clientes_email,null,null,postgres,null
+grant,public,gin_trgm_clientes_telefone,null,null,postgres,null
+grant,realtime,messages_2025_09_24,null,"supabase_admin=arwdDxtm/supabase_admin,postgres=arwdDxtm/supabase_admin,dashboard_user=arwdDxtm/supabase_admin",supabase_admin,null
+grant,realtime,wal_column,null,null,supabase_admin,null
+grant,public,idx_colaboradores_codigo_empresa,null,null,postgres,null
+grant,public,quadras,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
+grant,realtime,pk_subscription,null,null,supabase_admin,null
+grant,realtime,subscription_subscription_id_entity_filters_key,null,null,supabase_admin,null
+grant,realtime,subscription_id_seq,null,"supabase_admin=rwU/supabase_admin,postgres=rwU/supabase_admin,dashboard_user=rwU/supabase_admin,anon=U/supabase_admin,authenticated=U/supabase_admin,service_role=U/supabase_admin,supabase_realtime_admin=rwU/supabase_admin",supabase_admin,null
+grant,public,estoque_baixa_log,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
+grant,storage,idx_prefixes_lower_name,null,null,supabase_storage_admin,null
+grant,public,estoque_baixa_log_pkey,null,null,postgres,null
+grant,realtime,messages,null,"supabase_realtime_admin=arwdDxtm/supabase_realtime_admin,postgres=arwdDxtm/supabase_realtime_admin,dashboard_user=arwdDxtm/supabase_realtime_admin,anon=arw/supabase_realtime_admin,authenticated=arw/supabase_realtime_admin,service_role=arw/supabase_realtime_admin",supabase_realtime_admin,null
+grant,public,user_profiles_pkey,null,null,postgres,null
+grant,public,agendamentos,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
+grant,public,empresa_counters,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
+grant,public,idx_comanda_clientes_cliente,null,null,postgres,null
+grant,public,comanda_clientes_comanda_idx,null,null,postgres,null
+grant,public,empresas_codigo_empresa_unique,null,null,postgres,null
+grant,public,idx_colaboradores_ativo,null,null,postgres,null
+grant,storage,buckets_analytics_pkey,null,null,supabase_storage_admin,null
+grant,public,empresa_counters_pkey,null,null,postgres,null
+grant,public,usuarios_codigo_empresa_idx,null,null,postgres,null
+grant,public,quadras_codigo_empresa_idx,null,null,postgres,null
+grant,storage,prefixes_pkey,null,null,supabase_storage_admin,null
+grant,storage,buckets_analytics,null,"supabase_storage_admin=arwdDxtm/supabase_storage_admin,service_role=arwdDxtm/supabase_storage_admin,authenticated=arwdDxtm/supabase_storage_admin,anon=arwdDxtm/supabase_storage_admin",supabase_storage_admin,null
+grant,storage,prefixes,null,"supabase_storage_admin=arwdDxtm/supabase_storage_admin,service_role=arwdDxtm/supabase_storage_admin,authenticated=arwdDxtm/supabase_storage_admin,anon=arwdDxtm/supabase_storage_admin",supabase_storage_admin,null
+grant,storage,idx_name_bucket_level_unique,null,null,supabase_storage_admin,null
+grant,storage,objects_bucket_id_level_idx,null,null,supabase_storage_admin,null
+grant,storage,idx_objects_lower_name,null,null,supabase_storage_admin,null
+grant,public,colaboradores,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
+grant,public,companies_code_idx,null,null,postgres,null
+grant,public,clientes_codigo_empresa_idx,null,null,postgres,null
+grant,public,colaboradores_codigo_empresa_idx,null,null,postgres,null
+grant,public,agendamentos_codigo_empresa_idx,null,null,postgres,null
+grant,public,idx_agp_codigo_empresa,null,null,postgres,null
+grant,public,idx_comanda_clientes_comanda,null,null,postgres,null
+grant,realtime,messages_2025_09_28_pkey,null,null,supabase_admin,null
+grant,public,produtos_codigo_empresa_nome_unique,null,null,postgres,null
+grant,public,idx_produtos_codigo_empresa,null,null,postgres,null
+grant,realtime,messages_2025_09_28_inserted_at_topic_idx,null,null,supabase_admin,null
+grant,public,ux_produtos_empresa_codigo_produto,null,null,postgres,null
+grant,realtime,messages_2025_09_28,null,"supabase_admin=arwdDxtm/supabase_admin,postgres=arwdDxtm/supabase_admin,dashboard_user=arwdDxtm/supabase_admin",supabase_admin,null
+grant,public,movimentos_saldo_pkey,null,null,postgres,null
+grant,public,idx_mov_saldo_empresa,null,null,postgres,null
+grant,public,idx_mov_saldo_cliente,null,null,postgres,null
+grant,public,idx_mov_saldo_agendamento,null,null,postgres,null
+grant,public,movimentos_saldo,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
+grant,public,idx_pagamentos_comanda_id,null,null,postgres,null
+grant,public,idx_pagamentos_comanda,null,null,postgres,null
+grant,realtime,messages_2025_09_25_pkey,null,null,supabase_admin,null
+grant,realtime,messages_2025_09_25,null,"supabase_admin=arwdDxtm/supabase_admin,postgres=arwdDxtm/supabase_admin,dashboard_user=arwdDxtm/supabase_admin",supabase_admin,null
+grant,realtime,messages_2025_09_22_pkey,null,null,supabase_admin,null
+grant,realtime,messages_2025_09_22,null,"supabase_admin=arwdDxtm/supabase_admin,postgres=arwdDxtm/supabase_admin,dashboard_user=arwdDxtm/supabase_admin",supabase_admin,null
+grant,realtime,messages_2025_09_26_pkey,null,null,supabase_admin,null
+grant,realtime,messages_2025_09_26,null,"supabase_admin=arwdDxtm/supabase_admin,postgres=arwdDxtm/supabase_admin,dashboard_user=arwdDxtm/supabase_admin",supabase_admin,null
+grant,public,finalizadoras_empresa_nome_unique,null,null,postgres,null
+grant,public,pagamentos,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
+grant,public,pagamentos_pkey,null,null,postgres,null
+grant,public,idx_pagamentos_empresa,null,null,postgres,null
+grant,public,mesas,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
+grant,public,comanda_itens,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
+grant,public,caixa_sessoes,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
+grant,public,caixa_sessoes_pkey,null,null,postgres,null
+grant,public,idx_caixa_sessoes_empresa_status,null,null,postgres,null
+grant,public,comanda_itens_pkey,null,null,postgres,null
+grant,public,idx_comanda_itens_comanda,null,null,postgres,null
+grant,public,idx_comanda_itens_empresa,null,null,postgres,null
+grant,public,mesas_pkey,null,null,postgres,null
+grant,public,mesas_codigo_empresa_numero_key,null,null,postgres,null
+grant,public,idx_clientes_empresa_nome,null,null,postgres,null
+grant,public,idx_clientes_empresa_aniversario,null,null,postgres,null
+grant,public,caixa_movimentos_pkey,null,null,postgres,null
+grant,public,caixa_movimentos,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
+grant,public,idx_caixa_movimentos_caixa,null,null,postgres,null
+grant,public,idx_caixa_movimentos_empresa,null,null,postgres,null
+grant,public,idx_clientes_empresa_telefone,null,null,postgres,null
+grant,public,uq_clientes_empresa_codigo,null,null,postgres,null
+grant,public,uq_clientes_empresa_cpf,null,null,postgres,null
+grant,public,uq_clientes_empresa_email_lower,null,null,postgres,null
+grant,public,comanda_clientes,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
+grant,public,comanda_clientes_pkey,null,null,postgres,null
+grant,public,finalizadoras_pkey,null,null,postgres,null
+grant,public,idx_finalizadoras_empresa,null,null,postgres,null
+grant,public,idx_finalizadoras_ativo,null,null,postgres,null
+grant,public,idx_finalizadoras_ordem,null,null,postgres,null
+grant,public,comanda_clientes_cliente_idx,null,null,postgres,null
+grant,public,comanda_clientes_empresa_idx,null,null,postgres,null
+grant,public,idx_pagamentos_finalizadora,null,null,postgres,null
+grant,public,idx_pagamentos_recebido_em,null,null,postgres,null
+grant,public,finalizadoras,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
+grant,auth,oauth_clients_pkey,null,null,supabase_auth_admin,null
+grant,auth,oauth_clients_client_id_key,null,null,supabase_auth_admin,null
+grant,auth,oauth_clients_client_id_idx,null,null,supabase_auth_admin,null
+grant,auth,oauth_clients_deleted_at_idx,null,null,supabase_auth_admin,null
+grant,realtime,messages_inserted_at_topic_index,null,null,supabase_realtime_admin,null
+grant,realtime,messages_2025_09_22_inserted_at_topic_idx,null,null,supabase_admin,null
+grant,realtime,messages_2025_09_23_inserted_at_topic_idx,null,null,supabase_admin,null
+grant,realtime,messages_2025_09_24_inserted_at_topic_idx,null,null,supabase_admin,null
+grant,realtime,messages_2025_09_25_inserted_at_topic_idx,null,null,supabase_admin,null
+grant,realtime,messages_2025_09_26_inserted_at_topic_idx,null,null,supabase_admin,null
+grant,public,agenda_settings_pkey,null,null,postgres,null
+grant,auth,oauth_clients,null,"postgres=arwdDxtm/supabase_auth_admin,supabase_auth_admin=arwdDxtm/supabase_auth_admin,dashboard_user=arwdDxtm/supabase_auth_admin",supabase_auth_admin,null
+grant,public,agenda_settings,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
+grant,public,idx_pagamentos_codigo_empresa,null,null,postgres,null
+grant,public,idx_comandas_aberto_em,null,null,postgres,null
+grant,public,idx_comandas_codigo_empresa,null,null,postgres,null
+grant,public,idx_comanda_itens_comanda_id,null,null,postgres,null
+grant,public,idx_comanda_itens_codigo_empresa,null,null,postgres,null
+grant,public,caixa_movimentacoes_pkey,null,null,postgres,null
+grant,public,idx_caixa_mov_empresa_sessao,null,null,postgres,null
+grant,public,caixa_resumos_id_seq,null,"postgres=rwU/postgres,anon=rwU/postgres,authenticated=rwU/postgres,service_role=rwU/postgres",postgres,null
+grant,public,caixa_resumos_pkey,null,null,postgres,null
+grant,public,idx_caixa_resumos_empresa_sessao,null,null,postgres,null
+grant,public,idx_caixa_resumos_periodo,null,null,postgres,null
+grant,public,caixa_movimentacoes_id_seq,null,"postgres=rwU/postgres,anon=rwU/postgres,authenticated=rwU/postgres,service_role=rwU/postgres",postgres,null
+grant,public,idx_caixa_mov_tipo,null,null,postgres,null
+grant,public,caixa_resumos,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
+grant,public,caixa_movimentacoes,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
+grant,public,clientes,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
+grant,public,comandas_pkey,null,null,postgres,null
+grant,realtime,messages_2025_09_23_pkey,null,null,supabase_admin,null
+grant,public,idx_comandas_mesa,null,null,postgres,null
+grant,realtime,messages_2025_09_23,null,"supabase_admin=arwdDxtm/supabase_admin,postgres=arwdDxtm/supabase_admin,dashboard_user=arwdDxtm/supabase_admin",supabase_admin,null
+grant,realtime,messages_2025_09_27_pkey,null,null,supabase_admin,null
+grant,realtime,messages_2025_09_27_inserted_at_topic_idx,null,null,supabase_admin,null
+grant,public,comandas,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
+grant,public,idx_mesas_nome,null,null,postgres,null
+grant,realtime,messages_2025_09_27,null,"supabase_admin=arwdDxtm/supabase_admin,postgres=arwdDxtm/supabase_admin,dashboard_user=arwdDxtm/supabase_admin",supabase_admin,null

@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
+import { useLocation } from 'react-router-dom';
 
 import { Helmet } from 'react-helmet';
 import { motion } from 'framer-motion';
@@ -1009,6 +1010,7 @@ function CategoryManagerModal({ open, onOpenChange, categories, onAddCategory, o
 function ProdutosPage() {
     const { toast } = useToast();
     const { userProfile, authReady } = useAuth();
+    const location = useLocation();
     const [products, setProducts] = useState(initialProducts);
     const [categories, setCategories] = useState(initialCategories);
 

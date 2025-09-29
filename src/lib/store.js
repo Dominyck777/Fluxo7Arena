@@ -9,6 +9,7 @@ function getCachedCompanyCode() {
       const obj = JSON.parse(cached)
       if (obj?.codigo_empresa) return obj.codigo_empresa
     }
+
     // 2) auth:company
     const comp = localStorage.getItem('auth:company')
     if (comp) {
@@ -1120,7 +1121,7 @@ function isEnumError(err) {
   return code === '22P02' || msg.includes('invalid input value for enum');
 }
 
-export async function registrarPagamento({ comandaId, finalizadoraId, metodo, valor, status = 'Pago', codigoEmpresa }) {
+export async function registrarPagamento({ comandaId, finalizadoraId, metodo, valor, status = 'Pago', codigoEmpresa, clienteId = null }) {
   const codigo = codigoEmpresa || getCachedCompanyCode()
   if (!codigo) throw new Error('Empresa não identificada (codigo_empresa ausente).')
   
@@ -1151,10 +1152,11 @@ export async function registrarPagamento({ comandaId, finalizadoraId, metodo, va
   
   const payload = {
     comanda_id: comandaId,
-    finalizadora_id: finalizadoraId,
+    finalizadora_id: finalizadoraId || null,
     metodo: metodoNormalizado,
     valor: Math.max(0, Number(valor) || 0),
     status: statusValido,
+    cliente_id: clienteId || null,
     recebido_em: new Date().toISOString(),
     codigo_empresa: codigo // Sempre inclui o código da empresa
   }
@@ -1175,7 +1177,43 @@ export async function registrarPagamento({ comandaId, finalizadoraId, metodo, va
       .select()
       .single()
     
-    if (error) throw error
+    if (error) {
+      const msg = `${error?.message || ''} ${error?.details || ''}`.toLowerCase()
+      const isUndefinedColumn = (error?.code === '42703') || msg.includes("column") && msg.includes("cliente_id")
+      if (isUndefinedColumn) {
+        // Retry sem cliente_id
+        const { cliente_id, ...withoutCliente } = payload
+        const { data: d2, error: e2 } = await supabase
+          .from('pagamentos')
+          .insert(withoutCliente)
+          .select()
+          .single()
+        if (e2) throw e2
+        return d2
+      }
+      // Se for erro de enum, tenta segunda abordagem simples sem casts complexos
+      if (isEnumError(error)) {
+        console.log('[registrarPagamento] Tentando abordagem alternativa sem status...')
+        try {
+          const simplePayload = { ...payload }
+          delete simplePayload.status // Remove o status para evitar problemas com o enum
+          
+          const { data, error: simpleError } = await supabase
+            .from('pagamentos')
+            .insert(simplePayload)
+            .select()
+            .single()
+          
+          if (simpleError) throw simpleError
+          console.log('[registrarPagamento] Pagamento registrado com sucesso (abordagem alternativa)')
+          return data
+        } catch (fallbackError) {
+          console.error('[registrarPagamento] Falha na abordagem alternativa:', fallbackError)
+          throw new Error(`Falha ao processar pagamento: ${fallbackError.message}`)
+        }
+      }
+      throw error
+    }
     return data
   } catch (error) {
     console.error('[registrarPagamento] Erro ao registrar pagamento:', {
@@ -1191,29 +1229,6 @@ export async function registrarPagamento({ comandaId, finalizadoraId, metodo, va
       status: payload.status,
       codigoEmpresa: codigo
     })
-    
-    // Se falhar, tenta uma abordagem mais simples sem o status
-    if (error.code === '22P02' || error.message?.includes('invalid input value for enum')) {
-      console.log('[registrarPagamento] Tentando abordagem alternativa sem status...')
-      try {
-        const simplePayload = { ...payload }
-        delete simplePayload.status // Remove o status para evitar problemas com o enum
-        
-        const { data, error: simpleError } = await supabase
-          .from('pagamentos')
-          .insert(simplePayload)
-          .select()
-          .single()
-        
-        if (simpleError) throw simpleError
-        console.log('[registrarPagamento] Pagamento registrado com sucesso (abordagem alternativa)')
-        return data
-      } catch (fallbackError) {
-        console.error('[registrarPagamento] Falha na abordagem alternativa:', fallbackError)
-        throw new Error(`Falha ao processar pagamento: ${fallbackError.message}`)
-      }
-    }
-    
     throw error
   }
 }

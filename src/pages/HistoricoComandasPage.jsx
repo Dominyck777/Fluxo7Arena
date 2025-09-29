@@ -306,7 +306,19 @@ export default function HistoricoComandasPage() {
           listarItensDaComanda({ comandaId: id, codigoEmpresa: emp }),
           listarPagamentos({ comandaId: id, codigoEmpresa: emp })
         ]);
-        return { itens: itens || [], pagamentos: pagamentos || [] };
+        // Carregar clientes vinculados para resolver nomes por id
+        let clientesVinc = [];
+        try { clientesVinc = await listarClientesDaComanda({ comandaId: id, codigoEmpresa: emp }); } catch {}
+        const nomeById = new Map((clientesVinc || []).map(r => {
+          const cid = r?.cliente_id ?? r?.clientes?.id ?? null;
+          const nome = r?.clientes?.nome ?? r?.nome ?? r?.nome_livre ?? '';
+          return cid ? [String(cid), nome] : null;
+        }).filter(Boolean));
+        const pgEnriched = (pagamentos || []).map(p => ({
+          ...p,
+          cliente_nome: p?.cliente_id ? (nomeById.get(String(p.cliente_id)) || '') : ''
+        }));
+        return { itens: itens || [], pagamentos: pgEnriched };
       };
       let result = await fetchOnce();
       // Retry único se vier tudo vazio (ex.: latência/consistência eventual)
@@ -406,6 +418,7 @@ export default function HistoricoComandasPage() {
 
       <motion.div variants={itemVariants} className="flex items-center justify-between mb-6 gap-4 flex-wrap">
         <div className="flex items-center gap-3">
+          <h1 className="text-xl sm:text-2xl font-bold text-text-primary">Histórico</h1>
           <Tabs value="historico" onValueChange={(v) => {
             if (v === 'mesas') navigate('/vendas');
             if (v === 'balcao') navigate('/balcao');
@@ -524,13 +537,13 @@ export default function HistoricoComandasPage() {
                 >
                   <td className="px-4 py-2 whitespace-nowrap">{r.mesa_id == null ? 'Balcão' : (r.mesaNumero != null ? `Mesa ${r.mesaNumero}` : '—')}</td>
                   <td className="px-4 py-2 whitespace-nowrap">{r.mesa_id == null ? 'Balcão' : 'Comanda'}</td>
-                  <td className="px-4 py-2 truncate max-w-[260px]">{r.clientesStr || '—'}</td>
+                  <td className="px-4 py-2 break-words" title={r.clientesStr || ''}>{r.clientesStr || '—'}</td>
                   <td className="px-4 py-2">
                     <span className={cn("inline-flex items-center text-[11px] font-medium px-2 py-0.5 rounded-full border", statusBadgeClass(r.statusDerived || r.status))}>
                       {statusPt(r.statusDerived || r.status)}
                     </span>
                   </td>
-                  <td className="px-4 py-2 truncate max-w-[220px]">{r.finalizadorasStr || '—'}</td>
+                  <td className="px-4 py-2 break-words" title={r.finalizadorasStr || ''}>{r.finalizadorasStr || '—'}</td>
                   <td className="px-4 py-2 whitespace-nowrap">{fmtDate(r.aberto_em)}</td>
                   <td className="px-4 py-2 whitespace-nowrap">{fmtDate(r.fechado_em)}</td>
                   <td className="px-4 py-2 text-right font-semibold whitespace-nowrap">{fmtMoney(r.total)}</td>
@@ -680,7 +693,11 @@ export default function HistoricoComandasPage() {
                   <ul className="text-sm space-y-2 max-h-64 overflow-auto thin-scroll">
                     {detail.pagamentos.map(pg => (
                       <li key={pg.id} className="flex justify-between">
-                        <span className="truncate pr-2">{pg.metodo || '—'} <span className="text-text-muted">{pg.status || ''}</span></span>
+                        <span className="pr-2 break-words">
+                          {pg.metodo || '—'}
+                          {pg.cliente_nome ? <span className="text-text-secondary"> • {pg.cliente_nome}</span> : null}
+                          {pg.status ? <span className="text-text-muted"> • {pg.status}</span> : null}
+                        </span>
                         <span className="font-mono">R$ {Number(pg.valor||0).toFixed(2)}</span>
                       </li>
                     ))}
