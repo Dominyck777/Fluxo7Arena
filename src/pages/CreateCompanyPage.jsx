@@ -325,7 +325,6 @@ export default function CreateCompanyPage() {
               cargo: formData.cargo || 'admin',
               ativo: true,
               codigo_empresa: codigoEmpresa,
-              primeiro_acesso: true, // Forçar troca de senha no primeiro login
             });
           
           if (colabError) {
