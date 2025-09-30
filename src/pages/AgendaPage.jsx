@@ -306,6 +306,19 @@ function AgendaPage() {
       return [];
     }
   });
+  
+  // Estado para filtrar qual quadra está sendo visualizada (primeira quadra por padrão)
+  const [activeCourtFilter, setActiveCourtFilter] = useState(null);
+  
+  // Estado para navegação mobile
+  const [mobileCourtIndex, setMobileCourtIndex] = useState(0);
+  
+  // useEffect para selecionar primeira quadra automaticamente
+  useEffect(() => {
+    if (selectedCourts.length > 0 && activeCourtFilter === null) {
+      setActiveCourtFilter(selectedCourts[0]);
+    }
+  }, [selectedCourts, activeCourtFilter]);
 
   // Lista de clientes vinda do banco (sem clientes fictícios)
   const [customerOptions, setCustomerOptions] = useState([]);
@@ -1280,7 +1293,7 @@ function AgendaPage() {
     });
   };
 
-  const BookingCard = ({ booking }) => {
+  const BookingCard = ({ booking, courtGridStart, courtGridEnd }) => {
     const slotHeight = SLOT_HEIGHT;
     // Minutos absolutos do dia
     const minutesFromMidnight = (date) => getHours(date) * 60 + getMinutes(date);
@@ -1288,11 +1301,15 @@ function AgendaPage() {
     const endAbs = minutesFromMidnight(booking.end);
 
     // Converter para minutos desde START_HOUR
-    const startMinutes = startAbs - dayStartHour * 60;
-    const endMinutes = endAbs - dayStartHour * 60;
+    // Usar horários passados via props (calculados no contexto do grid)
+    const gridStartM = courtGridStart !== undefined ? courtGridStart : (activeCourtFilter ? activeCourtHours.start * 60 : dayStartHour * 60);
+    const gridEndM = courtGridEnd !== undefined ? courtGridEnd : (activeCourtFilter ? activeCourtHours.end * 60 : dayEndHourExclusive * 60);
+    
+    const startMinutes = startAbs - gridStartM;
+    const endMinutes = endAbs - gridStartM;
 
     // Total de slots no dia
-    const totalSlots = (dayEndHourExclusive - dayStartHour) * (60 / SLOT_MINUTES);
+    const totalSlots = (gridEndM - gridStartM) / SLOT_MINUTES;
 
     // Índices dos slots com arredondamento e clamps
     let startSlotIndex = Math.floor(startMinutes / SLOT_MINUTES);
@@ -1433,11 +1450,24 @@ function AgendaPage() {
                     <span className={cn("truncate font-semibold", config.text)} style={{ fontSize: namePx }}>{config.label}</span>
                   </div>
                   {/* Chip de pagamentos ao lado direito do status */}
-                  {totalParticipants > 0 && (
-                    <span className={`text-sm font-semibold rounded-full px-2.5 py-1 border ${paidCount === totalParticipants ? 'text-emerald-300 bg-emerald-500/10 border-emerald-400/30' : 'text-amber-300 bg-amber-500/10 border-amber-400/30'}`} style={{ fontSize: Math.max(13, Math.round(13 * (isLong ? scale : 1))) }}>
-                      {paidCount}/{totalParticipants} pagos
-                    </span>
-                  )}
+                  {totalParticipants > 0 && (() => {
+                    const isMobileView = typeof window !== 'undefined' && window.innerWidth < 768;
+                    return (
+                      <span 
+                        className={cn(
+                          "font-bold rounded-full border flex items-center gap-1",
+                          isHalfHour ? "px-2 py-0.5 text-xs" : "px-2.5 py-1 text-sm",
+                          paidCount === totalParticipants 
+                            ? 'text-emerald-300 bg-emerald-500/10 border-emerald-400/30' 
+                            : 'text-amber-300 bg-amber-500/10 border-amber-400/30'
+                        )} 
+                        style={{ fontSize: Math.max(isHalfHour ? 11 : 13, Math.round((isHalfHour ? 11 : 13) * (isLong ? scale : 1))) }}
+                      >
+                        <DollarSign className="w-3 h-3" />
+                        <span>{paidCount}/{totalParticipants}{isMobileView ? '' : ' pagos'}</span>
+                      </span>
+                    );
+                  })()}
                 </div>
               )}
             </div>
@@ -3233,19 +3263,19 @@ function AgendaPage() {
                       } else {
                         customerPickerDesiredOpenRef.current = false;
                         try { localStorage.removeItem('agenda:customerPicker:desiredAt'); } catch {}
-                        // Before actually closing, ensure selection isn't lost unintentionally
+                        // Before actually closing, preserve current selection (even if empty)
                         try {
                           const cur = Array.isArray(selectedClientsRef.current) ? [...selectedClientsRef.current] : [];
-                          const last = Array.isArray(lastNonEmptySelectionRef.current) ? [...lastNonEmptySelectionRef.current] : [];
-                          const snapshot = cur.length > 0 ? cur : last;
-                          if (snapshot.length > 0 && !clearedByUserRef.current) {
-                            lastSelActionRef.current = 'onOpenChange:close:restore';
-                            try { sessionStorage.setItem(persistLastKey, JSON.stringify(snapshot)); } catch {}
-                            setChipsSnapshotSafe(snapshot);
-                            applySelectedClients('onOpenChange:close:restore', snapshot);
-                            // Reasserts
-                            setTimeout(() => { applySelectedClients('onOpenChange:close:reassert:0', snapshot); }, 0);
-                            setTimeout(() => { applySelectedClients('onOpenChange:close:reassert:60', snapshot); }, 60);
+                          // Respeita seleção vazia se usuário removeu todos os clientes
+                          if (cur.length > 0) {
+                            lastSelActionRef.current = 'onOpenChange:close:preserve';
+                            try { sessionStorage.setItem(persistLastKey, JSON.stringify(cur)); } catch {}
+                            setChipsSnapshotSafe(cur);
+                            applySelectedClients('onOpenChange:close:preserve', cur);
+                          } else if (!clearedByUserRef.current) {
+                            // Só aplica seleção vazia se não foi limpeza intencional
+                            lastSelActionRef.current = 'onOpenChange:close:empty';
+                            applySelectedClients('onOpenChange:close:empty', []);
                           }
                         } catch {}
                         // Suppress external close interpretation for a short window
@@ -3315,19 +3345,19 @@ function AgendaPage() {
                         // Snapshot da seleção atual antes de fechar por clique fora
                         try {
                           const cur = Array.isArray(selectedClientsRef.current) ? [...selectedClientsRef.current] : [];
-                          const last = Array.isArray(lastNonEmptySelectionRef.current) ? [...lastNonEmptySelectionRef.current] : [];
-                          const currentSel = cur.length > 0 ? cur : last;
-                          if (currentSel.length > 0) {
+                          // Respeita seleção atual, mesmo que vazia
+                          if (cur.length > 0) {
                             lastSelActionRef.current = 'outside:close:snapshot';
-                            lastNonEmptySelectionRef.current = currentSel;
-                            try { sessionStorage.setItem(persistLastKey, JSON.stringify(currentSel)); } catch {}
-                            setChipsSnapshotSafe(currentSel);
+                            lastNonEmptySelectionRef.current = cur;
+                            try { sessionStorage.setItem(persistLastKey, JSON.stringify(cur)); } catch {}
+                            setChipsSnapshotSafe(cur);
                             // Garante que o form persista a seleção atual
-                            applySelectedClients('outside:close:apply', currentSel);
-                            // Reassert após pequenos atrasos para vencer efeitos concorrentes tardios
-                            setTimeout(() => { applySelectedClients('outside:close:reassert:25', currentSel); }, 25);
-                            setTimeout(() => { applySelectedClients('outside:close:reassert:120', currentSel); }, 120);
+                            applySelectedClients('outside:close:apply', cur);
                             clearedByUserRef.current = false;
+                          } else {
+                            // Seleção vazia - não restaura
+                            lastSelActionRef.current = 'outside:close:empty';
+                            applySelectedClients('outside:close:empty', []);
                           }
                         } catch {}
                         // Abre janela de supressão para evitar o Dialog interpretar como clique fora e fechar
@@ -3511,10 +3541,10 @@ function AgendaPage() {
                               try { localStorage.removeItem('agenda:customerPicker:desiredAt'); } catch {}
                               // Marca estado de fechamento e trava seleção por uma janela maior
                               pickerClosingRef.current = true;
-                              // Snapshot da seleção atual a partir das refs (fallback para última não-vazia)
+                              // Snapshot da seleção atual a partir das refs
+                              // IMPORTANTE: Respeita seleção vazia se usuário desselecionou intencionalmente
                               const cur = Array.isArray(selectedClientsRef.current) ? [...selectedClientsRef.current] : [];
-                              const last = Array.isArray(lastNonEmptySelectionRef.current) ? [...lastNonEmptySelectionRef.current] : [];
-                              const currentSel = cur.length > 0 ? cur : last;
+                              const currentSel = cur; // Usa seleção atual, mesmo que vazia
                               // Persistir como última seleção não-vazia
                               try {
                                 if (currentSel.length > 0) {
@@ -3528,9 +3558,8 @@ function AgendaPage() {
                               // Trava restauração e evita limpezas por 3s
                               try { selectionLockUntilRef.current = Date.now() + 3000; } catch {}
                               applySelectedClients('conclude:close:apply', currentSel);
-                              // Reforços síncronos/adicionais para evitar race após close
+                              // Aplica seleção atual (respeitando se está vazia)
                               setForm(f => ({ ...f, selectedClients: [...currentSel] }));
-                              try { requestAnimationFrame(() => setForm(f => ({ ...f, selectedClients: [...(lastNonEmptySelectionRef.current || currentSel)] }))); } catch {}
                               // Não é uma limpeza intencional
                               try { clearedByUserRef.current = false; } catch {}
                               // Fechar picker (com janela de supressão para evitar reabertura)
@@ -3645,10 +3674,30 @@ function AgendaPage() {
               <div>
                 <Label className="font-bold">Quadra</Label>
                 <Select value={form.court} onValueChange={(v) => setForm((f) => ({ ...f, court: v }))}>
-                  <SelectTrigger className="mt-1" onMouseDown={() => { if (effectiveCustomerPickerOpen) setTimeout(closeCustomerPicker, 0); }}><SelectValue /></SelectTrigger>
+                  <SelectTrigger className="mt-1" onMouseDown={() => { if (effectiveCustomerPickerOpen) setTimeout(closeCustomerPicker, 0); }}>
+                    <SelectValue>
+                      {form.court && (
+                        <div className="flex items-center gap-2">
+                          <span
+                            className="inline-block w-2.5 h-2.5 rounded-full"
+                            style={{ backgroundColor: getCourtColor(form.court) }}
+                          />
+                          <span>{form.court}</span>
+                        </div>
+                      )}
+                    </SelectValue>
+                  </SelectTrigger>
                   <SelectContent className="z-[60]">
                     {availableCourts.map((name) => (
-                      <SelectItem key={name} value={name}>{name}</SelectItem>
+                      <SelectItem key={name} value={name}>
+                        <div className="flex items-center gap-2">
+                          <span
+                            className="inline-block w-2.5 h-2.5 rounded-full"
+                            style={{ backgroundColor: getCourtColor(name) }}
+                          />
+                          <span>{name}</span>
+                        </div>
+                      </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -4409,10 +4458,39 @@ function AgendaPage() {
 
   // Cores por quadra agora são geradas de forma determinística via getCourtColor(name)
 
-  const hoursList = useMemo(() => Array.from({ length: Math.max(0, dayEndHourExclusive - dayStartHour) }, (_, i) => dayStartHour + i), [dayStartHour, dayEndHourExclusive]);
+  // Calcular horários baseado na quadra ativa (se houver filtro)
+  const activeCourtHours = useMemo(() => {
+    if (!activeCourtFilter || !courtsMap[activeCourtFilter]) {
+      return { start: dayStartHour, end: dayEndHourExclusive };
+    }
+    
+    const court = courtsMap[activeCourtFilter];
+    const startTime = court.hora_inicio || `${dayStartHour}:00:00`;
+    const endTime = court.hora_fim || `${dayEndHourExclusive}:00:00`;
+    
+    const [startHour, startMin] = String(startTime).split(':').map(Number);
+    const [endHour, endMin] = String(endTime).split(':').map(Number);
+    
+    // Usar exatamente os horários da quadra
+    return {
+      start: startHour || dayStartHour,
+      end: endHour || dayEndHourExclusive,
+      startMinutes: (startHour || 0) * 60 + (startMin || 0),
+      endMinutes: (endHour || 0) * 60 + (endMin || 0)
+    };
+  }, [activeCourtFilter, courtsMap, dayStartHour, dayEndHourExclusive]);
+  
+  const hoursList = useMemo(() => {
+    const start = activeCourtHours.start;
+    const end = activeCourtHours.end;
+    return Array.from({ length: Math.max(0, end - start) }, (_, i) => start + i);
+  }, [activeCourtHours]);
+  
   const totalGridHeight = useMemo(() => {
-    return Math.max(0, (dayEndHourExclusive - dayStartHour)) * (60 / SLOT_MINUTES) * SLOT_HEIGHT; // 2 slots por hora
-  }, [dayStartHour, dayEndHourExclusive]);
+    const start = activeCourtHours.start;
+    const end = activeCourtHours.end;
+    return Math.max(0, (end - start)) * (60 / SLOT_MINUTES) * SLOT_HEIGHT;
+  }, [activeCourtHours]);
 
   return (
     <>
@@ -4424,10 +4502,10 @@ function AgendaPage() {
       {/* Payment Modal movido para AddBookingModal para manter escopo correto */}
 
       {/* ClientFormModal já é renderizado dentro do AddBookingModal */}
-      <motion.div variants={isModalOpen ? undefined : pageVariants} initial={isModalOpen ? false : "hidden"} animate={isModalOpen ? false : "visible"} className="h-full flex flex-col">
+      <motion.div variants={isModalOpen ? undefined : pageVariants} initial={isModalOpen ? false : "hidden"} animate={isModalOpen ? false : "visible"} className="h-full flex flex-col md:px-0">
 
         {/* Controls */}
-        <motion.div variants={itemVariants} className="p-3 rounded-lg bg-surface mb-6">
+        <motion.div variants={itemVariants} className="p-3 bg-surface mb-6 md:rounded-lg">
           <div className="max-w-[1200px] mx-auto w-full flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             {/* Navegação de data */}
             <div className="flex items-center gap-2">
@@ -4435,8 +4513,10 @@ function AgendaPage() {
               <Popover>
                 <PopoverTrigger asChild>
                   <Button variant="ghost" className="w-full sm:w-auto max-w-full justify-center text-base font-semibold whitespace-nowrap truncate">
-                    <CalendarIcon className="mr-2 h-4 w-4" />
-                    {format(currentDate, "EEEE, dd 'de' MMMM 'de' yyyy", { locale: ptBR })}
+                    <CalendarIcon className="mr-2 h-5 w-5" />
+                    {/* Mobile: Terça-feira, 21/09/2025 | Desktop: Terça-feira, 21 de setembro de 2025 */}
+                    <span className="hidden sm:inline">{format(currentDate, "EEEE, dd 'de' MMMM 'de' yyyy", { locale: ptBR })}</span>
+                    <span className="sm:hidden">{format(currentDate, "EEEE, dd/MM/yyyy", { locale: ptBR })}</span>
                   </Button>
                 </PopoverTrigger>
                 <PopoverContent className="w-auto p-0">
@@ -4467,7 +4547,23 @@ function AgendaPage() {
                   </button>
                 )}
               </div>
-              <Button size="sm" onClick={openBookingModal} aria-label="Novo agendamento" className="gap-2" disabled={availableCourts.length === 0}>
+              <Button 
+                size="sm" 
+                onClick={() => {
+                  // Limpa estado antes de abrir novo agendamento
+                  setEditingBooking(null);
+                  setPrefill(null);
+                  // Limpa sessionStorage que pode ter dados antigos
+                  try {
+                    sessionStorage.removeItem('agenda:customerPicker:closing');
+                    sessionStorage.removeItem('agenda:customerPicker:closingAt');
+                  } catch {}
+                  openBookingModal();
+                }} 
+                aria-label="Novo agendamento" 
+                className="gap-2" 
+                disabled={availableCourts.length === 0}
+              >
                 <Plus className="h-4 w-4" /> Agendar
               </Button>
               <DropdownMenu>
@@ -4524,30 +4620,6 @@ function AgendaPage() {
                       />
                     </div>
                   </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuLabel className="text-xs text-text-muted">Filtrar quadras</DropdownMenuLabel>
-                  <DropdownMenuSeparator />
-                  {availableCourts.map((c) => {
-                    const checked = selectedCourts.includes(c);
-                    return (
-                      <DropdownMenuItem key={c} onClick={(e) => e.preventDefault()}>
-                        <div className="flex items-center justify-between gap-3 w-full">
-                          <div className="flex items-center gap-2">
-                            <span
-                              className="inline-block w-2.5 h-2.5 rounded-full"
-                              style={{ backgroundColor: getCourtColor(c), boxShadow: '0 0 0 2px rgba(255,255,255,0.06)' }}
-                              aria-hidden="true"
-                            />
-                            <span>{c}</span>
-                          </div>
-                          <Checkbox
-                            checked={checked}
-                            onCheckedChange={() => setSelectedCourts(prev => checked ? prev.filter(x => x !== c) : [...prev, c])}
-                          />
-                        </div>
-                      </DropdownMenuItem>
-                    );
-                  })}
                 </DropdownMenuContent>
               </DropdownMenu>
               <Button
@@ -4686,33 +4758,73 @@ function AgendaPage() {
 
         {/* Aviso: nenhuma quadra cadastrada */}
         {!courtsLoading && availableCourts.length === 0 && (
-          <div className="mb-4 p-4 rounded-lg border border-border bg-surface text-sm flex items-center justify-between">
+          <div className="mb-4 p-4 rounded-lg border border-border bg-surface text-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
             <div>
               <div className="font-medium">Nenhuma quadra encontrada</div>
               <div className="text-text-muted">Cadastre suas quadras para começar a usar a agenda.</div>
             </div>
-            <Button asChild>
-              <Link to="/quadras">Ir para Cadastros • Quadras</Link>
+            <Button asChild className="w-full sm:w-auto">
+              <Link to="/quadras">
+                <span className="hidden sm:inline">Ir para Cadastros • Quadras</span>
+                <span className="sm:hidden">Adicionar</span>
+              </Link>
             </Button>
           </div>
         )}
 
         {/* Calendar Grid */}
-        {selectedCourts.length > 0 && (
-        <motion.div variants={isModalOpen ? undefined : itemVariants} className="flex-1 overflow-auto bg-surface rounded-lg border border-border fx-scroll" ref={scrollRef}>
-          <div
-            className="grid mx-auto"
-            style={{
-              gridTemplateColumns:
-                selectedCourts.length === 1
-                  ? `120px 760px`
-                  : selectedCourts.length === 2
-                  ? `120px repeat(2, 520px)`
-                  : `120px repeat(${selectedCourts.length}, 1fr)`,
-              width: (selectedCourts.length <= 2) ? 'fit-content' : undefined,
-              columnGap: '16px'
-            }}
-          >
+        {selectedCourts.length > 0 && (() => {
+          // Mobile: mostrar apenas uma quadra por vez
+          const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
+          
+          // Filtrar quadras baseado na tab ativa (Desktop) ou mobile index
+          const courtsToShow = isMobile 
+            ? [selectedCourts[mobileCourtIndex % selectedCourts.length]]
+            : activeCourtFilter 
+              ? [activeCourtFilter]
+              : selectedCourts;
+          
+          // Calcular horários para o grid atual (mobile usa quadra atual, desktop usa filtro)
+          const currentDisplayCourt = isMobile ? courtsToShow[0] : activeCourtFilter;
+          const gridHours = (() => {
+            if (currentDisplayCourt && courtsMap[currentDisplayCourt]) {
+              const court = courtsMap[currentDisplayCourt];
+              const startTime = court.hora_inicio || `${dayStartHour}:00:00`;
+              const endTime = court.hora_fim || `${dayEndHourExclusive}:00:00`;
+              const [startHour] = String(startTime).split(':').map(Number);
+              const [endHour] = String(endTime).split(':').map(Number);
+              return {
+                start: startHour || dayStartHour,
+                end: endHour || dayEndHourExclusive
+              };
+            }
+            return { start: dayStartHour, end: dayEndHourExclusive };
+          })();
+          
+          const displayHoursList = Array.from(
+            { length: Math.max(0, gridHours.end - gridHours.start) }, 
+            (_, i) => gridHours.start + i
+          );
+          
+          const displayTotalGridHeight = Math.max(0, (gridHours.end - gridHours.start)) * (60 / SLOT_MINUTES) * SLOT_HEIGHT;
+          
+          return (
+            <>
+              <motion.div variants={isModalOpen ? undefined : itemVariants} className={cn("flex-1 overflow-auto bg-surface fx-scroll", isMobile ? "" : "rounded-lg border border-border")} ref={scrollRef}>
+                <div
+                  className={cn("grid", !isMobile && "mx-auto")}
+                  style={{
+                    gridTemplateColumns: isMobile
+                      ? `60px 1fr`
+                      : courtsToShow.length === 1
+                      ? `120px 760px`
+                      : courtsToShow.length === 2
+                      ? `120px repeat(2, 520px)`
+                      : `120px repeat(${courtsToShow.length}, 1fr)`,
+                    width: isMobile ? '100%' : (courtsToShow.length <= 2) ? 'fit-content' : undefined,
+                    columnGap: isMobile ? '4px' : '16px'
+                  }}
+                >
             {/* Time Column */}
             <div className="sticky left-0 bg-surface z-20">
               <div className="sticky top-0 z-20 h-14 border-b border-r border-border bg-surface flex items-center justify-center px-2">
@@ -4739,17 +4851,17 @@ function AgendaPage() {
                   </DropdownMenuContent>
                 </DropdownMenu>
               </div>
-              {hoursList.map((hour) => (
+              {displayHoursList.map((hour) => (
                 <div key={`time-${hour}`} className={cn("border-r border-border", (hour % 2 === 1) && "bg-surface-2/30") }>
                   {/* Slot :00 */}
                   <div className="relative border-b border-border/60" style={{ height: SLOT_HEIGHT }}>
-                    <span className="absolute left-1/2 -translate-x-1/2 top-1/2 -translate-y-1/2 bg-surface px-2 rounded font-bold text-lg">
+                    <span className={cn("absolute left-1/2 -translate-x-1/2 top-1/2 -translate-y-1/2 bg-surface rounded font-bold", isMobile ? "px-1 text-sm" : "px-2 text-lg")}>
                       {String(hour).padStart(2, '0')}:00
                     </span>
                   </div>
                   {/* Slot :30 */}
                   <div className="relative border-b border-border/60" style={{ height: SLOT_HEIGHT }}>
-                    <span className="absolute left-1/2 -translate-x-1/2 top-1/2 -translate-y-1/2 bg-surface px-2 rounded font-bold text-lg">
+                    <span className={cn("absolute left-1/2 -translate-x-1/2 top-1/2 -translate-y-1/2 bg-surface rounded font-bold", isMobile ? "px-1 text-sm" : "px-2 text-lg")}>
                       {String(hour).padStart(2, '0')}:30
                     </span>
                   </div>
@@ -4758,31 +4870,99 @@ function AgendaPage() {
             </div>
 
           {/* Court Columns */}
-          {selectedCourts.map(court => (
+          {courtsToShow.map(court => (
             <div key={court} className="relative border-r border-border">
-              <div className="h-14 border-b border-border text-center font-semibold text-lg flex items-center justify-center sticky top-0 bg-surface z-10">
-                <div className="flex items-center gap-2">
-                  <span
-                    className="inline-block w-2.5 h-2.5 rounded-full"
-                    style={{ backgroundColor: getCourtColor(court), boxShadow: '0 0 0 2px rgba(255,255,255,0.06)' }}
-                    aria-hidden="true"
-                  />
-                  <span className="tracking-tight">{court}</span>
+              {/* Header com Tabs de Navegação - Desktop */}
+              {!isMobile && selectedCourts.length > 1 ? (
+                <div className="h-14 border-b border-border sticky top-0 bg-surface z-10 flex items-center justify-center gap-2 px-3 overflow-x-auto">
+                  {/* Tabs das Quadras */}
+                  {selectedCourts.map(c => (
+                    <button
+                      key={c}
+                      onClick={() => setActiveCourtFilter(c)}
+                      className={cn(
+                        "px-4 py-2 rounded-lg font-semibold text-base transition-all duration-200 whitespace-nowrap flex items-center gap-2.5 flex-shrink-0",
+                        activeCourtFilter === c
+                          ? "bg-surface-2 text-text-primary border-2 border-brand/60"
+                          : c === court
+                          ? "bg-surface-2/50 text-text-primary hover:bg-surface-2"
+                          : "hover:bg-surface-2/60 text-text-muted hover:text-text-primary"
+                      )}
+                    >
+                      <span
+                        className={cn(
+                          "inline-block w-2.5 h-2.5 rounded-full shadow-sm",
+                          activeCourtFilter === c && "ring-2 ring-brand/40"
+                        )}
+                        style={{ backgroundColor: getCourtColor(c) }}
+                      />
+                      <span className="tracking-tight font-bold">{c}</span>
+                    </button>
+                  ))}
                 </div>
-              </div>
+              ) : (
+                <div className="h-14 border-b border-border sticky top-0 bg-surface z-10 flex items-center justify-center">
+                  {/* Mobile: Dropdown para trocar de quadra */}
+                  {isMobile && selectedCourts.length > 1 ? (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <button className="flex items-center gap-2 px-4 py-2 rounded-lg hover:bg-surface-2 transition-colors">
+                          <span
+                            className="inline-block w-2.5 h-2.5 rounded-full"
+                            style={{ backgroundColor: getCourtColor(court) }}
+                          />
+                          <span className="font-semibold text-lg tracking-tight">{court}</span>
+                          <ChevronDown className="h-4 w-4 text-text-muted" />
+                        </button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="center" className="w-56">
+                        {selectedCourts.map((c, idx) => (
+                          <DropdownMenuItem
+                            key={c}
+                            onClick={() => setMobileCourtIndex(idx)}
+                            className={cn(
+                              "flex items-center gap-2",
+                              c === court && "bg-surface-2"
+                            )}
+                          >
+                            <span
+                              className="inline-block w-2.5 h-2.5 rounded-full"
+                              style={{ backgroundColor: getCourtColor(c) }}
+                            />
+                            <span className="font-semibold">{c}</span>
+                            {c === court && <span className="ml-auto text-brand">✓</span>}
+                          </DropdownMenuItem>
+                        ))}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <span
+                        className="inline-block w-2.5 h-2.5 rounded-full"
+                        style={{ backgroundColor: getCourtColor(court), boxShadow: '0 0 0 2px rgba(255,255,255,0.06)' }}
+                      />
+                      <span className="font-semibold text-lg tracking-tight">{court}</span>
+                    </div>
+                  )}
+                </div>
+              )}
               {/* Container relativo para posicionar reservas */}
-              <div className="relative" style={{ height: totalGridHeight }}>
+              <div className="relative" style={{ height: displayTotalGridHeight }}>
                 {/* Linhas base por quadra: exibe apenas durante o horário de funcionamento dessa quadra */}
                 {(viewFilter.scheduled || viewFilter.canceledOnly) && (() => {
+                  // Usar horários do grid atual (já calculados no escopo externo)
+                  const dayStartM = gridHours.start * 60;
+                  const dayEndM = gridHours.end * 60;
+                  
+                  // Horários da quadra individual (pode ser diferente se estiver mostrando todas)
                   const bounds = (() => {
                     const tStart = courtsMap[court]?.hora_inicio;
                     const tEnd = courtsMap[court]?.hora_fim;
-                    const [sh, sm] = String(tStart || `${dayStartHour}:00:00`).split(':').map(Number);
-                    const [eh, em] = String(tEnd || `${dayEndHourExclusive}:00:00`).split(':').map(Number);
+                    const [sh, sm] = String(tStart || `${gridHours.start}:00:00`).split(':').map(Number);
+                    const [eh, em] = String(tEnd || `${gridHours.end}:00:00`).split(':').map(Number);
                     return { start: (sh||0)*60 + (sm||0), end: (eh||0)*60 + (em||0) };
                   })();
-                  const dayStartM = dayStartHour * 60;
-                  const dayEndM = dayEndHourExclusive * 60;
+                  
                   const startM = Math.max(bounds.start, dayStartM);
                   const endM = Math.min(bounds.end, dayEndM);
                   const startSlot = Math.max(0, Math.floor((startM - dayStartM) / SLOT_MINUTES));
@@ -4798,7 +4978,7 @@ function AgendaPage() {
                       {/* Slots visíveis com linhas a cada 30 minutos */}
                       {Array.from({ length: visibleSlots }, (_, i) => {
                         const globalSlotIdx = startSlot + i;
-                        const hour = Math.floor(globalSlotIdx / (60 / SLOT_MINUTES)) + dayStartHour;
+                        const hour = Math.floor(globalSlotIdx / (60 / SLOT_MINUTES)) + Math.floor(dayStartM / 60);
                         const isOddHour = hour % 2 === 1;
                         return (
                           <div key={`base-${court}-slot-${globalSlotIdx}`} className={cn("border-b border-border/60", isOddHour && "bg-surface-2/30")} style={{ height: SLOT_HEIGHT }} />
@@ -4812,7 +4992,7 @@ function AgendaPage() {
                 {/* Agendados ou Cancelados (filtrados) */}
                 {(viewFilter.scheduled || viewFilter.canceledOnly) && filteredBookings
                   .filter(b => b.court === court)
-                  .map(b => <BookingCard key={b.id} booking={b} />)
+                  .map(b => <BookingCard key={b.id} booking={b} courtGridStart={gridHours.start * 60} courtGridEnd={gridHours.end * 60} />)
                 }
                 {/* Livres */}
                 {viewFilter.available && (() => {
@@ -4846,7 +5026,9 @@ function AgendaPage() {
                   const FreeSlot = ({startM, endM}) => {
                     const [hoverSlot, setHoverSlot] = useState(null);
                     // posiciona por slots como BookingCard
-                    const startSlotIndex = Math.floor((startM - (dayStartHour * 60)) / SLOT_MINUTES);
+                    // Usar horários do grid atual (já calculados no escopo externo)
+                    const gridStartM = gridHours.start * 60;
+                    const startSlotIndex = Math.floor((startM - gridStartM) / SLOT_MINUTES);
                     const slotsCount = Math.max(1, Math.ceil((endM - startM) / SLOT_MINUTES));
                     const endSlotIndex = startSlotIndex + slotsCount;
                     const top = startSlotIndex * SLOT_HEIGHT - 1;
@@ -4911,8 +5093,17 @@ function AgendaPage() {
                             }
                           }
 
-                          setPrefill({ court, date: currentDate, startMinutes: clickedStart, endMinutes: clickedEnd });
+                          // Limpa completamente o estado antes de abrir novo agendamento
                           setEditingBooking(null);
+                          setPrefill({ court, date: currentDate, startMinutes: clickedStart, endMinutes: clickedEnd });
+                          // Limpa seleção de clientes para evitar carregar dados de agendamento anterior
+                          try {
+                            lastNonEmptySelectionRef.current = [];
+                            setChipsSnapshot([]);
+                            sessionStorage.removeItem(persistLastKey);
+                            sessionStorage.removeItem('agenda:customerPicker:closing');
+                            sessionStorage.removeItem('agenda:customerPicker:closingAt');
+                          } catch {}
                           openBookingModal();
                         }}
                         title={`Livre: ${sLabel}–${eLabel}`}
@@ -4935,10 +5126,12 @@ function AgendaPage() {
                 })()}
               </div>
             </div>
-          ))}
-          </div>
-        </motion.div>
-        )}
+          ))}  
+                </div>
+              </motion.div>
+            </>
+          );
+        })()}
       </motion.div>
       <AddBookingModal />
     </>

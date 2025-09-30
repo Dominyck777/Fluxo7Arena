@@ -8,9 +8,40 @@ import { useToast } from '@/components/ui/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
 import { Trophy, Eye, EyeOff, Mail, Lock, LogIn } from 'lucide-react';
 
+// Traduções de erros comuns do Supabase
+const translateError = (errorMessage) => {
+  const translations = {
+    'Invalid login credentials': 'Email ou senha incorretos',
+    'Email not confirmed': 'Email não confirmado',
+    'User not found': 'Usuário não encontrado',
+    'Invalid email': 'Email inválido',
+    'Password should be at least 6 characters': 'A senha deve ter pelo menos 6 caracteres',
+    'Unable to validate email address: invalid format': 'Formato de email inválido',
+    'Email rate limit exceeded': 'Muitas tentativas. Aguarde alguns minutos',
+    'Network request failed': 'Erro de conexão. Verifique sua internet',
+    'Failed to fetch': 'Erro de conexão. Verifique sua internet',
+  };
+
+  // Procura por correspondência exata
+  if (translations[errorMessage]) {
+    return translations[errorMessage];
+  }
+
+  // Procura por correspondência parcial
+  for (const [key, value] of Object.entries(translations)) {
+    if (errorMessage.includes(key)) {
+      return value;
+    }
+  }
+
+  // Retorna mensagem genérica se não encontrar tradução
+  return 'Erro ao fazer login. Verifique suas credenciais e tente novamente.';
+};
+
 const LoginPage = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
   const [formData, setFormData] = useState({
     email: '',
     password: ''
@@ -33,11 +64,14 @@ const LoginPage = () => {
       ...formData,
       [e.target.name]: e.target.value
     });
+    // Limpa o erro quando o usuário começar a digitar
+    if (error) setError('');
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
+    setError(''); // Limpa erro anterior
 
     try {
       const result = await signIn(formData.email, formData.password);
@@ -56,9 +90,14 @@ const LoginPage = () => {
       } catch {}
 
     } catch (error) {
+      const originalMessage = error.message || "Ocorreu um erro. Tente novamente.";
+      const translatedMessage = translateError(originalMessage);
+      
+      setError(translatedMessage); // Define erro traduzido visível
+      
       toast({
         title: "Erro",
-        description: error.message || "Ocorreu um erro. Tente novamente.",
+        description: translatedMessage,
         variant: "destructive",
       });
     } finally {
@@ -82,14 +121,14 @@ const LoginPage = () => {
         <meta name="description" content="Acesse sua conta do Fluxo7 Arena" />
       </Helmet>
 
-      <div className="min-h-screen bg-background flex items-center justify-center p-4">
+      <div className="min-h-screen bg-background flex items-center justify-center p-4 sm:p-6">
         <div className="absolute inset-0 bg-court-pattern opacity-[0.02] mix-blend-overlay"></div>
         
         <motion.div
           variants={pageVariants}
           initial="hidden"
           animate="visible"
-          className="relative z-10 w-full max-w-md"
+          className="relative z-10 w-full max-w-md pb-20 sm:pb-0"
         >
           {/* Card with Logo + Form */}
           <div className="fx-card">
@@ -109,11 +148,11 @@ const LoginPage = () => {
               </div>
             </div>
 
-            <form onSubmit={handleSubmit} className="space-y-4">
+            <form onSubmit={handleSubmit} className="space-y-5 sm:space-y-4">
               {/* Email */}
               <div className="space-y-2">
-                <Label htmlFor="email" className="text-text-primary flex items-center gap-2">
-                  <Mail className="w-4 h-4" />
+                <Label htmlFor="email" className="text-text-primary flex items-center gap-2 text-sm sm:text-base">
+                  <Mail className="w-4 h-4 sm:w-5 sm:h-5" />
                   Email
                 </Label>
                 <Input
@@ -124,14 +163,14 @@ const LoginPage = () => {
                   value={formData.email}
                   onChange={handleInputChange}
                   required
-                  className="placeholder:text-[#B0B0B0]"
+                  className="placeholder:text-[#B0B0B0] h-12 sm:h-10 text-base sm:text-sm"
                 />
               </div>
 
               {/* Password */}
               <div className="space-y-2">
-                <Label htmlFor="password" className="text-text-primary flex items-center gap-2">
-                  <Lock className="w-4 h-4" />
+                <Label htmlFor="password" className="text-text-primary flex items-center gap-2 text-sm sm:text-base">
+                  <Lock className="w-4 h-4 sm:w-5 sm:h-5" />
                   Senha
                 </Label>
                 <div className="relative">
@@ -143,22 +182,36 @@ const LoginPage = () => {
                     value={formData.password}
                     onChange={handleInputChange}
                     required
-                    className="pr-10 placeholder:text-[#B0B0B0]"
+                    className="pr-10 placeholder:text-[#B0B0B0] h-12 sm:h-10 text-base sm:text-sm"
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
                     className="absolute right-3 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-primary transition-colors"
                   >
-                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    {showPassword ? <EyeOff className="w-5 h-5 sm:w-4 sm:h-4" /> : <Eye className="w-5 h-5 sm:w-4 sm:h-4" />}
                   </button>
                 </div>
               </div>
 
+              {/* Error Message */}
+              {error && (
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="p-3 rounded-lg bg-destructive/10 border border-destructive/30 text-destructive text-sm"
+                >
+                  <div className="flex items-start gap-2">
+                    <span className="text-base">⚠️</span>
+                    <span className="flex-1">{error}</span>
+                  </div>
+                </motion.div>
+              )}
+
               {/* Submit Button */}
               <Button
                 type="submit"
-                className="w-full"
+                className="w-full h-12 sm:h-10 text-base sm:text-sm"
                 disabled={loading}
               >
                 {loading ? (

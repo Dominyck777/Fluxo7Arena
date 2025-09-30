@@ -158,6 +158,20 @@
     background: #3a3a3a; /* leve realce ao passar o mouse */
     border-color: #4a4a4a;
   }
+  
+  /* Animação shimmer para tabs ativas */
+  @keyframes shimmer {
+    0% {
+      transform: translateX(-100%);
+    }
+    100% {
+      transform: translateX(100%);
+    }
+  }
+  
+  .animate-shimmer {
+    animation: shimmer 3s ease-in-out infinite;
+  }
 }
 
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');

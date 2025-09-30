@@ -42,7 +42,7 @@ function PlaceholderPage({ title }) {
             <div className="text-sm text-text-secondary mt-1">2025 • todos os direitos reservados</div>
             <div className="mt-4 inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/5 border border-white/10">
               <span className="text-xs text-text-muted">versão</span>
-              <span className="text-sm font-semibold">v0.0.3</span>
+              <span className="text-sm font-semibold">v0.0.4</span>
             </div>
           </div>
         )}

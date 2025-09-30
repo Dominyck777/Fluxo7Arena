@@ -24,9 +24,9 @@ const navItemVariants = {
   }),
 };
 
-const NavItem = ({ to, icon: Icon, label, index }) => {
-  const activeLink = "flex items-center h-[46px] px-4 rounded-sm bg-brand text-primary-foreground font-bold shadow-lg shadow-brand/10 border-l-4 border-brand";
-  const inactiveLink = "flex items-center h-[46px] px-4 rounded-sm text-text-secondary hover:bg-surface-2 hover:text-text-primary transition-all duration-200 border-l-4 border-transparent";
+const NavItem = ({ to, icon: Icon, label, index, onNavigate }) => {
+  const activeLink = "flex items-center h-[52px] px-4 rounded-sm bg-brand text-primary-foreground font-bold shadow-lg shadow-brand/10 border-l-4 border-brand";
+  const inactiveLink = "flex items-center h-[52px] px-4 rounded-sm text-text-secondary hover:bg-surface-2 hover:text-text-primary transition-all duration-200 border-l-4 border-transparent";
 
   return (
     <motion.li
@@ -39,20 +39,29 @@ const NavItem = ({ to, icon: Icon, label, index }) => {
     >
       <NavLink
         to={to}
+        onClick={onNavigate}
         className={({ isActive }) => (isActive ? activeLink : inactiveLink)}
       >
         <Icon className="h-5 w-5 mr-4 flex-shrink-0" />
-        <span className="text-sm">{label}</span>
+        <span className="text-base">{label}</span>
       </NavLink>
     </motion.li>
   );
 };
 
-function Sidebar() {
+function Sidebar({ onNavigate }) {
   const location = useLocation();
   const groupPaths = ['/produtos', '/clientes', '/equipe', '/quadras', '/empresas', '/finalizadoras'];
   const groupActive = useMemo(() => groupPaths.includes(location.pathname), [location.pathname]);
   const [openCadastros, setOpenCadastros] = useState(groupActive);
+
+  // Função para fechar sidebar em mobile ao clicar em um link
+  const handleNavClick = () => {
+    // Verifica se é mobile (largura < 768px)
+    if (window.innerWidth < 768 && onNavigate) {
+      onNavigate();
+    }
+  };
 
   return (
     <motion.aside
@@ -65,22 +74,22 @@ function Sidebar() {
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.2, duration: 0.4 }}
-        className="flex items-center px-6 pt-6 pb-4 h-[96px] flex-shrink-0"
+        className="flex items-center px-6 pt-8 pb-6 h-[120px] flex-shrink-0"
       >
-        <div className="w-10 h-10 bg-brand rounded-lg flex items-center justify-center mr-3">
-            <Trophy className="w-6 h-6 text-primary-foreground" />
+        <div className="w-14 h-14 bg-brand rounded-xl flex items-center justify-center mr-4">
+            <Trophy className="w-8 h-8 text-primary-foreground" />
         </div>
         <div className="flex items-baseline">
-            <span className="font-extrabold text-xl" style={{ color: '#FF6600' }}>Fluxo</span>
-            <span className="font-extrabold text-xl" style={{ color: '#FFAA33' }}>7</span>
-            <span className="font-medium text-xl" style={{ color: '#B0B0B0' }}> Arena</span>
+            <span className="font-extrabold text-2xl" style={{ color: '#FF6600' }}>Fluxo</span>
+            <span className="font-extrabold text-2xl" style={{ color: '#FFAA33' }}>7</span>
+            <span className="font-medium text-2xl" style={{ color: '#B0B0B0' }}> Arena</span>
         </div>
       </motion.div>
 
       <nav className="flex-1 overflow-y-auto px-6 py-2 scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent hover:scrollbar-thumb-border-hover">
         <ul className="space-y-3">
           {navItems.map((item, i) => (
-            <NavItem key={item.to} {...item} index={i} />
+            <NavItem key={item.to} {...item} index={i} onNavigate={handleNavClick} />
           ))}
           <motion.li
             custom={navItems.length}
@@ -91,10 +100,10 @@ function Sidebar() {
             <button
               type="button"
               onClick={() => setOpenCadastros((v) => !v)}
-              className={`w-full flex items-center h-[46px] px-4 rounded-sm text-text-secondary hover:bg-surface-2 hover:text-text-primary transition-all duration-200 border-l-4 ${groupActive ? 'bg-brand text-primary-foreground font-bold border-brand' : 'border-transparent'}`}
+              className={`w-full flex items-center h-[52px] px-4 rounded-sm text-text-secondary hover:bg-surface-2 hover:text-text-primary transition-all duration-200 border-l-4 ${groupActive ? 'bg-brand text-primary-foreground font-bold border-brand' : 'border-transparent'}`}
             >
               <Folder className="h-5 w-5 mr-4 flex-shrink-0" />
-              <span className="text-sm flex-1 text-left">Cadastros</span>
+              <span className="text-base flex-1 text-left">Cadastros</span>
               <ChevronDown className={`h-4 w-4 transition-transform ${openCadastros ? 'rotate-180' : ''}`} />
             </button>
 
@@ -103,7 +112,8 @@ function Sidebar() {
                 <li>
                   <NavLink
                     to="/finalizadoras"
-                    className={({ isActive }) => isActive ? 'flex items-center h-[36px] px-3 rounded-sm bg-brand/20 text-text-primary font-medium' : 'flex items-center h-[36px] px-3 rounded-sm text-text-secondary hover:bg-surface-2 hover:text-text-primary transition-colors'}
+                    onClick={handleNavClick}
+                    className={({ isActive }) => isActive ? 'flex items-center h-[40px] px-3 rounded-sm bg-brand/20 text-text-primary font-medium text-sm' : 'flex items-center h-[40px] px-3 rounded-sm text-text-secondary hover:bg-surface-2 hover:text-text-primary transition-colors text-sm'}
                   >
                     <Banknote className="h-4 w-4 mr-3" /> Finalizadoras
                   </NavLink>
@@ -111,7 +121,8 @@ function Sidebar() {
                 <li>
                   <NavLink
                     to="/quadras"
-                    className={({ isActive }) => isActive ? 'flex items-center h-[36px] px-3 rounded-sm bg-brand/20 text-text-primary font-medium' : 'flex items-center h-[36px] px-3 rounded-sm text-text-secondary hover:bg-surface-2 hover:text-text-primary transition-colors'}
+                    onClick={handleNavClick}
+                    className={({ isActive }) => isActive ? 'flex items-center h-[40px] px-3 rounded-sm bg-brand/20 text-text-primary font-medium text-sm' : 'flex items-center h-[40px] px-3 rounded-sm text-text-secondary hover:bg-surface-2 hover:text-text-primary transition-colors text-sm'}
                   >
                     <Layers className="h-4 w-4 mr-3" /> Quadras
                   </NavLink>
@@ -119,7 +130,8 @@ function Sidebar() {
                 <li>
                   <NavLink
                     to="/produtos"
-                    className={({ isActive }) => isActive ? 'flex items-center h-[36px] px-3 rounded-sm bg-brand/20 text-text-primary font-medium' : 'flex items-center h-[36px] px-3 rounded-sm text-text-secondary hover:bg-surface-2 hover:text-text-primary transition-colors'}
+                    onClick={handleNavClick}
+                    className={({ isActive }) => isActive ? 'flex items-center h-[40px] px-3 rounded-sm bg-brand/20 text-text-primary font-medium text-sm' : 'flex items-center h-[40px] px-3 rounded-sm text-text-secondary hover:bg-surface-2 hover:text-text-primary transition-colors text-sm'}
                   >
                     <Package className="h-4 w-4 mr-3" /> Produtos
                   </NavLink>
@@ -127,7 +139,8 @@ function Sidebar() {
                 <li>
                   <NavLink
                     to="/clientes"
-                    className={({ isActive }) => isActive ? 'flex items-center h-[36px] px-3 rounded-sm bg-brand/20 text-text-primary font-medium' : 'flex items-center h-[36px] px-3 rounded-sm text-text-secondary hover:bg-surface-2 hover:text-text-primary transition-colors'}
+                    onClick={handleNavClick}
+                    className={({ isActive }) => isActive ? 'flex items-center h-[40px] px-3 rounded-sm bg-brand/20 text-text-primary font-medium text-sm' : 'flex items-center h-[40px] px-3 rounded-sm text-text-secondary hover:bg-surface-2 hover:text-text-primary transition-colors text-sm'}
                   >
                     <Users className="h-4 w-4 mr-3" /> Clientes
                   </NavLink>
@@ -135,7 +148,8 @@ function Sidebar() {
                 <li>
                   <NavLink
                     to="/equipe"
-                    className={({ isActive }) => isActive ? 'flex items-center h-[36px] px-3 rounded-sm bg-brand/20 text-text-primary font-medium' : 'flex items-center h-[36px] px-3 rounded-sm text-text-secondary hover:bg-surface-2 hover:text-text-primary transition-colors'}
+                    onClick={handleNavClick}
+                    className={({ isActive }) => isActive ? 'flex items-center h-[40px] px-3 rounded-sm bg-brand/20 text-text-primary font-medium text-sm' : 'flex items-center h-[40px] px-3 rounded-sm text-text-secondary hover:bg-surface-2 hover:text-text-primary transition-colors text-sm'}
                   >
                     <UserCog className="h-4 w-4 mr-3" /> Equipe
                   </NavLink>
@@ -143,7 +157,8 @@ function Sidebar() {
                 <li>
                   <NavLink
                     to="/empresas"
-                    className={({ isActive }) => isActive ? 'flex items-center h-[36px] px-3 rounded-sm bg-brand/20 text-text-primary font-medium' : 'flex items-center h-[36px] px-3 rounded-sm text-text-secondary hover:bg-surface-2 hover:text-text-primary transition-colors'}
+                    onClick={handleNavClick}
+                    className={({ isActive }) => isActive ? 'flex items-center h-[40px] px-3 rounded-sm bg-brand/20 text-text-primary font-medium text-sm' : 'flex items-center h-[40px] px-3 rounded-sm text-text-secondary hover:bg-surface-2 hover:text-text-primary transition-colors text-sm'}
                   >
                     <Building2 className="h-4 w-4 mr-3" /> Empresa
                   </NavLink>
@@ -160,7 +175,7 @@ function Sidebar() {
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.6, duration: 0.4 }}
         className="px-6 pb-6 flex-shrink-0">
-         <NavItem to="/suporte" icon={LifeBuoy} label="Suporte" index={navItems.length} />
+         <NavItem to="/suporte" icon={LifeBuoy} label="Suporte" index={navItems.length} onNavigate={handleNavClick} />
       </motion.div>
     </motion.aside>
   );

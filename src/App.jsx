@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route, useLocation } from 'react-router-dom';
+import { cn } from '@/lib/utils';
 import Sidebar from '@/components/layout/Sidebar';
 import Header from '@/components/layout/Header';
 import ProtectedRoute from '@/components/ProtectedRoute';
@@ -24,18 +25,20 @@ import { Helmet } from 'react-helmet';
 function PrivateApp() {
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const toggleSidebar = () => setSidebarVisible(v => !v);
+  const location = useLocation();
+  const isAgendaPage = location.pathname === '/agenda';
 
   return (
     <div className="flex h-screen bg-background text-text-primary">
       <Helmet>
-          <title>Fluxo7 Arena - Gestão de Quadras</title>
-          <meta name="description" content="Software completo para gestão de quadras esportivas." />
+          <title>Fluxo7 Arena - Gestão de Quadras Esportivas</title>
+          <meta name="description" content="Software para gestão de quadras esportivas." />
       </Helmet>
       
-      {sidebarVisible && <Sidebar />}
+      {sidebarVisible && <Sidebar onNavigate={toggleSidebar} />}
       <div className="flex-1 flex flex-col overflow-hidden">
         <Header onToggleSidebar={toggleSidebar} sidebarVisible={sidebarVisible} />
-        <main className="flex-1 overflow-x-hidden overflow-y-auto bg-background p-8">
+        <main className={cn("flex-1 overflow-x-hidden overflow-y-auto bg-background", isAgendaPage ? "p-0 md:p-8" : "p-8")}>
           <Routes>
             <Route path="/" element={<DashboardPage />} />
             <Route path="/agenda" element={<AgendaPage />} />

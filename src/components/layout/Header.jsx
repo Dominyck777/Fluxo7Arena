@@ -1,7 +1,7 @@
 import React from 'react';
 import { useLocation } from 'react-router-dom';
 
-import { Calendar, Bell, LogOut, Building, SidebarClose, SidebarOpen } from 'lucide-react';
+import { Calendar, Bell, LogOut, Building, Menu, X } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { useToast } from "@/components/ui/use-toast";
@@ -115,9 +115,9 @@ function Header({ onToggleSidebar, sidebarVisible }) {
             : 'border-border/60 bg-surface hover:bg-surface-2/60 text-text-primary'}`}
         >
           {sidebarVisible ? (
-            <SidebarClose className="w-5 h-5" />
+            <X className="w-5 h-5" />
           ) : (
-            <SidebarOpen className="w-5 h-5" />
+            <Menu className="w-5 h-5" />
           )}
         </Button>
         <div
@@ -138,9 +138,9 @@ function Header({ onToggleSidebar, sidebarVisible }) {
         {/* Data removida conforme solicitado */}
       </div>
 
-      {/* Título central da aba atual (overlay centralizado) */}
+      {/* Título central da aba atual (overlay centralizado) - Oculto em mobile */}
       {pageTitle ? (
-        <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
+        <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 hidden md:block">
           <h1 className="text-lg md:text-xl font-bold tracking-tight text-text-primary">{pageTitle}</h1>
         </div>
       ) : null}
