@@ -1506,7 +1506,20 @@ function VendasPage() {
     }
   };
 
-  const ProductsPanel = () => (
+  const ProductsPanel = () => {
+    // Ordenar produtos por código
+    const sortedProducts = (products.length ? products : productsData).slice().sort((a, b) => {
+      const codeA = a.code || '';
+      const codeB = b.code || '';
+      // Se ambos são números, comparar numericamente
+      if (/^\d+$/.test(codeA) && /^\d+$/.test(codeB)) {
+        return parseInt(codeA, 10) - parseInt(codeB, 10);
+      }
+      // Caso contrário, comparar alfabeticamente
+      return codeA.localeCompare(codeB);
+    });
+    
+    return (
     <div className="flex flex-col h-full">
        <div className="p-4 border-b border-border">
            <div className="relative">
@@ -1516,7 +1529,7 @@ function VendasPage() {
        </div>
        <div className="flex-1 overflow-y-auto p-4 thin-scroll">
           <ul className="space-y-2">
-              {(products.length ? products : productsData).map(prod => {
+              {sortedProducts.map(prod => {
                   const q = qtyByProductId.get(prod.id) || 0;
                   const stock = Number(prod.stock ?? prod.currentStock ?? 0);
                   const remaining = Math.max(0, stock - q);
@@ -1529,7 +1542,9 @@ function VendasPage() {
                     >
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
-                          <p className="font-semibold truncate" title={prod.name}>{prod.name}</p>
+                          <p className="font-semibold truncate" title={`${prod.code ? `[${prod.code}] ` : ''}${prod.name}`}>
+                            {prod.code && <span className="text-text-muted">[{prod.code}]</span>} {prod.name}
+                          </p>
                           {q > 0 && (
                             <span className="inline-flex items-center justify-center text-[11px] px-1.5 py-0.5 rounded-full bg-brand/15 text-brand border border-brand/30 flex-shrink-0">x{q}</span>
                           )}
@@ -1548,7 +1563,8 @@ function VendasPage() {
           </ul>
        </div>
     </div>
-  );
+    );
+  };
 
   // Estado e lógica do Modo Balcão (comanda sem mesa)
   const [counterComandaId, setCounterComandaId] = useState(null);
@@ -1705,7 +1721,14 @@ function VendasPage() {
                   {(products.length ? products : productsData).filter(p => {
                     const s = counterSearch.trim().toLowerCase();
                     if (!s) return true;
-                    return (p.name || '').toLowerCase().includes(s);
+                    return (p.name || '').toLowerCase().includes(s) || (p.code || '').toLowerCase().includes(s);
+                  }).sort((a, b) => {
+                    const codeA = a.code || '';
+                    const codeB = b.code || '';
+                    if (/^\d+$/.test(codeA) && /^\d+$/.test(codeB)) {
+                      return parseInt(codeA, 10) - parseInt(codeB, 10);
+                    }
+                    return codeA.localeCompare(codeB);
                   }).map((prod) => {
             const qty = (counterItems || []).reduce((acc, it) => acc + (it.productId === prod.id ? Number(it.quantity || 0) : 0), 0);
             const stock = Number(prod.stock ?? prod.currentStock ?? 0);
@@ -1714,7 +1737,9 @@ function VendasPage() {
               <li key={prod.id} className="flex items-center p-2 rounded-md hover:bg-surface-2 transition-colors" onClick={() => { setSelectedCounterProduct(prod); setIsCounterProductDetailsOpen(true); }}>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <p className="font-semibold truncate">{prod.name}</p>
+                    <p className="font-semibold truncate" title={`${prod.code ? `[${prod.code}] ` : ''}${prod.name}`}>
+                      {prod.code && <span className="text-text-muted">[{prod.code}]</span>} {prod.name}
+                    </p>
                     {qty > 0 && (
                       <span className="inline-flex items-center justify-center text-[11px] px-1.5 py-0.5 rounded-full bg-brand/15 text-brand border border-brand/30 flex-shrink-0">x{qty}</span>
                     )}
