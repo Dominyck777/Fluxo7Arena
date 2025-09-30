@@ -112,7 +112,7 @@ export default function HistoricoComandasPage() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [rows, setRows] = useState([]);
-  const [from, setFrom] = useState(() => new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString().slice(0,10));
+  const [from, setFrom] = useState(() => new Date().toISOString().slice(0,10));
   const [to, setTo] = useState(() => new Date().toISOString().slice(0,10));
   const [status, setStatus] = useState('closed');
   const [search, setSearch] = useState('');
@@ -314,10 +314,25 @@ export default function HistoricoComandasPage() {
           const nome = r?.clientes?.nome ?? r?.nome ?? r?.nome_livre ?? '';
           return cid ? [String(cid), nome] : null;
         }).filter(Boolean));
-        const pgEnriched = (pagamentos || []).map(p => ({
-          ...p,
-          cliente_nome: p?.cliente_id ? (nomeById.get(String(p.cliente_id)) || '') : ''
-        }));
+        
+        // Para pagamentos sem cliente_id (antigos), distribuir clientes vinculados
+        const clientesDisponiveis = Array.from(nomeById.values());
+        
+        const pgEnriched = (pagamentos || []).map((p, idx) => {
+          let clienteNome = '';
+          if (p?.cliente_id) {
+            // Tem cliente_id específico no pagamento (vendas novas)
+            clienteNome = nomeById.get(String(p.cliente_id)) || '';
+          } else if (clientesDisponiveis.length > 0) {
+            // Pagamento antigo sem cliente_id: distribuir clientes de forma round-robin
+            clienteNome = clientesDisponiveis[idx % clientesDisponiveis.length];
+          }
+          return {
+            ...p,
+            cliente_nome: clienteNome,
+            finalizadora_nome: p?.finalizadoras?.nome || p?.metodo || '—'
+          };
+        });
         return { itens: itens || [], pagamentos: pgEnriched };
       };
       let result = await fetchOnce();
@@ -417,31 +432,28 @@ export default function HistoricoComandasPage() {
       </Helmet>
 
       <motion.div variants={itemVariants} className="flex items-center justify-between mb-6 gap-4 flex-wrap">
-        <div className="flex items-center gap-3">
-          <h1 className="text-xl sm:text-2xl font-bold text-text-primary">Histórico</h1>
-          <Tabs value="historico" onValueChange={(v) => {
-            if (v === 'mesas') navigate('/vendas');
-            if (v === 'balcao') navigate('/balcao');
-            if (v === 'historico') navigate('/historico');
-          }}>
-            <TabsList className="grid grid-cols-3">
-              <TabsTrigger value="mesas">Mesas</TabsTrigger>
-              <TabsTrigger value="balcao">Balcão</TabsTrigger>
-              <TabsTrigger value="historico">Histórico</TabsTrigger>
-            </TabsList>
-          </Tabs>
-        </div>
+        <Tabs value="historico" onValueChange={(v) => {
+          if (v === 'mesas') navigate('/vendas');
+          if (v === 'balcao') navigate('/balcao');
+          if (v === 'historico') navigate('/historico');
+        }}>
+          <TabsList className="grid grid-cols-3">
+            <TabsTrigger value="mesas">Mesas</TabsTrigger>
+            <TabsTrigger value="balcao">Balcão</TabsTrigger>
+            <TabsTrigger value="historico">Histórico</TabsTrigger>
+          </TabsList>
+        </Tabs>
         {/* Abas internas do Histórico movidas para a barra superior (lado direito) */}
         <div className="flex items-center gap-3">
+          {tab === 'comandas' && (
+            <div className="text-xs sm:text-sm text-text-secondary whitespace-nowrap">Total: <span className="font-semibold text-text-primary">R$ {totals.sum.toFixed(2)}</span></div>
+          )}
           <Tabs value={tab} onValueChange={setTab}>
             <TabsList className="grid grid-cols-2 text-sm">
               <TabsTrigger value="comandas" className="text-sm">Comandas</TabsTrigger>
               <TabsTrigger value="fechamentos" className="text-sm">Fechamentos</TabsTrigger>
             </TabsList>
           </Tabs>
-          {tab === 'comandas' && (
-            <div className="text-xs sm:text-sm text-text-secondary whitespace-nowrap">Total: <span className="font-semibold text-text-primary">R$ {totals.sum.toFixed(2)}</span></div>
-          )}
         </div>
       </motion.div>
 
@@ -692,13 +704,12 @@ export default function HistoricoComandasPage() {
                 ) : (
                   <ul className="text-sm space-y-2 max-h-64 overflow-auto thin-scroll">
                     {detail.pagamentos.map(pg => (
-                      <li key={pg.id} className="flex justify-between">
-                        <span className="pr-2 break-words">
-                          {pg.metodo || '—'}
-                          {pg.cliente_nome ? <span className="text-text-secondary"> • {pg.cliente_nome}</span> : null}
-                          {pg.status ? <span className="text-text-muted"> • {pg.status}</span> : null}
+                      <li key={pg.id} className="flex justify-between gap-2">
+                        <span className="pr-2 break-words flex-1">
+                          {pg.cliente_nome ? <span className="font-semibold">{pg.cliente_nome}</span> : <span className="text-text-muted">Sem cliente</span>}
+                          <span className="text-text-secondary"> • {pg.finalizadora_nome}</span>
                         </span>
-                        <span className="font-mono">R$ {Number(pg.valor||0).toFixed(2)}</span>
+                        <span className="font-mono font-semibold whitespace-nowrap">R$ {Number(pg.valor||0).toFixed(2)}</span>
                       </li>
                     ))}
                   </ul>
