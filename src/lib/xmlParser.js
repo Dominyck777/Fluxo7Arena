@@ -25,10 +25,13 @@ export function parseNFeXML(xmlText) {
     // Extrair produtos
     const produtos = extractProdutos(xmlDoc);
     
+    // Calcular total da nota
+    const totalNota = produtos.reduce((acc, p) => acc + (p.valorTotal || 0), 0);
+    
     return {
       produtos,
       fornecedor,
-      nfe: nfeInfo,
+      nfe: { ...nfeInfo, totalNota },
       success: true
     };
   } catch (error) {
@@ -44,18 +47,40 @@ export function parseNFeXML(xmlText) {
 }
 
 /**
- * Extrai informações básicas da NF-e
+ * Extrai informações básicas da NF-e/NFC-e
  */
 function extractNFeInfo(xmlDoc) {
   const ide = xmlDoc.querySelector('ide');
   if (!ide) return null;
   
+  // Extrair chave de acesso (funciona para NF-e e NFC-e)
+  let chaveAcesso = '';
+  
+  // Método 1: Tag <chNFe> (mais confiável)
+  const chNFeTag = xmlDoc.querySelector('chNFe');
+  if (chNFeTag) {
+    chaveAcesso = chNFeTag.textContent.trim();
+  }
+  
+  // Método 2: Atributo Id da tag infNFe (fallback)
+  if (!chaveAcesso) {
+    const infNFe = xmlDoc.querySelector('infNFe');
+    if (infNFe) {
+      const id = infNFe.getAttribute('Id');
+      if (id) {
+        // Remove o prefixo "NFe" se existir
+        chaveAcesso = id.replace('NFe', '');
+      }
+    }
+  }
+  
   return {
     numero: getTextContent(ide, 'nNF'),
     serie: getTextContent(ide, 'serie'),
     dataEmissao: getTextContent(ide, 'dhEmi'),
-    chaveAcesso: getTextContent(xmlDoc, 'infNFe')?.replace('NFe', ''),
-    tipo: getTextContent(ide, 'tpNF') === '0' ? 'Entrada' : 'Saída'
+    chaveAcesso: chaveAcesso,
+    tipo: getTextContent(ide, 'tpNF') === '0' ? 'Entrada' : 'Saída',
+    naturezaOperacao: getTextContent(ide, 'natOp')
   };
 }
 
@@ -127,6 +152,7 @@ function extractProdutos(xmlDoc) {
         // Valores
         valorUnitario: parseFloat(getTextContent(prod, 'vUnCom') || '0'),
         valorTotal: parseFloat(getTextContent(prod, 'vProd') || '0'),
+        desconto: parseFloat(getTextContent(prod, 'vDesc') || '0'),
         
         // Impostos
         impostos: extractImpostos(imposto),
