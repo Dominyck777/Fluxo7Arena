@@ -274,8 +274,15 @@ function ClientFormModal({ open, onOpenChange, client, onSaved }) {
       }
       if (error) throw error;
       toast({ title: 'Cliente salvo!', description: 'As informações do cliente foram atualizadas.', variant: 'success' });
-      onOpenChange?.(false);
+      
+      // ✅ CORREÇÃO CRÍTICA: Chama onSaved ANTES de fechar o modal
+      // para garantir que o estado seja sincronizado antes de qualquer cleanup
       onSaved?.(savedRow);
+      
+      // Pequeno delay para garantir que onSaved complete antes de fechar
+      setTimeout(() => {
+        onOpenChange?.(false);
+      }, 50);
     } catch (err) {
       // Mensagem amigável quando colunas não existirem ainda no BD
       const raw = (err?.message || '').toLowerCase();

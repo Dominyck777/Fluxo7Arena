@@ -438,6 +438,7 @@ export async function listarClientes({ searchTerm = '', limit = 20, codigoEmpres
   let q = supabase
     .from('clientes')
     .select('*')
+    .eq('status', 'active')  // ✅ Filtro: apenas clientes ativos
     .order('nome', { ascending: true })
     .limit(limit)
   if (codigo) q = q.eq('codigo_empresa', codigo)

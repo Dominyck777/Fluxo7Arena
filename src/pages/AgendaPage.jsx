@@ -2555,11 +2555,12 @@ function AgendaPage() {
             } catch {}
           }
         } catch {}
-        // Carregar clientes da empresa (sem filtrar por status para evitar listas vazias em bancos com outros valores)
+        // Carregar clientes da empresa - apenas clientes ativos
         const { data, error } = await supabase
           .from('clientes')
           .select('id, nome, codigo, email, telefone, status, codigo_empresa')
           .eq('codigo_empresa', userProfile.codigo_empresa)
+          .eq('status', 'active')  // ✅ Filtro: apenas clientes ativos
           .order('nome', { ascending: true });
         if (error) {
           // eslint-disable-next-line no-console
@@ -3585,6 +3586,19 @@ function AgendaPage() {
                   <Button
                     type="button"
                     onClick={() => {
+                      // ✅ PROTEÇÃO: Salva seleção atual antes de abrir modal de cadastro
+                      try {
+                        const current = Array.isArray(selectedClientsRef.current) ? selectedClientsRef.current : [];
+                        if (current.length > 0) {
+                          lastNonEmptySelectionRef.current = current;
+                          sessionStorage.setItem(persistLastKey, JSON.stringify(current));
+                          setChipsSnapshotSafe(current);
+                          console.warn('[CustomerPicker][+Novo:save-selection]', { 
+                            savedCount: current.length 
+                          });
+                        }
+                      } catch {}
+                      
                       // Fecha o popover antes de abrir o modal para evitar flicker/fechamento tardio
                       customerPickerDesiredOpenRef.current = false; try { localStorage.removeItem('agenda:customerPicker:desiredAt'); } catch {}; customerPickerIntentRef.current = 'close'; setIsCustomerPickerOpen(false); setEffectiveCustomerPickerOpen(false);
                       setClientForModal(null);
@@ -4255,6 +4269,19 @@ function AgendaPage() {
             onSaved={(saved) => {
             try {
               if (saved && typeof saved === 'object') {
+                console.warn('[CustomerPicker][onSaved:START]', { 
+                  clientId: saved.id, 
+                  clientName: saved.nome,
+                  currentSelection: Array.isArray(selectedClientsRef.current) ? selectedClientsRef.current.length : 0
+                });
+                
+                // ✅ PROTEÇÃO CRÍTICA: Bloqueia qualquer limpeza por 3 segundos
+                try { 
+                  preventClearsUntilRef.current = Date.now() + 3000;
+                  selectionLockUntilRef.current = Date.now() + 3000;
+                  restoreGuardUntilRef.current = Date.now() + 3000;
+                } catch {}
+                
                 // Atualiza lista se ainda não contém este cliente
                 const exists = (localCustomers || []).some((c) => typeof c === 'object' ? c.id === saved.id : false);
                 if (!exists) {
@@ -4262,16 +4289,50 @@ function AgendaPage() {
                   // Opcional: sincroniza com o pai fora da animação inicial
                   setCustomerOptions((prev) => [...(prev || []), saved]);
                 }
+                
                 // Insere como cliente primário do agendamento
                 setForm((f) => {
                   const prev = Array.isArray(f.selectedClients) ? f.selectedClients : [];
                   const novo = { id: saved.id, nome: saved.nome || saved.name || getCustomerName(saved), codigo: saved.codigo };
                   const withoutDup = prev.filter(sc => sc.id !== saved.id);
-                  return { ...f, selectedClients: [novo, ...withoutDup] };
+                  const newSelection = [novo, ...withoutDup];
+                  
+                  // ✅ CORREÇÃO: Sincroniza TODAS as refs para evitar dessincronização
+                  try { selectedClientsRef.current = newSelection; } catch {}
+                  try { lastNonEmptySelectionRef.current = newSelection; } catch {}
+                  try { setChipsSnapshotSafe(newSelection); } catch {}
+                  try { sessionStorage.setItem(persistLastKey, JSON.stringify(newSelection)); } catch {}
+                  
+                  // Marca que NÃO foi limpeza intencional do usuário
+                  try { clearedByUserRef.current = false; } catch {}
+                  
+                  console.warn('[CustomerPicker][onSaved:COMPLETE]', { 
+                    newClientId: saved.id, 
+                    newClientName: saved.nome,
+                    totalSelected: newSelection.length,
+                    refsSynced: true,
+                    protectionActive: true
+                  });
+                  
+                  return { ...f, selectedClients: newSelection };
                 });
+                
+                // Reforço adicional após microtask para garantir persistência
+                Promise.resolve().then(() => {
+                  try {
+                    const current = Array.isArray(selectedClientsRef.current) ? selectedClientsRef.current : [];
+                    if (current.length > 0) {
+                      setForm(f => ({ ...f, selectedClients: [...current] }));
+                      console.warn('[CustomerPicker][onSaved:REASSERT]', { count: current.length });
+                    }
+                  } catch {}
+                });
+                
                 /* console cleaned: onSaved */
               }
-            } catch {}
+            } catch (e) {
+              console.error('[CustomerPicker][onSaved:ERROR]', e);
+            }
           }}
           />
           </>

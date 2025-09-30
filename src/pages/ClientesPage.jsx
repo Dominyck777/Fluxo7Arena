@@ -44,7 +44,7 @@ const StatCard = ({ icon, title, value, color, onClick, isActive }) => {
     );
 };
 
-function ClientDetailsModal({ open, onOpenChange, client, onEdit, codigoEmpresa }) {
+function ClientDetailsModal({ open, onOpenChange, client, onEdit, onInactivate, codigoEmpresa }) {
   const { toast } = useToast();
   // Estilos de status de agendamento alinhados com AgendaPage.statusConfig
   // scheduled: #3B82F6, confirmed: #22C55E, in_progress: #FACC15, finished: #6B7280, canceled: #EF4444, absent: #F97316
@@ -713,13 +713,25 @@ function ClientDetailsModal({ open, onOpenChange, client, onEdit, codigoEmpresa 
             </Dialog>
         </div>
 
-        <DialogFooter>
-          <DialogClose asChild>
-            <Button type="button" variant="secondary">Fechar</Button>
-          </DialogClose>
-          <Button onClick={() => onEdit(client)}>
-            <Edit className="mr-2 h-4 w-4" /> Editar Cliente
-          </Button>
+        <DialogFooter className="flex items-center justify-between sm:justify-between">
+          <div className="flex-1">
+            <Button 
+              type="button" 
+              variant="destructive"
+              className="bg-red-600 hover:bg-red-500 text-white"
+              onClick={() => onInactivate?.(client)}
+            >
+              <UserX className="mr-2 h-4 w-4" /> Inativar Cliente
+            </Button>
+          </div>
+          <div className="flex gap-2 ml-auto">
+            <DialogClose asChild>
+              <Button type="button" variant="secondary">Fechar</Button>
+            </DialogClose>
+            <Button onClick={() => onEdit(client)}>
+              <Edit className="mr-2 h-4 w-4" /> Editar Cliente
+            </Button>
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -1061,6 +1073,10 @@ function ClientesPage() {
       try {
         const { error } = await supabase.from('clientes').update({ status: 'inactive' }).eq('id', client.id);
         if (error) throw error;
+        
+        // ✅ UX: Fecha o modal de detalhes após inativar
+        setIsDetailsOpen(false);
+        
         toast({ title: 'Cliente inativado', description: `${client.nome} foi marcado como inativo.` });
         loadClients();
       } catch (err) {
@@ -1153,13 +1169,12 @@ function ClientesPage() {
                                     </TableHead>
                                     <TableHead className="text-text-secondary">Contato</TableHead>
                                     <TableHead className="text-text-secondary">Status</TableHead>
-                                    <TableHead className="w-[50px]"></TableHead>
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
                                 {loading ? (
                                   <TableRow>
-                                    <TableCell colSpan={5} className="h-24 text-center">Carregando...</TableCell>
+                                    <TableCell colSpan={4} className="h-24 text-center">Carregando...</TableCell>
                                   </TableRow>
                                 ) : sortedClients.length > 0 ? (
                                     sortedClients.map(client => (
@@ -1189,25 +1204,11 @@ function ClientesPage() {
                                                     {client.status === 'active' ? 'Ativo' : 'Inativo'}
                                                 </span>
                                             </TableCell>
-                                            <TableCell>
-                                                <DropdownMenu>
-                                                    <DropdownMenuTrigger asChild>
-                                                        <Button variant="ghost" className="h-8 w-8 p-0" onClick={(e) => e.stopPropagation()}>
-                                                            <MoreHorizontal className="h-4 w-4" />
-                                                        </Button>
-                                                    </DropdownMenuTrigger>
-                                                    <DropdownMenuContent align="end">
-                                                        <DropdownMenuItem onClick={(e) => {e.stopPropagation(); handleViewDetails(client); }}>Ver Detalhes</DropdownMenuItem>
-                                                        <DropdownMenuItem onClick={(e) => {e.stopPropagation(); handleEditFromMenu(client); }}>Editar</DropdownMenuItem>
-                                                        <DropdownMenuItem className="text-danger" onClick={(e) => { e.stopPropagation(); handleInactivate(client); }}>Inativar Cliente</DropdownMenuItem>
-                                                    </DropdownMenuContent>
-                                                </DropdownMenu>
-                                            </TableCell>
                                         </TableRow>
                                     ))
                                 ) : (
                                     <TableRow>
-                                        <TableCell colSpan={5} className="h-24 text-center">
+                                        <TableCell colSpan={4} className="h-24 text-center">
                                             Nenhum cliente encontrado com os filtros aplicados.
                                         </TableCell>
                                     </TableRow>
@@ -1229,6 +1230,7 @@ function ClientesPage() {
           onOpenChange={setIsDetailsOpen}
           client={selectedClient}
           onEdit={handleEdit}
+          onInactivate={handleInactivate}
           codigoEmpresa={userProfile?.codigo_empresa}
         />
       </>
