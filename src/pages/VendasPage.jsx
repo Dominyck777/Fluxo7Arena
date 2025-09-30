@@ -143,17 +143,29 @@ function VendasPage() {
         listarResumoSessaoCaixaAtual({ codigoEmpresa }).catch(() => null),
         getCaixaAberto({ codigoEmpresa }).catch(() => null),
       ]);
+      
+      // Se não há sessão aberta, não mostrar nada
+      if (!sess?.id) {
+        setCashSummary(null);
+        return;
+      }
+      
       let totalSangria = 0;
+      let movimentacoes = [];
       try {
-        if (sess?.id) {
-          const movs = await listarMovimentacoesCaixa({ caixaSessaoId: sess.id, codigoEmpresa });
-          totalSangria = (movs || []).filter(m => (m?.tipo || '') === 'sangria').reduce((acc, m) => acc + Number(m?.valor || 0), 0);
-        }
+        movimentacoes = await listarMovimentacoesCaixa({ caixaSessaoId: sess.id, codigoEmpresa });
+        totalSangria = (movimentacoes || []).filter(m => (m?.tipo || '') === 'sangria').reduce((acc, m) => acc + Number(m?.valor || 0), 0);
       } catch {}
+      
+      // Sempre usar dados da sessão, mesmo sem vendas
       const merged = {
-        ...(summary || {}),
-        saldo_inicial: (summary?.saldo_inicial ?? summary?.saldoInicial ?? sess?.saldo_inicial ?? 0),
+        saldo_inicial: sess.saldo_inicial || 0,
+        totalPorFinalizadora: summary?.totalPorFinalizadora || summary?.porFinalizadora || {},
+        totalEntradas: summary?.totalEntradas || summary?.entradas || 0,
         totalSangria,
+        totalSaidas: totalSangria,
+        sessaoId: sess.id,
+        movimentacoes
       };
       setCashSummary(merged);
     } catch {
@@ -1435,27 +1447,14 @@ function VendasPage() {
         >
           <DialogHeader>
             <DialogTitle className="text-2xl font-bold">Nova Mesa</DialogTitle>
-            <DialogDescription>Crie uma nova mesa informando, opcionalmente, o número desejado. Em branco cria a próxima sequência.</DialogDescription>
+            <DialogDescription>Informe o nome da mesa. Se deixar em branco, será criada com numeração automática.</DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
-            <Label htmlFor="nova-mesa-numero">Número da mesa (opcional)</Label>
-            <Input
-              id="nova-mesa-numero"
-              type="text"
-              inputMode="numeric"
-              placeholder="Ex.: 12"
-              value={numeroVal}
-              onChange={(e) => setNumeroVal(e.target.value)}
-              onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Enter') e.preventDefault(); }}
-              onKeyUp={(e) => e.stopPropagation()}
-              onKeyPress={(e) => e.stopPropagation()}
-              autoFocus
-            />
-            <Label htmlFor="nova-mesa-nome">Nome da mesa (opcional)</Label>
+            <Label htmlFor="nova-mesa-nome">Nome da mesa</Label>
             <Input
               id="nova-mesa-nome"
               type="text"
-              placeholder="Ex.: Pátio 1"
+              placeholder="Ex.: Mesa 1, Pátio 1, VIP..."
               value={nomeVal}
               onChange={(e) => setNomeVal(e.target.value)}
               onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Enter') e.preventDefault(); }}

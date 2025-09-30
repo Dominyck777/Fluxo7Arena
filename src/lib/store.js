@@ -256,10 +256,21 @@ export async function criarComandaBalcao({ codigoEmpresa } = {}) {
   const codigo = codigoEmpresa || getCachedCompanyCode()
   // Bloqueio: exigir caixa aberto
   await assertCaixaAberto({ codigoEmpresa: codigo })
-  const payload = { status: 'open', mesa_id: null, aberto_em: new Date().toISOString() }
+  const payload = { 
+    tipo: 'balcao',
+    status: 'open', 
+    mesa_id: null, 
+    aberto_em: new Date().toISOString() 
+  }
   if (codigo) payload.codigo_empresa = codigo
-  const { data, error } = await supabase.from('comandas').insert(payload).select('id,status,aberto_em').single()
-  if (error) throw error
+  
+  console.log('[criarComandaBalcao] Criando comanda:', payload)
+  const { data, error } = await supabase.from('vendas').insert(payload).select('id,status,aberto_em,tipo').single()
+  if (error) {
+    console.error('[criarComandaBalcao] Erro ao criar:', error)
+    throw error
+  }
+  console.log('[criarComandaBalcao] Comanda criada com ID:', data?.id, 'tipo:', typeof data?.id)
   return data
 }
 

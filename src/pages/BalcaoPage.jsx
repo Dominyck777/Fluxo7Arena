@@ -113,18 +113,37 @@ export default function BalcaoPage() {
         listarResumoSessaoCaixaAtual({ codigoEmpresa }).catch(() => null),
         getCaixaAberto({ codigoEmpresa }).catch(() => null),
       ]);
+      
+      // Se não há sessão aberta, não mostrar nada
+      if (!sess?.id) {
+        setCashSummary(null);
+        return;
+      }
+      
       let totalSangria = 0;
+      let movimentacoes = [];
       try {
-        if (sess?.id) {
-          const movs = await listarMovimentacoesCaixa({ caixaSessaoId: sess.id, codigoEmpresa });
-          totalSangria = (movs || []).filter(m => (m?.tipo || '') === 'sangria').reduce((acc, m) => acc + Number(m?.valor || 0), 0);
-        }
+        movimentacoes = await listarMovimentacoesCaixa({ caixaSessaoId: sess.id, codigoEmpresa });
+        totalSangria = (movimentacoes || []).filter(m => (m?.tipo || '') === 'sangria').reduce((acc, m) => acc + Number(m?.valor || 0), 0);
       } catch {}
+      
+      // Sempre usar dados da sessão, mesmo sem vendas
       const merged = {
-        ...(summary || {}),
-        saldo_inicial: (summary?.saldo_inicial ?? summary?.saldoInicial ?? sess?.saldo_inicial ?? 0),
+        saldo_inicial: sess.saldo_inicial || 0,
+        totalPorFinalizadora: summary?.totalPorFinalizadora || summary?.porFinalizadora || {},
+        totalEntradas: summary?.totalEntradas || summary?.entradas || 0,
         totalSangria,
+        totalSaidas: totalSangria,
+        sessaoId: sess.id,
+        movimentacoes
       };
+      setCashSummary(merged);
+    } catch {
+      setCashSummary(null);
+    } finally {
+      setCashLoading(false);
+    }
+  };
 
   // Mantém clientes e linhas sincronizados quando o modal está aberto e a lista de clientes selecionados muda
   useEffect(() => {
@@ -174,13 +193,6 @@ export default function BalcaoPage() {
     sync();
     return () => { active = false; };
   }, [isPayOpen, selectedClientIds, comandaId, userProfile?.codigo_empresa]);
-      setCashSummary(merged);
-    } catch {
-      setCashSummary(null);
-    } finally {
-      setCashLoading(false);
-    }
-  };
 
   // Confirmar pagamento no Balcão
   const confirmPay = async () => {
@@ -1542,7 +1554,15 @@ export default function BalcaoPage() {
                   } catch {}
                   setIsClientWizardOpen(false);
                 } else {
-                  await adicionarClientesAComanda({ comandaId, clienteIds: ids, nomesLivres: [], codigoEmpresa });
+                  try {
+                    await adicionarClientesAComanda({ comandaId, clienteIds: ids, nomesLivres: [], codigoEmpresa });
+                  } catch (error) {
+                    // Ignora erro de duplicata (constraint violation)
+                    if (!error?.message?.includes('duplicate') && !error?.message?.includes('violates foreign key')) {
+                      throw error;
+                    }
+                    console.log('Alguns clientes já estavam vinculados, continuando...');
+                  }
                   const vincs = await listarClientesDaComanda({ comandaId, codigoEmpresa });
                   const nomes = (vincs || []).map(v => v?.nome).filter(Boolean);
                   setCustomerName(nomes.length ? nomes.join(', ') : '');

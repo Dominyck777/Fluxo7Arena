@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
-import { Upload, FileText, CheckCircle, AlertCircle, Loader2, Plus, RefreshCw } from 'lucide-react';
+import { Upload, FileText, CheckCircle, AlertCircle, Loader2, Plus, RefreshCw, Copy } from 'lucide-react';
 import { parseNFeXML, findExistingProduct, convertXMLProductToSystemFormat } from '@/lib/xmlParser';
 import { createProduct, adjustProductStock, listProducts } from '@/lib/products';
 import { cn } from '@/lib/utils';
@@ -247,12 +247,18 @@ export default function XMLImportModal({ open, onOpenChange, products, codigoEmp
                     <div><span className="text-text-muted">Tipo:</span> <span>{parsedData.nfe.tipo}</span></div>
                     <div><span className="text-text-muted">Fornecedor:</span> <span>{parsedData.fornecedor?.razaoSocial}</span></div>
                   </div>
+                  {parsedData.nfe.chaveAcesso && (
+                    <div className="mt-2 pt-2 border-t border-border">
+                      <span className="text-text-muted text-xs">Chave de Acesso:</span>
+                      <p className="font-mono text-xs break-all">{parsedData.nfe.chaveAcesso}</p>
+                    </div>
+                  )}
                 </div>
               )}
 
-              <div className="bg-surface-2 rounded-lg p-4 border border-border">
+              <div className="bg-surface-2 rounded-lg p-4 border border-border flex flex-col max-h-[500px]">
                 <h3 className="font-semibold mb-3">Produtos Encontrados ({productsPreview.length})</h3>
-                <div className="space-y-2 max-h-96 overflow-y-auto">
+                <div className="space-y-2 overflow-y-auto flex-1">
                   {productsPreview.map((item, idx) => (
                     <div 
                       key={idx} 

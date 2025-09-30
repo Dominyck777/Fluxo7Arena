@@ -9,10 +9,12 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/components/ui/use-toast';
-import { CalendarDays, FileText, Search, Loader2 } from 'lucide-react';
+import { CalendarDays, FileText, Search, Loader2, Copy, Download } from 'lucide-react';
 import { listarComandas, listarItensDaComanda, listarTotaisPorComanda, listarPagamentos, listMesas, listarClientesDaComanda, listarFechamentosCaixa, listarResumoPeriodo, getCaixaResumo, listarMovimentacoesCaixa, listarClientesPorComandas, listarFinalizadorasPorComandas } from '@/lib/store';
 import { cn } from '@/lib/utils';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '@/contexts/AuthContext';
+import XMLSalesImportModal from '@/components/XMLSalesImportModal';
 
 const pageVariants = { hidden: { opacity: 0 }, visible: { opacity: 1, transition: { staggerChildren: 0.1 } } };
 const itemVariants = { hidden: { opacity: 0, y: 20 }, visible: { opacity: 1, y: 0, transition: { duration: 0.5 } } };
@@ -110,6 +112,7 @@ function DateInput({ value, onChange }) {
 export default function HistoricoComandasPage() {
   const { toast } = useToast();
   const navigate = useNavigate();
+  const { userProfile } = useAuth();
   const [loading, setLoading] = useState(false);
   const [rows, setRows] = useState([]);
   const [from, setFrom] = useState(() => new Date().toISOString().slice(0,10));
@@ -124,6 +127,90 @@ export default function HistoricoComandasPage() {
   const [detail, setDetail] = useState({ loading: false, itens: [], pagamentos: [] });
   const [detailMeta, setDetailMeta] = useState(null); // { mesaLabel, clientesStr, aberto_em, fechado_em, tipo }
   const [cashDetail, setCashDetail] = useState({ open: false, loading: false, resumo: null, periodo: { from: null, to: null }, movs: [] });
+  
+  // XML Import
+  const [isXmlImportOpen, setIsXmlImportOpen] = useState(false);
+  
+  // Mostrar todas (sem filtro de data)
+  const [showAll, setShowAll] = useState(false);
+  
+  // Exportar CSV
+  const exportarCSV = async () => {
+    try {
+      toast({ title: 'Gerando CSV...', description: 'Aguarde enquanto preparamos o arquivo', variant: 'default' });
+      
+      // Buscar todas as comandas do período
+      const todasComandas = await listarComandas({ 
+        status, 
+        from: from || undefined, 
+        to: to || undefined, 
+        search: debouncedSearch || '', 
+        limit: 10000, 
+        offset: 0 
+      });
+      
+      if (!todasComandas || todasComandas.length === 0) {
+        toast({ title: 'Nenhum dado para exportar', variant: 'warning' });
+        return;
+      }
+      
+      // Buscar totais
+      const ids = todasComandas.map(r => r.id);
+      const totals = await listarTotaisPorComanda(ids, userProfile?.codigo_empresa);
+      const mesas = await listMesas(userProfile?.codigo_empresa);
+      const mapMesaNumero = new Map(mesas.map(m => [m.id, m.numero]));
+      const namesByComanda = await listarClientesPorComandas(ids);
+      const finsByComanda = await listarFinalizadorasPorComandas(ids);
+      
+      // Montar dados para CSV
+      const csvData = todasComandas.map(cmd => {
+        const mesaLabel = cmd.mesa_id ? `Mesa ${mapMesaNumero.get(cmd.mesa_id) || '?'}` : 'Balcão';
+        const clientes = (namesByComanda[cmd.id] || []).join(', ') || 'Sem cliente';
+        const fins = finsByComanda[cmd.id];
+        const finalizadoras = Array.isArray(fins) ? fins.join(', ') : (fins || 'Não informado');
+        const statusLabel = cmd.fechado_em ? 'Fechada' : 'Aberta';
+        
+        return {
+          'Tipo': cmd.tipo === 'balcao' ? 'Balcão' : 'Mesa',
+          'Mesa/Local': mesaLabel,
+          'Cliente(s)': clientes,
+          'Status': statusLabel,
+          'Abertura': new Date(cmd.aberto_em).toLocaleString('pt-BR'),
+          'Fechamento': cmd.fechado_em ? new Date(cmd.fechado_em).toLocaleString('pt-BR') : '-',
+          'Total (R$)': Number(totals[cmd.id] || 0).toFixed(2),
+          'Forma(s) Pagamento': finalizadoras,
+          'Observações': cmd.observacao || '-'
+        };
+      });
+      
+      // Converter para CSV
+      const headers = Object.keys(csvData[0]);
+      const csvContent = [
+        headers.join(';'),
+        ...csvData.map(row => headers.map(h => {
+          const value = row[h] || '';
+          // Escapar aspas e adicionar aspas se contém vírgula ou ponto-e-vírgula
+          return `"${String(value).replace(/"/g, '""')}"`;
+        }).join(';'))
+      ].join('\n');
+      
+      // Download
+      const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      const url = URL.createObjectURL(blob);
+      link.setAttribute('href', url);
+      link.setAttribute('download', `historico_comandas_${new Date().toISOString().slice(0,10)}.csv`);
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      toast({ title: 'CSV exportado!', description: `${csvData.length} comandas exportadas`, variant: 'success' });
+    } catch (error) {
+      console.error('Erro ao exportar CSV:', error);
+      toast({ title: 'Erro ao exportar', description: error.message, variant: 'destructive' });
+    }
+  };
 
   // Paginação de comandas
   const PAGE_LIMIT = 100;
@@ -446,7 +533,38 @@ export default function HistoricoComandasPage() {
         {/* Abas internas do Histórico movidas para a barra superior (lado direito) */}
         <div className="flex items-center gap-3">
           {tab === 'comandas' && (
-            <div className="text-xs sm:text-sm text-text-secondary whitespace-nowrap">Total: <span className="font-semibold text-text-primary">R$ {totals.sum.toFixed(2)}</span></div>
+            <>
+              <Button variant="secondary" size="sm" onClick={() => setIsXmlImportOpen(true)}>
+                <FileText className="mr-2 h-4 w-4" />
+                Importar XML
+              </Button>
+              <Button variant="outline" size="sm" onClick={exportarCSV}>
+                <Download className="mr-1 h-3 w-3" />
+                Exportar
+              </Button>
+              <button
+                className="text-xs text-text-muted hover:text-text-primary transition-colors"
+                onClick={() => {
+                  if (showAll) {
+                    // Voltar ao normal (hoje)
+                    const hoje = new Date().toISOString().slice(0, 10);
+                    setFrom(hoje);
+                    setTo(hoje);
+                    setShowAll(false);
+                  } else {
+                    // Mostrar todas
+                    setFrom('');
+                    setTo('');
+                    setShowAll(true);
+                  }
+                  setOffset(0);
+                }}
+                title={showAll ? 'Voltar ao filtro de hoje' : 'Mostrar todas as comandas'}
+              >
+                {showAll ? '◀' : '●'}
+              </button>
+              <div className="text-xs sm:text-sm text-text-secondary whitespace-nowrap">Total: <span className="font-semibold text-text-primary">R$ {totals.sum.toFixed(2)}</span></div>
+            </>
           )}
           <Tabs value={tab} onValueChange={setTab}>
             <TabsList className="grid grid-cols-2 text-sm">
@@ -654,24 +772,60 @@ export default function HistoricoComandasPage() {
 
       {tab === 'comandas' && (
       <Dialog open={!!detailId} onOpenChange={(v) => { if (!v) { detailOpenRef.current = false; setDetailId(null); setDetail({ loading: false, itens: [], pagamentos: [] }); setDetailMeta(null); } else { detailOpenRef.current = true; } }}>
-        <DialogContent className="max-w-3xl" onKeyDown={(e) => e.stopPropagation()}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col" onKeyDown={(e) => e.stopPropagation()}>
           <DialogHeader>
-            <DialogTitle>
-              {detailMeta ? (
-                <span>
-                  {detailMeta.mesaLabel}
-                  {detailMeta.clientesStr ? <span className="text-text-secondary"> • {detailMeta.clientesStr}</span> : null}
-                </span>
-              ) : (
-                <>Detalhes da Comanda #{detailId || '—'}</>
+            <DialogTitle className="flex items-center gap-2 flex-wrap">
+              <span>
+                {detailMeta ? (
+                  <span>
+                    {detailMeta.mesaLabel}
+                    {detailMeta.clientesStr ? <span className="text-text-secondary"> • {detailMeta.clientesStr}</span> : null}
+                  </span>
+                ) : (
+                  <>Comanda #{detailId || '—'}</>
+                )}
+              </span>
+              {detailMeta && (
+                <div className="flex gap-2">
+                  <span className={cn("text-xs px-2 py-0.5 rounded-full border", statusBadgeClass(detailMeta.status))}>
+                    {detailMeta.status === 'closed' ? 'Fechada' : detailMeta.status === 'open' ? 'Aberta' : 'Cancelada'}
+                  </span>
+                  <span className="text-xs px-2 py-0.5 rounded-full border bg-info/10 text-info border-info/30">
+                    {detailMeta.tipo === 'balcao' ? 'Balcão' : detailMeta.tipo === 'comanda' ? 'Mesa' : 'Importada'}
+                  </span>
+                </div>
               )}
             </DialogTitle>
-            <DialogDescription>
+            <DialogDescription className="space-y-1">
               {detailMeta ? (
                 <>
-                  {detailMeta.aberto_em ? <>Abertura: {fmtDate(detailMeta.aberto_em)}</> : '—'}
-                  {" "}•{" "}
-                  {detailMeta.fechado_em ? <>Fechamento: {fmtDate(detailMeta.fechado_em)}</> : '—'}
+                  <div>
+                    {detailMeta.aberto_em ? <>Abertura: {fmtDate(detailMeta.aberto_em)}</> : '—'}
+                    {detailMeta.fechado_em && (
+                      <>
+                        {" "}•{" "}
+                        Fechamento: {fmtDate(detailMeta.fechado_em)}
+                        {(() => {
+                          const inicio = new Date(detailMeta.aberto_em);
+                          const fim = new Date(detailMeta.fechado_em);
+                          const diffMs = fim - inicio;
+                          const diffMins = Math.floor(diffMs / 60000);
+                          const hours = Math.floor(diffMins / 60);
+                          const mins = diffMins % 60;
+                          return diffMins > 0 ? <span className="text-text-muted"> ({hours > 0 ? `${hours}h ` : ''}{mins}min)</span> : null;
+                        })()}
+                      </>
+                    )}
+                  </div>
+                  {detailMeta.observacao && (
+                    <div className="text-xs text-text-muted">
+                      {detailMeta.observacao.includes('Importado de XML') ? (
+                        <span className="text-warning">📄 {detailMeta.observacao.split('\n')[0]}</span>
+                      ) : (
+                        <span>Obs: {detailMeta.observacao}</span>
+                      )}
+                    </div>
+                  )}
                 </>
               ) : (
                 <>Itens e pagamentos registrados.</>
@@ -681,39 +835,96 @@ export default function HistoricoComandasPage() {
           {detail.loading ? (
             <div className="p-6 text-center text-text-muted"><Loader2 className="mr-2 inline h-4 w-4 animate-spin" /> Carregando...</div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="border rounded-md p-3">
-                <div className="font-semibold mb-2">Itens</div>
-                {detail.itens.length === 0 ? (
-                  <div className="text-sm text-text-muted">Sem itens.</div>
-                ) : (
-                  <ul className="text-sm space-y-2 max-h-64 overflow-auto thin-scroll">
-                    {detail.itens.map(it => (
-                      <li key={it.id} className="flex justify-between">
-                        <span className="truncate pr-2">{it.descricao} <span className="text-text-muted">x {it.quantidade}</span></span>
-                        <span className="font-mono">R$ {(Number(it.quantidade||0)*Number(it.preco_unitario||0)).toFixed(2)}</span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-              <div className="border rounded-md p-3">
-                <div className="font-semibold mb-2">Pagamentos</div>
-                {detail.pagamentos.length === 0 ? (
-                  <div className="text-sm text-text-muted">Sem registros.</div>
-                ) : (
-                  <ul className="text-sm space-y-2 max-h-64 overflow-auto thin-scroll">
-                    {detail.pagamentos.map(pg => (
-                      <li key={pg.id} className="flex justify-between gap-2">
-                        <span className="pr-2 break-words flex-1">
-                          {pg.cliente_nome ? <span className="font-semibold">{pg.cliente_nome}</span> : <span className="text-text-muted">Sem cliente</span>}
-                          <span className="text-text-secondary"> • {pg.finalizadora_nome}</span>
-                        </span>
-                        <span className="font-mono font-semibold whitespace-nowrap">R$ {Number(pg.valor||0).toFixed(2)}</span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
+            <div className="space-y-4 overflow-y-auto flex-1 px-1">
+              {/* Resumo Financeiro */}
+              {(() => {
+                const subtotalItens = detail.itens.reduce((acc, it) => acc + (Number(it.quantidade||0) * Number(it.preco_unitario||0)), 0);
+                const totalDescontos = detail.itens.reduce((acc, it) => acc + Number(it.desconto||0), 0);
+                const totalItens = subtotalItens - totalDescontos;
+                const totalPagamentos = detail.pagamentos.reduce((acc, pg) => acc + Number(pg.valor||0), 0);
+                const diferenca = totalPagamentos - totalItens;
+                
+                return (
+                  <div className="bg-surface-2 rounded-lg p-4 border border-border">
+                    <h3 className="font-semibold mb-3">Resumo Financeiro</h3>
+                    <div className="space-y-2 text-sm">
+                      <div className="flex justify-between">
+                        <span className="text-text-muted">Subtotal dos itens:</span>
+                        <span className="font-mono">R$ {subtotalItens.toFixed(2)}</span>
+                      </div>
+                      {totalDescontos > 0 && (
+                        <div className="flex justify-between text-warning">
+                          <span>Descontos:</span>
+                          <span className="font-mono">- R$ {totalDescontos.toFixed(2)}</span>
+                        </div>
+                      )}
+                      <div className="flex justify-between font-semibold pt-2 border-t border-border">
+                        <span>Total da comanda:</span>
+                        <span className="font-mono text-lg">R$ {totalItens.toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between text-success">
+                        <span>Total pago:</span>
+                        <span className="font-mono">R$ {totalPagamentos.toFixed(2)}</span>
+                      </div>
+                      {Math.abs(diferenca) > 0.01 && (
+                        <div className={cn("flex justify-between", diferenca > 0 ? "text-warning" : "text-danger")}>
+                          <span>{diferenca > 0 ? 'Troco/Excedente:' : 'Faltando:'}</span>
+                          <span className="font-mono">R$ {Math.abs(diferenca).toFixed(2)}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
+              
+              {/* Itens e Pagamentos */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="border rounded-md p-3">
+                  <div className="font-semibold mb-2">Itens ({detail.itens.length})</div>
+                  {detail.itens.length === 0 ? (
+                    <div className="text-sm text-text-muted">Sem itens.</div>
+                  ) : (
+                    <ul className="text-sm space-y-2 max-h-64 overflow-auto thin-scroll">
+                      {detail.itens.map(it => {
+                        const subtotal = Number(it.quantidade||0) * Number(it.preco_unitario||0);
+                        const desconto = Number(it.desconto||0);
+                        const total = subtotal - desconto;
+                        return (
+                          <li key={it.id} className="border-b border-border/50 pb-2 last:border-0">
+                            <div className="flex justify-between items-start gap-2">
+                              <span className="flex-1 min-w-0">
+                                <div className="font-medium truncate">{it.descricao}</div>
+                                <div className="text-xs text-text-muted">
+                                  {it.quantidade} x R$ {Number(it.preco_unitario||0).toFixed(2)}
+                                  {desconto > 0 && <span className="text-warning"> (desc: R$ {desconto.toFixed(2)})</span>}
+                                </div>
+                              </span>
+                              <span className="font-mono font-semibold whitespace-nowrap">R$ {total.toFixed(2)}</span>
+                            </div>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </div>
+                <div className="border rounded-md p-3">
+                  <div className="font-semibold mb-2">Pagamentos ({detail.pagamentos.length})</div>
+                  {detail.pagamentos.length === 0 ? (
+                    <div className="text-sm text-text-muted">Sem registros.</div>
+                  ) : (
+                    <ul className="text-sm space-y-2 max-h-64 overflow-auto thin-scroll">
+                      {detail.pagamentos.map(pg => (
+                        <li key={pg.id} className="flex justify-between gap-2 border-b border-border/50 pb-2 last:border-0">
+                          <span className="pr-2 break-words flex-1">
+                            {pg.cliente_nome ? <div className="font-medium">{pg.cliente_nome}</div> : <div className="text-text-muted">Sem cliente</div>}
+                            <div className="text-xs text-text-secondary">{pg.finalizadora_nome || 'Outros'}</div>
+                          </span>
+                          <span className="font-mono font-semibold whitespace-nowrap">R$ {Number(pg.valor||0).toFixed(2)}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
               </div>
             </div>
           )}
@@ -777,6 +988,25 @@ export default function HistoricoComandasPage() {
         </DialogContent>
       </Dialog>
       )}
+      
+      <XMLSalesImportModal
+        open={isXmlImportOpen}
+        onOpenChange={setIsXmlImportOpen}
+        codigoEmpresa={userProfile?.codigo_empresa}
+        onSuccess={async (dataEmissao) => {
+          setIsXmlImportOpen(false);
+          // Ajustar filtro de data para incluir a data da nota
+          if (dataEmissao) {
+            setFrom(dataEmissao);
+            setTo(dataEmissao);
+          }
+          // Aguardar um pouco para garantir que o banco processou
+          await new Promise(resolve => setTimeout(resolve, 500));
+          // Resetar offset e recarregar do zero
+          setOffset(0);
+          await load({ append: false });
+        }}
+      />
     </motion.div>
   );
 }
