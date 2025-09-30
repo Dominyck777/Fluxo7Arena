@@ -82,11 +82,11 @@ function extractFornecedor(xmlDoc) {
 }
 
 /**
- * Extrai todos os produtos do XML
+ * Extrai todos os produtos do XML e agrupa duplicados
  */
 function extractProdutos(xmlDoc) {
   const detElements = xmlDoc.querySelectorAll('det');
-  const produtos = [];
+  const produtosMap = new Map(); // Usar Map para agrupar por chave única
   
   detElements.forEach((det, index) => {
     const prod = det.querySelector('prod');
@@ -94,35 +94,54 @@ function extractProdutos(xmlDoc) {
     
     if (!prod) return;
     
-    const produto = {
-      // Identificação
-      codigo: getTextContent(prod, 'cProd'),
-      ean: getTextContent(prod, 'cEAN'),
-      nome: getTextContent(prod, 'xProd'),
-      ncm: getTextContent(prod, 'NCM'),
-      cest: getTextContent(prod, 'CEST'),
-      cfop: getTextContent(prod, 'CFOP'),
-      
-      // Unidade e quantidade
-      unidade: getTextContent(prod, 'uCom'),
-      quantidade: parseFloat(getTextContent(prod, 'qCom') || '0'),
-      
-      // Valores
-      valorUnitario: parseFloat(getTextContent(prod, 'vUnCom') || '0'),
-      valorTotal: parseFloat(getTextContent(prod, 'vProd') || '0'),
-      
-      // Impostos
-      impostos: extractImpostos(imposto),
-      
-      // Informações adicionais
-      descricao: getTextContent(prod, 'xProd'),
-      origem: index + 1 // Número do item na nota
-    };
+    const codigo = getTextContent(prod, 'cProd');
+    const ean = getTextContent(prod, 'cEAN');
+    const nome = getTextContent(prod, 'xProd');
+    const quantidade = parseFloat(getTextContent(prod, 'qCom') || '0');
     
-    produtos.push(produto);
+    // Criar chave única: prioriza EAN, depois código, depois nome
+    const chave = ean && ean !== 'SEM GTIN' ? `ean:${ean}` : 
+                  codigo ? `cod:${codigo}` : 
+                  `nome:${nome.toLowerCase().trim()}`;
+    
+    if (produtosMap.has(chave)) {
+      // Produto duplicado: somar quantidade
+      const existing = produtosMap.get(chave);
+      existing.quantidade += quantidade;
+      existing.valorTotal += parseFloat(getTextContent(prod, 'vProd') || '0');
+    } else {
+      // Produto novo: adicionar ao mapa
+      const produto = {
+        // Identificação
+        codigo: codigo,
+        ean: ean,
+        nome: nome,
+        ncm: getTextContent(prod, 'NCM'),
+        cest: getTextContent(prod, 'CEST'),
+        cfop: getTextContent(prod, 'CFOP'),
+        
+        // Unidade e quantidade
+        unidade: getTextContent(prod, 'uCom'),
+        quantidade: quantidade,
+        
+        // Valores
+        valorUnitario: parseFloat(getTextContent(prod, 'vUnCom') || '0'),
+        valorTotal: parseFloat(getTextContent(prod, 'vProd') || '0'),
+        
+        // Impostos
+        impostos: extractImpostos(imposto),
+        
+        // Informações adicionais
+        descricao: nome,
+        origem: index + 1 // Número do item na nota
+      };
+      
+      produtosMap.set(chave, produto);
+    }
   });
   
-  return produtos;
+  // Converter Map para Array
+  return Array.from(produtosMap.values());
 }
 
 /**
@@ -217,13 +236,23 @@ export function findExistingProduct(produtoXML, produtosExistentes) {
     if (byCode) return byCode;
   }
   
-  // Busca por nome similar (70% de similaridade)
+  // Busca por nome EXATO (case insensitive)
+  const nomeXML = produtoXML.nome?.toLowerCase().trim() || '';
+  if (nomeXML) {
+    const byExactName = produtosExistentes.find(p => {
+      const nomeProd = p.name?.toLowerCase().trim() || '';
+      return nomeProd === nomeXML;
+    });
+    if (byExactName) return byExactName;
+  }
+  
+  // Busca por nome similar (85% de similaridade - mais rigoroso)
   const byName = produtosExistentes.find(p => {
     const similarity = calculateSimilarity(
       p.name?.toLowerCase() || '',
       produtoXML.nome?.toLowerCase() || ''
     );
-    return similarity > 0.7;
+    return similarity > 0.85;
   });
   
   return byName || null;

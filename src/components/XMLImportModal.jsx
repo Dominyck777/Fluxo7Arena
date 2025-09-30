@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
 import { Upload, FileText, CheckCircle, AlertCircle, Loader2, Plus, RefreshCw } from 'lucide-react';
 import { parseNFeXML, findExistingProduct, convertXMLProductToSystemFormat } from '@/lib/xmlParser';
-import { createProduct, adjustProductStock } from '@/lib/products';
+import { createProduct, adjustProductStock, listProducts } from '@/lib/products';
 import { cn } from '@/lib/utils';
 
 export default function XMLImportModal({ open, onOpenChange, products, codigoEmpresa, onSuccess }) {
@@ -43,9 +43,22 @@ export default function XMLImportModal({ open, onOpenChange, products, codigoEmp
 
       setParsedData(parsed);
       
+      // Buscar TODOS os produtos do banco para validação precisa
+      let allProducts = products;
+      try {
+        const fullList = await listProducts({ 
+          searchTerm: '', 
+          limit: 10000, 
+          codigoEmpresa 
+        });
+        allProducts = fullList || products;
+      } catch (err) {
+        console.warn('[XMLImport] Não foi possível carregar lista completa, usando cache:', err);
+      }
+      
       // Validar produtos: novos vs existentes
       const preview = parsed.produtos.map(prodXML => {
-        const existing = findExistingProduct(prodXML, products);
+        const existing = findExistingProduct(prodXML, allProducts);
         return {
           xml: prodXML,
           existing: existing,
@@ -68,24 +81,53 @@ export default function XMLImportModal({ open, onOpenChange, products, codigoEmp
     setStep('processing');
     setProcessing(true);
     
-    const results = { created: 0, updated: 0, errors: 0, details: [] };
+    const results = { created: 0, updated: 0, errors: 0, skipped: 0, details: [] };
     
     for (const item of productsPreview) {
       try {
         if (item.isNew) {
           // Criar produto novo
           const productData = convertXMLProductToSystemFormat(item.xml, codigoEmpresa);
-          await createProduct(productData);
           
-          // Atualizar estoque (entrada)
-          if (item.xml.quantidade > 0) {
-            // Buscar o produto recém-criado para pegar o ID
-            // Por enquanto, vamos apenas criar sem atualizar estoque
-            // TODO: Implementar busca do produto criado e atualização de estoque
+          try {
+            await createProduct(productData);
+            results.created++;
+            results.details.push({ produto: item.xml.nome, acao: 'Criado', status: 'success' });
+          } catch (createError) {
+            // Se erro de duplicação, tentar encontrar o produto existente e atualizar estoque
+            if (createError.message?.includes('duplicate') || createError.message?.includes('unique constraint')) {
+              console.warn('[XMLImport] Produto já existe, tentando atualizar estoque:', item.xml.nome);
+              
+              // Buscar produto existente novamente (pode ter sido criado entre a validação e agora)
+              const existingProducts = await listProducts({ 
+                searchTerm: item.xml.nome, 
+                limit: 100, 
+                codigoEmpresa 
+              });
+              
+              const found = existingProducts.find(p => 
+                p.name?.toLowerCase() === item.xml.nome?.toLowerCase() ||
+                p.barcode === item.xml.ean ||
+                p.code === item.xml.codigo
+              );
+              
+              if (found && item.xml.quantidade > 0) {
+                await adjustProductStock({
+                  productId: found.id,
+                  adjustment: item.xml.quantidade,
+                  reason: `Entrada via XML - NF-e ${parsedData.nfe?.numero || ''}`,
+                  codigoEmpresa
+                });
+                results.updated++;
+                results.details.push({ produto: item.xml.nome, acao: 'Já existe - Estoque atualizado', status: 'success' });
+              } else {
+                results.skipped++;
+                results.details.push({ produto: item.xml.nome, acao: 'Já existe - Ignorado', status: 'warning' });
+              }
+            } else {
+              throw createError;
+            }
           }
-          
-          results.created++;
-          results.details.push({ produto: item.xml.nome, acao: 'Criado', status: 'success' });
         } else {
           // Atualizar estoque do produto existente
           if (item.xml.quantidade > 0) {

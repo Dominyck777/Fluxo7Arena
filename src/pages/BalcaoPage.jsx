@@ -1120,50 +1120,62 @@ export default function BalcaoPage() {
             </div>
           </div>
           <div className="flex-1 overflow-y-auto p-4 thin-scroll">
-            <ul className="space-y-2">
-              {(products || []).map(prod => {
-                const qty = qtyByProductId.get(prod.id) || 0;
-                const stock = Number(prod.stock ?? prod.currentStock ?? 0);
-                const remaining = Math.max(0, stock - qty);
-                const price = Number(prod.salePrice ?? prod.price ?? 0);
-                
-                return (
-                  <React.Fragment key={prod.id}>
-                    <li className="flex items-center p-2 rounded-md hover:bg-surface-2 transition-colors">
-                      <div 
-                        className="flex-1 min-w-0 cursor-pointer"
-                        onClick={() => { setSelectedProduct({ ...prod, qty, remaining, price }); setIsProductDetailsOpen(true); }}
-                      >
-                        <div className="flex items-center gap-2">
-                          <p className="font-semibold truncate max-w-[180px]" title={prod.name}>
-                            {prod.name.length > 25 ? `${prod.name.substring(0, 25)}...` : prod.name}
-                          </p>
-                          {qty > 0 && (
-                            <span className="inline-flex items-center justify-center text-[11px] px-1.5 py-0.5 rounded-full bg-brand/15 text-brand border border-brand/30 flex-shrink-0">x{qty}</span>
-                          )}
-                          <span className="inline-flex items-center justify-center text-[11px] px-1.5 py-0.5 rounded-full bg-surface-2 text-text-secondary border border-border flex-shrink-0">
-                            Qtd {remaining}
-                          </span>
+            {(products || []).length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-full py-12">
+                <ShoppingBag className="w-16 h-16 text-text-muted mb-4" />
+                <p className="text-lg font-semibold text-text-primary mb-2">Nenhum produto cadastrado</p>
+                <p className="text-sm text-text-muted mb-6 text-center">Cadastre produtos para começar a vender</p>
+                <Button onClick={() => navigate('/produtos')}>
+                  <Plus className="mr-2 h-4 w-4" />
+                  Cadastrar Produto
+                </Button>
+              </div>
+            ) : (
+              <ul className="space-y-2">
+                {products.map(prod => {
+                  const qty = qtyByProductId.get(prod.id) || 0;
+                  const stock = Number(prod.stock ?? prod.currentStock ?? 0);
+                  const remaining = Math.max(0, stock - qty);
+                  const price = Number(prod.salePrice ?? prod.price ?? 0);
+                  
+                  return (
+                    <React.Fragment key={prod.id}>
+                      <li className="flex items-center p-2 rounded-md hover:bg-surface-2 transition-colors">
+                        <div 
+                          className="flex-1 min-w-0 cursor-pointer"
+                          onClick={() => { setSelectedProduct({ ...prod, qty, remaining, price }); setIsProductDetailsOpen(true); }}
+                        >
+                          <div className="flex items-center gap-2">
+                            <p className="font-semibold truncate max-w-[180px]" title={prod.name}>
+                              {prod.name.length > 25 ? `${prod.name.substring(0, 25)}...` : prod.name}
+                            </p>
+                            {qty > 0 && (
+                              <span className="inline-flex items-center justify-center text-[11px] px-1.5 py-0.5 rounded-full bg-brand/15 text-brand border border-brand/30 flex-shrink-0">x{qty}</span>
+                            )}
+                            <span className="inline-flex items-center justify-center text-[11px] px-1.5 py-0.5 rounded-full bg-surface-2 text-text-secondary border border-border flex-shrink-0">
+                              Qtd {remaining}
+                            </span>
+                          </div>
+                          <p className="text-sm text-text-muted">R$ {price.toFixed(2)}</p>
                         </div>
-                        <p className="text-sm text-text-muted">R$ {price.toFixed(2)}</p>
-                      </div>
-                      <Button 
-                        size="icon" 
-                        variant="outline" 
-                        className="flex-shrink-0" 
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          addProduct(prod);
-                        }}
-                        aria-label={`Adicionar ${prod.name}`}
-                      >
-                        <Plus className="h-4 w-4" />
-                      </Button>
-                    </li>
-                  </React.Fragment>
-                );
-              })}
-            </ul>
+                        <Button 
+                          size="icon" 
+                          variant="outline" 
+                          className="flex-shrink-0" 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            addProduct(prod);
+                          }}
+                          aria-label={`Adicionar ${prod.name}`}
+                        >
+                          <Plus className="h-4 w-4" />
+                        </Button>
+                      </li>
+                    </React.Fragment>
+                  );
+                })}
+              </ul>
+            )}
           </div>
         </div>
 
