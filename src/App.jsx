@@ -18,6 +18,7 @@ import FinalizadorasPage from '@/pages/FinalizadorasPage.new';
 import TestPage from '@/pages/TestPage';
 import ResetPasswordPage from '@/pages/ResetPasswordPage';
 import HistoricoComandasPage from '@/pages/HistoricoComandasPage';
+import CreateCompanyPage from '@/pages/CreateCompanyPage';
 import { Helmet } from 'react-helmet';
 
 function PrivateApp() {
@@ -60,8 +61,10 @@ function PrivateApp() {
 function App() {
   return (
     <Routes>
-      {/* Rota pública para redefinição de senha */}
+      {/* Rotas públicas */}
       <Route path="/reset-password" element={<ResetPasswordPage />} />
+      <Route path="/40028922" element={<CreateCompanyPage />} />
+      
       {/* Todas as demais rotas protegidas */}
       <Route path="/*" element={
         <ProtectedRoute>
