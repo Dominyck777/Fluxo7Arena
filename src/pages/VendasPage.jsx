@@ -68,10 +68,6 @@ function VendasPage() {
   const [isProductDetailsOpen, setIsProductDetailsOpen] = useState(false);
   const [isOrderDetailsOpen, setIsOrderDetailsOpen] = useState(false);
   const [isManageClientsOpen, setIsManageClientsOpen] = useState(false);
-  const [manageClientsSearch, setManageClientsSearch] = useState('');
-  const [manageClientsLoading, setManageClientsLoading] = useState(false);
-  const [manageClientsData, setManageClientsData] = useState([]);
-  const [currentTableClients, setCurrentTableClients] = useState([]);
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(false);
   // Abrir mesa
@@ -348,9 +344,18 @@ function VendasPage() {
   }, [selectedTable?.id, selectedTable?.comandaId]);
 
   // Recarregar detalhes da mesa selecionada quando a janela ganhar foco ou a página voltar a ficar visível
+  // MAS NÃO quando o modal de clientes estiver aberto
   useEffect(() => {
-    const onFocus = () => { if (!anyDialogOpen && selectedTable?.comandaId) refetchSelectedTableDetails(selectedTable); };
-    const onVisibility = () => { if (!anyDialogOpen && document.visibilityState === 'visible' && selectedTable?.comandaId) refetchSelectedTableDetails(selectedTable); };
+    const onFocus = () => { 
+      if (!anyDialogOpen && !isManageClientsOpen && selectedTable?.comandaId) {
+        refetchSelectedTableDetails(selectedTable); 
+      }
+    };
+    const onVisibility = () => { 
+      if (!anyDialogOpen && !isManageClientsOpen && document.visibilityState === 'visible' && selectedTable?.comandaId) {
+        refetchSelectedTableDetails(selectedTable); 
+      }
+    };
     window.addEventListener('focus', onFocus);
     document.addEventListener('visibilitychange', onVisibility);
     return () => {
@@ -358,7 +363,7 @@ function VendasPage() {
       document.removeEventListener('visibilitychange', onVisibility);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedTable?.comandaId, anyDialogOpen]);
+  }, [selectedTable?.comandaId, anyDialogOpen, isManageClientsOpen]);
 
   const handleNotImplemented = () => {
     toast({
@@ -413,6 +418,15 @@ function VendasPage() {
     const parts = fullName.trim().split(/\s+/);
     if (parts.length <= 2) return fullName;
     return parts.slice(0, 2).join(' ');
+  };
+
+  // Formata nome de clientes: "Primeiro Cliente +2" se houver mais
+  const formatClientDisplay = (customerString) => {
+    if (!customerString) return '';
+    const names = customerString.split(',').map(n => n.trim()).filter(Boolean);
+    if (names.length === 0) return '';
+    if (names.length === 1) return truncateClientName(names[0]);
+    return `${truncateClientName(names[0])} +${names.length - 1}`;
   };
 
   const qtyByProductId = useMemo(() => {
@@ -688,7 +702,7 @@ function VendasPage() {
           <div className="w-full mt-auto">
             <div className="flex items-center gap-1 mb-1">
               <Users className="w-3 h-3 text-text-muted flex-shrink-0" />
-              <div className="text-sm sm:text-base font-medium text-text-primary truncate" title={table.customer || ''}>{truncateClientName(table.customer) || '—'}</div>
+              <div className="text-sm sm:text-base font-medium text-text-primary truncate" title={table.customer || ''}>{formatClientDisplay(table.customer) || '—'}</div>
             </div>
             <div className="flex items-center gap-1">
               <DollarSign className="w-3 h-3 text-text-muted flex-shrink-0" />
@@ -740,9 +754,9 @@ function VendasPage() {
         }
         // Se não existe próxima linha, cria uma e foca nela
         setPaymentLines(prev => {
-          const used = new Set(prev.map(x => String(x.clientId)).filter(Boolean));
-          const remaining = (payClients || []).filter(c => !used.has(String(c.id)));
-          const pick = (remaining[0]?.id) || (payClients[0]?.id) || '';
+          // PERMITIR selecionar o mesmo cliente múltiplas vezes
+          // Não filtrar clientes já usados
+          const pick = (payClients[0]?.id) || '';
           const defMethod = (payMethods && payMethods[0] && payMethods[0].id) ? payMethods[0].id : null;
           const newId = nextPayLineId;
           const nextState = [...prev, { id: newId, clientId: pick, methodId: defMethod, value: '' }];
@@ -778,11 +792,11 @@ function VendasPage() {
           let defMethod = (payMethods && payMethods[0] && payMethods[0].id) ? payMethods[0].id : null;
           let primaryId = (normalized[0]?.id) || null;
           let initialValue = '';
-          // auto-preencher se houver exatamente 1 cliente e total > 0
+          // auto-preencher SEMPRE com o valor total (independente de quantos clientes)
           try {
             const itens = await listarItensDaComanda({ comandaId: selectedTable.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
             const total = (itens || []).reduce((acc, it) => acc + Number(it.quantidade || 0) * Number(it.preco_unitario || 0), 0);
-            if ((normalized || []).length === 1 && total > 0) {
+            if (total > 0) {
               initialValue = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(total);
             }
           } catch {}
@@ -810,10 +824,32 @@ function VendasPage() {
         }
         const effTotal = total > 0 ? total : 0;
         const totalSum = sumPayments();
-        if (Math.abs(totalSum - effTotal) > 0.009) {
+        const diff = Math.abs(totalSum - effTotal);
+        
+        // Se a diferença for apenas centavos (até 0.05), ajustar automaticamente na última linha
+        if (diff > 0.009 && diff <= 0.05) {
+          const adjustment = effTotal - totalSum;
+          setPaymentLines(prev => {
+            const lastIdx = prev.length - 1;
+            return prev.map((line, idx) => {
+              if (idx === lastIdx) {
+                const currentValue = parseBRL(line.value);
+                const newValue = currentValue + adjustment;
+                const formatted = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(newValue);
+                return { ...line, value: formatted };
+              }
+              return line;
+            });
+          });
+          // Não retornar - continuar com o pagamento após ajuste
+        } else if (diff > 0.05) {
+          // Diferença maior que 5 centavos - mostrar erro
           const remaining = effTotal - totalSum;
-          if (remaining > 0) toast({ title: 'Valor insuficiente', description: `Faltam R$ ${remaining.toFixed(2)} para fechar o total.`, variant: 'warning' });
-          else toast({ title: 'Valor excedente', description: `Excedeu em R$ ${Math.abs(remaining).toFixed(2)}. Ajuste os valores.`, variant: 'warning' });
+          if (remaining > 0) {
+            toast({ title: 'Valor insuficiente', description: `Faltam R$ ${remaining.toFixed(2)} para fechar o total.`, variant: 'warning' });
+          } else {
+            toast({ title: 'Valor excedente', description: `Excedeu em R$ ${Math.abs(remaining).toFixed(2)}. Ajuste os valores.`, variant: 'warning' });
+          }
           return;
         }
         let refreshTotal = total;
@@ -885,13 +921,29 @@ function VendasPage() {
                 };
                 const hasMultiClients = (payClients || []).length > 1;
                 const primary = (payClients || [])[0] || null;
-                const usedByOthers = new Set((paymentLines || []).filter(x => x.id !== ln.id).map(x => String(x.clientId)).filter(Boolean));
-                const remaining = (payClients || []).filter(c => String(c.id) !== String(primary?.id || '')).filter(c => !usedByOthers.has(String(c.id)));
+                // PERMITIR selecionar o mesmo cliente múltiplas vezes - não filtrar por usados
+                const remaining = (payClients || []).filter(c => String(c.id) !== String(primary?.id || ''));
                 return (
                   <div key={ln.id} className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-center">
                     <div className="sm:col-span-1 flex sm:justify-start">
                       {paymentLines.length > 1 && idx > 0 && (
-                        <Button type="button" variant="outline" size="sm" className="h-8 w-8" onClick={() => setPaymentLines(prev => prev.filter(x => x.id !== ln.id))}>×</Button>
+                        <Button type="button" variant="outline" size="sm" className="h-8 w-8" onClick={() => {
+                          setPaymentLines(prev => {
+                            const newLines = prev.filter(x => x.id !== ln.id);
+                            if (newLines.length === 0) return [];
+                            
+                            // Redistribuir valores automaticamente
+                            const totalValue = total > 0 ? total : 0;
+                            const perLine = Math.floor((totalValue / newLines.length) * 100) / 100;
+                            const remainder = totalValue - (perLine * newLines.length);
+                            
+                            return newLines.map((line, i) => {
+                              const value = i === newLines.length - 1 ? perLine + remainder : perLine;
+                              const formatted = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
+                              return { ...line, value: formatted };
+                            });
+                          });
+                        }}>×</Button>
                       )}
                     </div>
                     {(idx === 0) ? (
@@ -903,7 +955,8 @@ function VendasPage() {
                         <Select value={ln.clientId || ''} onValueChange={(v) => setPaymentLines(prev => prev.map(x => x.id === ln.id ? { ...x, clientId: v } : x))}>
                           <SelectTrigger className="w-full truncate"><SelectValue placeholder="Cliente" /></SelectTrigger>
                           <SelectContent>
-                            {remaining.map(c => (<SelectItem key={c.id} value={c.id}>{c.nome}</SelectItem>))}
+                            {/* Mostrar TODOS os clientes, incluindo o primary */}
+                            {(payClients || []).map(c => (<SelectItem key={c.id} value={c.id}>{c.nome}</SelectItem>))}
                           </SelectContent>
                         </Select>
                       </div>
@@ -948,11 +1001,22 @@ function VendasPage() {
               <div>
                 <Button type="button" variant="secondary" size="sm" onClick={() => {
                   setPaymentLines(prev => {
-                    const used = new Set(prev.map(x => String(x.clientId)).filter(Boolean));
-                    const remaining = (payClients || []).filter(c => !used.has(String(c.id)));
-                    const pick = (remaining[0]?.id) || (payClients[0]?.id) || '';
+                    // PERMITIR selecionar o mesmo cliente múltiplas vezes
+                    const pick = (payClients[0]?.id) || '';
                     const defMethod = (payMethods && payMethods[0] && payMethods[0].id) ? payMethods[0].id : null;
-                    return [...prev, { id: nextPayLineId, clientId: pick, methodId: defMethod, value: '' }];
+                    const newLines = [...prev, { id: nextPayLineId, clientId: pick, methodId: defMethod, value: '' }];
+                    
+                    // Distribuir valor total automaticamente entre todas as linhas
+                    const totalValue = total > 0 ? total : 0;
+                    const perLine = Math.floor((totalValue / newLines.length) * 100) / 100; // Arredondar para baixo
+                    const remainder = totalValue - (perLine * newLines.length); // Calcular resto
+                    
+                    return newLines.map((line, idx) => {
+                      // Adicionar o resto na última linha para fechar exato
+                      const value = idx === newLines.length - 1 ? perLine + remainder : perLine;
+                      const formatted = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
+                      return { ...line, value: formatted };
+                    });
                   });
                   setNextPayLineId(n => n + 1);
                 }}>Adicionar forma</Button>
@@ -1228,7 +1292,7 @@ function VendasPage() {
       <>
         <div className="flex flex-col h-full">
           <div className="p-3 border-b border-border flex items-center justify-between gap-2">
-            <div className="text-sm font-medium text-text-primary leading-none truncate" title={table.customer || ''}>{truncateClientName(table.customer) || '—'}</div>
+            <div className="text-sm font-medium text-text-primary leading-none truncate" title={table.customer || ''}>{formatClientDisplay(table.customer) || '—'}</div>
             <div className="flex items-center gap-2">
               {table.comandaId ? (
                 <>
@@ -2171,6 +2235,9 @@ function VendasPage() {
     const [localClients, setLocalClients] = useState([]);
     const [localLinked, setLocalLinked] = useState([]);
     const [localLoading, setLocalLoading] = useState(false);
+    const [pendingChanges, setPendingChanges] = useState(new Set());
+    const initialLinkedRef = useRef([]);
+    const loadedRef = useRef(false);
 
     useEffect(() => {
       let active = true;
@@ -2183,50 +2250,128 @@ function VendasPage() {
           const clientIds = (vincs || []).map(v => v?.cliente_id ?? v?.clientes?.id).filter(Boolean);
           if (!active) return;
           setLocalLinked(clientIds);
+          initialLinkedRef.current = clientIds;
+          setPendingChanges(new Set());
           // Carregar lista de clientes disponíveis
-          const rows = await listarClientes({ searchTerm: localSearch, limit: 20 });
+          const rows = await listarClientes({ searchTerm: localSearch, limit: 50 });
           if (!active) return;
           const sorted = (rows || []).slice().sort((a, b) => Number(a?.codigo || 0) - Number(b?.codigo || 0));
           setLocalClients(sorted);
+          loadedRef.current = true;
         } catch (e) {
           console.error('Erro ao carregar clientes:', e);
         } finally {
           if (active) setLocalLoading(false);
         }
       };
-      load();
+      
+      // Carregar apenas quando o modal abre pela primeira vez
+      if (!isManageClientsOpen) {
+        loadedRef.current = false;
+        return () => { active = false; };
+      }
+      
+      // Debounce apenas para busca
+      if (localSearch) {
+        const timer = setTimeout(() => {
+          load();
+        }, 300);
+        return () => { 
+          active = false; 
+          clearTimeout(timer);
+        };
+      } else if (!loadedRef.current) {
+        load();
+      }
+      
       return () => { active = false; };
-    }, [isManageClientsOpen, localSearch, selectedTable?.comandaId, userProfile?.codigo_empresa]);
+    }, [isManageClientsOpen, localSearch]);
 
-    const toggleClient = async (clientId) => {
+    const toggleClient = (clientId) => {
       if (!selectedTable?.comandaId) return;
-      try {
-        const isCurrentlyLinked = localLinked.includes(clientId);
+      
+      // Atualizar UI imediatamente
+      const isCurrentlyLinked = localLinked.includes(clientId);
+      
+      setLocalLinked(prev => {
         if (isCurrentlyLinked) {
-          // Remover cliente
-          await supabase
+          return prev.filter(id => id !== clientId);
+        } else {
+          return [...prev, clientId];
+        }
+      });
+      
+      // Marcar como mudança pendente
+      setPendingChanges(prev => {
+        const newSet = new Set(prev);
+        newSet.add(clientId);
+        return newSet;
+      });
+    };
+
+    const confirmChanges = async () => {
+      if (!selectedTable?.comandaId) {
+        setIsManageClientsOpen(false);
+        return;
+      }
+
+      // Se não houver mudanças, apenas fechar
+      if (pendingChanges.size === 0) {
+        setIsManageClientsOpen(false);
+        return;
+      }
+
+      try {
+        setLocalLoading(true);
+        
+        // Determinar quais clientes adicionar e remover
+        const toAdd = localLinked.filter(id => !initialLinkedRef.current.includes(id));
+        const toRemove = initialLinkedRef.current.filter(id => !localLinked.includes(id));
+        
+        console.log('[confirmChanges] toAdd:', toAdd, 'toRemove:', toRemove);
+        
+        // Remover clientes
+        for (const clientId of toRemove) {
+          console.log('[confirmChanges] Removendo cliente:', clientId);
+          const { error } = await supabase
             .from('comanda_clientes')
             .delete()
             .eq('comanda_id', selectedTable.comandaId)
             .eq('cliente_id', clientId)
             .eq('codigo_empresa', userProfile?.codigo_empresa);
-          setLocalLinked(prev => prev.filter(id => id !== clientId));
-          toast({ title: 'Cliente removido', variant: 'success' });
-        } else {
-          // Adicionar cliente
+          
+          if (error) {
+            console.error('[confirmChanges] Erro ao remover:', error);
+            throw error;
+          }
+        }
+        
+        // Adicionar clientes
+        if (toAdd.length > 0) {
+          console.log('[confirmChanges] Adicionando clientes:', toAdd);
           await adicionarClientesAComanda({
             comandaId: selectedTable.comandaId,
-            clienteIds: [clientId],
+            clienteIds: toAdd,
             nomesLivres: [],
             codigoEmpresa: userProfile?.codigo_empresa
           });
-          setLocalLinked(prev => [...prev, clientId]);
-          toast({ title: 'Cliente adicionado', variant: 'success' });
         }
-        // Atualizar nome do cliente na mesa
+        
+        console.log('[confirmChanges] Operações concluídas, atualizando mesa');
+        
+        // Atualizar mesa e aguardar
         await refetchSelectedTableDetails(selectedTable);
+        
+        // Atualizar também a lista de mesas
+        await refreshTablesLight({ showToast: false });
+        
+        toast({ title: 'Clientes atualizados', variant: 'success' });
+        setIsManageClientsOpen(false);
       } catch (e) {
-        toast({ title: 'Falha ao atualizar cliente', description: e?.message || 'Tente novamente', variant: 'destructive' });
+        console.error('[confirmChanges] Erro:', e);
+        toast({ title: 'Falha ao atualizar clientes', description: e?.message || 'Tente novamente', variant: 'destructive' });
+      } finally {
+        setLocalLoading(false);
       }
     };
 
@@ -2279,12 +2424,16 @@ function VendasPage() {
                     return (
                       <li
                         key={client.id}
-                        className="p-3 hover:bg-surface-2 cursor-pointer transition-colors flex items-center justify-between"
+                        className={cn(
+                          "p-3 cursor-pointer transition-colors flex items-center justify-between",
+                          isLinked ? "bg-success/5 hover:bg-success/10" : "hover:bg-surface-2"
+                        )}
                         onClick={(e) => {
                           e.preventDefault();
                           e.stopPropagation();
                           toggleClient(client.id);
                         }}
+                        style={{ userSelect: 'none', WebkitUserSelect: 'none' }}
                       >
                         <div className="flex-1 min-w-0">
                           <div className="font-medium truncate">{client.nome}</div>
@@ -2307,7 +2456,10 @@ function VendasPage() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsManageClientsOpen(false)}>Fechar</Button>
+            <Button variant="outline" onClick={() => setIsManageClientsOpen(false)} disabled={localLoading}>Cancelar</Button>
+            <Button onClick={confirmChanges} disabled={localLoading}>
+              {localLoading ? 'Salvando...' : `Confirmar ${pendingChanges.size > 0 ? `(${pendingChanges.size} alterações)` : ''}`}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

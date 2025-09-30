@@ -202,10 +202,32 @@ export default function BalcaoPage() {
         total = (itens || []).reduce((acc, it) => acc + Number(it.quantidade || 0) * Number(it.preco_unitario || 0), 0);
       } catch {}
       const sum = (paymentLines || []).reduce((acc, ln) => acc + (Number(String(ln.value||'').replace(/\D/g, ''))/100 || 0), 0);
-      if (Math.abs(sum - total) > 0.009) {
-        const diff = total - sum;
-        if (diff > 0) toast({ title: 'Valor insuficiente', description: `Faltam R$ ${diff.toFixed(2)} para fechar o total.`, variant: 'warning' });
-        else toast({ title: 'Valor excedente', description: `Excedeu em R$ ${Math.abs(diff).toFixed(2)}.`, variant: 'warning' });
+      const diff = Math.abs(sum - total);
+      
+      // Se a diferença for apenas centavos (até 0.05), ajustar automaticamente na última linha
+      if (diff > 0.009 && diff <= 0.05) {
+        const adjustment = total - sum;
+        setPaymentLines(prev => {
+          const lastIdx = prev.length - 1;
+          return prev.map((line, idx) => {
+            if (idx === lastIdx) {
+              const currentValue = Number(String(line.value || '').replace(/\D/g, '')) / 100;
+              const newValue = currentValue + adjustment;
+              const formatted = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(newValue);
+              return { ...line, value: formatted };
+            }
+            return line;
+          });
+        });
+        // Não retornar - continuar com o pagamento após ajuste
+      } else if (diff > 0.05) {
+        // Diferença maior que 5 centavos - mostrar erro
+        const remaining = total - sum;
+        if (remaining > 0) {
+          toast({ title: 'Valor insuficiente', description: `Faltam R$ ${remaining.toFixed(2)} para fechar o total.`, variant: 'warning' });
+        } else {
+          toast({ title: 'Valor excedente', description: `Excedeu em R$ ${Math.abs(remaining).toFixed(2)}. Ajuste os valores.`, variant: 'warning' });
+        }
         return;
       }
       setPayLoading(true);
@@ -773,7 +795,9 @@ export default function BalcaoPage() {
       try {
         const rows = await listarClientes({ searchTerm: clientSearch, limit: 20, codigoEmpresa: userProfile?.codigo_empresa });
         if (!active) return;
-        setClients(rows || []);
+        // Ordenar por código
+        const sorted = (rows || []).slice().sort((a, b) => Number(a?.codigo || 0) - Number(b?.codigo || 0));
+        setClients(sorted);
       } catch { if (active) setClients([]); }
     }, 250);
     return () => { active = false; clearTimeout(t); };
@@ -981,11 +1005,11 @@ export default function BalcaoPage() {
         : (normalized[0]?.id || null);
       setPaymentLines([{ id: 1, clientId: mainClientId, methodId: def, value: '' }]);
       setNextPayLineId(2);
-      // Auto-preencher total se existir exatamente 1 cliente
+      // Auto-preencher total SEMPRE (independente de quantos clientes)
       try {
         const itens = await listarItensDaComanda({ comandaId, codigoEmpresa });
         const total = (itens || []).reduce((acc, it) => acc + Number(it.quantidade || 0) * Number(it.preco_unitario || 0), 0);
-        if ((normalized || []).length === 1 && total > 0) {
+        if (total > 0) {
           const formatted = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(total);
           setPaymentLines([{ id: 1, clientId: mainClientId, methodId: def, value: formatted }]);
         }
@@ -1283,20 +1307,10 @@ export default function BalcaoPage() {
                   if (byClients?.nome) return byClients.nome;
                   return customerName || 'Cliente';
                 };
-                const hasSelectedList = Array.isArray(selectedClientIds) && selectedClientIds.length > 0;
-                const baseClients = (payClients && payClients.length > 0) ? payClients : (clients || []).map(c => ({ id: c.id, nome: c.nome }));
-                const selectedClients = hasSelectedList
-                  ? baseClients.filter(c => (selectedClientIds || []).map(String).includes(String(c.id)))
-                  : baseClients; // fallback: usa os clientes vinculados à comanda
-                const hasMultiClients = (selectedClients || []).length > 1;
-                const primaryClient = hasSelectedList
-                  ? (baseClients.find(c => String(c.id) === String(selectedClientIds?.[0] || '')) || baseClients[0])
-                  : baseClients[0];
-                const primaryId = primaryClient?.id || ln.clientId;
-                const usedByOthers = new Set((paymentLines || []).filter(x => x.id !== ln.id).map(x => String(x.clientId)).filter(Boolean));
-                const remainingClients = selectedClients
-                  .filter(c => String(c.id) !== String(primaryClient?.id || ''))
-                  .filter(c => !usedByOthers.has(String(c.id)));
+                const hasMultiClients = (payClients || []).length > 1;
+                const primary = (payClients || [])[0] || null;
+                // PERMITIR selecionar o mesmo cliente múltiplas vezes - não filtrar por usados
+                const remaining = (payClients || []).filter(c => String(c.id) !== String(primary?.id || ''));
                 return (
                 <div key={ln.id} className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-center">
                   {/* Remove button aligned to the LEFT */}
@@ -1309,25 +1323,19 @@ export default function BalcaoPage() {
                         className="h-8 w-8"
                         onClick={() => {
                           setPaymentLines(prev => {
-                            // Remove a linha
-                            let lines = prev.filter(x => x.id !== ln.id).map(l => ({ ...l }));
-                            if (lines.length === 0) return [];
-                            // Define pool de clientes
-                            const hasSelected = Array.isArray(selectedClientIds) && selectedClientIds.length > 0;
-                            const pool = hasSelected ? selectedClientIds.map(String) : (payClients || []).map(c => String(c.id));
-                            if (!pool || pool.length === 0) return lines;
-                            // Garante cliente primário na primeira linha
-                            lines[0].clientId = pool[0];
-                            const used = new Set([String(lines[0].clientId || '')].filter(Boolean));
-                            for (let i = 1; i < lines.length; i++) {
-                              const cid = lines[i].clientId ? String(lines[i].clientId) : '';
-                              if (!cid || used.has(cid)) {
-                                const pick = pool.find(id => !used.has(String(id))) || pool[0] || '';
-                                lines[i].clientId = pick;
-                              }
-                              used.add(String(lines[i].clientId || ''));
-                            }
-                            return lines;
+                            const newLines = prev.filter(x => x.id !== ln.id);
+                            if (newLines.length === 0) return [];
+                            
+                            // Redistribuir valores automaticamente
+                            const totalValue = total > 0 ? total : 0;
+                            const perLine = Math.floor((totalValue / newLines.length) * 100) / 100;
+                            const remainder = totalValue - (perLine * newLines.length);
+                            
+                            return newLines.map((line, i) => {
+                              const value = i === newLines.length - 1 ? perLine + remainder : perLine;
+                              const formatted = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
+                              return { ...line, value: formatted };
+                            });
                           });
                         }}
                       >
@@ -1336,28 +1344,22 @@ export default function BalcaoPage() {
                     )}
                   </div>
                   {(idx === 0) ? (
-                    // Primeira linha sempre mostra o cliente principal (somente leitura)
                     <div className="sm:col-span-4">
-                      <div className="h-9 px-3 rounded-md border border-border bg-surface flex items-center text-sm truncate">
-                        {resolveClientName(primaryId)}
-                      </div>
+                      <div className="h-9 px-3 rounded-md border border-border bg-surface flex items-center text-sm truncate">{resolveClientName(primary?.id || ln.clientId)}</div>
                     </div>
                   ) : hasMultiClients ? (
                     <div className="sm:col-span-4">
                       <Select value={ln.clientId || ''} onValueChange={(v) => setPaymentLines(prev => prev.map(x => x.id === ln.id ? { ...x, clientId: v } : x))}>
                         <SelectTrigger className="w-full truncate"><SelectValue placeholder="Cliente" /></SelectTrigger>
                         <SelectContent>
-                          {remainingClients.map(c => (
-                            <SelectItem key={c.id} value={c.id}>{c.codigo != null ? `${c.codigo} - ${c.nome}` : c.nome}</SelectItem>
-                          ))}
+                          {/* Mostrar TODOS os clientes, incluindo o primary */}
+                          {(payClients || []).map(c => (<SelectItem key={c.id} value={c.id}>{c.nome}</SelectItem>))}
                         </SelectContent>
                       </Select>
                     </div>
                   ) : (
                     <div className="sm:col-span-4">
-                      <div className="h-9 px-3 rounded-md border border-border bg-surface flex items-center text-sm truncate">
-                        {resolveClientName(primaryId)}
-                      </div>
+                      <div className="h-9 px-3 rounded-md border border-border bg-surface flex items-center text-sm truncate">{resolveClientName(primary?.id || ln.clientId)}</div>
                     </div>
                   )}
                   <div className="sm:col-span-4">
@@ -1405,7 +1407,19 @@ export default function BalcaoPage() {
                       const used = new Set(prev.map(x => x.clientId).filter(Boolean));
                       const candidates = (pool || []).filter(id => !used.has(id));
                       const clientPick = candidates[0] || pool[0] || '';
-                      return [...prev, { id: nextPayLineId, clientId: clientPick, methodId: (payMethods[0]?.id || ''), value: '' }];
+                      const newLines = [...prev, { id: nextPayLineId, clientId: clientPick, methodId: (payMethods[0]?.id || ''), value: '' }];
+                      
+                      // Distribuir valor total automaticamente entre todas as linhas
+                      const totalValue = total > 0 ? total : 0;
+                      const perLine = Math.floor((totalValue / newLines.length) * 100) / 100; // Arredondar para baixo
+                      const remainder = totalValue - (perLine * newLines.length); // Calcular resto
+                      
+                      return newLines.map((line, idx) => {
+                        // Adicionar o resto na última linha para fechar exato
+                        const value = idx === newLines.length - 1 ? perLine + remainder : perLine;
+                        const formatted = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
+                        return { ...line, value: formatted };
+                      });
                     });
                     setNextPayLineId((n) => n + 1);
                   }}

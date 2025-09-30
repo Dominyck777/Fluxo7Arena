@@ -6,7 +6,7 @@ import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useToast } from "@/components/ui/use-toast";
-import { Plus, Search, List, LayoutGrid, Download, Edit, Trash2, Trophy, AlertTriangle, CalendarX, Tag, Filter, Eye, EyeOff } from 'lucide-react';
+import { Plus, Search, List, LayoutGrid, Download, Edit, Trash2, Trophy, AlertTriangle, CalendarX, Tag, Filter, Eye, EyeOff, FileText } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -18,6 +18,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Checkbox } from '@/components/ui/checkbox';
 import { listProducts, createProduct, updateProduct, deleteProduct, listCategories, createCategory, removeCategory, getMostSoldProductsToday, getSoldProductsByPeriod, adjustProductStock } from '@/lib/products';
 import { useAuth } from '@/contexts/AuthContext';
+import XMLImportModal from '@/components/XMLImportModal';
 
 const initialProducts = [];
 
@@ -1197,6 +1198,9 @@ function ProdutosPage() {
     // Modal: Vendas por Período (acionado pelo card "Mais Vendido (Dia)")
     const [isSalesModalOpen, setIsSalesModalOpen] = useState(false);
     const [salesFrom, setSalesFrom] = useState(() => { const d = new Date(); d.setHours(0,0,0,0); return d; });
+    
+    // XML Import
+    const [isXmlImportOpen, setIsXmlImportOpen] = useState(false);
     const [salesTo, setSalesTo] = useState(() => new Date());
     const [salesLoading, setSalesLoading] = useState(false);
     const [salesItems, setSalesItems] = useState([]); // [{id,name,total}]
@@ -1480,6 +1484,7 @@ function ProdutosPage() {
                       {showStats ? <EyeOff className="h-4 w-4"/> : <Eye className="h-4 w-4"/>}
                     </Button>
                     <Button variant="outline" onClick={handleExport}><Download className="mr-2 h-4 w-4" /> Exportar</Button>
+                    <Button variant="secondary" onClick={() => setIsXmlImportOpen(true)}><FileText className="mr-2 h-4 w-4" /> Importar XML</Button>
                     <Button onClick={handleAddNew}><Plus className="mr-2 h-4 w-4" /> Novo Produto</Button>
                 </div>
             </motion.div>
@@ -1703,6 +1708,16 @@ function ProdutosPage() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+        <XMLImportModal
+            open={isXmlImportOpen}
+            onOpenChange={setIsXmlImportOpen}
+            products={products}
+            codigoEmpresa={userProfile?.codigo_empresa}
+            onSuccess={() => {
+              refetchProducts();
+              setIsXmlImportOpen(false);
+            }}
+        />
         <CategoryManagerModal 
             open={isCategoryModalOpen}
             onOpenChange={setIsCategoryModalOpen}

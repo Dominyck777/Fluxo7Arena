@@ -269,6 +269,7 @@ export async function listarComandas({ status, from, to, search = '', limit = 50
   let q = supabase
     .from('comandas')
     .select('id, mesa_id, status, aberto_em, fechado_em')
+    .order('fechado_em', { ascending: false, nullsFirst: false })
     .order('aberto_em', { ascending: false })
     .range(offset, offset + limit - 1)
 
@@ -421,9 +422,10 @@ export async function listarResumoSessaoCaixaAtual({ codigoEmpresa } = {}) {
 
 export async function listarPagamentos({ comandaId, codigoEmpresa } = {}) {
   const codigo = codigoEmpresa || getCachedCompanyCode()
+  // Carregar pagamentos com JOIN para pegar nome da finalizadora (especificando a FK correta)
   let q = supabase
     .from('pagamentos')
-    .select('*')
+    .select('*, finalizadoras!pagamentos_finalizadora_id_fkey(id, nome)')
     .order('recebido_em', { ascending: true })
   if (comandaId) q = q.eq('comanda_id', comandaId)
   if (codigo) q = q.eq('codigo_empresa', codigo)
@@ -913,26 +915,44 @@ export async function adicionarClientesAComanda({ comandaId, clienteIds = [], no
   const codigo = codigoEmpresa || getCachedCompanyCode()
   if (!comandaId) throw new Error('comandaId é obrigatório')
   
-  // DESABILITADO: Não fechar comandas antigas automaticamente
-  // Isso estava causando o fechamento de comandas ativas
-  console.log(`[adicionarClientesAComanda] Fechamento automático de comandas antigas DESABILITADO para evitar perda de dados`)
+  console.log(`[adicionarClientesAComanda] Adicionando clientes à comanda ${comandaId}:`, { clienteIds, nomesLivres })
   
-  // SEGUNDO: Limpar clientes existentes da comanda atual para evitar duplicatas
-  let deleteQuery = supabase.from('comanda_clientes').delete().eq('comanda_id', comandaId)
-  if (codigo) deleteQuery = deleteQuery.eq('codigo_empresa', codigo)
-  const { error: deleteError } = await deleteQuery
-  if (deleteError) throw deleteError
+  // NÃO deletar clientes existentes - apenas adicionar os novos
+  // Verificar se já existem para evitar duplicatas
+  const { data: existentes } = await supabase
+    .from('comanda_clientes')
+    .select('cliente_id')
+    .eq('comanda_id', comandaId)
+  
+  const idsExistentes = new Set((existentes || []).map(e => e.cliente_id).filter(Boolean))
   
   const rows = []
-  for (const id of (clienteIds || [])) rows.push({ comanda_id: comandaId, cliente_id: id })
+  for (const id of (clienteIds || [])) {
+    // Só adicionar se não existir
+    if (!idsExistentes.has(id)) {
+      rows.push({ comanda_id: comandaId, cliente_id: id })
+    } else {
+      console.log(`[adicionarClientesAComanda] Cliente ${id} já vinculado, pulando`)
+    }
+  }
+  
   for (const nome of (nomesLivres || [])) {
     const n = (nome || '').trim()
     if (n) rows.push({ comanda_id: comandaId, nome_livre: n })
   }
-  if (rows.length === 0) return true
+  
+  if (rows.length === 0) {
+    console.log(`[adicionarClientesAComanda] Nenhum cliente novo para adicionar`)
+    return true
+  }
+  
   const payload = rows.map(r => (codigo ? { ...r, codigo_empresa: codigo } : r))
+  console.log(`[adicionarClientesAComanda] Inserindo ${payload.length} novos vínculos`)
+  
   const { error } = await supabase.from('comanda_clientes').insert(payload)
   if (error) throw error
+  
+  console.log(`[adicionarClientesAComanda] Clientes adicionados com sucesso`)
   return true
 }
 
