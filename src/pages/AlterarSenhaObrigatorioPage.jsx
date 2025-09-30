@@ -255,38 +255,10 @@ export default function AlterarSenhaObrigatorioPage() {
             </form>
             
             {/* Footer */}
-            <div className="mt-6 space-y-3">
-              <p className="text-xs text-text-muted text-center">
-                ⚠️ Recomendamos fortemente alterar sua senha
+            <div className="mt-6 text-center">
+              <p className="text-xs text-text-muted">
+                ⚠️ Você não pode pular esta etapa
               </p>
-              
-              {/* Botão de emergência */}
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="w-full text-xs text-text-muted hover:text-text-primary"
-                onClick={async () => {
-                  if (!confirm('Tem certeza? Você poderá trocar a senha depois nas configurações.')) return;
-                  
-                  console.log('[AlterarSenha] Pulando troca de senha (emergência)...');
-                  try {
-                    const { error } = await supabase
-                      .from('colaboradores')
-                      .update({ primeiro_acesso: false })
-                      .eq('id', userProfile.id);
-                    
-                    if (!error) {
-                      localStorage.removeItem('auth:userProfile');
-                      window.location.href = '/';
-                    }
-                  } catch (e) {
-                    console.error(e);
-                  }
-                }}
-              >
-                Pular por enquanto (não recomendado)
-              </Button>
             </div>
           </div>
         </motion.div>
