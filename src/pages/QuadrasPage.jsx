@@ -8,6 +8,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { useToast } from '@/components/ui/use-toast';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
+import { Trophy, Users, TrendingUp, Eye, EyeOff } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 const pageVariants = {
   hidden: { opacity: 0 },
@@ -23,6 +25,24 @@ function SectionCard({ children, className = '' }) {
     </motion.div>
   );
 }
+
+const StatCard = ({ icon, title, value, subtitle, color }) => {
+  const Icon = icon;
+  return (
+    <motion.div variants={itemVariants} 
+      className="bg-surface rounded-lg border-2 border-border hover:border-border-hover p-4 flex flex-col justify-between gap-2 transition-all duration-300"
+    >
+      <div className="flex items-center justify-between">
+        <p className="text-text-secondary text-sm font-semibold">{title}</p>
+        <Icon className={`w-5 h-5 ${color}`} />
+      </div>
+      <div>
+        <p className="text-2xl font-bold text-text-primary">{value}</p>
+        <p className="text-xs text-text-muted">{subtitle}</p>
+      </div>
+    </motion.div>
+  );
+};
 
 function Input({ label, ...props }) {
   return (
@@ -65,6 +85,14 @@ export default function QuadrasPage() {
   const [editingId, setEditingId] = useState(null);
   const [editForm, setEditForm] = useState({ nome: '', modalidades: [], tipo: 'Descoberta', status: 'Ativa', hora_inicio: '06:00', hora_fim: '23:59', valor_hora: '' });
   const [newEditMod, setNewEditMod] = useState("");
+  
+  // Stats
+  const [showStats, setShowStats] = useState(true);
+  const [stats, setStats] = useState({
+    mostUsed: '-',
+    topClient: '-',
+    totalBookings: '-',
+  });
 
   // Watchdog: se uma submissão ficar presa, logar após 15s
   useEffect(() => {
@@ -314,8 +342,58 @@ export default function QuadrasPage() {
   useEffect(() => {
     if (authReady && userProfile?.codigo_empresa) {
       loadQuadras();
+      loadStats();
     }
   }, [authReady, userProfile?.codigo_empresa]);
+  
+  const loadStats = async () => {
+    if (!userProfile?.codigo_empresa) return;
+    
+    try {
+      // Buscar agendamentos dos últimos 30 dias
+      const thirtyDaysAgo = new Date();
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+      
+      const { data: agendamentos } = await supabase
+        .from('agendamentos')
+        .select('quadra_id, cliente_id, quadras!inner(nome), clientes(nome)')
+        .eq('codigo_empresa', userProfile.codigo_empresa)
+        .gte('inicio', thirtyDaysAgo.toISOString())
+        .neq('status', 'canceled');
+      
+      if (!agendamentos || agendamentos.length === 0) {
+        setStats({ mostUsed: 'Sem dados', topClient: 'Sem dados', totalBookings: '0' });
+        return;
+      }
+      
+      // Quadra mais usada
+      const quadraCount = {};
+      agendamentos.forEach(a => {
+        const nome = a.quadras?.nome || 'Sem nome';
+        quadraCount[nome] = (quadraCount[nome] || 0) + 1;
+      });
+      const mostUsed = Object.entries(quadraCount).sort((a, b) => b[1] - a[1])[0];
+      
+      // Cliente mais agendado
+      const clienteCount = {};
+      agendamentos.forEach(a => {
+        if (a.cliente_id && a.clientes?.nome) {
+          const nome = a.clientes.nome;
+          clienteCount[nome] = (clienteCount[nome] || 0) + 1;
+        }
+      });
+      const topClient = Object.entries(clienteCount).sort((a, b) => b[1] - a[1])[0];
+      
+      setStats({
+        mostUsed: mostUsed ? `${mostUsed[0]} (${mostUsed[1]})` : 'Sem dados',
+        topClient: topClient ? `${topClient[0]} (${topClient[1]})` : 'Sem dados',
+        totalBookings: agendamentos.length.toString(),
+      });
+    } catch (e) {
+      console.error('Erro ao carregar stats:', e);
+      setStats({ mostUsed: 'Erro', topClient: 'Erro', totalBookings: '0' });
+    }
+  };
 
   const addQuadra = async () => {
     // eslint-disable-next-line no-console
@@ -439,19 +517,26 @@ export default function QuadrasPage() {
       </Helmet>
 
       <motion.div variants={pageVariants} initial="hidden" animate="visible" className="space-y-6">
-        <SectionCard>
-          <div className="flex items-center justify-between">
-            <div className="flex flex-col gap-1">
-              <h1 className="text-2xl md:text-3xl font-bold text-text-primary tracking-tight">Cadastros • Quadras</h1>
-              {!loading && (
-                <span className="inline-flex w-fit items-center gap-2 text-[11px] md:text-xs text-text-muted bg-surface-2/60 border border-border px-2 py-0.5 rounded-full">
-                  <span className="h-1.5 w-1.5 rounded-full bg-primary" /> {quadras.length} cadastrada(s)
-                </span>
-              )}
-            </div>
+        <motion.div variants={itemVariants} className="flex items-center justify-between mb-6">
+          <div>
+            <h1 className="text-3xl font-black text-text-primary tracking-tighter">Controle de Quadras</h1>
+            <p className="text-text-secondary">Gerencie as quadras e horários disponíveis.</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="icon" onClick={() => setShowStats(s => !s)} title={showStats ? 'Ocultar resumo' : 'Mostrar resumo'} aria-label={showStats ? 'Ocultar resumo' : 'Mostrar resumo'}>
+              {showStats ? <EyeOff className="h-4 w-4"/> : <Eye className="h-4 w-4"/>}
+            </Button>
             <Button onClick={() => setIsCreateOpen(true)} className="shadow-sm">Adicionar Quadra</Button>
           </div>
-        </SectionCard>
+        </motion.div>
+        
+        {showStats && (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+            <StatCard icon={Trophy} title="Quadra Mais Usada" value={stats.mostUsed} subtitle="Últimos 30 dias" color="text-brand" />
+            <StatCard icon={Users} title="Cliente Top" value={stats.topClient} subtitle="Mais agendamentos no mês" color="text-purple" />
+            <StatCard icon={TrendingUp} title="Total de Agendamentos" value={stats.totalBookings} subtitle="Últimos 30 dias" color="text-success" />
+          </div>
+        )}
 
         <SectionCard>
           <div className="flex items-center justify-between mb-4">
