@@ -13,7 +13,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger, } from "@/components/ui/alert-dialog"
 import { Label } from '@/components/ui/label';
-import { listMesas, ensureCaixaAberto, fecharCaixa, getOrCreateComandaForMesa, listarItensDaComanda, adicionarItem, atualizarQuantidadeItem, removerItem, listarFinalizadoras, registrarPagamento, fecharComandaEMesa, listarComandasAbertas, listarTotaisPorComanda, criarMesa, listarClientes, adicionarClientesAComanda, listarClientesDaComanda, getCaixaAberto, listarResumoSessaoCaixaAtual, criarMovimentacaoCaixa, listarMovimentacoesCaixa } from '@/lib/store';
+import { listMesas, ensureCaixaAberto, fecharCaixa, getOrCreateComandaForMesa, listarItensDaComanda, adicionarItem, atualizarQuantidadeItem, removerItem, listarFinalizadoras, registrarPagamento, fecharComandaEMesa, cancelarComandaEMesa, listarComandasAbertas, listarTotaisPorComanda, criarMesa, listarClientes, adicionarClientesAComanda, listarClientesDaComanda, getCaixaAberto, listarResumoSessaoCaixaAtual, criarMovimentacaoCaixa, listarMovimentacoesCaixa } from '@/lib/store';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -67,6 +67,11 @@ function VendasPage() {
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [isProductDetailsOpen, setIsProductDetailsOpen] = useState(false);
   const [isOrderDetailsOpen, setIsOrderDetailsOpen] = useState(false);
+  const [isManageClientsOpen, setIsManageClientsOpen] = useState(false);
+  const [manageClientsSearch, setManageClientsSearch] = useState('');
+  const [manageClientsLoading, setManageClientsLoading] = useState(false);
+  const [manageClientsData, setManageClientsData] = useState([]);
+  const [currentTableClients, setCurrentTableClients] = useState([]);
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(false);
   // Abrir mesa
@@ -400,9 +405,16 @@ function VendasPage() {
     toast({ title: "Layout das mesas atualizado!", description: "As posições foram salvas temporariamente.", variant: 'success' });
   };
 
-  const calculateTotal = (order) => order.reduce((acc, item) => acc + item.price * item.quantity, 0);
+  const calculateTotal = (order) => (order || []).reduce((acc, item) => acc + (item.price * item.quantity), 0);
+  
+  // Trunca nome para mostrar apenas os 2 primeiros nomes completos
+  const truncateClientName = (fullName) => {
+    if (!fullName) return '';
+    const parts = fullName.trim().split(/\s+/);
+    if (parts.length <= 2) return fullName;
+    return parts.slice(0, 2).join(' ');
+  };
 
-  // Mapa de quantidades por produto (para badges no catálogo da esquerda)
   const qtyByProductId = useMemo(() => {
     const map = new Map();
     const order = selectedTable?.order || [];
@@ -676,7 +688,7 @@ function VendasPage() {
           <div className="w-full mt-auto">
             <div className="flex items-center gap-1 mb-1">
               <Users className="w-3 h-3 text-text-muted flex-shrink-0" />
-              <div className="text-sm sm:text-base font-medium text-text-primary truncate" title={table.customer || ''}>{table.customer || '—'}</div>
+              <div className="text-sm sm:text-base font-medium text-text-primary truncate" title={table.customer || ''}>{truncateClientName(table.customer) || '—'}</div>
             </div>
             <div className="flex items-center gap-1">
               <DollarSign className="w-3 h-3 text-text-muted flex-shrink-0" />
@@ -1216,33 +1228,36 @@ function VendasPage() {
       <>
         <div className="flex flex-col h-full">
           <div className="p-3 border-b border-border flex items-center justify-between gap-2">
-            <div className="text-sm font-medium text-text-primary leading-none truncate">{table.customer || '—'}</div>
+            <div className="text-sm font-medium text-text-primary leading-none truncate" title={table.customer || ''}>{truncateClientName(table.customer) || '—'}</div>
             <div className="flex items-center gap-2">
               {table.comandaId ? (
                 <>
+                  <Button size="sm" variant="outline" className="h-7 px-2.5 rounded-full text-[12px] font-medium leading-none whitespace-nowrap" onClick={() => setIsManageClientsOpen(true)}>
+                    <Users size={12} className="mr-1.5" /> Clientes
+                  </Button>
                   <Button size="sm" variant="secondary" className="h-7 px-2.5 rounded-full text-[12px] font-medium leading-none whitespace-nowrap" onClick={() => setIsOrderDetailsOpen(true)}>
                     <FileText size={12} className="mr-1.5" /> Comanda
                   </Button>
                   <Button size="sm" variant="destructive" className="h-7 px-2.5 rounded-full text-[12px] font-medium leading-none whitespace-nowrap" onClick={async () => {
                     try {
-                      console.log('[Liberar Mesa] Iniciando liberação da mesa:', table.number);
+                      console.log('[Cancelar Comanda] Iniciando cancelamento da comanda:', table.comandaId);
                       
-                      // Fechar comanda e mesa
-                      await fecharComandaEMesa({ comandaId: table.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
-                      console.log('[Liberar Mesa] Comanda fechada com sucesso');
+                      // Cancelar comanda sem enviar para histórico
+                      await cancelarComandaEMesa({ comandaId: table.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
+                      console.log('[Cancelar Comanda] Comanda cancelada com sucesso');
                       
                       // Atualizar estado local imediatamente
                       setSelectedTable(null);
                       
                       // Recarregar mesas (com feedback)
                       await refreshTablesLight({ showToast: true });
-                      console.log('[Liberar Mesa] Mesas atualizadas');
+                      console.log('[Cancelar Comanda] Mesas atualizadas');
                       
-                      toast({ title: 'Mesa liberada', variant: 'success' });
+                      toast({ title: 'Comanda cancelada', variant: 'success' });
                     } catch (e) {
-                      console.error('[Liberar Mesa] Erro:', e);
+                      console.error('[Cancelar Comanda] Erro:', e);
                       toast({ 
-                        title: 'Falha ao liberar mesa', 
+                        title: 'Falha ao cancelar comanda', 
                         description: e?.message || 'Tente novamente', 
                         variant: 'destructive' 
                       });
@@ -1251,11 +1266,11 @@ function VendasPage() {
                       try {
                         await refreshTablesLight({ showToast: true });
                       } catch (refreshErr) {
-                        console.error('[Liberar Mesa] Erro ao recarregar após falha:', refreshErr);
+                        console.error('[Cancelar Comanda] Erro ao recarregar após falha:', refreshErr);
                       }
                     }
                   }}>
-                    <X size={12} className="mr-1.5" /> Liberar
+                    <X size={12} className="mr-1.5" /> Cancelar
                   </Button>
                 </>
               ) : (
@@ -2151,6 +2166,154 @@ function VendasPage() {
     )
   };
 
+  const ManageClientsDialog = () => {
+    const [localSearch, setLocalSearch] = useState('');
+    const [localClients, setLocalClients] = useState([]);
+    const [localLinked, setLocalLinked] = useState([]);
+    const [localLoading, setLocalLoading] = useState(false);
+
+    useEffect(() => {
+      let active = true;
+      const load = async () => {
+        if (!isManageClientsOpen || !selectedTable?.comandaId) return;
+        try {
+          setLocalLoading(true);
+          // Carregar clientes vinculados à comanda
+          const vincs = await listarClientesDaComanda({ comandaId: selectedTable.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
+          const clientIds = (vincs || []).map(v => v?.cliente_id ?? v?.clientes?.id).filter(Boolean);
+          if (!active) return;
+          setLocalLinked(clientIds);
+          // Carregar lista de clientes disponíveis
+          const rows = await listarClientes({ searchTerm: localSearch, limit: 20 });
+          if (!active) return;
+          const sorted = (rows || []).slice().sort((a, b) => Number(a?.codigo || 0) - Number(b?.codigo || 0));
+          setLocalClients(sorted);
+        } catch (e) {
+          console.error('Erro ao carregar clientes:', e);
+        } finally {
+          if (active) setLocalLoading(false);
+        }
+      };
+      load();
+      return () => { active = false; };
+    }, [isManageClientsOpen, localSearch, selectedTable?.comandaId, userProfile?.codigo_empresa]);
+
+    const toggleClient = async (clientId) => {
+      if (!selectedTable?.comandaId) return;
+      try {
+        const isCurrentlyLinked = localLinked.includes(clientId);
+        if (isCurrentlyLinked) {
+          // Remover cliente
+          await supabase
+            .from('comanda_clientes')
+            .delete()
+            .eq('comanda_id', selectedTable.comandaId)
+            .eq('cliente_id', clientId)
+            .eq('codigo_empresa', userProfile?.codigo_empresa);
+          setLocalLinked(prev => prev.filter(id => id !== clientId));
+          toast({ title: 'Cliente removido', variant: 'success' });
+        } else {
+          // Adicionar cliente
+          await adicionarClientesAComanda({
+            comandaId: selectedTable.comandaId,
+            clienteIds: [clientId],
+            nomesLivres: [],
+            codigoEmpresa: userProfile?.codigo_empresa
+          });
+          setLocalLinked(prev => [...prev, clientId]);
+          toast({ title: 'Cliente adicionado', variant: 'success' });
+        }
+        // Atualizar nome do cliente na mesa
+        await refetchSelectedTableDetails(selectedTable);
+      } catch (e) {
+        toast({ title: 'Falha ao atualizar cliente', description: e?.message || 'Tente novamente', variant: 'destructive' });
+      }
+    };
+
+    return (
+      <Dialog open={isManageClientsOpen} onOpenChange={setIsManageClientsOpen}>
+        <DialogContent 
+          className="max-w-xl animate-none" 
+          onKeyDown={(e) => e.stopPropagation()} 
+          onKeyDownCapture={(e) => e.stopPropagation()}
+          onPointerDownOutside={(e) => { e.preventDefault(); e.stopPropagation(); }} 
+          onInteractOutside={(e) => { e.preventDefault(); e.stopPropagation(); }}
+          onEscapeKeyDown={(e) => e.preventDefault()}
+        >
+          <DialogHeader>
+            <DialogTitle>Gerenciar Clientes da Mesa</DialogTitle>
+            <DialogDescription>Clique nos clientes para adicionar ou remover. Pode ter múltiplos clientes.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted" />
+              <Input
+                placeholder="Buscar cliente..."
+                className="pl-9"
+                value={localSearch}
+                onChange={(e) => setLocalSearch(e.target.value)}
+                onKeyDown={(e) => e.stopPropagation()}
+                onKeyUp={(e) => e.stopPropagation()}
+              />
+            </div>
+            {localLinked.length > 0 && (
+              <div className="bg-success/10 border border-success/30 rounded-md p-3">
+                <div className="text-xs font-medium text-success mb-1">Clientes vinculados ({localLinked.length}):</div>
+                <div className="text-sm text-text-primary">
+                  {localClients
+                    .filter(c => localLinked.includes(c.id))
+                    .map(c => c.nome)
+                    .join(', ') || 'Carregando...'}
+                </div>
+              </div>
+            )}
+            <div className="border rounded-md max-h-[400px] overflow-y-auto thin-scroll">
+              {localLoading ? (
+                <div className="p-4 text-center text-text-muted">Carregando...</div>
+              ) : localClients.length === 0 ? (
+                <div className="p-4 text-center text-text-muted">Nenhum cliente encontrado</div>
+              ) : (
+                <ul className="divide-y divide-border">
+                  {localClients.map(client => {
+                    const isLinked = localLinked.includes(client.id);
+                    return (
+                      <li
+                        key={client.id}
+                        className="p-3 hover:bg-surface-2 cursor-pointer transition-colors flex items-center justify-between"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          toggleClient(client.id);
+                        }}
+                      >
+                        <div className="flex-1 min-w-0">
+                          <div className="font-medium truncate">{client.nome}</div>
+                          {client.telefone && (
+                            <div className="text-xs text-text-muted">{client.telefone}</div>
+                          )}
+                        </div>
+                        <div className="ml-3 flex-shrink-0">
+                          {isLinked ? (
+                            <CheckCircle className="h-5 w-5 text-success" />
+                          ) : (
+                            <div className="h-5 w-5 rounded-full border-2 border-border" />
+                          )}
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsManageClientsOpen(false)}>Fechar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    );
+  };
+
   const ProductDetailsDialog = () => {
     const prod = selectedProduct;
     const qInOrder = prod ? (qtyByProductId.get(prod.id) || 0) : 0;
@@ -2302,6 +2465,7 @@ function VendasPage() {
       <CounterModeModal />
       <CashierDetailsDialog />
       <OrderDetailsDialog />
+      <ManageClientsDialog />
       <OpenTableDialog />
       <CreateMesaDialog />
     </>

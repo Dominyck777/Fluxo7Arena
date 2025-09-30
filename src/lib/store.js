@@ -1326,3 +1326,58 @@ export async function fecharComandaEMesa({ comandaId, codigoEmpresa }) {
     try { console.groupEnd(); } catch {}
   }
 }
+
+// Cancela comanda e libera mesa SEM enviar para histórico (não define fechado_em)
+export async function cancelarComandaEMesa({ comandaId, codigoEmpresa }) {
+  const codigo = codigoEmpresa || getCachedCompanyCode()
+  const trace = '[cancelarComandaEMesa]'
+  try { console.group(trace); } catch {}
+  try { console.time?.(trace); } catch {}
+  try {
+    if (!comandaId) throw new Error('comandaId obrigatório')
+    if (!codigo) throw new Error('codigo_empresa obrigatório')
+    console.log(`${trace} Cancelando comanda ${comandaId}`)
+    
+    // Obter dados da comanda para liberar mesa
+    const { data: comanda } = await supabase
+      .from('comandas')
+      .select('id, mesa_id')
+      .eq('id', comandaId)
+      .single()
+    
+    // Limpa itens e vínculos de clientes
+    try { await supabase.from('comanda_itens').delete().eq('comanda_id', comandaId).eq('codigo_empresa', codigo) } catch {}
+    try { await supabase.from('comanda_clientes').delete().eq('comanda_id', comandaId).eq('codigo_empresa', codigo) } catch {}
+    
+    // Marca status como canceled sem fechado_em
+    // Nota: Se houver constraint de status, usar 'cancelled' ou outro valor aceito
+    const { error: upErr } = await supabase
+      .from('comandas')
+      .update({ status: 'cancelled', fechado_em: null })
+      .eq('id', comandaId)
+      .eq('codigo_empresa', codigo)
+    if (upErr) throw upErr
+    
+    // Se tiver mesa associada, marca como disponível
+    if (comanda?.mesa_id) {
+      console.log(`${trace} Liberando mesa ${comanda.mesa_id}`)
+      try {
+        await supabase
+          .from('mesas')
+          .update({ status: 'available' })
+          .eq('id', comanda.mesa_id)
+      } catch (err) {
+        console.error(`${trace} Erro ao liberar mesa:`, err)
+      }
+    }
+    
+    console.log(`${trace} Comanda ${comandaId} cancelada com sucesso`)
+    return true
+  } catch (e) {
+    console.error(`${trace} Falha:`, e)
+    throw e
+  } finally {
+    try { console.timeEnd?.(trace); } catch {}
+    try { console.groupEnd?.(trace); } catch {}
+  }
+}
