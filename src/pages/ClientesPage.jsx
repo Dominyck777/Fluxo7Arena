@@ -4,7 +4,7 @@ import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useToast } from "@/components/ui/use-toast";
-import { Plus, Search, Users, UserX, UserCheck, Gift, Edit, Trash2, MoreHorizontal, History, XCircle, Eye, EyeOff, Download } from 'lucide-react';
+import { Plus, Search, Users, UserX, UserCheck, Gift, Edit, Trash2, MoreHorizontal, History, XCircle, Eye, EyeOff, Download, TrendingUp } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from '@/components/ui/dialog';
@@ -898,6 +898,7 @@ function ClientesPage() {
         return {
             total: clients.length,
             birthdays: clients.filter(c => c.aniversario && new Date(c.aniversario).getMonth() === currentMonth).length,
+            active: clients.filter(c => c.status === 'Ativo').length,
         };
     }, [clients]);
 
@@ -1116,6 +1117,7 @@ function ClientesPage() {
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-6">
                       <StatCard icon={Users} title="Total de Clientes" value={stats.total} color="text-brand" />
                       <StatCard icon={Gift} title="Aniversariantes do Mês" value={stats.birthdays} color="text-info" />
+                      <StatCard icon={TrendingUp} title="Clientes Ativos" value={stats.active} color="text-success" />
                   </div>
                 )}
 

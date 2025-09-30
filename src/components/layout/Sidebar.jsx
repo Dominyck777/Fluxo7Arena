@@ -59,13 +59,14 @@ function Sidebar() {
       initial={{ x: -280 }}
       animate={{ x: 0 }}
       transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
-      className="w-[280px] flex-shrink-0 bg-surface flex flex-col p-6 border-r border-border shadow-xl shadow-black/20"
+      className="w-[280px] h-screen flex-shrink-0 bg-surface flex flex-col border-r border-border shadow-xl shadow-black/20"
     >
       <motion.div 
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.2, duration: 0.4 }}
-        className="flex items-center mb-10 pl-2 h-[72px]">
+        className="flex items-center px-6 pt-6 pb-4 h-[96px] flex-shrink-0"
+      >
         <div className="w-10 h-10 bg-brand rounded-lg flex items-center justify-center mr-3">
             <Trophy className="w-6 h-6 text-primary-foreground" />
         </div>
@@ -76,13 +77,11 @@ function Sidebar() {
         </div>
       </motion.div>
 
-      <nav className="flex-1">
+      <nav className="flex-1 overflow-y-auto px-6 py-2 scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent hover:scrollbar-thumb-border-hover">
         <ul className="space-y-3">
           {navItems.map((item, i) => (
             <NavItem key={item.to} {...item} index={i} />
           ))}
-
-          {/* Grupo: Cadastros */}
           <motion.li
             custom={navItems.length}
             variants={navItemVariants}
@@ -155,12 +154,12 @@ function Sidebar() {
         </ul>
       </nav>
 
-      {/* Rodapé removido conforme solicitado (cartão de usuário) */}
+      {/* Rodapé */}
       <motion.div 
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.6, duration: 0.4 }}
-        className="mt-auto flex flex-col space-y-3">
+        className="px-6 pb-6 flex-shrink-0">
          <NavItem to="/suporte" icon={LifeBuoy} label="Suporte" index={navItems.length} />
       </motion.div>
     </motion.aside>
