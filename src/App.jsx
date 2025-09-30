@@ -19,6 +19,8 @@ import TestPage from '@/pages/TestPage';
 import ResetPasswordPage from '@/pages/ResetPasswordPage';
 import HistoricoComandasPage from '@/pages/HistoricoComandasPage';
 import CreateCompanyPage from '@/pages/CreateCompanyPage';
+import AlterarSenhaObrigatorioPage from '@/pages/AlterarSenhaObrigatorioPage';
+import PrimeiroAcessoGuard from '@/components/PrimeiroAcessoGuard';
 import { Helmet } from 'react-helmet';
 
 function PrivateApp() {
@@ -65,10 +67,19 @@ function App() {
       <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="/40028922" element={<CreateCompanyPage />} />
       
-      {/* Todas as demais rotas protegidas */}
+      {/* Rota de troca de senha obrigatória (protegida mas sem guard) */}
+      <Route path="/alterar-senha-obrigatorio" element={
+        <ProtectedRoute>
+          <AlterarSenhaObrigatorioPage />
+        </ProtectedRoute>
+      } />
+      
+      {/* Todas as demais rotas protegidas com guard de primeiro acesso */}
       <Route path="/*" element={
         <ProtectedRoute>
-          <PrivateApp />
+          <PrimeiroAcessoGuard>
+            <PrivateApp />
+          </PrimeiroAcessoGuard>
         </ProtectedRoute>
       } />
     </Routes>

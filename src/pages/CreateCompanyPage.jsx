@@ -294,8 +294,12 @@ export default function CreateCompanyPage() {
       // 5. Criar perfil do usuário - em usuarios E colaboradores
       if (formData.email.trim() || formData.nomeUsuario.trim()) {
         try {
-          // Gerar ID temporário
-          const tempId = crypto.randomUUID();
+          // Gerar ID temporário (compatível com todos os navegadores)
+          const tempId = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+            const r = Math.random() * 16 | 0;
+            const v = c === 'x' ? r : (r & 0x3 | 0x8);
+            return v.toString(16);
+          });
           
           // Criar em usuarios
           const { error: userError } = await supabase
@@ -321,6 +325,7 @@ export default function CreateCompanyPage() {
               cargo: formData.cargo || 'admin',
               ativo: true,
               codigo_empresa: codigoEmpresa,
+              primeiro_acesso: true, // Forçar troca de senha no primeiro login
             });
           
           if (colabError) {
@@ -356,15 +361,7 @@ WHERE codigo_empresa = '${codigoEmpresa}' AND id = '${tempId}';
         auto_finish_enabled: true,
       });
       
-      // 7. Criar finalizadoras padrão
-      const finalizadoras = [
-        { nome: 'Dinheiro', tipo: 'dinheiro', ordem: 1 },
-        { nome: 'Cartão de Crédito', tipo: 'cartao_credito', ordem: 2 },
-        { nome: 'Cartão de Débito', tipo: 'cartao_debito', ordem: 3 },
-        { nome: 'PIX', tipo: 'pix', ordem: 4 },
-      ].map(f => ({ ...f, codigo_empresa: codigoEmpresa, ativo: true }));
-      
-      await supabase.from('finalizadoras').insert(finalizadoras);
+      // 7. Finalizadoras removidas - usuário cria após login
       
       // 8. Criar quadras
       if (formData.quadras.length > 0) {
@@ -464,7 +461,7 @@ WHERE codigo_empresa = '${codigoEmpresa}' AND id = '${tempId}';
           <Lock className="w-8 h-8 text-brand" />
         </div>
         <h1 className="text-2xl font-bold text-text-primary mb-2">Área Restrita</h1>
-        <p className="text-text-muted">Digite a senha para acessar o formulário de criação de empresa</p>
+        <p className="text-text-muted">Digite a senha para acessar</p>
       </div>
       
       <form onSubmit={handleSenhaSubmit} className="space-y-4">
@@ -781,11 +778,11 @@ WHERE codigo_empresa = '${codigoEmpresa}' AND id = '${tempId}';
         
         <div className="bg-info/10 border border-info/30 rounded-lg p-4">
           <div className="flex items-start gap-3">
-            <CreditCard className="w-5 h-5 text-info mt-0.5" />
+            <AlertCircle className="w-5 h-5 text-info mt-0.5" />
             <div>
-              <p className="text-sm font-medium text-text-primary mb-1">Métodos de Pagamento</p>
+              <p className="text-sm font-medium text-text-primary mb-1">Configurações Opcionais</p>
               <p className="text-xs text-text-muted">
-                Serão criados automaticamente: Dinheiro, Cartão de Crédito, Cartão de Débito e PIX
+                Você pode adicionar quadras, mesas e categorias agora ou configurar depois no sistema.
               </p>
             </div>
           </div>
@@ -899,10 +896,6 @@ WHERE codigo_empresa = '${codigoEmpresa}' AND id = '${tempId}';
                 <span className="text-text-muted">Categorias de Produtos:</span>
                 <span className="text-text-primary font-medium">{formData.categorias.length}</span>
               </div>
-              <div className="flex justify-between">
-                <span className="text-text-muted">Métodos de Pagamento:</span>
-                <span className="text-text-primary font-medium">4 (padrão)</span>
-              </div>
             </div>
           </div>
           
@@ -994,7 +987,7 @@ WHERE codigo_empresa = '${codigoEmpresa}' AND id = '${tempId}';
             </div>
             <div className="text-center p-4 bg-background rounded-lg">
               <div className="text-2xl font-bold text-brand mb-1">✓</div>
-              <div className="text-xs text-text-muted">Usuário Admin</div>
+              <div className="text-xs text-text-muted">Configurações</div>
             </div>
             <div className="text-center p-4 bg-background rounded-lg">
               <div className="text-2xl font-bold text-brand mb-1">{resultado?.numQuadras}</div>
@@ -1005,24 +998,35 @@ WHERE codigo_empresa = '${codigoEmpresa}' AND id = '${tempId}';
               <div className="text-xs text-text-muted">Mesas</div>
             </div>
             <div className="text-center p-4 bg-background rounded-lg">
-              <div className="text-2xl font-bold text-brand mb-1">4</div>
-              <div className="text-xs text-text-muted">Finalizadoras</div>
-            </div>
-            <div className="text-center p-4 bg-background rounded-lg">
               <div className="text-2xl font-bold text-brand mb-1">{resultado?.numCategorias}</div>
               <div className="text-xs text-text-muted">Categorias</div>
+            </div>
+            <div className="text-center p-4 bg-background rounded-lg">
+              <div className="text-2xl font-bold text-brand mb-1">✓</div>
+              <div className="text-xs text-text-muted">Pronto para Uso</div>
             </div>
           </div>
         </div>
         
-        <div className="bg-info/10 border border-info/30 rounded-lg p-4">
+        <div className="bg-warning/10 border border-warning/30 rounded-lg p-4">
           <div className="flex items-start gap-3">
-            <AlertCircle className="w-5 h-5 text-info mt-0.5" />
-            <div>
-              <p className="text-sm font-medium text-text-primary mb-1">Próximos Passos</p>
-              <p className="text-xs text-text-muted">
-                Faça login com o email cadastrado para acessar o sistema e começar a configurar sua empresa.
-              </p>
+            <AlertCircle className="w-5 h-5 text-warning mt-0.5" />
+            <div className="flex-1">
+              <p className="text-sm font-medium text-text-primary mb-2">⚠️ IMPORTANTE: Execute o SQL Antes de Fazer Login</p>
+              <div className="space-y-2 text-xs text-text-muted">
+                <p className="font-semibold text-text-primary">Para vincular seu usuário à empresa, siga estes passos:</p>
+                <ol className="list-decimal list-inside space-y-1 ml-2">
+                  <li>Abra o <strong>Console do Navegador</strong> (pressione F12)</li>
+                  <li>Procure pela mensagem <strong>"⚠️ APÓS O PRIMEIRO LOGIN, execute este SQL"</strong></li>
+                  <li>Copie o comando SQL que aparece no console</li>
+                  <li>Acesse o <strong>Supabase → SQL Editor</strong></li>
+                  <li>Cole e execute o SQL</li>
+                  <li>Agora sim, faça login normalmente</li>
+                </ol>
+                <p className="mt-2 text-warning font-medium">
+                  ⚠️ Se não executar o SQL, você verá o erro "Empresa não vinculada"
+                </p>
+              </div>
             </div>
           </div>
         </div>
