@@ -547,7 +547,7 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
         </DialogHeader>
         <form onSubmit={handleSave} className="grid gap-4 py-2 flex-1 overflow-y-auto pr-1 fx-scroll">
           <Tabs defaultValue="dados" className="w-full">
-            <TabsList className="grid grid-cols-5">
+            <TabsList className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-1">
               <TabsTrigger value="dados">Dados</TabsTrigger>
               <TabsTrigger value="estoque">Estoque</TabsTrigger>
               <TabsTrigger value="preco">Preço e Lucro</TabsTrigger>

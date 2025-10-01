@@ -552,65 +552,123 @@ export default function QuadrasPage() {
               <Button onClick={() => setIsCreateOpen(true)}>Adicionar Quadra</Button>
             </div>
           ) : (
-            <div className="overflow-x-auto rounded-lg border border-border bg-surface-0">
-              <Table>
-                <TableHeader className="bg-surface-2/60 backdrop-blur supports-[backdrop-filter]:bg-surface-2/70">
-                  <TableRow>
-                    <TableHead className="text-[11px] md:text-xs uppercase tracking-wide text-text-muted">Nome</TableHead>
-                    <TableHead className="text-[11px] md:text-xs uppercase tracking-wide text-text-muted">Modalidades</TableHead>
-                    <TableHead className="text-[11px] md:text-xs uppercase tracking-wide text-text-muted">Valor por hora</TableHead>
-                    <TableHead className="text-[11px] md:text-xs uppercase tracking-wide text-text-muted">Funcionamento</TableHead>
-                    <TableHead className="text-[11px] md:text-xs uppercase tracking-wide text-text-muted">Status</TableHead>
-                    <TableHead className="text-right text-[11px] md:text-xs uppercase tracking-wide text-text-muted">Ações</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {quadras.map((q) => (
-                    <TableRow key={q.id} className="hover:bg-surface-2/40 transition-colors">
-                      <TableCell className="font-medium text-sm md:text-base text-text-primary">
-                        <div className="flex items-center gap-2">
-                          <span
-                            className="inline-block w-2.5 h-2.5 rounded-full"
-                            style={{ backgroundColor: getCourtColor(q.nome), boxShadow: '0 0 0 2px rgba(255,255,255,0.06)' }}
-                            aria-hidden="true"
-                          />
-                          <span>{q.nome}</span>
+            <>
+              {/* Layout Mobile - Cards */}
+              <div className="md:hidden space-y-3">
+                {quadras.map((q) => (
+                  <div key={q.id} className="rounded-lg border border-border bg-surface p-4 space-y-3">
+                    {/* Header: Nome + Status */}
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2 flex-1 min-w-0">
+                        <span
+                          className="inline-block w-3 h-3 rounded-full flex-shrink-0"
+                          style={{ backgroundColor: getCourtColor(q.nome), boxShadow: '0 0 0 2px rgba(255,255,255,0.06)' }}
+                          aria-hidden="true"
+                        />
+                        <span className="font-semibold text-base text-text-primary truncate">{q.nome}</span>
+                      </div>
+                      <span className={`inline-flex px-2 py-0.5 rounded-full text-xs border flex-shrink-0 ${q.status === 'Ativa' ? 'bg-emerald-50/5 border-emerald-500/30 text-emerald-400' : q.status === 'Manutenção' ? 'bg-amber-50/5 border-amber-500/30 text-amber-400' : 'bg-surface-2 border-border text-text-muted'}`}>
+                        {q.status}
+                      </span>
+                    </div>
+
+                    {/* Modalidades */}
+                    {Array.isArray(q.modalidades) && q.modalidades.length > 0 && (
+                      <div>
+                        <span className="text-xs text-text-muted mb-1 block">Modalidades</span>
+                        <div className="flex flex-wrap gap-1">
+                          {q.modalidades.map((m) => (
+                            <span key={m} className="inline-flex px-2 py-0.5 rounded-full bg-surface-2 border border-border text-xs">{m}</span>
+                          ))}
                         </div>
-                      </TableCell>
-                      <TableCell className="text-sm md:text-base">
-                        {Array.isArray(q.modalidades) && q.modalidades.length > 0 ? (
-                          <div className="flex flex-wrap gap-1">
-                            {q.modalidades.map((m) => (
-                              <span key={m} className="inline-flex px-2 py-0.5 rounded-full bg-surface-2 border border-border text-[11px] md:text-xs">{m}</span>
-                            ))}
-                          </div>
-                        ) : (q.modalidades || '')}
-                      </TableCell>
-                      <TableCell className="text-sm md:text-base">
-                        {q.valor == null || q.valor === ''
-                          ? '-'
-                          : (
-                            <span className="inline-flex px-2 py-0.5 rounded-full bg-surface-2 border border-border text-[11px] md:text-xs">
-                              {formatBRLNumber(Number(q.valor) * 2, true)}
-                            </span>
-                          )}
-                      </TableCell>
-                      <TableCell className="text-sm md:text-base">
-                        {fromDbTime(q.hora_inicio)} - {fromDbTime(q.hora_fim === '24:00:00' ? '23:59:00' : q.hora_fim)}
-                      </TableCell>
-                      <TableCell className="text-sm md:text-base">
-                        <span className={`inline-flex px-2 py-0.5 rounded-full text-[11px] md:text-xs border ${q.status === 'Ativa' ? 'bg-emerald-50/5 border-emerald-500/30 text-emerald-400' : q.status === 'Manutenção' ? 'bg-amber-50/5 border-amber-500/30 text-amber-400' : 'bg-surface-2 border-border text-text-muted'}`}>
-                          {q.status}
+                      </div>
+                    )}
+
+                    {/* Valor e Horário */}
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <span className="text-xs text-text-muted block mb-1">Valor/hora</span>
+                        <span className="text-sm font-medium">
+                          {q.valor == null || q.valor === '' ? '-' : formatBRLNumber(Number(q.valor) * 2, true)}
                         </span>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <Button variant="outline" size="sm" onClick={() => openEdit(q)} className="text-sm">Editar</Button>
-                      </TableCell>
+                      </div>
+                      <div>
+                        <span className="text-xs text-text-muted block mb-1">Funcionamento</span>
+                        <span className="text-sm font-medium">
+                          {fromDbTime(q.hora_inicio)} - {fromDbTime(q.hora_fim === '24:00:00' ? '23:59:00' : q.hora_fim)}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Botão Editar */}
+                    <Button variant="outline" size="sm" onClick={() => openEdit(q)} className="w-full">
+                      Editar Quadra
+                    </Button>
+                  </div>
+                ))}
+              </div>
+
+              {/* Layout Desktop - Tabela */}
+              <div className="hidden md:block overflow-x-auto rounded-lg border border-border bg-surface-0">
+                <Table>
+                  <TableHeader className="bg-surface-2/60 backdrop-blur supports-[backdrop-filter]:bg-surface-2/70">
+                    <TableRow>
+                      <TableHead className="text-[11px] md:text-xs uppercase tracking-wide text-text-muted">Nome</TableHead>
+                      <TableHead className="text-[11px] md:text-xs uppercase tracking-wide text-text-muted">Modalidades</TableHead>
+                      <TableHead className="text-[11px] md:text-xs uppercase tracking-wide text-text-muted">Valor por hora</TableHead>
+                      <TableHead className="text-[11px] md:text-xs uppercase tracking-wide text-text-muted">Funcionamento</TableHead>
+                      <TableHead className="text-[11px] md:text-xs uppercase tracking-wide text-text-muted">Status</TableHead>
+                      <TableHead className="text-right text-[11px] md:text-xs uppercase tracking-wide text-text-muted">Ações</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
+                  </TableHeader>
+                  <TableBody>
+                    {quadras.map((q) => (
+                      <TableRow key={q.id} className="hover:bg-surface-2/40 transition-colors">
+                        <TableCell className="font-medium text-sm md:text-base text-text-primary">
+                          <div className="flex items-center gap-2">
+                            <span
+                              className="inline-block w-2.5 h-2.5 rounded-full"
+                              style={{ backgroundColor: getCourtColor(q.nome), boxShadow: '0 0 0 2px rgba(255,255,255,0.06)' }}
+                              aria-hidden="true"
+                            />
+                            <span>{q.nome}</span>
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-sm md:text-base">
+                          {Array.isArray(q.modalidades) && q.modalidades.length > 0 ? (
+                            <div className="flex flex-wrap gap-1">
+                              {q.modalidades.map((m) => (
+                                <span key={m} className="inline-flex px-2 py-0.5 rounded-full bg-surface-2 border border-border text-[11px] md:text-xs">{m}</span>
+                              ))}
+                            </div>
+                          ) : (q.modalidades || '')}
+                        </TableCell>
+                        <TableCell className="text-sm md:text-base">
+                          {q.valor == null || q.valor === ''
+                            ? '-'
+                            : (
+                              <span className="inline-flex px-2 py-0.5 rounded-full bg-surface-2 border border-border text-[11px] md:text-xs">
+                                {formatBRLNumber(Number(q.valor) * 2, true)}
+                              </span>
+                            )}
+                        </TableCell>
+                        <TableCell className="text-sm md:text-base">
+                          {fromDbTime(q.hora_inicio)} - {fromDbTime(q.hora_fim === '24:00:00' ? '23:59:00' : q.hora_fim)}
+                        </TableCell>
+                        <TableCell className="text-sm md:text-base">
+                          <span className={`inline-flex px-2 py-0.5 rounded-full text-[11px] md:text-xs border ${q.status === 'Ativa' ? 'bg-emerald-50/5 border-emerald-500/30 text-emerald-400' : q.status === 'Manutenção' ? 'bg-amber-50/5 border-amber-500/30 text-amber-400' : 'bg-surface-2 border-border text-text-muted'}`}>
+                            {q.status}
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Button variant="outline" size="sm" onClick={() => openEdit(q)} className="text-sm">Editar</Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </>
           )}
         </SectionCard>
 
