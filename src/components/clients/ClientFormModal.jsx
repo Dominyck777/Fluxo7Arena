@@ -61,6 +61,7 @@ function ClientFormModal({ open, onOpenChange, client, onSaved }) {
     status: c?.status || 'active',
   });
   const [form, setForm] = useState(initialForm(client));
+  const [activeTab, setActiveTab] = useState('basicos');
 
   useEffect(() => {
     setForm({
@@ -295,14 +296,31 @@ function ClientFormModal({ open, onOpenChange, client, onSaved }) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[900px] max-h-[90vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-[900px] max-h-[90vh] overflow-y-auto w-full">
         <DialogHeader>
           <DialogTitle>{client ? 'Editar Cliente' : 'Novo Cliente'}</DialogTitle>
           <DialogDescription>Preencha os dados cadastrais do cliente.</DialogDescription>
         </DialogHeader>
-        <form onSubmit={handleSave} className="grid gap-6 py-2">
-          <Tabs defaultValue="basicos" className="w-full">
-            <TabsList className="grid grid-cols-5">
+        <form onSubmit={handleSave} className="grid gap-4 sm:gap-6 py-2">
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+            {/* Select para Mobile */}
+            <div className="sm:hidden mb-4">
+              <Select value={activeTab} onValueChange={setActiveTab}>
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="basicos">Dados Básicos</SelectItem>
+                  <SelectItem value="endereco">Endereço</SelectItem>
+                  <SelectItem value="financeiro">Financeiro</SelectItem>
+                  <SelectItem value="adicionais">Adicionais</SelectItem>
+                  <SelectItem value="classificacoes">Classificações</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Tabs para Desktop */}
+            <TabsList className="hidden sm:grid grid-cols-5 gap-2">
               <TabsTrigger value="basicos">Dados Básicos</TabsTrigger>
               <TabsTrigger value="endereco">Endereço</TabsTrigger>
               <TabsTrigger value="financeiro">Financeiro</TabsTrigger>
@@ -310,8 +328,8 @@ function ClientFormModal({ open, onOpenChange, client, onSaved }) {
               <TabsTrigger value="classificacoes">Classificações</TabsTrigger>
             </TabsList>
 
-            <TabsContent value="basicos" className="space-y-4 mt-2">
-            <div className="grid grid-cols-12 gap-4">
+            <TabsContent value="basicos" className="space-y-3 sm:space-y-4 mt-2">
+            <div className="grid grid-cols-12 gap-3 sm:gap-4">
               <div className="col-span-12 sm:col-span-3">
                 <Label>Tipo de Pessoa</Label>
                 <Select value={form.tipo_pessoa} onValueChange={(v) => setForm((p) => ({ ...p, tipo_pessoa: v }))}>
@@ -395,8 +413,8 @@ function ClientFormModal({ open, onOpenChange, client, onSaved }) {
             </div>
             </TabsContent>
 
-            <TabsContent value="endereco" className="space-y-4 mt-2">
-            <div className="grid grid-cols-12 gap-4">
+            <TabsContent value="endereco" className="space-y-3 sm:space-y-4 mt-2">
+            <div className="grid grid-cols-12 gap-3 sm:gap-4">
               <div className="col-span-12 sm:col-span-3">
                 <Label htmlFor="cep">CEP</Label>
                 <div className="flex gap-2">
@@ -435,8 +453,8 @@ function ClientFormModal({ open, onOpenChange, client, onSaved }) {
             </div>
             </TabsContent>
 
-            <TabsContent value="financeiro" className="space-y-4 mt-2">
-            <div className="grid grid-cols-12 gap-4">
+            <TabsContent value="financeiro" className="space-y-3 sm:space-y-4 mt-2">
+            <div className="grid grid-cols-12 gap-3 sm:gap-4">
               <div className="col-span-12 sm:col-span-3">
                 <Label htmlFor="limite_credito">Limite de Crédito</Label>
                 <Input id="limite_credito" value={form.limite_credito} onChange={handleChange} placeholder="0,00" />
@@ -477,8 +495,8 @@ function ClientFormModal({ open, onOpenChange, client, onSaved }) {
             </div>
             </TabsContent>
 
-            <TabsContent value="adicionais" className="space-y-4 mt-2">
-            <div className="grid grid-cols-12 gap-4">
+            <TabsContent value="adicionais" className="space-y-3 sm:space-y-4 mt-2">
+            <div className="grid grid-cols-12 gap-3 sm:gap-4">
               <div className="col-span-12 sm:col-span-4">
                 <Label htmlFor="sexo">Sexo</Label>
                 <Select value={form.sexo || ''} onValueChange={(v) => setForm((p) => ({ ...p, sexo: v }))}>
@@ -518,7 +536,7 @@ function ClientFormModal({ open, onOpenChange, client, onSaved }) {
             </TabsContent>
 
             <TabsContent value="classificacoes" className="space-y-3 mt-2">
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
               <label className="flex items-center gap-2"><Checkbox checked={!!form.flag_cliente} onCheckedChange={(v) => setForm((p) => ({ ...p, flag_cliente: !!v }))} />Cliente</label>
               <label className="flex items-center gap-2"><Checkbox checked={!!form.flag_fornecedor} onCheckedChange={(v) => setForm((p) => ({ ...p, flag_fornecedor: !!v }))} />Fornecedor</label>
               <label className="flex items-center gap-2"><Checkbox checked={!!form.flag_funcionario} onCheckedChange={(v) => setForm((p) => ({ ...p, flag_funcionario: !!v }))} />Funcionário</label>
@@ -529,11 +547,11 @@ function ClientFormModal({ open, onOpenChange, client, onSaved }) {
             </TabsContent>
           </Tabs>
         </form>
-        <DialogFooter>
+        <DialogFooter className="flex flex-col sm:flex-row gap-2 sm:gap-0">
           <DialogClose asChild>
-            <Button type="button" variant="secondary">Cancelar</Button>
+            <Button type="button" variant="secondary" className="w-full sm:w-auto">Cancelar</Button>
           </DialogClose>
-          <Button type="submit" onClick={handleSave}>Salvar Cliente</Button>
+          <Button type="submit" onClick={handleSave} className="w-full sm:w-auto">Salvar Cliente</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
