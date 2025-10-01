@@ -57,11 +57,11 @@ function MemberDetailsModal({ open, onOpenChange, member, onEdit }) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[700px]">
+      <DialogContent className="sm:max-w-[700px] w-full max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Detalhes do Funcionário</DialogTitle>
         </DialogHeader>
-        <div className="p-6 space-y-6">
+        <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
             <div>
                 <h2 className="text-xl font-bold">{member.name}</h2>
                 <p className="text-brand font-semibold">{member.role}</p>
@@ -69,7 +69,7 @@ function MemberDetailsModal({ open, onOpenChange, member, onEdit }) {
 
             <div>
                 <h4 className="font-semibold text-text-primary mb-2 flex items-center gap-2"><KeyRound className="w-5 h-5 text-text-secondary"/> Permissões de Acesso</h4>
-                <div className="bg-surface-2 p-4 rounded-lg grid grid-cols-2 gap-x-4 gap-y-2">
+                <div className="bg-surface-2 p-3 sm:p-4 rounded-lg grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-x-4 sm:gap-y-2">
                   {permissionsList.map(p => (
                     <div key={p.id} className="flex items-center justify-between text-sm">
                       <span className="text-text-secondary">{p.label}</span>
@@ -78,7 +78,7 @@ function MemberDetailsModal({ open, onOpenChange, member, onEdit }) {
                       </span>
                     </div>
                   ))}
-                  {member.permissions.admin && <div className="col-span-2 text-center font-bold text-success p-2 bg-success/10 rounded-md mt-2">Acesso total de Administrador</div>}
+                  {member.permissions.admin && <div className="col-span-1 sm:col-span-2 text-center font-bold text-success p-2 bg-success/10 rounded-md mt-2">Acesso total de Administrador</div>}
                 </div>
             </div>
              <div>
@@ -88,9 +88,9 @@ function MemberDetailsModal({ open, onOpenChange, member, onEdit }) {
                 </div>
             </div>
         </div>
-        <DialogFooter>
-          <DialogClose asChild><Button type="button" variant="secondary">Fechar</Button></DialogClose>
-          <Button onClick={() => onEdit(member)}><Edit className="mr-2 h-4 w-4" /> Editar</Button>
+        <DialogFooter className="flex flex-col sm:flex-row gap-2 sm:gap-0">
+          <DialogClose asChild><Button type="button" variant="secondary" className="w-full sm:w-auto">Fechar</Button></DialogClose>
+          <Button onClick={() => onEdit(member)} className="w-full sm:w-auto"><Edit className="mr-2 h-4 w-4" /> Editar</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -147,11 +147,11 @@ function MemberFormModal({ open, onOpenChange, member, onSave, loading }) {
             </div>
           </div>
         </form>
-        <DialogFooter>
+        <DialogFooter className="flex flex-col sm:flex-row gap-2 sm:gap-0">
           <DialogClose asChild>
-            <Button type="button" variant="secondary">Cancelar</Button>
+            <Button type="button" variant="secondary" className="w-full sm:w-auto">Cancelar</Button>
           </DialogClose>
-          <Button type="submit" onClick={handleSubmit} disabled={!!loading}>{loading ? 'Salvando...' : 'Salvar'}</Button>
+          <Button type="submit" onClick={handleSubmit} disabled={!!loading} className="w-full sm:w-auto">{loading ? 'Salvando...' : 'Salvar'}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -414,18 +414,29 @@ export default function EquipePage() {
             </Helmet>
             <div className="h-full flex flex-col">
                 <motion.div variants={pageVariants} initial="hidden" animate="visible">
-                    <motion.div variants={itemVariants} className="flex items-center justify-between mb-6">
+                    <motion.div variants={itemVariants} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
                         <div>
-                            <h1 className="text-3xl font-black text-text-primary tracking-tighter">Gestão de Equipe</h1>
-                            <p className="text-text-secondary">Controle de funcionários, permissões e logs.</p>
+                            <h1 className="text-2xl sm:text-3xl font-black text-text-primary tracking-tighter">Gestão de Equipe</h1>
+                            <p className="text-sm sm:text-base text-text-secondary">Controle de funcionários, permissões e logs.</p>
                         </div>
-                        <Button
-                          onClick={handleAddNew}
-                          disabled={!authReady || !company?.codigo_empresa}
-                          title={!authReady ? 'Aguardando autenticação...' : (!company?.codigo_empresa ? 'Empresa sem código. Defina o código da empresa antes.' : '')}
-                        >
-                          <Plus className="mr-2 h-4 w-4" /> Novo Funcionário
-                        </Button>
+                        <div className="flex gap-2">
+                          <Button
+                            onClick={handleAddNew}
+                            disabled={!authReady || !company?.codigo_empresa}
+                            title={!authReady ? 'Aguardando autenticação...' : (!company?.codigo_empresa ? 'Empresa sem código. Defina o código da empresa antes.' : '')}
+                            className="hidden sm:flex"
+                          >
+                            <Plus className="mr-2 h-4 w-4" /> Novo Funcionário
+                          </Button>
+                          <Button
+                            onClick={handleAddNew}
+                            disabled={!authReady || !company?.codigo_empresa}
+                            size="icon"
+                            className="sm:hidden"
+                          >
+                            <Plus className="h-4 w-4" />
+                          </Button>
+                        </div>
                     </motion.div>
 
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
@@ -447,63 +458,119 @@ export default function EquipePage() {
                                     />
                                 </div>
                             </div>
-                            <Table>
-                                <TableHeader>
-                                    <TableRow>
-                                        <TableHead>Funcionário</TableHead>
-                                        <TableHead>Cargo</TableHead>
-                                        <TableHead>Status</TableHead>
-                                        <TableHead className="w-[50px]"></TableHead>
-                                    </TableRow>
-                                </TableHeader>
-                                <TableBody>
-                                    {filteredTeam.length === 0 && (
+                            {/* Layout Mobile - Cards */}
+                            <div className="md:hidden p-4 space-y-3">
+                              {filteredTeam.length === 0 ? (
+                                <div className="text-center py-10 text-text-muted">
+                                  Nenhum funcionário cadastrado.
+                                </div>
+                              ) : (
+                                filteredTeam.map((member, idx) => (
+                                  <div key={member.id} className="rounded-lg border border-border bg-surface p-4 space-y-3" onClick={() => handleViewDetails(member)}>
+                                    {/* Header: Nome + Status */}
+                                    <div className="flex items-start justify-between gap-3">
+                                      <div className="flex-1 min-w-0">
+                                        <h3 className="font-semibold text-base text-text-primary truncate">{member.name}</h3>
+                                        <p className="text-sm text-text-muted mt-0.5">{member.role}</p>
+                                      </div>
+                                      <span className={cn(
+                                        "inline-flex px-2 py-0.5 rounded-full text-xs font-semibold flex-shrink-0",
+                                        member.status === 'active' ? "bg-success/10 text-success" : "bg-danger/10 text-danger"
+                                      )}>
+                                        {member.status === 'active' ? 'Ativo' : 'Inativo'}
+                                      </span>
+                                    </div>
+
+                                    {/* Botões de Ação */}
+                                    <div className="flex gap-2 pt-2">
+                                      <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); handleViewDetails(member); }} className="flex-1">
+                                        Ver Detalhes
+                                      </Button>
+                                      <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); handleEditFromMenu(member); }}>
+                                        <Edit className="h-3 w-3" />
+                                      </Button>
+                                      <DropdownMenu>
+                                        <DropdownMenuTrigger asChild>
+                                          <Button variant="outline" size="sm" onClick={(e) => e.stopPropagation()}>
+                                            <MoreHorizontal className="h-3 w-3" />
+                                          </Button>
+                                        </DropdownMenuTrigger>
+                                        <DropdownMenuContent align="end">
+                                          <DropdownMenuItem
+                                            className="text-danger"
+                                            disabled={idx === 0 || team.filter(m => m.status === 'active').length <= 1 || (userProfile?.id && member.id === userProfile.id)}
+                                            onClick={(e) => { e.stopPropagation(); handleDeactivate(member); }}
+                                          >
+                                            Desativar
+                                          </DropdownMenuItem>
+                                        </DropdownMenuContent>
+                                      </DropdownMenu>
+                                    </div>
+                                  </div>
+                                ))
+                              )}
+                            </div>
+
+                            {/* Layout Desktop - Tabela */}
+                            <div className="hidden md:block">
+                              <Table>
+                                  <TableHeader>
                                       <TableRow>
-                                        <TableCell colSpan={4} className="text-center py-10 text-text-muted">
-                                          Nenhum funcionário cadastrado.
-                                        </TableCell>
+                                          <TableHead>Funcionário</TableHead>
+                                          <TableHead>Cargo</TableHead>
+                                          <TableHead>Status</TableHead>
+                                          <TableHead className="w-[50px]"></TableHead>
                                       </TableRow>
-                                    )}
-                                    {filteredTeam.map((member, idx) => (
-                                        <TableRow key={member.id} className="cursor-pointer" onClick={() => handleViewDetails(member)}>
-                                            <TableCell className="font-medium">
-                                                <div className="flex items-center gap-3">
-                                                    <span>{member.name}</span>
-                                                </div>
-                                            </TableCell>
-                                            <TableCell>{member.role}</TableCell>
-                                            <TableCell>
-                                                <span className={cn(
-                                                    "px-2 py-1 text-xs font-semibold rounded-full",
-                                                    member.status === 'active' ? "bg-success/10 text-success" : "bg-danger/10 text-danger"
-                                                )}>
-                                                    {member.status === 'active' ? 'Ativo' : 'Inativo'}
-                                                </span>
-                                            </TableCell>
-                                            <TableCell>
-                                                <DropdownMenu>
-                                                    <DropdownMenuTrigger asChild>
-                                                        <Button variant="ghost" className="h-8 w-8 p-0" onClick={(e) => e.stopPropagation()}>
-                                                            <MoreHorizontal className="h-4 w-4" />
-                                                        </Button>
-                                                    </DropdownMenuTrigger>
-                                                    <DropdownMenuContent align="end">
-                                                        <DropdownMenuItem onClick={(e) => {e.stopPropagation(); handleViewDetails(member); }}>Ver Detalhes</DropdownMenuItem>
-                                                        <DropdownMenuItem onClick={(e) => {e.stopPropagation(); handleEditFromMenu(member); }}>Editar</DropdownMenuItem>
-                                                        <DropdownMenuItem
-                                                          className="text-danger"
-                                                          disabled={idx === 0 || team.filter(m => m.status === 'active').length <= 1 || (userProfile?.id && member.id === userProfile.id)}
-                                                          onClick={(e) => { e.stopPropagation(); handleDeactivate(member); }}
-                                                        >
-                                                          Desativar
-                                                        </DropdownMenuItem>
-                                                    </DropdownMenuContent>
-                                                </DropdownMenu>
-                                            </TableCell>
+                                  </TableHeader>
+                                  <TableBody>
+                                      {filteredTeam.length === 0 && (
+                                        <TableRow>
+                                          <TableCell colSpan={4} className="text-center py-10 text-text-muted">
+                                            Nenhum funcionário cadastrado.
+                                          </TableCell>
                                         </TableRow>
-                                    ))}
-                                </TableBody>
-                            </Table>
+                                      )}
+                                      {filteredTeam.map((member, idx) => (
+                                          <TableRow key={member.id} className="cursor-pointer" onClick={() => handleViewDetails(member)}>
+                                              <TableCell className="font-medium">
+                                                  <div className="flex items-center gap-3">
+                                                      <span>{member.name}</span>
+                                                  </div>
+                                              </TableCell>
+                                              <TableCell>{member.role}</TableCell>
+                                              <TableCell>
+                                                  <span className={cn(
+                                                      "px-2 py-1 text-xs font-semibold rounded-full",
+                                                      member.status === 'active' ? "bg-success/10 text-success" : "bg-danger/10 text-danger"
+                                                  )}>
+                                                      {member.status === 'active' ? 'Ativo' : 'Inativo'}
+                                                  </span>
+                                              </TableCell>
+                                              <TableCell>
+                                                  <DropdownMenu>
+                                                      <DropdownMenuTrigger asChild>
+                                                          <Button variant="ghost" className="h-8 w-8 p-0" onClick={(e) => e.stopPropagation()}>
+                                                              <MoreHorizontal className="h-4 w-4" />
+                                                          </Button>
+                                                      </DropdownMenuTrigger>
+                                                      <DropdownMenuContent align="end">
+                                                          <DropdownMenuItem onClick={(e) => {e.stopPropagation(); handleViewDetails(member); }}>Ver Detalhes</DropdownMenuItem>
+                                                          <DropdownMenuItem onClick={(e) => {e.stopPropagation(); handleEditFromMenu(member); }}>Editar</DropdownMenuItem>
+                                                          <DropdownMenuItem
+                                                            className="text-danger"
+                                                            disabled={idx === 0 || team.filter(m => m.status === 'active').length <= 1 || (userProfile?.id && member.id === userProfile.id)}
+                                                            onClick={(e) => { e.stopPropagation(); handleDeactivate(member); }}
+                                                          >
+                                                            Desativar
+                                                          </DropdownMenuItem>
+                                                      </DropdownMenuContent>
+                                                  </DropdownMenu>
+                                              </TableCell>
+                                          </TableRow>
+                                      ))}
+                                  </TableBody>
+                              </Table>
+                            </div>
                         </div>
                     </motion.div>
                 </motion.div>
