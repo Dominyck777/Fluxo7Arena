@@ -469,16 +469,16 @@ function ClientDetailsModal({ open, onOpenChange, client, onEdit, onInactivate, 
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[800px] max-h-[90vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-[800px] max-h-[90vh] overflow-y-auto w-full">
         <DialogHeader>
           <DialogTitle>Detalhes do Cliente</DialogTitle>
           <DialogDescription>Informações cadastrais e histórico recente deste cliente.</DialogDescription>
         </DialogHeader>
-        <div className="p-6 space-y-8">
+        <div className="p-4 sm:p-6 space-y-6 sm:space-y-8">
             <div className="overflow-hidden">
               <div className="flex items-start justify-between gap-4">
                 <div className="min-w-0">
-                  <h2 className="text-2xl font-extrabold tracking-tight text-text-primary truncate">{client.nome}</h2>
+                  <h2 className="text-xl sm:text-2xl font-extrabold tracking-tight text-text-primary truncate">{client.nome}</h2>
                   <div className="mt-2 flex items-center flex-wrap gap-2">
                     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-surface-2 border border-border text-text-secondary">
                       Código: <span className="text-text-primary font-mono">{client.codigo}</span>
@@ -495,7 +495,7 @@ function ClientDetailsModal({ open, onOpenChange, client, onEdit, onInactivate, 
             <div className="grid grid-cols-1 gap-8">
                 <div>
                     <h4 className="text-sm font-semibold uppercase tracking-wide text-text-secondary mb-2">Informações Cadastrais</h4>
-                    <div className="bg-surface-2 p-4 rounded-lg space-y-1">
+                    <div className="bg-surface-2 p-3 sm:p-4 rounded-lg space-y-1">
                         <DetailRow label="Código" value={client.codigo} />
                         <DetailRow label="CPF/CNPJ" value={client.cpf || client.cnpj || '—'} />
                         <DetailRow label="Telefone" value={client.telefone || '—'} />
@@ -511,7 +511,7 @@ function ClientDetailsModal({ open, onOpenChange, client, onEdit, onInactivate, 
                   <History className="w-5 h-5 text-text-secondary"/>
                   <h4 className="font-semibold">Histórico Recente</h4>
                 </div>
-                <div className="bg-surface-2 p-4 rounded-lg">
+                <div className="bg-surface-2 p-3 sm:p-4 rounded-lg">
                   {(historyLoading && bookingsLoading) ? (
                     <div className="text-center py-8 text-sm text-text-muted">Carregando histórico...</div>
                   ) : (unifiedRecent && unifiedRecent.length > 0) ? (
@@ -520,7 +520,7 @@ function ClientDetailsModal({ open, onOpenChange, client, onEdit, onInactivate, 
                         {unifiedRecent.map((item, idx) => (
                           <div
                             key={`${item.kind}-${idx}`}
-                            className="group flex items-center justify-between gap-3 p-3 rounded-md border border-border/60 bg-background cursor-pointer transition-colors transition-shadow hover:bg-surface-2/60 hover:shadow-md hover:border-brand/30"
+                            className="group flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-3 p-3 rounded-md border border-border/60 bg-background cursor-pointer transition-colors transition-shadow hover:bg-surface-2/60 hover:shadow-md hover:border-brand/30"
                             title="Clique para ver detalhes"
                             onClick={() => openDetail(item)}
                           >
@@ -541,7 +541,7 @@ function ClientDetailsModal({ open, onOpenChange, client, onEdit, onInactivate, 
                                 </>
                               )}
                             </div>
-                            <div className="flex items-center gap-3">
+                            <div className="flex items-center gap-2 sm:gap-3 w-full sm:w-auto justify-between sm:justify-end">
                               {item.kind === 'comanda' ? (
                                 <>
                                   <span className={cn(
@@ -589,7 +589,7 @@ function ClientDetailsModal({ open, onOpenChange, client, onEdit, onInactivate, 
             </div>
             {/* Detalhes do histórico selecionado */}
             <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
-              <DialogContent className="sm:max-w-[700px]">
+              <DialogContent className="sm:max-w-[700px] w-full max-h-[85vh] overflow-y-auto">
                 <DialogHeader>
                   <DialogTitle>
                     {detailKind === 'comanda' ? (detailData?.mesa_title || 'Detalhes da Comanda') : 'Detalhes do Agendamento'}
@@ -603,7 +603,7 @@ function ClientDetailsModal({ open, onOpenChange, client, onEdit, onInactivate, 
                     <div className="text-sm text-text-muted">Carregando detalhes...</div>
                   ) : detailKind === 'comanda' && detailData ? (
                     <div className="space-y-4">
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-3">
                         <div className="bg-surface-2 rounded-md p-3 border border-border">
                           <p className="text-xs text-text-secondary">Status</p>
                           <p className="font-semibold">{(() => {
@@ -626,11 +626,11 @@ function ClientDetailsModal({ open, onOpenChange, client, onEdit, onInactivate, 
                         <h5 className="text-sm font-semibold mb-2">Itens</h5>
                         <div className="border rounded-md divide-y divide-border">
                           {(detailData.itens || []).map((it) => (
-                            <div key={it.id} className="p-2 grid grid-cols-12 gap-2 text-sm">
-                              <div className="col-span-6 truncate">{it.produto_nome || 'Item'}</div>
-                              <div className="col-span-2 text-right">qtd {Number(it.quantidade || 0)}</div>
-                              <div className="col-span-2 text-right">R$ {Number(it.preco_unitario || 0).toFixed(2)}</div>
-                              <div className="col-span-2 text-right text-text-secondary">{Number(it.desconto||0) ? `- R$ ${Number(it.desconto||0).toFixed(2)}` : ''}</div>
+                            <div key={it.id} className="p-2 flex flex-col sm:grid sm:grid-cols-12 gap-1 sm:gap-2 text-sm">
+                              <div className="sm:col-span-6 font-medium">{it.produto_nome || 'Item'}</div>
+                              <div className="sm:col-span-2 sm:text-right text-text-muted">Qtd: {Number(it.quantidade || 0)}</div>
+                              <div className="sm:col-span-2 sm:text-right">R$ {Number(it.preco_unitario || 0).toFixed(2)}</div>
+                              <div className="sm:col-span-2 sm:text-right text-text-secondary">{Number(it.desconto||0) ? `- R$ ${Number(it.desconto||0).toFixed(2)}` : ''}</div>
                             </div>
                           ))}
                           {(!detailData.itens || detailData.itens.length === 0) && (
@@ -652,14 +652,14 @@ function ClientDetailsModal({ open, onOpenChange, client, onEdit, onInactivate, 
                           )}
                         </div>
                       </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
                         <div className="bg-surface-2 rounded-md p-3 border border-border"><p className="text-xs text-text-secondary">Total de Itens</p><p className="font-bold">R$ {Number(detailData.totalItens||0).toFixed(2)}</p></div>
                         <div className="bg-surface-2 rounded-md p-3 border border-border"><p className="text-xs text-text-secondary">Total Pago</p><p className="font-bold text-success">R$ {Number(detailData.totalPagos||0).toFixed(2)}</p></div>
                       </div>
                     </div>
                   ) : detailKind === 'agendamento' && detailData ? (
                     <div className="space-y-4">
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
                         <div className="bg-surface-2 rounded-md p-3 border border-border">
                           <p className="text-xs text-text-secondary">Modalidade</p>
                           <p className="font-semibold">{detailData.modalidade || '—'}</p>
@@ -681,12 +681,12 @@ function ClientDetailsModal({ open, onOpenChange, client, onEdit, onInactivate, 
                         <h5 className="text-sm font-semibold mb-2">Participantes</h5>
                         <div className="border rounded-md divide-y divide-border">
                           {(detailData.participantes || []).map((p) => (
-                            <div key={p.id} className="p-2 text-sm flex items-center justify-between gap-3">
+                            <div key={p.id} className="p-2 text-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-3">
                               <div className="min-w-0">
                                 <div className="font-medium truncate">{p.nome || 'Participante'}</div>
                                 <div className="text-xs text-text-muted truncate">{p.email || '—'} {p.telefone ? `• ${p.telefone}` : ''}</div>
                               </div>
-                              <div className="flex items-center gap-2">
+                              <div className="flex items-center gap-2 w-full sm:w-auto justify-between sm:justify-end">
                                 {p.valor_cota != null && (
                                   <span className="text-xs font-semibold text-text-secondary">R$ {Number(p.valor_cota || 0).toFixed(2)}</span>
                                 )}
@@ -713,22 +713,22 @@ function ClientDetailsModal({ open, onOpenChange, client, onEdit, onInactivate, 
             </Dialog>
         </div>
 
-        <DialogFooter className="flex items-center justify-between sm:justify-between">
-          <div className="flex-1">
+        <DialogFooter className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 sm:gap-0 sm:justify-between">
+          <div className="w-full sm:flex-1">
             <Button 
               type="button" 
               variant="destructive"
-              className="bg-red-600 hover:bg-red-500 text-white"
+              className="bg-red-600 hover:bg-red-500 text-white w-full sm:w-auto"
               onClick={() => onInactivate?.(client)}
             >
               <UserX className="mr-2 h-4 w-4" /> Inativar Cliente
             </Button>
           </div>
-          <div className="flex gap-2 ml-auto">
+          <div className="flex gap-2 w-full sm:w-auto sm:ml-auto">
             <DialogClose asChild>
-              <Button type="button" variant="secondary">Fechar</Button>
+              <Button type="button" variant="secondary" className="flex-1 sm:flex-none">Fechar</Button>
             </DialogClose>
-            <Button onClick={() => onEdit(client)}>
+            <Button onClick={() => onEdit(client)} className="flex-1 sm:flex-none">
               <Edit className="mr-2 h-4 w-4" /> Editar Cliente
             </Button>
           </div>
@@ -1099,17 +1099,21 @@ function ClientesPage() {
         </Helmet>
         <div className="h-full flex flex-col">
             <motion.div variants={pageVariants} initial="hidden" animate="visible">
-                <motion.div variants={itemVariants} className="flex items-center justify-between mb-6">
-                    <div>
-                        <h1 className="text-3xl font-black text-text-primary tracking-tighter">Controle de Clientes</h1>
-                        <p className="text-text-secondary">controle financeiro dos seus clientes.</p>
+                <motion.div variants={itemVariants} className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
+                    <div className="flex-1 min-w-0">
+                        <h1 className="text-2xl sm:text-3xl font-black text-text-primary tracking-tighter">Controle de Clientes</h1>
+                        <p className="text-sm text-text-secondary">controle financeiro dos seus clientes.</p>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <Button variant="outline" size="icon" onClick={() => setShowStats(s => !s)} title={showStats ? 'Ocultar resumo' : 'Mostrar resumo'} aria-label={showStats ? 'Ocultar resumo' : 'Mostrar resumo'}>
+                    <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+                      <Button variant="outline" size="icon" onClick={() => setShowStats(s => !s)} title={showStats ? 'Ocultar resumo' : 'Mostrar resumo'} aria-label={showStats ? 'Ocultar resumo' : 'Mostrar resumo'} className="flex-shrink-0">
                         {showStats ? <EyeOff className="h-4 w-4"/> : <Eye className="h-4 w-4"/>}
                       </Button>
-                      <Button variant="outline" onClick={handleExport}><Download className="mr-2 h-4 w-4" /> Exportar</Button>
-                      <Button onClick={handleAddNew}><Plus className="mr-2 h-4 w-4" /> Novo Cliente</Button>
+                      <Button variant="outline" onClick={handleExport} className="text-sm">
+                        <Download className="mr-2 h-4 w-4" /> 
+                        <span className="hidden sm:inline">Exportar</span>
+                        <span className="sm:hidden">CSV</span>
+                      </Button>
+                      <Button onClick={handleAddNew} className="text-sm"><Plus className="mr-2 h-4 w-4" /> <span className="hidden xs:inline">Novo</span><span className="xs:hidden">Novo</span></Button>
                     </div>
                 </motion.div>
 
@@ -1123,8 +1127,8 @@ function ClientesPage() {
 
                 <motion.div initial={{opacity: 0, y: 20}} animate={{opacity: 1, y: 0}} transition={{delay: 0.2}}>
                     <div className="bg-surface rounded-lg border border-border">
-                        <div className="p-4 border-b border-border flex flex-col sm:flex-row gap-4">
-                           <div className="relative flex-1">
+                        <div className="p-4 border-b border-border flex flex-col gap-4">
+                           <div className="relative w-full">
                                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted" />
                                 <Input 
                                   placeholder="Buscar por nome, CPF ou telefone..." 
@@ -1133,9 +1137,9 @@ function ClientesPage() {
                                   onChange={(e) => setFilters(prev => ({ ...prev, searchTerm: e.target.value }))}
                                 />
                             </div>
-                            <div className="flex gap-4">
+                            <div className="flex flex-col sm:flex-row gap-2">
                                <Select value={filters.status} onValueChange={(value) => setFilters(prev => ({...prev, status: value}))}>
-                                 <SelectTrigger className="w-[180px]">
+                                 <SelectTrigger className="w-full sm:w-[180px]">
                                    <SelectValue placeholder="Status" />
                                  </SelectTrigger>
                                  <SelectContent>
@@ -1145,78 +1149,128 @@ function ClientesPage() {
                                  </SelectContent>
                                </Select>
                                {hasActiveFilters && (
-                                  <Button variant="ghost" onClick={handleClearFilters}>
+                                  <Button variant="ghost" onClick={handleClearFilters} className="w-full sm:w-auto">
                                       <XCircle className="mr-2 h-4 w-4"/>
                                       Limpar Filtros
                                   </Button>
                                )}
                             </div>
                         </div>
-                        <Table>
-                            <TableHeader className="sticky top-0 bg-surface-2 z-10">
-                                <TableRow className="border-b border-border">
-                                    <TableHead
-                                      className="select-none cursor-pointer text-text-secondary"
-                                      onClick={() => toggleSort('codigo')}
-                                      title="Ordenar por código"
-                                    >
-                                      Código {sort.by === 'codigo' ? (sort.dir === 'asc' ? '▲' : '▼') : ''}
-                                    </TableHead>
-                                    <TableHead
-                                      className="text-text-secondary select-none cursor-pointer"
-                                      onClick={() => toggleSort('nome')}
-                                      title="Ordenar por nome"
-                                    >
-                                      Cliente {sort.by === 'nome' ? (sort.dir === 'asc' ? '▲' : '▼') : ''}
-                                    </TableHead>
-                                    <TableHead className="text-text-secondary">Contato</TableHead>
-                                    <TableHead className="text-text-secondary">Status</TableHead>
-                                </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                                {loading ? (
-                                  <TableRow>
-                                    <TableCell colSpan={4} className="h-24 text-center">Carregando...</TableCell>
-                                  </TableRow>
-                                ) : sortedClients.length > 0 ? (
-                                    sortedClients.map(client => (
-                                        <TableRow key={client.id} className="cursor-pointer" onClick={() => handleViewDetails(client)}>
-                                            <TableCell className="font-mono text-base font-semibold text-text-primary">{client.codigo}</TableCell>
-                                            {/* Cliente */}
-                                            <TableCell>
-                                                <div className="flex flex-col">
-                                                    <span className="text-base font-semibold text-text-primary truncate">{client.nome || '—'}</span>
-                                                    <span className="text-xs text-text-muted truncate">
-                                                      {(client.cpf && `CPF: ${client.cpf}`) || (client.cnpj && `CNPJ: ${client.cnpj}`) || (client.apelido ? `Apelido: ${client.apelido}` : ' ')}
-                                                    </span>
-                                                </div>
-                                            </TableCell>
-                                            {/* Contato: priorizar telefone; se não houver, mostrar email */}
-                                            <TableCell>
-                                                <div className="flex flex-col">
-                                                    <span className="text-sm truncate">{client.telefone || client.email || '—'}</span>
-                                                </div>
-                                            </TableCell>
-                                            {/* Status */}
-                                            <TableCell>
-                                                <span className={cn(
-                                                    "px-2 py-1 text-xs font-semibold rounded-full",
-                                                    client.status === 'active' ? "bg-success/10 text-success" : "bg-danger/10 text-danger"
-                                                )}>
-                                                    {client.status === 'active' ? 'Ativo' : 'Inativo'}
-                                                </span>
-                                            </TableCell>
-                                        </TableRow>
-                                    ))
-                                ) : (
-                                    <TableRow>
-                                        <TableCell colSpan={4} className="h-24 text-center">
-                                            Nenhum cliente encontrado com os filtros aplicados.
-                                        </TableCell>
-                                    </TableRow>
+                        {/* Layout Mobile - Cards */}
+                        <div className="md:hidden space-y-3 p-4">
+                          {loading ? (
+                            <div className="text-center py-8 text-text-muted">Carregando...</div>
+                          ) : sortedClients.length > 0 ? (
+                            sortedClients.map(client => (
+                              <div key={client.id} className="rounded-lg border border-border bg-surface p-4 space-y-3 cursor-pointer hover:border-brand/50 transition-colors" onClick={() => handleViewDetails(client)}>
+                                {/* Header: Código + Status */}
+                                <div className="flex items-center justify-between gap-3">
+                                  <span className="font-mono text-sm font-semibold text-text-primary">{client.codigo}</span>
+                                  <span className={cn(
+                                    "px-2 py-0.5 text-xs font-semibold rounded-full flex-shrink-0",
+                                    client.status === 'active' ? "bg-success/10 text-success" : "bg-danger/10 text-danger"
+                                  )}>
+                                    {client.status === 'active' ? 'Ativo' : 'Inativo'}
+                                  </span>
+                                </div>
+
+                                {/* Nome e Documento */}
+                                <div>
+                                  <h3 className="font-semibold text-base text-text-primary mb-1">{client.nome || '—'}</h3>
+                                  <p className="text-sm text-text-muted">
+                                    {(client.cpf && `CPF: ${client.cpf}`) || (client.cnpj && `CNPJ: ${client.cnpj}`) || (client.apelido ? `Apelido: ${client.apelido}` : ' ')}
+                                  </p>
+                                </div>
+
+                                {/* Contato */}
+                                {(client.telefone || client.email) && (
+                                  <div>
+                                    <span className="text-xs text-text-muted block mb-1">Contato</span>
+                                    <span className="text-sm font-medium">{client.telefone || client.email}</span>
+                                  </div>
                                 )}
-                            </TableBody>
-                        </Table>
+
+                                {/* Hint de clique */}
+                                <div className="text-xs text-text-muted text-center pt-2 border-t border-border/50">
+                                  Toque para ver detalhes
+                                </div>
+                              </div>
+                            ))
+                          ) : (
+                            <div className="text-center py-8 text-text-muted">
+                              Nenhum cliente encontrado com os filtros aplicados.
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Layout Desktop - Tabela */}
+                        <div className="hidden md:block">
+                          <Table>
+                              <TableHeader className="sticky top-0 bg-surface-2 z-10">
+                                  <TableRow className="border-b border-border">
+                                      <TableHead
+                                        className="select-none cursor-pointer text-text-secondary"
+                                        onClick={() => toggleSort('codigo')}
+                                        title="Ordenar por código"
+                                      >
+                                        Código {sort.by === 'codigo' ? (sort.dir === 'asc' ? '▲' : '▼') : ''}
+                                      </TableHead>
+                                      <TableHead
+                                        className="text-text-secondary select-none cursor-pointer"
+                                        onClick={() => toggleSort('nome')}
+                                        title="Ordenar por nome"
+                                      >
+                                        Cliente {sort.by === 'nome' ? (sort.dir === 'asc' ? '▲' : '▼') : ''}
+                                      </TableHead>
+                                      <TableHead className="text-text-secondary">Contato</TableHead>
+                                      <TableHead className="text-text-secondary">Status</TableHead>
+                                  </TableRow>
+                              </TableHeader>
+                              <TableBody>
+                                  {loading ? (
+                                    <TableRow>
+                                      <TableCell colSpan={4} className="h-24 text-center">Carregando...</TableCell>
+                                    </TableRow>
+                                  ) : sortedClients.length > 0 ? (
+                                      sortedClients.map(client => (
+                                          <TableRow key={client.id} className="cursor-pointer" onClick={() => handleViewDetails(client)}>
+                                              <TableCell className="font-mono text-base font-semibold text-text-primary">{client.codigo}</TableCell>
+                                              {/* Cliente */}
+                                              <TableCell>
+                                                  <div className="flex flex-col">
+                                                      <span className="text-base font-semibold text-text-primary truncate">{client.nome || '—'}</span>
+                                                      <span className="text-xs text-text-muted truncate">
+                                                        {(client.cpf && `CPF: ${client.cpf}`) || (client.cnpj && `CNPJ: ${client.cnpj}`) || (client.apelido ? `Apelido: ${client.apelido}` : ' ')}
+                                                      </span>
+                                                  </div>
+                                              </TableCell>
+                                              {/* Contato: priorizar telefone; se não houver, mostrar email */}
+                                              <TableCell>
+                                                  <div className="flex flex-col">
+                                                      <span className="text-sm truncate">{client.telefone || client.email || '—'}</span>
+                                                  </div>
+                                              </TableCell>
+                                              {/* Status */}
+                                              <TableCell>
+                                                  <span className={cn(
+                                                      "px-2 py-1 text-xs font-semibold rounded-full",
+                                                      client.status === 'active' ? "bg-success/10 text-success" : "bg-danger/10 text-danger"
+                                                  )}>
+                                                      {client.status === 'active' ? 'Ativo' : 'Inativo'}
+                                                  </span>
+                                              </TableCell>
+                                          </TableRow>
+                                      ))
+                                  ) : (
+                                      <TableRow>
+                                          <TableCell colSpan={4} className="h-24 text-center">
+                                              Nenhum cliente encontrado com os filtros aplicados.
+                                          </TableCell>
+                                      </TableRow>
+                                  )}
+                              </TableBody>
+                          </Table>
+                        </div>
                     </div>
                 </motion.div>
             </motion.div>
