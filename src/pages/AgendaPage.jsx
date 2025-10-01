@@ -267,7 +267,7 @@ function AgendaPage() {
     lastOpenRef.current = now;
     setIsModalOpen(true);
     hasOpenedRef.current = true;
-  }, []);
+  }, [isModalOpen]); // ✅ CORREÇÃO: Adiciona isModalOpen nas dependências
   const [viewFilter, setViewFilter] = useState(() => {
     try {
       const saved = JSON.parse(localStorage.getItem('agenda:viewFilter') || '{}');
@@ -1173,11 +1173,26 @@ function AgendaPage() {
   useEffect(() => {
     const loadCourts = async () => {
       if (!userProfile?.codigo_empresa) return;
+      
+      // ✅ CORREÇÃO: Verifica se o cache é da empresa atual, senão limpa
+      try {
+        const cached = JSON.parse(localStorage.getItem('quadras:list') || '[]');
+        if (Array.isArray(cached) && cached.length > 0) {
+          const cachedEmpresa = cached[0]?.codigo_empresa;
+          if (cachedEmpresa && cachedEmpresa !== userProfile.codigo_empresa) {
+            console.warn('🧹 [Cache Limpo] Quadras de outra empresa detectadas e removidas');
+            localStorage.removeItem('quadras:list');
+            localStorage.removeItem('agenda:selectedCourts');
+            setDbCourts([]);
+          }
+        }
+      } catch {}
+      
       // Mantém UI responsiva: só ativa loading "forte" quando não há cache
       if (!dbCourts || dbCourts.length === 0) setCourtsLoading(true);
       const { data, error } = await supabase
         .from('quadras')
-        .select('id, nome, modalidades, hora_inicio, hora_fim, valor')
+        .select('id, nome, modalidades, hora_inicio, hora_fim, valor, codigo_empresa')
         .eq('codigo_empresa', userProfile.codigo_empresa)
         .order('nome', { ascending: true });
       if (error) {
@@ -1204,6 +1219,11 @@ function AgendaPage() {
         }
       }
       courtsRetryRef.current = false; // sucesso (ou segunda tentativa)
+      console.log('🏟️ [Quadras Carregadas]', {
+        empresa: userProfile?.codigo_empresa,
+        total: rows.length,
+        quadras: rows.map(q => ({ id: q.id, nome: q.nome }))
+      });
       setDbCourts(rows);
       try { localStorage.setItem('quadras:list', JSON.stringify(rows)); } catch {}
       setCourtsLoading(false);
@@ -1409,43 +1429,47 @@ function AgendaPage() {
           style={{ paddingLeft: padX, paddingRight: padX, paddingTop: padY, paddingBottom: padY }}
         >
           <div className="flex-1 flex flex-col justify-center">
-            <div className={cn("flex justify-between gap-2", isHalfHour ? "items-center" : "items-start") }>
-              {/* Esquerda: cliente e, em meia hora, modalidade à direita do nome */}
-              <div className="flex items-center gap-2 min-w-0">
-                <p className="font-semibold text-text-primary truncate text-base" style={{ fontSize: namePx, lineHeight: 1.15 }}>{shortName(booking.customer)}</p>
-                {isHalfHour && (
-                  <span className="text-sm font-medium text-text-secondary truncate bg-white/5 border border-white/10 rounded px-2.5 py-0 whitespace-nowrap" style={{ fontSize: smallPx }}>
-                    {booking.modality}
-                  </span>
-                )}
-              </div>
-              <div className={cn("flex items-center gap-2", isHalfHour ? "whitespace-nowrap shrink-0" : "flex-col items-end") }>
-                <span className={cn("text-text-muted whitespace-nowrap font-semibold", isHalfHour ? "text-base" : "text-base") } style={{ fontSize: namePx }}>
-                  {format(booking.start, 'HH:mm')}–{format(booking.end, 'HH:mm')}
+            {/* Linha 1: Nome do cliente */}
+            <div className="flex items-center gap-2 mb-0.5">
+              <p className="font-semibold text-text-primary truncate text-base" style={{ fontSize: namePx, lineHeight: 1.15 }}>{shortName(booking.customer)}</p>
+              {isHalfHour && (
+                <span className="text-xs font-bold text-white truncate bg-gradient-to-r from-slate-700 to-slate-800 border border-slate-600/60 rounded-md px-2 py-0.5 whitespace-nowrap shadow-md" style={{ fontSize: smallPx }}>
+                  {booking.modality}
                 </span>
-                {isHalfHour ? (
-                  <div className="flex items-center gap-1.5 whitespace-nowrap shrink-0">
-                    <Icon className={cn(config.text)} style={{ width: iconPx, height: iconPx }} />
-                    <span className={cn("truncate font-semibold", config.text, "text-base")} style={{ fontSize: namePx }}>{config.label}</span>
-                  </div>
-                ) : null}
-                {/* Indicador de pagamento de participantes (pago/total) — em layout meia hora fica ao lado do status (à direita) */}
-                {isHalfHour && totalParticipants > 0 && (
-                  <span className={`text-sm font-semibold rounded-full px-2.5 py-1 border ${paidCount === totalParticipants ? 'text-emerald-300 bg-emerald-500/10 border-emerald-400/30' : 'text-amber-300 bg-amber-500/10 border-amber-400/30'}`} style={{ fontSize: Math.max(13, Math.round(13 * (isLong ? scale : 1))) }}>
-                    {paidCount}/{totalParticipants} pagos
-                  </span>
-                )}
-              </div>
+              )}
             </div>
-            <div className="mt-1 flex items-center justify-between gap-2">
+            
+            {/* Linha 2: Horário + Status + Pagamentos */}
+            <div className="flex items-center gap-2 flex-wrap">
+              {/* Horário - sempre visível completo */}
+              <span className={cn("text-text-muted font-semibold text-base whitespace-nowrap") } style={{ fontSize: namePx }}>
+                {format(booking.start, 'HH:mm')}–{format(booking.end, 'HH:mm')}
+              </span>
+              
+              {/* Status (apenas em meia hora) */}
+              {isHalfHour && (
+                <div className="flex items-center gap-1">
+                  <Icon className={cn(config.text)} style={{ width: iconPx, height: iconPx }} />
+                  <span className={cn("truncate font-semibold", config.text, "text-base")} style={{ fontSize: namePx }}>{config.label}</span>
+                </div>
+              )}
+              
+              {/* Indicador de pagamento de participantes (pago/total) — em layout meia hora */}
+              {isHalfHour && totalParticipants > 0 && (
+                <span className={`text-xs font-semibold rounded-full px-2 py-0.5 border ${paidCount === totalParticipants ? 'text-emerald-300 bg-emerald-500/10 border-emerald-400/30' : 'text-amber-300 bg-amber-500/10 border-amber-400/30'}`} style={{ fontSize: Math.max(11, Math.round(11 * (isLong ? scale : 1))) }}>
+                  {paidCount}/{totalParticipants}
+                </span>
+              )}
+            </div>
+            <div className="mt-1 flex items-center justify-between gap-2 flex-wrap">
               {!isHalfHour && (
-                <span className="text-sm font-medium text-text-secondary truncate bg-white/5 border border-white/10 rounded px-2.5 py-0.5" style={{ fontSize: smallPx }}>
+                <span className="text-xs font-bold text-white truncate bg-gradient-to-r from-slate-700 to-slate-800 border border-slate-600/60 rounded-md px-2.5 py-1 shadow-md" style={{ fontSize: smallPx }}>
                   {booking.modality}
                 </span>
               )}
               {!isHalfHour && (
-                <div className="flex items-center gap-2 text-base">
-                  <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-1.5 text-base flex-wrap justify-end">
+                  <div className="flex items-center gap-1">
                     <Icon className={cn(config.text)} style={{ width: iconPx, height: iconPx }} />
                     <span className={cn("truncate font-semibold", config.text)} style={{ fontSize: namePx }}>{config.label}</span>
                   </div>
@@ -1739,12 +1763,12 @@ function AgendaPage() {
     }, [debugOn, isCustomerPickerOpen, effectiveCustomerPickerOpen]);
 
     // Log whenever selectedClients length changes (diagnostics)
-    useEffect(() => {
-      try {
-        const len = Array.isArray(form.selectedClients) ? form.selectedClients.length : -1;
-        console.log('[CustomerPicker][selectedClients.len]', len, '| lastAction=', lastSelActionRef.current);
-      } catch {}
-    }, [form.selectedClients]);
+    // useEffect(() => {
+    //   try {
+    //     const len = Array.isArray(form.selectedClients) ? form.selectedClients.length : -1;
+    //     console.log('[CustomerPicker][selectedClients.len]', len, '| lastAction=', lastSelActionRef.current);
+    //   } catch {}
+    // }, [form.selectedClients]);
 
     // Global restoration when picker is closed and selection becomes empty unintentionally
     useEffect(() => {
@@ -1753,10 +1777,17 @@ function AgendaPage() {
       const cur = Array.isArray(form.selectedClients) ? form.selectedClients : [];
       const last = Array.isArray(lastNonEmptySelectionRef.current) ? lastNonEmptySelectionRef.current : [];
       const lockActive = Date.now() < (selectionLockUntilRef.current || 0);
-      if (cur.length === 0 && last.length > 0 && (!clearedByUserRef.current || lockActive)) {
+      // ✅ CORREÇÃO: Não restaura se usuário limpou intencionalmente E não há lock ativo
+      if (cur.length === 0 && last.length > 0 && !clearedByUserRef.current && lockActive) {
         lastSelActionRef.current = 'global:restore';
         setForm((f) => ({ ...f, selectedClients: last }));
         try { console.warn('[CustomerPicker][GLOBAL:restore]', { id: mountIdRef.current, lastLen: last.length, lockActive }); } catch {}
+      } else if (cur.length === 0 && last.length > 0 && clearedByUserRef.current && !lockActive) {
+        // Se usuário limpou e não há lock, garante que lastNonEmpty também está limpo
+        try { 
+          lastNonEmptySelectionRef.current = [];
+          console.warn('[CustomerPicker][GLOBAL:ensure-cleared]', { id: mountIdRef.current });
+        } catch {}
       }
     }, [isModalOpen, effectiveCustomerPickerOpen, form.selectedClients]);
 
@@ -2082,10 +2113,10 @@ function AgendaPage() {
           const prevWithin = prevClosingAt && (Date.now() - prevClosingAt < 10000); // 10s
           if (prevPickerSid && prevWithin) {
             modalSessionIdRef.current = prevPickerSid;
-            try { console.warn('[CustomerPicker][SESSION:reuse]', { id: mountIdRef.current, modalSid: modalSessionIdRef.current, withinMs: Date.now() - prevClosingAt }); } catch {}
+            // try { console.warn('[CustomerPicker][SESSION:reuse]', { id: mountIdRef.current, modalSid: modalSessionIdRef.current, withinMs: Date.now() - prevClosingAt }); } catch {}
           } else if (!modalSessionIdRef.current) {
             modalSessionIdRef.current = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-            try { console.warn('[CustomerPicker][SESSION:new]', { id: mountIdRef.current, modalSid: modalSessionIdRef.current }); } catch {}
+            // try { console.warn('[CustomerPicker][SESSION:new]', { id: mountIdRef.current, modalSid: modalSessionIdRef.current }); } catch {}
           }
           sessionStorage.setItem('agenda:modal:sessionId', modalSessionIdRef.current);
         } catch {}
@@ -2129,12 +2160,12 @@ function AgendaPage() {
               setTimeout(() => setForm(f => ({ ...f, selectedClients: [...(lastNonEmptySelectionRef.current || [])] })), 96);
               return;
             }
-            try { console.warn('[CustomerPicker][RESTORE:init-open:skip]', { id: mountIdRef.current, within, closingSessionId, modalSessionId, idsMatch: closingSessionId && modalSessionId && (closingSessionId === modalSessionId), persistedLen: Array.isArray(persisted)?persisted.length:NaN }); } catch {}
+            // try { console.warn('[CustomerPicker][RESTORE:init-open:skip]', { id: mountIdRef.current, within, closingSessionId, modalSessionId, idsMatch: closingSessionId && modalSessionId && (closingSessionId === modalSessionId), persistedLen: Array.isArray(persisted)?persisted.length:NaN }); } catch {}
           } catch {}
           // Se estamos em janela de proteção pós-concluir, não executar o clear neste ciclo
           try {
             if (Date.now() < (preventClearsUntilRef.current || 0)) {
-              console.warn('[CustomerPicker][INIT:clear:blocked:post-conclude]', { id: mountIdRef.current });
+              // console.warn('[CustomerPicker][INIT:clear:blocked:post-conclude]', { id: mountIdRef.current });
               return;
             }
           } catch {}
@@ -2145,16 +2176,16 @@ function AgendaPage() {
             const persisted = rawSel ? JSON.parse(rawSel) : [];
             const last = Array.isArray(lastNonEmptySelectionRef.current) ? lastNonEmptySelectionRef.current : [];
             if ((Array.isArray(persisted) && persisted.length > 0) || (Array.isArray(last) && last.length > 0)) {
-              console.warn('[CustomerPicker][INIT:clear:new-open:skipped:have-last]', { id: mountIdRef.current, persistedLen: Array.isArray(persisted)?persisted.length:0, lastLen: last.length });
+              // console.warn('[CustomerPicker][INIT:clear:new-open:skipped:have-last]', { id: mountIdRef.current, persistedLen: Array.isArray(persisted)?persisted.length:0, lastLen: last.length });
             } else {
-              console.warn('[CustomerPicker][INIT:clear:new-open]', { id: mountIdRef.current });
+              // console.warn('[CustomerPicker][INIT:clear:new-open]', { id: mountIdRef.current });
               try { lastNonEmptySelectionRef.current = []; } catch {}
               try { setChipsSnapshot([]); } catch {}
               try { clearedByUserRef.current = false; } catch {}
               setForm(f => ({ ...f, selectedClients: [] }));
             }
           } catch {
-            try { console.warn('[CustomerPicker][INIT:clear:new-open]', { id: mountIdRef.current, err: 'check-failed' }); } catch {}
+            // try { console.warn('[CustomerPicker][INIT:clear:new-open]', { id: mountIdRef.current, err: 'check-failed' }); } catch {}
             try { lastNonEmptySelectionRef.current = []; } catch {}
             try { setChipsSnapshot([]); } catch {}
             try { clearedByUserRef.current = false; } catch {}
@@ -2176,7 +2207,7 @@ function AgendaPage() {
           const rawSel = sessionStorage.getItem(persistLastKey);
           const persisted = rawSel ? JSON.parse(rawSel) : [];
           if (within && Array.isArray(persisted) && persisted.length > 0 && closingSessionId && modalSessionId && closingSessionId === modalSessionId) {
-            try { console.warn('[CustomerPicker][RESTORE:new-mode]', { id: mountIdRef.current, withinMs: Date.now() - closingAt, idsMatch: true, closingSessionId, modalSessionId, persistedLen: persisted.length }); } catch {}
+            // try { console.warn('[CustomerPicker][RESTORE:new-mode]', { id: mountIdRef.current, withinMs: Date.now() - closingAt, idsMatch: true, closingSessionId, modalSessionId, persistedLen: persisted.length }); } catch {}
             try { userSelectedOnceRef.current = true; } catch {}
             setForm(f => ({ ...f, selectedClients: persisted }));
             lastNonEmptySelectionRef.current = persisted;
@@ -2190,7 +2221,7 @@ function AgendaPage() {
           }
           // Fallback: dentro da janela com persisted, restaura mesmo que IDs não batam (evita perda)
           if (within && Array.isArray(persisted) && persisted.length > 0) {
-            try { console.warn('[CustomerPicker][RESTORE:new-mode:FALLBACK]', { id: mountIdRef.current, withinMs: Date.now() - closingAt, idsMatch: false, closingSessionId, modalSessionId, persistedLen: persisted.length }); } catch {}
+            // try { console.warn('[CustomerPicker][RESTORE:new-mode:FALLBACK]', { id: mountIdRef.current, withinMs: Date.now() - closingAt, idsMatch: false, closingSessionId, modalSessionId, persistedLen: persisted.length }); } catch {}
             try { userSelectedOnceRef.current = true; } catch {}
             setForm(f => ({ ...f, selectedClients: persisted }));
             lastNonEmptySelectionRef.current = persisted;
@@ -2202,12 +2233,12 @@ function AgendaPage() {
             setTimeout(() => setForm(f => ({ ...f, selectedClients: [...(lastNonEmptySelectionRef.current || [])] })), 96);
             return;
           }
-          try { console.warn('[CustomerPicker][RESTORE:new-mode:skip]', { id: mountIdRef.current, within, closingSessionId, modalSessionId, idsMatch: closingSessionId && modalSessionId && (closingSessionId === modalSessionId), persistedLen: Array.isArray(persisted)?persisted.length:NaN }); } catch {}
+          // try { console.warn('[CustomerPicker][RESTORE:new-mode:skip]', { id: mountIdRef.current, within, closingSessionId, modalSessionId, idsMatch: closingSessionId && modalSessionId && (closingSessionId === modalSessionId), persistedLen: Array.isArray(persisted)?persisted.length:NaN }); } catch {}
         } catch {}
         // Se estamos em janela de proteção pós-concluir, não executar o clear agora
         try {
           if (Date.now() < (preventClearsUntilRef.current || 0)) {
-            console.warn('[CustomerPicker][INIT:clear:new-mode:blocked:post-conclude]', { id: mountIdRef.current });
+            // console.warn('[CustomerPicker][INIT:clear:new-mode:blocked:post-conclude]', { id: mountIdRef.current });
             return;
           }
         } catch {}
@@ -2218,15 +2249,15 @@ function AgendaPage() {
           const persisted = rawSel ? JSON.parse(rawSel) : [];
           const last = Array.isArray(lastNonEmptySelectionRef.current) ? lastNonEmptySelectionRef.current : [];
           if ((Array.isArray(persisted) && persisted.length > 0) || (Array.isArray(last) && last.length > 0)) {
-            console.warn('[CustomerPicker][INIT:clear:new-mode:skipped:have-last]', { id: mountIdRef.current, persistedLen: Array.isArray(persisted)?persisted.length:0, lastLen: last.length });
+            // console.warn('[CustomerPicker][INIT:clear:new-mode:skipped:have-last]', { id: mountIdRef.current, persistedLen: Array.isArray(persisted)?persisted.length:0, lastLen: last.length });
           } else {
-            console.warn('[CustomerPicker][INIT:clear:new-mode]', { id: mountIdRef.current });
+            // console.warn('[CustomerPicker][INIT:clear:new-mode]', { id: mountIdRef.current });
             try { lastNonEmptySelectionRef.current = []; } catch {}
             try { setChipsSnapshot([]); } catch {}
             setForm(f => ({ ...f, selectedClients: [] }));
           }
         } catch {
-          try { console.warn('[CustomerPicker][INIT:clear:new-mode]', { id: mountIdRef.current, err: 'check-failed' }); } catch {}
+          // try { console.warn('[CustomerPicker][INIT:clear:new-mode]', { id: mountIdRef.current, err: 'check-failed' }); } catch {}
           try { lastNonEmptySelectionRef.current = []; } catch {}
           try { setChipsSnapshot([]); } catch {}
           setForm(f => ({ ...f, selectedClients: [] }));
@@ -2263,7 +2294,7 @@ function AgendaPage() {
           // Também zera a seleção do form e representante para garantir limpeza total
           setForm(f => ({ ...f, selectedClients: [] }));
           setPaymentSelectedId(null);
-          console.warn('[CustomerPicker][CLOSE:modal:clear-all]');
+          // console.warn('[CustomerPicker][CLOSE:modal:clear-all]');
         } catch {}
         return; 
       }
@@ -2273,7 +2304,7 @@ function AgendaPage() {
         // Bloqueia clear se estamos em janela de proteção pós-concluir (remount)
         try {
           if (Date.now() < (preventClearsUntilRef.current || 0)) {
-            console.warn('[CustomerPicker][INIT:clear:new-mode:blocked:post-conclude:effect2]', { id: mountIdRef.current });
+            // console.warn('[CustomerPicker][INIT:clear:new-mode:blocked:post-conclude:effect2]', { id: mountIdRef.current });
             return;
           }
         } catch {}
@@ -2284,9 +2315,9 @@ function AgendaPage() {
           const persisted = rawSel ? JSON.parse(rawSel) : [];
           const last = Array.isArray(lastNonEmptySelectionRef.current) ? lastNonEmptySelectionRef.current : [];
           if ((Array.isArray(persisted) && persisted.length > 0) || (Array.isArray(last) && last.length > 0)) {
-            console.warn('[CustomerPicker][INIT:clear:new-mode:effect2:skipped:have-last]', { id: mountIdRef.current, persistedLen: Array.isArray(persisted)?persisted.length:0, lastLen: last.length });
+            // console.warn('[CustomerPicker][INIT:clear:new-mode:effect2:skipped:have-last]', { id: mountIdRef.current, persistedLen: Array.isArray(persisted)?persisted.length:0, lastLen: last.length });
           } else {
-            console.warn('[CustomerPicker][INIT:clear:new-mode:effect2]', { id: mountIdRef.current });
+            // console.warn('[CustomerPicker][INIT:clear:new-mode:effect2]', { id: mountIdRef.current });
             try { lastNonEmptySelectionRef.current = []; } catch {}
             try { setChipsSnapshot([]); } catch {}
             setForm(f => ({ ...f, selectedClients: [] }));
@@ -3140,7 +3171,7 @@ function AgendaPage() {
           forceMount
           disableAnimations={true}
           alignTop
-          className="sm:max-w-[960px] max-h-[90vh] overflow-y-auto min-h-[360px]"
+          className="sm:max-w-[960px] max-h-[85vh] min-h-[360px] flex flex-col p-0"
           onOpenAutoFocus={(e) => e.preventDefault()}
           onInteractOutside={(e) => {
             // Não permitir fechar o Dialog enquanto o seletor de clientes estiver aberto
@@ -3178,7 +3209,8 @@ function AgendaPage() {
             } catch {}
           }}
         >
-          <DialogHeader>
+          {/* Header fixo */}
+          <DialogHeader className="px-6 pt-6 pb-4 flex-shrink-0">
             <DialogTitle className="flex items-center justify-between gap-3 flex-wrap">
               <span>
                 {editingBooking
@@ -3235,7 +3267,9 @@ function AgendaPage() {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="grid md:grid-cols-2 gap-4">
+          {/* Conteúdo com scroll */}
+          <div className="flex-1 overflow-y-auto px-6">
+            <div className="grid md:grid-cols-2 gap-4 pb-4">
             {/* Coluna esquerda */}
             <div className="space-y-4">
               {/* Clientes */}
@@ -3355,8 +3389,14 @@ function AgendaPage() {
                             applySelectedClients('outside:close:apply', cur);
                             clearedByUserRef.current = false;
                           } else {
-                            // Seleção vazia - não restaura
+                            // Seleção vazia - limpa refs para evitar restauração futura
                             lastSelActionRef.current = 'outside:close:empty';
+                            // ✅ CORREÇÃO: Limpa lastNonEmptySelectionRef quando usuário limpou intencionalmente
+                            if (clearedByUserRef.current) {
+                              lastNonEmptySelectionRef.current = [];
+                              try { sessionStorage.removeItem(persistLastKey); } catch {}
+                              console.warn('[CustomerPicker][outside:close:empty:cleared]', { ts: new Date().toISOString() });
+                            }
                             applySelectedClients('outside:close:empty', []);
                           }
                         } catch {}
@@ -3655,7 +3695,15 @@ function AgendaPage() {
                               dbg('CustomerPicker:chip:remove', { token }); // keep chip-related log
                               const next = (Array.isArray(selectedClientsRef.current) ? selectedClientsRef.current : []).filter((x) => (x?.id && c?.id) ? (x.id !== c.id) : (String(x?.nome || '').toLowerCase() !== nameKey));
                               try { clearedByUserRef.current = next.length === 0; } catch {}
-                              try { if (next.length > 0) { lastNonEmptySelectionRef.current = next; } } catch {}
+                              // ✅ CORREÇÃO: Sempre atualiza lastNonEmptySelectionRef, mesmo se vazio
+                              try { 
+                                lastNonEmptySelectionRef.current = next; 
+                                // Se ficou vazio, também limpa do sessionStorage
+                                if (next.length === 0) {
+                                  sessionStorage.removeItem(persistLastKey);
+                                  console.warn('[CustomerPicker][chip:remove:cleared-all]', { ts: new Date().toISOString() });
+                                }
+                              } catch {}
                               try { selectedClientsRef.current = next; } catch {}
                               applySelectedClients('chips:remove', next);
                             }}
@@ -3794,87 +3842,104 @@ function AgendaPage() {
                 <div className="mt-1 inline-block text-xs font-semibold text-text-secondary bg-white/5 border border-white/10 rounded px-2 py-0.5">Duração: {durationLabel}</div>
               </div>
             </div>
+            </div>
           </div>
 
-          <DialogFooter className="w-full flex items-center -mx-6">
-            {editingBooking && (
-              <>
-                <div className="ml-6 mr-auto flex items-center gap-2">
-                  <Button
-                    type="button"
-                    variant="destructive"
-                    className="bg-red-600 hover:bg-red-500 text-white border border-red-700"
-                    onClick={() => setIsCancelConfirmOpen(true)}
-                  >
-                    <XCircle className="w-4 h-4 mr-2 opacity-90" /> Cancelar agendamento
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    className="bg-teal-600 hover:bg-teal-500 text-white border-teal-700"
-                    onClick={() => setIsPaymentModalOpen(true)}
-                  >
-                    <DollarSign className="w-4 h-4 mr-2 opacity-90" /> Pagamentos
-                  </Button>
-                </div>
-                <AlertDialog open={isCancelConfirmOpen} onOpenChange={setIsCancelConfirmOpen}>
-                  <AlertDialogContent>
-                    <AlertDialogHeader>
-                      <AlertDialogTitle>Cancelar agendamento?</AlertDialogTitle>
-                      <AlertDialogDescription>
-                        Ao cancelar, este agendamento deixará de aparecer na agenda padrão. Ele só será visível ao selecionar o filtro "Cancelados".
-                      </AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                      <AlertDialogCancel>Voltar</AlertDialogCancel>
-                      <AlertDialogAction
-                        className="bg-red-600 hover:bg-red-500"
-                        onClick={async () => {
-                          try {
-                            setIsCancelConfirmOpen(false);
-                            setIsModalOpen(false);
-                            await updateBookingStatus(editingBooking.id, 'canceled', 'user');
-                            toast({ title: 'Agendamento cancelado' });
-                          } catch (e) {
-                            toast({ title: 'Erro ao cancelar', description: e?.message || 'Tente novamente.' });
-                          }
-                        }}
-                      >
-                        Confirmar cancelamento
-                      </AlertDialogAction>
-                    </AlertDialogFooter>
-                  </AlertDialogContent>
-                </AlertDialog>
-              </>
-            )}
-            <div className="ml-auto flex gap-2 pr-6">
-              <Button type="button" variant="ghost" className="border border-white/10" onClick={() => setIsModalOpen(false)}>Fechar</Button>
-              <Button
-                type="button"
-                className="bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-60 disabled:cursor-not-allowed"
-                disabled={isSavingBooking}
-                onClick={async () => {
-                  const clickTs = Date.now();
-                  const traceId = `[Click:SaveBooking ${clickTs}]`;
-                  try { console.group(traceId); } catch {}
-                  try {
-                    try { console.log('Start', { isSavingBooking, hasEditing: !!editingBooking, formSnapshot: { court: form?.court, start: form?.startMinutes, end: form?.endMinutes, status: form?.status } }); } catch {}
-                    if (isSavingBooking) {
-                      try { console.warn('Ignored click: already saving'); } catch {}
-                      return;
+          {/* Footer fixo */}
+          <DialogFooter className="flex-shrink-0 border-t border-border bg-surface px-6 py-3">
+            <div className="w-full flex flex-col gap-3 sm:flex-row sm:items-center">
+              {/* Botões de ação (esquerda no desktop, topo no mobile) */}
+              {editingBooking && (
+                <>
+                  <div className="flex flex-col sm:flex-row gap-2 sm:mr-auto w-full sm:w-auto">
+                    <Button
+                      type="button"
+                      variant="destructive"
+                      className="bg-red-600 hover:bg-red-500 text-white border border-red-700 w-full sm:w-auto justify-center"
+                      onClick={() => setIsCancelConfirmOpen(true)}
+                    >
+                      <XCircle className="w-4 h-4 mr-2 opacity-90" /> 
+                      Cancelar agendamento
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="bg-teal-600 hover:bg-teal-500 text-white border-teal-700 w-full sm:w-auto justify-center"
+                      onClick={() => setIsPaymentModalOpen(true)}
+                    >
+                      <DollarSign className="w-4 h-4 mr-2 opacity-90" /> Pagamentos
+                    </Button>
+                  </div>
+                  <AlertDialog open={isCancelConfirmOpen} onOpenChange={setIsCancelConfirmOpen}>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Cancelar agendamento?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          Ao cancelar, este agendamento deixará de aparecer na agenda padrão. Ele só será visível ao selecionar o filtro "Cancelados".
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Voltar</AlertDialogCancel>
+                        <AlertDialogAction
+                          className="bg-red-600 hover:bg-red-500"
+                          onClick={async () => {
+                            try {
+                              setIsCancelConfirmOpen(false);
+                              setIsModalOpen(false);
+                              await updateBookingStatus(editingBooking.id, 'canceled', 'user');
+                              toast({ title: 'Agendamento cancelado' });
+                            } catch (e) {
+                              toast({ title: 'Erro ao cancelar', description: e?.message || 'Tente novamente.' });
+                            }
+                          }}
+                        >
+                          Confirmar cancelamento
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                </>
+              )}
+              
+              {/* Botões principais (direita no desktop, embaixo no mobile) */}
+              <div className="flex gap-2 w-full sm:w-auto sm:ml-auto">
+                <Button 
+                  type="button" 
+                  variant="ghost" 
+                  className="border border-white/10 flex-1 sm:flex-none" 
+                  onClick={() => setIsModalOpen(false)}
+                >
+                  Fechar
+                </Button>
+                <Button
+                  type="button"
+                  className="bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-60 disabled:cursor-not-allowed flex-1 sm:flex-none"
+                  disabled={isSavingBooking}
+                  onClick={async () => {
+                    const clickTs = Date.now();
+                    const traceId = `[Click:SaveBooking ${clickTs}]`;
+                    try { console.group(traceId); } catch {}
+                    try {
+                      try { console.log('Start', { isSavingBooking, hasEditing: !!editingBooking, formSnapshot: { court: form?.court, start: form?.startMinutes, end: form?.endMinutes, status: form?.status } }); } catch {}
+                      if (isSavingBooking) {
+                        try { console.warn('Ignored click: already saving'); } catch {}
+                        return;
+                      }
+                      // Marca como pendente e executa; se algo interromper (ex.: troca de aba), auto-resume via visibilitychange
+                      pendingSaveRef.current = true;
+                      completedSaveRef.current = false;
+                      await saveBookingOnce();
+                      try { console.log('Completed saveBookingOnce()'); } catch {}
+                    } catch (e) {
+                      try { console.error('Unhandled click error (Salvar agendamento)', e); } catch {}
+                    } finally {
+                      try { console.groupEnd(); } catch {}
                     }
-                    // Marca como pendente e executa; se algo interromper (ex.: troca de aba), auto-resume via visibilitychange
-                    pendingSaveRef.current = true;
-                    completedSaveRef.current = false;
-                    await saveBookingOnce();
-                    try { console.log('Completed saveBookingOnce()'); } catch {}
-                  } catch (e) {
-                    try { console.error('Unhandled click error (Salvar agendamento)', e); } catch {}
-                  } finally {
-                    try { console.groupEnd(); } catch {}
-                  }
-                }}
-              >Salvar</Button>
+                  }}
+                >
+                  Salvar
+                </Button>
+              </div>
             </div>
           </DialogFooter>
         </DialogContent>
@@ -3897,10 +3962,10 @@ function AgendaPage() {
             <div className="space-y-4">
               {/* Total e ações essenciais */}
               <div className="p-4 rounded-lg border border-border bg-gradient-to-br from-surface-2 to-surface shadow-md">
-                <div className="flex flex-wrap items-end gap-3">
-                  <div className="space-y-1">
+                <div className="flex flex-col md:flex-row md:flex-wrap md:items-end gap-3">
+                  <div className="space-y-1 w-full md:w-auto">
                     <Label className="font-bold">Valor total a receber</Label>
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                       <Input
                         type="text"
                         inputMode="decimal"
@@ -3908,17 +3973,24 @@ function AgendaPage() {
                         placeholder="0,00"
                         value={maskBRL(paymentTotal)}
                         onChange={(e) => setPaymentTotal(maskBRL(e.target.value))}
-                        className="max-w-[180px]"
+                        className="w-full sm:max-w-[180px]"
                       />
                       <Button
                         type="button"
                         variant="secondary"
-                        className="bg-sky-600 hover:bg-sky-500 text-white"
+                        size="sm"
+                        className="bg-sky-600 hover:bg-sky-500 text-white w-full sm:w-auto"
                         onClick={splitEqually}
                         disabled={!paymentTotal || participantsCount === 0}
                       >Dividir igualmente</Button>
-                      {/* Removed secondary mass-pay button as requested */}
-                      <Button type="button" variant="ghost" className="border border-white/10" onClick={zeroAllValues} disabled={participantsCount === 0}>Zerar valores</Button>
+                      <Button 
+                        type="button" 
+                        variant="ghost" 
+                        size="sm"
+                        className="border border-white/10 w-full sm:w-auto" 
+                        onClick={zeroAllValues} 
+                        disabled={participantsCount === 0}
+                      >Zerar valores</Button>
                     </div>
                   </div>
                   <div className="ml-auto text-sm">
@@ -4025,8 +4097,9 @@ function AgendaPage() {
                     </div>
                   </div>
                 )}
-                <div className="border border-border rounded-md overflow-x-auto">
-                  <div className="grid grid-cols-12 items-center px-3 py-2 bg-surface-2 text-[11px] uppercase tracking-wide text-text-secondary">
+                <div className="border border-border rounded-md overflow-hidden">
+                  {/* Header da tabela - apenas desktop */}
+                  <div className="hidden md:grid grid-cols-12 items-center px-3 py-2 bg-surface-2 text-[11px] uppercase tracking-wide text-text-secondary">
                     <div className="col-span-6">Participante</div>
                     <div className="col-span-3">Valor</div>
                     <div className="col-span-2 flex items-center justify-between pr-2">
@@ -4054,10 +4127,78 @@ function AgendaPage() {
                         <div
                           key={c.id}
                           id={`payment-row-${c.id}`}
-                          className={`grid grid-cols-12 items-center px-3 py-2 ${paymentWarning?.type === 'pending' && pf.status_pagamento !== 'Pago' ? 'bg-amber-500/5' : ''}`}
+                          className={`${paymentWarning?.type === 'pending' && pf.status_pagamento !== 'Pago' ? 'bg-amber-500/5' : ''}`}
                         >
-                          <div className="col-span-6 truncate text-[15px] font-medium">{c.nome}</div>
-                          <div className="col-span-3 pr-2">
+                          {/* Layout Mobile - Cards */}
+                          <div className="md:hidden p-3 space-y-3">
+                            {/* Nome do participante */}
+                            <div className="font-semibold text-base">{c.nome}</div>
+                            
+                            {/* Valor e Status */}
+                            <div className="flex gap-2">
+                              <div className="flex-1">
+                                <Label className="text-xs text-text-muted mb-1">Valor</Label>
+                                <Input
+                                  type="text"
+                                  inputMode="decimal"
+                                  step="0.01"
+                                  placeholder="0,00"
+                                  value={maskBRL(pf.valor_cota)}
+                                  onChange={(e) => {
+                                    const masked = maskBRL(e.target.value);
+                                    const amount = parseBRL(masked);
+                                    const autoStatus = (Number.isFinite(amount) && amount > 0) ? 'Pago' : 'Pendente';
+                                    setParticipantsForm(prev => {
+                                      let list = [...prev];
+                                      const idx = list.findIndex(p => p.cliente_id === c.id);
+                                      if (idx >= 0) {
+                                        list[idx] = { ...list[idx], valor_cota: masked, status_pagamento: autoStatus };
+                                      } else {
+                                        list = [...list, { cliente_id: c.id, nome: c.nome, valor_cota: masked, status_pagamento: autoStatus }];
+                                      }
+                                      const totalTarget = parseBRL(paymentTotal);
+                                      if (Number.isFinite(totalTarget)) {
+                                        const anyCoversAll = parseBRL(masked) >= totalTarget;
+                                        if (anyCoversAll) {
+                                          list = list.map(p => ({ ...p, status_pagamento: 'Pago' }));
+                                          return list;
+                                        }
+                                      }
+                                      return list;
+                                    });
+                                  }}
+                                  className="text-sm"
+                                />
+                              </div>
+                              <div className="flex-1">
+                                <Label className="text-xs text-text-muted mb-1">Status</Label>
+                                <div
+                                  className={`flex items-center justify-center h-10 px-3 rounded text-sm font-medium border w-full select-none ${pf.status_pagamento === 'Pago' ? 'bg-emerald-600/20 text-emerald-400 border-emerald-700/40' : 'bg-amber-600/20 text-amber-400 border-amber-700/40'}`}
+                                >
+                                  {pf.status_pagamento === 'Pago' ? 'Pago' : 'Pendente'}
+                                </div>
+                              </div>
+                            </div>
+                            
+                            {/* Botão Remover */}
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="text-red-500 hover:text-red-400 w-full"
+                              onClick={() => {
+                                setPaymentHiddenIds((prev) => prev.includes(c.id) ? prev : [...prev, c.id]);
+                                setParticipantsForm(prev => prev.filter(p => p.cliente_id !== c.id));
+                              }}
+                            >
+                              Remover participante
+                            </Button>
+                          </div>
+                          
+                          {/* Layout Desktop - Tabela */}
+                          <div className="hidden md:grid grid-cols-12 items-center px-3 py-2">
+                            <div className="col-span-6 truncate text-[15px] font-medium">{c.nome}</div>
+                            <div className="col-span-3 pr-2">
                             <Input
                               type="text"
                               inputMode="decimal"
@@ -4098,21 +4239,21 @@ function AgendaPage() {
                             >
                               {pf.status_pagamento === 'Pago' ? 'Pago' : 'Pendente'}
                             </span>
-                          </div>
-                          <div className="col-span-1 text-right">
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              className="text-red-500 hover:text-red-400"
-                              onClick={() => {
-                                // Remove apenas na UI de pagamentos (não altera os clientes do agendamento aqui)
-                                setPaymentHiddenIds((prev) => prev.includes(c.id) ? prev : [...prev, c.id]);
-                                setParticipantsForm(prev => prev.filter(p => p.cliente_id !== c.id));
-                              }}
-                            >
-                              Remover
-                            </Button>
+                            </div>
+                            <div className="col-span-1 text-right">
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                className="text-red-500 hover:text-red-400"
+                                onClick={() => {
+                                  setPaymentHiddenIds((prev) => prev.includes(c.id) ? prev : [...prev, c.id]);
+                                  setParticipantsForm(prev => prev.filter(p => p.cliente_id !== c.id));
+                                }}
+                              >
+                                Remover
+                              </Button>
+                            </div>
                           </div>
                         </div>
                       );
@@ -4123,7 +4264,7 @@ function AgendaPage() {
                 </>
               )}
 
-              <DialogFooter>
+              <DialogFooter className="gap-2">
                 <Button type="button" variant="ghost" className="border border-white/10" onClick={() => setIsPaymentModalOpen(false)}>Cancelar</Button>
                 <Button
                   type="button"
@@ -4721,7 +4862,7 @@ function AgendaPage() {
                 </div>
               </div>
             </div>
-            <DialogFooter className="mt-2">
+            <DialogFooter className="mt-2 gap-2">
               <Button type="button" variant="ghost" className="border border-white/10" onClick={() => setIsSettingsOpen(false)}>Cancelar</Button>
               <Button type="button" variant="default" onClick={handleSaveSettings} disabled={savingSettings}>
                 {savingSettings ? 'Salvando…' : 'Salvar'}
@@ -4854,13 +4995,13 @@ function AgendaPage() {
               {displayHoursList.map((hour) => (
                 <div key={`time-${hour}`} className={cn("border-r border-border", (hour % 2 === 1) && "bg-surface-2/30") }>
                   {/* Slot :00 */}
-                  <div className="relative border-b border-border/60" style={{ height: SLOT_HEIGHT }}>
+                  <div className="relative border-b border-border/80" style={{ height: SLOT_HEIGHT }}>
                     <span className={cn("absolute left-1/2 -translate-x-1/2 top-1/2 -translate-y-1/2 bg-surface rounded font-bold", isMobile ? "px-1 text-sm" : "px-2 text-lg")}>
                       {String(hour).padStart(2, '0')}:00
                     </span>
                   </div>
                   {/* Slot :30 */}
-                  <div className="relative border-b border-border/60" style={{ height: SLOT_HEIGHT }}>
+                  <div className="relative border-b border-border/80" style={{ height: SLOT_HEIGHT }}>
                     <span className={cn("absolute left-1/2 -translate-x-1/2 top-1/2 -translate-y-1/2 bg-surface rounded font-bold", isMobile ? "px-1 text-sm" : "px-2 text-lg")}>
                       {String(hour).padStart(2, '0')}:30
                     </span>
@@ -4981,7 +5122,7 @@ function AgendaPage() {
                         const hour = Math.floor(globalSlotIdx / (60 / SLOT_MINUTES)) + Math.floor(dayStartM / 60);
                         const isOddHour = hour % 2 === 1;
                         return (
-                          <div key={`base-${court}-slot-${globalSlotIdx}`} className={cn("border-b border-border/60", isOddHour && "bg-surface-2/30")} style={{ height: SLOT_HEIGHT }} />
+                          <div key={`base-${court}-slot-${globalSlotIdx}`} className={cn("border-b border-border/80", isOddHour && "bg-surface-2/30")} style={{ height: SLOT_HEIGHT }} />
                         );
                       })}
                       {/* Espaço inferior sem linhas após o fechamento */}

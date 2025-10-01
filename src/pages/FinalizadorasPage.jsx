@@ -8,7 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
-import { Plus, Search, Edit, Filter, Check, X, Loader2 } from 'lucide-react';
+import { Plus, Search, Edit, Filter, Check, X, Loader2, CreditCard, DollarSign, TrendingUp, Eye, EyeOff, RefreshCw, ChevronLeft, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { listarFinalizadoras, criarFinalizadora, atualizarFinalizadora, ativarDesativarFinalizadora } from '@/lib/store';
 import { useAuth } from '@/contexts/AuthContext';
@@ -23,6 +23,29 @@ function SectionCard({ children, className = '' }) {
     </motion.div>
   );
 }
+
+const StatCard = ({ icon, title, value, subtitle, color, onClick, isActive }) => {
+  const Icon = icon;
+  return (
+    <motion.div 
+      variants={itemVariants} 
+      className={cn(
+        "bg-surface rounded-lg border-2 p-4 flex flex-col justify-between gap-2 cursor-pointer transition-all duration-300",
+        isActive ? `${color}/30 border-${color}` : 'border-border hover:border-border-hover',
+      )}
+      onClick={onClick}
+    >
+      <div className="flex items-center justify-between">
+        <p className="text-text-secondary text-sm font-semibold">{title}</p>
+        <Icon className={`w-5 h-5 ${color}`} />
+      </div>
+      <div>
+        <p className="text-2xl font-bold text-text-primary">{value}</p>
+        <p className="text-xs text-text-muted">{subtitle}</p>
+      </div>
+    </motion.div>
+  );
+};
 
 function Input({ label, ...props }) {
   return (
@@ -40,6 +63,7 @@ export default function FinalizadorasPage() {
   // Estados principais
   const [finalizadoras, setFinalizadoras] = useState([]);
   const [loadingFins, setLoadingFins] = useState(false);
+  const [savingCreate, setSavingCreate] = useState(false);
   
   // Estados de busca e filtros
   const [searchTerm, setSearchTerm] = useState('');
@@ -68,6 +92,10 @@ export default function FinalizadorasPage() {
   const [taxaDrafts, setTaxaDrafts] = useState({});
   const [savingTaxaId, setSavingTaxaId] = useState(null);
   const [togglingId, setTogglingId] = useState(null);
+  
+  // Estados para estatísticas
+  const [showStats, setShowStats] = useState(true);
+  const [activeFilter, setActiveFilter] = useState('all');
   
   // Refs para controle
   const mountedRef = useRef(true);
@@ -152,12 +180,29 @@ export default function FinalizadorasPage() {
     }
   }, [finalizadoras]);
 
+  // Estatísticas
+  const stats = useMemo(() => {
+    const ativas = finalizadoras.filter(f => f.ativo).length;
+    const comTaxa = finalizadoras.filter(f => f.taxa_percentual && f.taxa_percentual > 0).length;
+    const tiposUnicos = new Set(finalizadoras.map(f => f.tipo || 'outros')).size;
+    return {
+      ativas,
+      comTaxa,
+      tiposUnicos
+    };
+  }, [finalizadoras]);
+
   const filteredSorted = useMemo(() => {
     let rows = Array.isArray(finalizadoras) ? [...finalizadoras] : [];
     const s = (searchTerm || '').trim().toLowerCase();
     if (s) rows = rows.filter(r => (r?.nome || '').toLowerCase().includes(s));
     if (filterTipo !== 'all') rows = rows.filter(r => (r?.tipo || 'outros') === filterTipo);
     if (filterStatus !== 'all') rows = rows.filter(r => (filterStatus === 'active') ? !!r?.ativo : !r?.ativo);
+    
+    // Filtro por card de estatística
+    if (activeFilter === 'ativas') rows = rows.filter(r => !!r?.ativo);
+    if (activeFilter === 'com_taxa') rows = rows.filter(r => r?.taxa_percentual && r.taxa_percentual > 0);
+    
     rows.sort((a,b) => {
       const dir = sort.dir === 'asc' ? 1 : -1;
       const av = (sort.by === 'tipo' ? (a?.tipo || '') : (a?.nome || '')).toLowerCase();
@@ -165,7 +210,7 @@ export default function FinalizadorasPage() {
       if (av < bv) return -1 * dir; if (av > bv) return 1 * dir; return 0;
     });
     return rows;
-  }, [finalizadoras, searchTerm, filterTipo, filterStatus, sort]);
+  }, [finalizadoras, searchTerm, filterTipo, filterStatus, sort, activeFilter]);
 
   // Paginação
   const totalItems = filteredSorted.length;
@@ -182,6 +227,10 @@ export default function FinalizadorasPage() {
 
   const toggleSort = (by) => {
     setSort(prev => prev.by === by ? { by, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { by, dir: 'asc' });
+  };
+
+  const handleStatCardClick = (filter) => {
+    setActiveFilter(prev => prev === filter ? 'all' : filter);
   };
 
   const saveTaxaInline = async (fin) => {
@@ -255,30 +304,75 @@ export default function FinalizadorasPage() {
 
   const submitCreate = async () => {
     const trace = '[Finalizadoras:create]';
+    alert('🔵 FUNÇÃO INICIOU!\n\nNome: ' + formFin.nome + '\nTipo: ' + formFin.tipo + '\nEmpresa: ' + userProfile?.codigo_empresa);
+    console.log('🔵 [INICIO] submitCreate chamado');
+    console.log('🔵 Estado atual:', { 
+      savingCreate, 
+      formFin, 
+      userProfile: userProfile?.codigo_empresa,
+      authReady 
+    });
+    
     try {
+      alert('🟢 STEP 1 - Validando nome: ' + formFin.nome);
+      console.log('🟢 [STEP 1] Iniciando try block');
       try { console.group(trace); } catch {}
       try { console.log('payloadDraft', { ...formFin }); } catch {}
+      
+      console.log('🟢 [STEP 2] Validando nome:', formFin.nome);
       if (!formFin.nome?.trim()) {
+        alert('⚠️ ERRO - Nome vazio!');
+        console.warn('⚠️ Nome vazio - abortando');
         toast({ title: 'Nome é obrigatório', variant: 'warning' });
         return;
       }
+      
+      alert('🟢 STEP 2 - Nome OK, setando savingCreate = true');
+      console.log('🟢 [STEP 3] Setando savingCreate = true');
+      setSavingCreate(true);
+      
       const payload = {
         nome: formFin.nome.trim(),
         tipo: formFin.tipo,
         ativo: !!formFin.ativo,
         taxa_percentual: formFin.taxa_percentual === '' ? null : Number(formFin.taxa_percentual),
       };
-      try { console.log('create:calling'); } catch {}
-      await criarFinalizadora(payload, userProfile?.codigo_empresa);
+      console.log('🟢 [STEP 4] Payload preparado:', payload);
+      console.log('🟢 [STEP 5] Código empresa:', userProfile?.codigo_empresa);
+      
+      alert('🟢 STEP 3 - Chamando criarFinalizadora...');
+      console.log('🟢 [STEP 6] Chamando criarFinalizadora...');
+      const result = await criarFinalizadora(payload, userProfile?.codigo_empresa);
+      alert('✅ SUCESSO - Finalizadora criada! Resultado: ' + JSON.stringify(result));
+      console.log('🟢 [STEP 7] criarFinalizadora retornou:', result);
+      
+      console.log('🟢 [STEP 8] Limpando formulário');
       setFormFin({ nome: '', tipo: 'outros', ativo: true, taxa_percentual: '' });
+      
+      console.log('🟢 [STEP 9] Fechando modal');
       setIsCreateOpen(false);
-      try { console.log('create:success -> reload'); } catch {}
+      
+      console.log('🟢 [STEP 10] Recarregando lista');
       await loadFinalizadoras();
+      
+      console.log('🟢 [STEP 11] Mostrando toast de sucesso');
       toast({ title: 'Finalizadora criada', variant: 'success' });
+      
+      console.log('✅ [SUCESSO] Processo completo');
     } catch (e) {
+      alert('🔴 ERRO CAPTURADO!\n\nMensagem: ' + (e?.message || 'Erro desconhecido') + '\n\nStack: ' + (e?.stack || 'N/A'));
+      console.error('🔴 [ERRO] Exceção capturada:', e);
+      console.error('🔴 [ERRO] Stack:', e?.stack);
+      console.error('🔴 [ERRO] Message:', e?.message);
       try { console.error(trace + ' error', e); } catch {}
       toast({ title: 'Falha ao criar finalizadora', description: e?.message || 'Tente novamente', variant: 'destructive' });
-    } finally { try { console.groupEnd(); } catch {} }
+    } finally { 
+      console.log('🟡 [FINALLY] Executando finally block');
+      console.log('🟡 [FINALLY] Setando savingCreate = false');
+      setSavingCreate(false);
+      try { console.groupEnd(); } catch {} 
+      console.log('🔵 [FIM] submitCreate finalizado');
+    }
   };
 
   const toggleAtivo = async (fin) => {
@@ -342,17 +436,55 @@ export default function FinalizadorasPage() {
         <title>Finalizadoras - Fluxo7 Arena</title>
       </Helmet>
 
-      <div className="flex-1 space-y-4 p-4 md:p-6">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between space-y-2">
+      <motion.div variants={pageVariants} initial="hidden" animate="visible" className="flex-1 space-y-4 p-4 md:p-6">
+        <motion.div variants={itemVariants} className="flex items-center justify-between mb-6">
           <div>
-            <h2 className="text-2xl font-bold tracking-tight">Finalizadoras</h2>
-            <p className="text-muted-foreground">Gerencie os métodos de pagamento do sistema</p>
+            <h1 className="text-3xl font-black text-text-primary tracking-tighter">Gestão de Finalizadoras</h1>
+            <p className="text-text-secondary">Controle completo sobre os métodos de pagamento do sistema.</p>
           </div>
-          <Button onClick={() => setIsCreateOpen(true)} className="gap-2">
-            <Plus className="h-4 w-4" />
-            Nova Finalizadora
-          </Button>
-        </div>
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" size="icon" onClick={() => setShowStats(!showStats)} title={showStats ? 'Ocultar estatísticas' : 'Mostrar estatísticas'}>
+              {showStats ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+            </Button>
+            <Button onClick={() => {
+              alert('🟢 BOTÃO NOVA FINALIZADORA CLICADO!');
+              setIsCreateOpen(true);
+            }} className="gap-2">
+              <Plus className="h-4 w-4" />
+              Nova Finalizadora
+            </Button>
+          </div>
+        </motion.div>
+
+        {showStats && (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+            <StatCard 
+              icon={CreditCard} 
+              title="Finalizadoras Ativas" 
+              value={stats.ativas} 
+              subtitle="Métodos de pagamento disponíveis" 
+              color="text-brand" 
+              onClick={() => handleStatCardClick('ativas')} 
+              isActive={activeFilter === 'ativas'} 
+            />
+            <StatCard 
+              icon={DollarSign} 
+              title="Com Taxa" 
+              value={stats.comTaxa} 
+              subtitle="Finalizadoras com taxa configurada" 
+              color="text-warning" 
+              onClick={() => handleStatCardClick('com_taxa')} 
+              isActive={activeFilter === 'com_taxa'} 
+            />
+            <StatCard 
+              icon={TrendingUp} 
+              title="Tipos Cadastrados" 
+              value={stats.tiposUnicos} 
+              subtitle="Variedade de métodos disponíveis" 
+              color="text-success" 
+            />
+          </div>
+        )}
 
         <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
           <div className="p-4 border-b flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -572,11 +704,22 @@ export default function FinalizadorasPage() {
             )}
           </div>
         </div>
-      </div>
+      </motion.div>
 
       {/* Modal de Criação */}
-      <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
-        <DialogContent className="sm:max-w-[500px]">
+      <Dialog open={isCreateOpen} onOpenChange={(open) => {
+        console.log('🟣 [DIALOG] onOpenChange chamado:', open);
+        alert('🟣 DIALOG MUDOU!\n\nNovo estado: ' + (open ? 'ABERTO' : 'FECHADO'));
+        setIsCreateOpen(open);
+      }}>
+        <DialogContent 
+          className="sm:max-w-[500px]"
+          onPointerDownOutside={(e) => {
+            console.log('⚠️ [DIALOG] Click fora detectado');
+            alert('⚠️ CLICK FORA DO MODAL DETECTADO!');
+            e.preventDefault();
+          }}
+        >
           <DialogHeader>
             <DialogTitle className="text-2xl font-bold">Nova Finalizadora</DialogTitle>
             <DialogDescription>
@@ -584,71 +727,74 @@ export default function FinalizadorasPage() {
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
-              <div className="grid grid-cols-1 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="nome">Nome</Label>
-                <Input
-                  id="nome"
-                  value={formFin.nome}
-                  onChange={(e) => setFormFin({ ...formFin, nome: e.target.value })}
-                />
-              </div>
-              
-              <div className="space-y-2">
-                <Label htmlFor="tipo">Tipo</Label>
-                <select
-                  id="tipo"
-                  value={formFin.tipo}
-                  onChange={(e) => setFormFin({ ...formFin, tipo: e.target.value })}
-                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <option value="dinheiro">Dinheiro</option>
-                  <option value="credito">Crédito</option>
-                  <option value="debito">Débito</option>
-                  <option value="pix">PIX</option>
-                  <option value="voucher">Voucher</option>
-                  <option value="outros">Outros</option>
-                </select>
-              </div>
-              
-              <div className="space-y-2">
-                <Label htmlFor="taxa">Taxa (%)</Label>
-                <Input
-                  id="taxa"
-                  type="number"
-                  step="0.01"
-                  value={formFin.taxa_percentual}
-                  onChange={(e) => setFormFin({ ...formFin, taxa_percentual: e.target.value })}
-                  placeholder="0.00"
-                />
-              </div>
-              
-              <div className="flex items-center space-x-2 pt-2">
-                <Checkbox
-                  id="ativo"
-                  checked={formFin.ativo}
-                  onCheckedChange={(checked) => setFormFin({ ...formFin, ativo: checked })}
-                />
-                <Label htmlFor="ativo" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
-                  Ativo
-                </Label>
-              </div>
+            <div className="space-y-2">
+              <Label htmlFor="nome">Nome</Label>
+              <Input
+                id="nome"
+                value={formFin.nome}
+                onChange={(e) => setFormFin({ ...formFin, nome: e.target.value })}
+              />
+            </div>
+            
+            <div className="space-y-2">
+              <Label htmlFor="tipo">Tipo</Label>
+              <select
+                id="tipo"
+                value={formFin.tipo}
+                onChange={(e) => setFormFin({ ...formFin, tipo: e.target.value })}
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <option value="dinheiro">Dinheiro</option>
+                <option value="credito">Crédito</option>
+                <option value="debito">Débito</option>
+                <option value="pix">PIX</option>
+                <option value="voucher">Voucher</option>
+                <option value="outros">Outros</option>
+              </select>
+            </div>
+            
+            <div className="space-y-2">
+              <Label htmlFor="taxa">Taxa (%)</Label>
+              <Input
+                id="taxa"
+                type="number"
+                step="0.01"
+                value={formFin.taxa_percentual}
+                onChange={(e) => setFormFin({ ...formFin, taxa_percentual: e.target.value })}
+                placeholder="0.00"
+              />
+            </div>
+            
+            <div className="flex items-center space-x-2 pt-2">
+              <Checkbox
+                id="ativo"
+                checked={formFin.ativo}
+                onCheckedChange={(checked) => setFormFin({ ...formFin, ativo: checked })}
+              />
+              <Label htmlFor="ativo" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
+                Ativo
+              </Label>
             </div>
           </div>
-          <DialogFooter>
+          <DialogFooter className="gap-2">
             <Button 
               variant="outline" 
               onClick={() => setIsCreateOpen(false)} 
-              disabled={loadingFins}
+              disabled={savingCreate}
             >
               <X className="mr-2 h-4 w-4" />
               Cancelar
             </Button>
             <Button 
-              onClick={submitCreate} 
-              disabled={loadingFins}
+              onClick={() => {
+                alert('🔴 BOTÃO CLICADO!\n\nEstado savingCreate: ' + savingCreate + '\nIniciando submitCreate...');
+                console.log('🔴 [CLICK] Botão Salvar clicado!');
+                console.log('🔴 [CLICK] savingCreate:', savingCreate);
+                submitCreate();
+              }} 
+              disabled={savingCreate}
             >
-              {loadingFins ? (
+              {savingCreate ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   Salvando...

@@ -1,7 +1,7 @@
 import React from 'react';
 import { useLocation } from 'react-router-dom';
 
-import { Calendar, Bell, LogOut, Building, Menu, X } from 'lucide-react';
+import { Calendar, Bell, LogOut, Building, Menu, X, PanelLeftClose, PanelLeft } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { useToast } from "@/components/ui/use-toast";
@@ -10,7 +10,15 @@ import { useAuth } from '@/contexts/AuthContext';
 function Header({ onToggleSidebar, sidebarVisible }) {
   const { toast } = useToast();
   const { signOut, userProfile, company, user } = useAuth();
-  const userName = userProfile?.nome || 'Usuário';
+  // Extrair apenas nome e sobrenome (primeiras duas palavras)
+  const fullName = userProfile?.nome || 'Usuário';
+  const userName = React.useMemo(() => {
+    const parts = fullName.trim().split(/\s+/);
+    if (parts.length >= 2) {
+      return `${parts[0]} ${parts[1]}`;
+    }
+    return fullName;
+  }, [fullName]);
   const userRole = userProfile?.cargo || userProfile?.papel || '—';
   // Garantir exibição do nome real da empresa mesmo durante hidratação
   let cachedCompanyName = '';
@@ -106,18 +114,19 @@ function Header({ onToggleSidebar, sidebarVisible }) {
     >
       <div className="flex items-center gap-4">
         <Button
-          variant="outline"
+          variant="ghost"
           size="icon"
           onClick={onToggleSidebar}
           aria-label={sidebarVisible ? 'Ocultar barra lateral' : 'Mostrar barra lateral'}
-          className={`rounded-full transition-colors ${sidebarVisible
-            ? 'bg-brand/20 border-brand/50 text-brand hover:bg-brand/30'
-            : 'border-border/60 bg-surface hover:bg-surface-2/60 text-text-primary'}`}
+          className="h-12 w-12 hover:bg-surface-2/60 transition-colors"
         >
+          {/* Mobile: Menu (3 traços) */}
+          <Menu className={`w-7 h-7 md:hidden transition-colors ${sidebarVisible ? 'text-brand' : 'text-text-primary'}`} />
+          {/* Desktop: PanelLeft (ícone de painel) */}
           {sidebarVisible ? (
-            <X className="w-5 h-5" />
+            <PanelLeftClose className="w-7 h-7 hidden md:block text-brand transition-colors" />
           ) : (
-            <Menu className="w-5 h-5" />
+            <PanelLeft className="w-7 h-7 hidden md:block text-text-primary transition-colors" />
           )}
         </Button>
         <div
