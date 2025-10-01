@@ -533,41 +533,41 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[780px] max-h-[85vh] flex flex-col" onKeyDown={(ev) => {
+      <DialogContent className="w-[95vw] sm:max-w-[780px] max-h-[90vh] sm:max-h-[85vh] flex flex-col" onKeyDown={(ev) => {
         if (ev.key === 'F5') { ev.preventDefault(); handleSave(ev); }
         if (ev.key === 'Escape') { ev.preventDefault(); onOpenChange(false); }
       }}>
         <DialogHeader>
           <div className="flex items-center justify-between">
             <div>
-              <DialogTitle>{product ? 'Detalhes do Produto' : 'Novo Produto'}</DialogTitle>
-              <DialogDescription>Preencha as informações e use as abas para navegar.</DialogDescription>
+              <DialogTitle className="text-lg sm:text-xl">{product ? 'Detalhes do Produto' : 'Novo Produto'}</DialogTitle>
+              <DialogDescription className="text-xs sm:text-sm">Preencha as informações e use as abas para navegar.</DialogDescription>
             </div>
           </div>
         </DialogHeader>
         <form onSubmit={handleSave} className="grid gap-4 py-2 flex-1 overflow-y-auto pr-1 fx-scroll">
           <Tabs defaultValue="dados" className="w-full">
-            <TabsList className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-1">
-              <TabsTrigger value="dados">Dados</TabsTrigger>
-              <TabsTrigger value="estoque">Estoque</TabsTrigger>
-              <TabsTrigger value="preco">Preço e Lucro</TabsTrigger>
-              <TabsTrigger value="impostos">Impostos</TabsTrigger>
-              <TabsTrigger value="outras">Outras Info</TabsTrigger>
+            <TabsList className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-1 text-xs sm:text-sm">
+              <TabsTrigger value="dados" className="text-xs sm:text-sm">Dados</TabsTrigger>
+              <TabsTrigger value="estoque" className="text-xs sm:text-sm">Estoque</TabsTrigger>
+              <TabsTrigger value="preco" className="text-xs sm:text-sm">Preço</TabsTrigger>
+              <TabsTrigger value="impostos" className="text-xs sm:text-sm">Impostos</TabsTrigger>
+              <TabsTrigger value="outras" className="text-xs sm:text-sm">Outras</TabsTrigger>
             </TabsList>
 
-            <div className="mt-2 text-[11px] text-text-muted">* Campo obrigatório</div>
+            <div className="mt-2 text-[10px] sm:text-[11px] text-text-muted">* Campo obrigatório</div>
 
             <TabsContent value="dados" className="space-y-3 mt-2">
-              <div className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor="code" className="text-right">Código <span className="text-text-muted text-xs ml-1">(gera automático se vazio)</span></Label>
-                <Input id="code" value={code} onChange={(e)=>setCode(e.target.value.replace(/\D/g, ''))} className="col-span-3" placeholder={suggestedCode || 'Ex.: 0001'} disabled={!editEnabled} />
+              <div className="grid grid-cols-1 sm:grid-cols-4 items-start sm:items-center gap-2 sm:gap-4">
+                <Label htmlFor="code" className="text-left sm:text-right text-xs sm:text-sm">Código <span className="text-text-muted text-[10px] sm:text-xs">(auto)</span></Label>
+                <Input id="code" value={code} onChange={(e)=>setCode(e.target.value.replace(/\D/g, ''))} className="col-span-1 sm:col-span-3 text-sm" placeholder={suggestedCode || 'Ex.: 0001'} disabled={!editEnabled} />
               </div>
-              <div className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor="name" className="text-right">Descrição {(!name?.trim()) && (<span className="text-danger">*</span>)}</Label>
-                <Input id="name" value={name} onChange={(e)=>setName(e.target.value)} className="col-span-3" disabled={!editEnabled} />
+              <div className="grid grid-cols-1 sm:grid-cols-4 items-start sm:items-center gap-2 sm:gap-4">
+                <Label htmlFor="name" className="text-left sm:text-right text-xs sm:text-sm">Descrição {(!name?.trim()) && (<span className="text-danger">*</span>)}</Label>
+                <Input id="name" value={name} onChange={(e)=>setName(e.target.value)} className="col-span-1 sm:col-span-3 text-sm" disabled={!editEnabled} />
               </div>
-              <div className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor="category" className="text-right">Categoria</Label>
+              <div className="grid grid-cols-1 sm:grid-cols-4 items-start sm:items-center gap-2 sm:gap-4">
+                <Label htmlFor="category" className="text-left sm:text-right text-xs sm:text-sm">Categoria</Label>
                 <div className="col-span-3 flex gap-2 items-center">
                   <Select value={category} onValueChange={(v)=> editEnabled && setCategory(v)}>
                       <SelectTrigger className="w-full" disabled={!editEnabled}>
@@ -622,14 +622,14 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
                   </div>
                 </div>
               )}
-              <div className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor="unit" className="text-right">Unidade {(!unit?.trim()) && (<span className="text-danger">*</span>)}</Label>
-                <Input id="unit" value={unit} onChange={(e)=>setUnit(e.target.value.toUpperCase().slice(0,5))} className="col-span-3" placeholder="UN, KG, LT" disabled={!editEnabled} />
+              <div className="grid grid-cols-1 sm:grid-cols-4 items-start sm:items-center gap-2 sm:gap-4">
+                <Label htmlFor="unit" className="text-left sm:text-right text-xs sm:text-sm">Unidade {(!unit?.trim()) && (<span className="text-danger">*</span>)}</Label>
+                <Input id="unit" value={unit} onChange={(e)=>setUnit(e.target.value.toUpperCase().slice(0,5))} className="col-span-1 sm:col-span-3 text-sm" placeholder="UN, KG, LT" disabled={!editEnabled} />
               </div>
-              <div className="grid grid-cols-4 items-center gap-4">
-                <Label className="text-right">Tipo {(!type) && (<span className="text-danger">*</span>)}</Label>
+              <div className="grid grid-cols-1 sm:grid-cols-4 items-start sm:items-center gap-2 sm:gap-4">
+                <Label className="text-left sm:text-right text-xs sm:text-sm">Tipo {(!type) && (<span className="text-danger">*</span>)}</Label>
                 <Select value={type} onValueChange={(v)=> editEnabled && setType(v)}>
-                  <SelectTrigger className="col-span-3" disabled={!editEnabled}>
+                  <SelectTrigger className="col-span-1 sm:col-span-3 text-sm" disabled={!editEnabled}>
                       <SelectValue placeholder="Selecione o tipo" />
                   </SelectTrigger>
                   <SelectContent>
@@ -638,17 +638,17 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
                   </SelectContent>
                 </Select>
               </div>
-              <div className="grid grid-cols-4 items-center gap-4">
-                <Label className="text-right">Ativo</Label>
-                <div className="col-span-3">
+              <div className="grid grid-cols-1 sm:grid-cols-4 items-start sm:items-center gap-2 sm:gap-4">
+                <Label className="text-left sm:text-right text-xs sm:text-sm">Ativo</Label>
+                <div className="col-span-1 sm:col-span-3">
                   {product ? (
                     <>
                       <Checkbox checked={active} onCheckedChange={(v)=>setActive(!!v)} disabled={!editEnabled} />
-                      <span className="ml-2 text-sm">Ativo</span>
+                      <span className="ml-2 text-xs sm:text-sm">Ativo</span>
                     </>
                   ) : (
                     <Select value={active ? 'ativo' : 'inativo'} onValueChange={(v)=>setActive(v === 'ativo')}>
-                      <SelectTrigger className="w-48" disabled={!editEnabled}>
+                      <SelectTrigger className="w-full sm:w-48 text-sm" disabled={!editEnabled}>
                         <SelectValue placeholder="Selecione" />
                       </SelectTrigger>
                       <SelectContent>
@@ -659,28 +659,28 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
                   )}
                 </div>
               </div>
-              <div className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor="barcode" className="text-right">EAN-13</Label>
-                <Input id="barcode" value={barcode} onChange={(e)=>setBarcode(formatEAN13(e.target.value))} className="col-span-3" placeholder="789..." disabled={!editEnabled} />
+              <div className="grid grid-cols-1 sm:grid-cols-4 items-start sm:items-center gap-2 sm:gap-4">
+                <Label htmlFor="barcode" className="text-left sm:text-right text-xs sm:text-sm">EAN-13</Label>
+                <Input id="barcode" value={barcode} onChange={(e)=>setBarcode(formatEAN13(e.target.value))} className="col-span-1 sm:col-span-3 text-sm" placeholder="789..." disabled={!editEnabled} />
               </div>
-              <div className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor="validade" className="text-right">Validade <span className="text-text-muted text-xs ml-1">(Opcional)</span></Label>
+              <div className="grid grid-cols-1 sm:grid-cols-4 items-start sm:items-center gap-2 sm:gap-4">
+                <Label htmlFor="validade" className="text-left sm:text-right text-xs sm:text-sm">Validade <span className="text-text-muted text-[10px] sm:text-xs">(Opcional)</span></Label>
                  <Popover>
                     <PopoverTrigger asChild>
                       <Button
                         variant={"outline"}
                         className={cn(
-                          "col-span-3 justify-start text-left font-normal",
+                          "col-span-1 sm:col-span-3 justify-start text-left font-normal text-xs sm:text-sm",
                           !validade && "text-muted-foreground"
                         )}
                         disabled={!editEnabled}
                       >
-                        <CalendarX className="mr-2 h-4 w-4" />
+                        <CalendarX className="mr-2 h-3 w-3 sm:h-4 sm:w-4" />
                         {validade ? format(validade, "dd/MM/yyyy") : <span>Selecione a data</span>}
                       </Button>
                     </PopoverTrigger>
-                    <PopoverContent className="p-0 w-[300px]">
-                      <div className="w-[300px] min-h-[332px]">
+                    <PopoverContent className="p-0 w-[280px] sm:w-[300px]">
+                      <div className="w-[280px] sm:w-[300px] min-h-[300px] sm:min-h-[332px]">
                         <Calendar mode="single" selected={validade} onSelect={setValidade} initialFocus fixedWeeks />
                       </div>
                     </PopoverContent>
@@ -1484,9 +1484,9 @@ function ProdutosPage() {
                       {showStats ? <EyeOff className="h-4 w-4"/> : <Eye className="h-4 w-4"/>}
                     </Button>
                     <Button variant="outline" onClick={handleExport} className="hidden sm:flex"><Download className="mr-2 h-4 w-4" /> Exportar</Button>
-                    <Button variant="outline" onClick={handleExport} size="icon" className="sm:hidden"><Download className="h-4 w-4" /></Button>
+                    <Button variant="outline" onClick={handleExport} className="sm:hidden"><Download className="h-4 w-4 mr-1" /> CSV</Button>
                     <Button variant="secondary" onClick={() => setIsXmlImportOpen(true)} className="hidden sm:flex"><FileText className="mr-2 h-4 w-4" /> Importar XML</Button>
-                    <Button variant="secondary" onClick={() => setIsXmlImportOpen(true)} size="icon" className="sm:hidden"><FileText className="h-4 w-4" /></Button>
+                    <Button variant="secondary" onClick={() => setIsXmlImportOpen(true)} className="sm:hidden"><FileText className="h-4 w-4 mr-1" /> XML</Button>
                     <Button onClick={handleAddNew} className="hidden sm:flex"><Plus className="mr-2 h-4 w-4" /> Novo Produto</Button>
                     <Button onClick={handleAddNew} size="icon" className="sm:hidden"><Plus className="h-4 w-4" /></Button>
                 </div>
@@ -1590,18 +1590,18 @@ function ProdutosPage() {
             </Dialog>
 
             <motion.div variants={itemVariants} className="bg-surface rounded-lg border border-border flex-1 flex flex-col min-h-0">
-                <div className="p-4 flex flex-col sm:flex-row items-center justify-between border-b border-border gap-4">
-                    <div className="relative w-full max-w-sm">
+                <div className="p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between border-b border-border gap-4">
+                    <div className="relative w-full sm:max-w-sm">
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted" />
                         <Input placeholder="Buscar por nome ou código..." className="pl-9" value={searchTerm} onChange={(e)=>setSearchTerm(e.target.value)} />
                     </div>
-                     <div className="flex items-center gap-2 w-full sm:w-auto">
-                        <Filter size={16} className="text-text-muted"/>
-                        <Select value={filters.type} onValueChange={v => handleFilterChange('type', v)}><SelectTrigger className="w-[150px]"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="all">Todos Tipos</SelectItem><SelectItem value="Venda">Venda</SelectItem><SelectItem value="Uso Interno">Uso Interno</SelectItem></SelectContent></Select>
-                        <Select value={filters.category} onValueChange={v => handleFilterChange('category', v)}><SelectTrigger className="w-[150px]"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="all">Categorias</SelectItem>{categories.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent></Select>
-                        <Select value={filters.status} onValueChange={v => handleFilterChange('status', v)}><SelectTrigger className="w-[150px]"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="all">Todos Status</SelectItem><SelectItem value="active">Ativo</SelectItem><SelectItem value="low_stock">Estoque Baixo</SelectItem><SelectItem value="inactive">Inativo</SelectItem></SelectContent></Select>
-                        <Button variant="outline" onClick={() => setIsCategoryModalOpen(true)}>
-                          <Tag className="h-4 w-4 mr-2"/> Categorias
+                     <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+                        <Filter size={16} className="text-text-muted hidden sm:block"/>
+                        <Select value={filters.type} onValueChange={v => handleFilterChange('type', v)}><SelectTrigger className="w-full sm:w-[150px] text-xs sm:text-sm"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="all">Todos Tipos</SelectItem><SelectItem value="Venda">Venda</SelectItem><SelectItem value="Uso Interno">Uso Interno</SelectItem></SelectContent></Select>
+                        <Select value={filters.category} onValueChange={v => handleFilterChange('category', v)}><SelectTrigger className="w-full sm:w-[150px] text-xs sm:text-sm"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="all">Categorias</SelectItem>{categories.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent></Select>
+                        <Select value={filters.status} onValueChange={v => handleFilterChange('status', v)}><SelectTrigger className="w-full sm:w-[150px] text-xs sm:text-sm"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="all">Todos Status</SelectItem><SelectItem value="active">Ativo</SelectItem><SelectItem value="low_stock">Estoque Baixo</SelectItem><SelectItem value="inactive">Inativo</SelectItem></SelectContent></Select>
+                        <Button variant="outline" onClick={() => setIsCategoryModalOpen(true)} className="w-full sm:w-auto text-xs sm:text-sm">
+                          <Tag className="h-3 w-3 sm:h-4 sm:w-4 mr-2"/> Categorias
                         </Button>
                     </div>
                 </div>
