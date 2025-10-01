@@ -122,7 +122,7 @@ function MemberFormModal({ open, onOpenChange, member, onSave, loading }) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[700px]">
+      <DialogContent className="sm:max-w-[700px] w-full">
         <DialogHeader>
           <DialogTitle>{member ? 'Editar Funcionário' : 'Novo Funcionário'}</DialogTitle>
           <DialogDescription>Informe apenas nome e cargo. O cargo é livre (texto).</DialogDescription>
