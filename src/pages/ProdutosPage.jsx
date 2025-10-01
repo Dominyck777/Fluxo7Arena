@@ -225,6 +225,7 @@ const StatCard = ({ icon, title, value, subtitle, color, onClick, isActive }) =>
 function ProductFormModal({ open, onOpenChange, product, onSave, categories, onCreateCategory, suggestedCode }) {
   const { toast } = useToast();
   const { userProfile } = useAuth();
+  const [activeTab, setActiveTab] = useState('dados');
   const [code, setCode] = useState(product?.code || '');
   const [name, setName] = useState(product?.name || '');
   const [category, setCategory] = useState(product?.category || '');
@@ -546,14 +547,10 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
           </div>
         </DialogHeader>
         <form onSubmit={handleSave} className="grid gap-4 py-2 flex-1 overflow-y-auto pr-1 fx-scroll">
-          <Tabs defaultValue="dados" className="w-full">
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
             {/* Select para Mobile */}
             <div className="sm:hidden mb-4">
-              <Select defaultValue="dados" onValueChange={(value) => {
-                const tabs = document.querySelector('[role="tablist"]');
-                const trigger = tabs?.querySelector(`[value="${value}"]`);
-                trigger?.click();
-              }}>
+              <Select value={activeTab} onValueChange={setActiveTab}>
                 <SelectTrigger className="w-full">
                   <SelectValue />
                 </SelectTrigger>
