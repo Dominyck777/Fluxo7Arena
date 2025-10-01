@@ -1,7 +1,7 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Calendar, ShoppingCart, Users, UserCog, LifeBuoy, Settings, Trophy, Package, Wallet, ChevronDown, Layers, Building2, Banknote, Folder } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { LayoutDashboard, Calendar, ShoppingCart, Users, UserCog, LifeBuoy, Settings, Trophy, Package, Wallet, ChevronDown, Layers, Building2, Banknote, Folder, CreditCard } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 
 const navItems = [
@@ -49,27 +49,136 @@ const NavItem = ({ to, icon: Icon, label, index, onNavigate }) => {
   );
 };
 
-function Sidebar({ onNavigate }) {
+function Sidebar({ onNavigate, isVisible, setIsVisible }) {
   const location = useLocation();
   const groupPaths = ['/produtos', '/clientes', '/equipe', '/quadras', '/empresas', '/finalizadoras'];
   const groupActive = useMemo(() => groupPaths.includes(location.pathname), [location.pathname]);
   const [openCadastros, setOpenCadastros] = useState(groupActive);
+  
+  // Refs para controle
+  const sidebarRef = useRef(null);
+  const triggerZoneRef = useRef(null);
+  const touchStartX = useRef(0);
+  const touchStartY = useRef(0);
 
   // Função para fechar sidebar em mobile ao clicar em um link
   const handleNavClick = () => {
-    // Verifica se é mobile (largura < 768px)
     if (window.innerWidth < 768 && onNavigate) {
       onNavigate();
     }
   };
 
+  // Detecta hover no canto esquerdo (desktop)
+  useEffect(() => {
+    const handleMouseMove = (e) => {
+      // Apenas em desktop (> 768px)
+      if (window.innerWidth < 768) return;
+      
+      // Zona de trigger: 30px da borda esquerda
+      if (e.clientX <= 30 && !isVisible) {
+        setIsVisible(true);
+      }
+      // Fecha se mouse está longe da sidebar (> 300px)
+      if (e.clientX > 300 && isVisible) {
+        setIsVisible(false);
+      }
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    return () => window.removeEventListener('mousemove', handleMouseMove);
+  }, [isVisible]);
+
+  // Touch events para mobile (swipe da esquerda)
+  useEffect(() => {
+    const handleTouchStart = (e) => {
+      // Apenas em mobile (< 768px)
+      if (window.innerWidth >= 768) return;
+      
+      touchStartX.current = e.touches[0].clientX;
+      touchStartY.current = e.touches[0].clientY;
+    };
+
+    const handleTouchMove = (e) => {
+      if (window.innerWidth >= 768) return;
+      if (!touchStartX.current) return;
+
+      const touchCurrentX = e.touches[0].clientX;
+      const touchCurrentY = e.touches[0].clientY;
+      const diffX = touchCurrentX - touchStartX.current;
+      const diffY = Math.abs(touchCurrentY - touchStartY.current);
+
+      // Swipe horizontal da esquerda (> 50px) e não muito vertical
+      if (touchStartX.current < 50 && diffX > 50 && diffY < 50) {
+        setIsVisible(true);
+      }
+    };
+
+    const handleTouchEnd = () => {
+      touchStartX.current = 0;
+      touchStartY.current = 0;
+    };
+
+    window.addEventListener('touchstart', handleTouchStart, { passive: true });
+    window.addEventListener('touchmove', handleTouchMove, { passive: true });
+    window.addEventListener('touchend', handleTouchEnd, { passive: true });
+
+    return () => {
+      window.removeEventListener('touchstart', handleTouchStart);
+      window.removeEventListener('touchmove', handleTouchMove);
+      window.removeEventListener('touchend', handleTouchEnd);
+    };
+  }, []);
+
+  // Fecha sidebar ao clicar fora (mobile)
+  useEffect(() => {
+    if (window.innerWidth >= 768) return;
+
+    const handleClickOutside = (e) => {
+      if (sidebarRef.current && !sidebarRef.current.contains(e.target) && isVisible) {
+        setIsVisible(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('touchstart', handleClickOutside, { passive: true });
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('touchstart', handleClickOutside);
+    };
+  }, [isVisible]);
+
   return (
-    <motion.aside
-      initial={{ x: -280 }}
-      animate={{ x: 0 }}
-      transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
-      className="w-[280px] h-screen flex-shrink-0 bg-surface flex flex-col border-r border-border shadow-xl shadow-black/20"
-    >
+    <>
+      {/* Zona de trigger invisível (desktop) */}
+      <div 
+        ref={triggerZoneRef}
+        className="hidden md:block fixed left-0 top-0 w-8 h-full z-30 pointer-events-auto"
+        onMouseEnter={() => setIsVisible(true)}
+      />
+
+      {/* Overlay escuro (mobile) */}
+      <AnimatePresence>
+        {isVisible && window.innerWidth < 768 && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="fixed inset-0 bg-black/50 z-40 md:hidden"
+            onClick={() => setIsVisible(false)}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Sidebar - empurra conteúdo */}
+      <motion.aside
+        ref={sidebarRef}
+        initial={false}
+        animate={{ width: isVisible ? 280 : 0 }}
+        transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+        className="h-screen flex-shrink-0 bg-surface flex flex-col border-r border-border shadow-xl shadow-black/20 overflow-hidden"
+      >
       <motion.div 
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -106,16 +215,24 @@ function Sidebar({ onNavigate }) {
               <span className="text-base flex-1 text-left">Cadastros</span>
               <ChevronDown className={`h-4 w-4 transition-transform ${openCadastros ? 'rotate-180' : ''}`} />
             </button>
-
             {openCadastros && (
               <ul className="mt-2 ml-8 space-y-2">
+                <li>
+                  <NavLink
+                    to="/clientes"
+                    onClick={handleNavClick}
+                    className={({ isActive }) => isActive ? 'flex items-center h-[40px] px-3 rounded-sm bg-brand/20 text-text-primary font-medium text-sm' : 'flex items-center h-[40px] px-3 rounded-sm text-text-secondary hover:bg-surface-2 hover:text-text-primary transition-colors text-sm'}
+                  >
+                    <Users className="h-4 w-4 mr-3" /> Clientes & Fornecedores
+                  </NavLink>
+                </li>
                 <li>
                   <NavLink
                     to="/finalizadoras"
                     onClick={handleNavClick}
                     className={({ isActive }) => isActive ? 'flex items-center h-[40px] px-3 rounded-sm bg-brand/20 text-text-primary font-medium text-sm' : 'flex items-center h-[40px] px-3 rounded-sm text-text-secondary hover:bg-surface-2 hover:text-text-primary transition-colors text-sm'}
                   >
-                    <Banknote className="h-4 w-4 mr-3" /> Finalizadoras
+                    <CreditCard className="h-4 w-4 mr-3" /> Finalizadoras
                   </NavLink>
                 </li>
                 <li>
@@ -134,15 +251,6 @@ function Sidebar({ onNavigate }) {
                     className={({ isActive }) => isActive ? 'flex items-center h-[40px] px-3 rounded-sm bg-brand/20 text-text-primary font-medium text-sm' : 'flex items-center h-[40px] px-3 rounded-sm text-text-secondary hover:bg-surface-2 hover:text-text-primary transition-colors text-sm'}
                   >
                     <Package className="h-4 w-4 mr-3" /> Produtos
-                  </NavLink>
-                </li>
-                <li>
-                  <NavLink
-                    to="/clientes"
-                    onClick={handleNavClick}
-                    className={({ isActive }) => isActive ? 'flex items-center h-[40px] px-3 rounded-sm bg-brand/20 text-text-primary font-medium text-sm' : 'flex items-center h-[40px] px-3 rounded-sm text-text-secondary hover:bg-surface-2 hover:text-text-primary transition-colors text-sm'}
-                  >
-                    <Users className="h-4 w-4 mr-3" /> Clientes
                   </NavLink>
                 </li>
                 <li>
@@ -178,6 +286,7 @@ function Sidebar({ onNavigate }) {
          <NavItem to="/suporte" icon={LifeBuoy} label="Suporte" index={navItems.length} onNavigate={handleNavClick} />
       </motion.div>
     </motion.aside>
+    </>
   );
 }
 

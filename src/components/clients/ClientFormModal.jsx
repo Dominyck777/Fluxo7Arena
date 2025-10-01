@@ -17,6 +17,7 @@ function ClientFormModal({ open, onOpenChange, client, onSaved }) {
   const initialForm = (c) => ({
     // Dados básicos
     tipo_pessoa: c?.tipo_pessoa || 'PF', // PF | PJ
+    tipo_cadastro: c?.tipo_cadastro || 'cliente', // cliente | fornecedor | ambos
     nome: c?.nome || '', // PF: Nome; PJ: Razão Social
     apelido: c?.apelido || '', // Nome Fantasia
     cpf: c?.cpf || '',
@@ -51,21 +52,24 @@ function ClientFormModal({ open, onOpenChange, client, onSaved }) {
     nome_mae: c?.nome_mae || '',
     nome_pai: c?.nome_pai || '',
     observacoes: c?.observacoes || '',
-    // Classificações / status
-    flag_cliente: c?.flag_cliente ?? true,
-    flag_fornecedor: c?.flag_fornecedor ?? false,
-    flag_funcionario: c?.flag_funcionario ?? false,
-    flag_administradora: c?.flag_administradora ?? false,
-    flag_parceiro: c?.flag_parceiro ?? false,
-    flag_ccf_spc: c?.flag_ccf_spc ?? false,
+    // Status
     status: c?.status || 'active',
   });
   const [form, setForm] = useState(initialForm(client));
   const [activeTab, setActiveTab] = useState('basicos');
 
   useEffect(() => {
+    // Determina tipo_cadastro baseado nas flags
+    let tipoCadastro = 'cliente';
+    if (client?.flag_cliente && client?.flag_fornecedor) {
+      tipoCadastro = 'ambos';
+    } else if (client?.flag_fornecedor) {
+      tipoCadastro = 'fornecedor';
+    }
+    
     setForm({
       tipo_pessoa: client?.tipo_pessoa || 'PF',
+      tipo_cadastro: tipoCadastro,
       nome: client?.nome || '',
       apelido: client?.apelido || '',
       cpf: client?.cpf || '',
@@ -96,12 +100,6 @@ function ClientFormModal({ open, onOpenChange, client, onSaved }) {
       nome_mae: client?.nome_mae || '',
       nome_pai: client?.nome_pai || '',
       observacoes: client?.observacoes || '',
-      flag_cliente: client?.flag_cliente ?? true,
-      flag_fornecedor: client?.flag_fornecedor ?? false,
-      flag_funcionario: client?.flag_funcionario ?? false,
-      flag_administradora: client?.flag_administradora ?? false,
-      flag_parceiro: client?.flag_parceiro ?? false,
-      flag_ccf_spc: client?.flag_ccf_spc ?? false,
       status: client?.status || 'active',
     });
   }, [client]);
@@ -239,13 +237,13 @@ function ClientFormModal({ open, onOpenChange, client, onSaved }) {
         nome_mae: toNull(form.nome_mae),
         nome_pai: toNull(form.nome_pai),
         observacoes: toNull(form.observacoes),
-        // flags/status
-        flag_cliente: !!form.flag_cliente,
-        flag_fornecedor: !!form.flag_fornecedor,
-        flag_funcionario: !!form.flag_funcionario,
-        flag_administradora: !!form.flag_administradora,
-        flag_parceiro: !!form.flag_parceiro,
-        flag_ccf_spc: !!form.flag_ccf_spc,
+        // flags baseadas no tipo_cadastro
+        flag_cliente: form.tipo_cadastro === 'cliente' || form.tipo_cadastro === 'ambos',
+        flag_fornecedor: form.tipo_cadastro === 'fornecedor' || form.tipo_cadastro === 'ambos',
+        flag_funcionario: false,
+        flag_administradora: false,
+        flag_parceiro: false,
+        flag_ccf_spc: false,
         status: form.status,
       };
       let error;
@@ -314,18 +312,16 @@ function ClientFormModal({ open, onOpenChange, client, onSaved }) {
                   <SelectItem value="endereco">Endereço</SelectItem>
                   <SelectItem value="financeiro">Financeiro</SelectItem>
                   <SelectItem value="adicionais">Adicionais</SelectItem>
-                  <SelectItem value="classificacoes">Classificações</SelectItem>
                 </SelectContent>
               </Select>
             </div>
 
             {/* Tabs para Desktop */}
-            <TabsList className="hidden sm:grid grid-cols-5 gap-2">
+            <TabsList className="hidden sm:grid grid-cols-4 gap-2">
               <TabsTrigger value="basicos">Dados Básicos</TabsTrigger>
               <TabsTrigger value="endereco">Endereço</TabsTrigger>
               <TabsTrigger value="financeiro">Financeiro</TabsTrigger>
               <TabsTrigger value="adicionais">Adicionais</TabsTrigger>
-              <TabsTrigger value="classificacoes">Classificações</TabsTrigger>
             </TabsList>
 
             <TabsContent value="basicos" className="space-y-3 sm:space-y-4 mt-2">
@@ -340,7 +336,18 @@ function ClientFormModal({ open, onOpenChange, client, onSaved }) {
                   </SelectContent>
                 </Select>
               </div>
-              <div className="col-span-12 sm:col-span-9">
+              <div className="col-span-12 sm:col-span-3">
+                <Label>Tipo de Cadastro *</Label>
+                <Select value={form.tipo_cadastro} onValueChange={(v) => setForm((p) => ({ ...p, tipo_cadastro: v }))} required>
+                  <SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="cliente">Cliente</SelectItem>
+                    <SelectItem value="fornecedor">Fornecedor</SelectItem>
+                    <SelectItem value="ambos">Cliente e Fornecedor</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="col-span-12 sm:col-span-6">
                 <Label htmlFor="nome">{form.tipo_pessoa === 'PJ' ? 'Razão Social' : 'Nome'}</Label>
                 <Input id="nome" value={form.nome} onChange={handleChange} required />
               </div>
@@ -532,17 +539,6 @@ function ClientFormModal({ open, onOpenChange, client, onSaved }) {
                 <Label htmlFor="observacoes">Observações</Label>
                 <textarea id="observacoes" value={form.observacoes} onChange={handleChange} rows={4} className="w-full rounded-md border border-border bg-background p-2 text-sm" />
               </div>
-            </div>
-            </TabsContent>
-
-            <TabsContent value="classificacoes" className="space-y-3 mt-2">
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-              <label className="flex items-center gap-2"><Checkbox checked={!!form.flag_cliente} onCheckedChange={(v) => setForm((p) => ({ ...p, flag_cliente: !!v }))} />Cliente</label>
-              <label className="flex items-center gap-2"><Checkbox checked={!!form.flag_fornecedor} onCheckedChange={(v) => setForm((p) => ({ ...p, flag_fornecedor: !!v }))} />Fornecedor</label>
-              <label className="flex items-center gap-2"><Checkbox checked={!!form.flag_funcionario} onCheckedChange={(v) => setForm((p) => ({ ...p, flag_funcionario: !!v }))} />Funcionário</label>
-              <label className="flex items-center gap-2"><Checkbox checked={!!form.flag_administradora} onCheckedChange={(v) => setForm((p) => ({ ...p, flag_administradora: !!v }))} />Administradora</label>
-              <label className="flex items-center gap-2"><Checkbox checked={!!form.flag_parceiro} onCheckedChange={(v) => setForm((p) => ({ ...p, flag_parceiro: !!v }))} />Parceiro</label>
-              <label className="flex items-center gap-2"><Checkbox checked={!!form.flag_ccf_spc} onCheckedChange={(v) => setForm((p) => ({ ...p, flag_ccf_spc: !!v }))} />CCF/SPC</label>
             </div>
             </TabsContent>
           </Tabs>

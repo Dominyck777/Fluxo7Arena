@@ -80,7 +80,7 @@ function Header({ onToggleSidebar, sidebarVisible }) {
       if (pathname === '/' || pathname.startsWith('/dashboard')) return '';
       const map = [
         { key: '/agenda', label: 'Agenda' },
-        { key: '/clientes', label: 'Clientes' },
+        { key: '/clientes', label: 'Clientes & Fornecedores' },
         { key: '/produtos', label: 'Produtos' },
         { key: '/vendas', label: 'Vendas' },
         { key: '/financeiro', label: 'Financeiro' },

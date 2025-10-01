@@ -35,7 +35,7 @@ function PrivateApp() {
           <meta name="description" content="Software para gestão de quadras esportivas." />
       </Helmet>
       
-      {sidebarVisible && <Sidebar onNavigate={toggleSidebar} />}
+      <Sidebar isVisible={sidebarVisible} setIsVisible={setSidebarVisible} />
       <div className="flex-1 flex flex-col overflow-hidden">
         <Header onToggleSidebar={toggleSidebar} sidebarVisible={sidebarVisible} />
         <main className={cn("flex-1 overflow-x-hidden overflow-y-auto bg-background", isAgendaPage ? "p-0 md:p-8" : "p-8")}>
