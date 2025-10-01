@@ -1490,7 +1490,7 @@ function ProdutosPage() {
             </motion.div>
 
             {showStats && (
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+              <div className="hidden md:grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
                   <StatCard icon={Trophy} title="Mais Vendido (Dia)" value={stats.mostSold} subtitle="Produto com mais saídas hoje" color="text-brand" onClick={handleOpenSalesModal} />
                   <StatCard icon={AlertTriangle} title="Estoque Baixo" value={stats.lowStock} subtitle="Produtos precisando de reposição" color="text-warning" onClick={() => handleStatCardClick('low_stock')} isActive={activeFilter === 'low_stock'} />
                   <StatCard icon={CalendarX} title="Vencidos" value={stats.expired} subtitle="Produtos fora da data de validade" color="text-danger" onClick={() => handleStatCardClick('expired')} isActive={activeFilter === 'expired'} />
@@ -1604,80 +1604,151 @@ function ProdutosPage() {
                 </div>
                 
                 <div className="flex-1">
-                    {sortedProducts.length === 0 ? (
-                      <div className="p-10 text-center text-text-secondary">
-                        <p className="text-lg mb-3">Nenhum produto cadastrado.</p>
-                        <Button onClick={handleAddNew}><Plus className="mr-2 h-4 w-4" />Cadastrar primeiro produto</Button>
-                      </div>
-                    ) : viewMode === 'list' ? (
-                        <div className="rounded-lg border border-border overflow-hidden">
-                          <table className="w-full text-sm bg-surface table-fixed">
-                            <thead className="bg-surface-2 text-text-secondary">
-                                <tr className="border-b border-border">
-                                    <th className="p-3 text-left font-semibold select-none cursor-pointer whitespace-nowrap w-[110px]" onClick={() => toggleSort('code')}>
-                                      Código {sort.by === 'code' ? (sort.dir === 'asc' ? '▲' : '▼') : ''}
-                                    </th>
-                                    <th className="p-3 text-left font-semibold select-none cursor-pointer whitespace-nowrap w-[40%]" onClick={() => toggleSort('name')}>
-                                      Produto {sort.by === 'name' ? (sort.dir === 'asc' ? '▲' : '▼') : ''}
-                                    </th>
-                                    <th className="p-3 text-left font-semibold whitespace-nowrap w-[18%]">Categoria</th>
-                                    <th className="p-3 text-right font-semibold whitespace-nowrap w-[120px]">Preço</th>
-                                    <th className="p-3 text-right font-semibold whitespace-nowrap w-[110px]">Estoque</th>
-                                    <th className="p-3 text-center font-semibold select-none cursor-pointer whitespace-nowrap w-[120px]" onClick={() => toggleSort('validade')}>
-                                      Validade {sort.by === 'validade' ? (sort.dir === 'asc' ? '▲' : '▼') : ''}
-                                    </th>
-                                    <th className="p-3 text-center font-semibold whitespace-nowrap w-[140px]">Status</th>
-                                    <th className="p-3 text-right font-semibold whitespace-nowrap w-[90px]">Ações</th>
-                                </tr>
-                            </thead>
-                            <tbody className="text-text-primary divide-y divide-border">
-                                {sortedProducts.map(p => (
-                                    <tr key={p.id} className="hover:bg-surface-2 transition-colors group cursor-pointer align-middle">
-                                        <td className="p-3 font-mono text-sm text-text-secondary align-middle whitespace-nowrap" onClick={() => handleEdit(p)}>{p.code || '-'}</td>
-                                        <td className="p-3 font-semibold align-middle text-text-primary whitespace-nowrap overflow-hidden text-ellipsis" onClick={() => handleEdit(p)} title={p.name}>{p.name}</td>
-                                        <td className="p-3 text-text-secondary align-middle whitespace-nowrap" onClick={() => handleEdit(p)}>{p.category}</td>
-                                        <td className="p-3 text-right font-mono tabular-nums align-middle whitespace-nowrap" onClick={() => handleEdit(p)}>R$ {p.price.toFixed(2)}</td>
-                                        <td className="p-3 text-right font-mono tabular-nums align-middle whitespace-nowrap" onClick={() => handleEdit(p)}>{p.stock}</td>
-                                        <td className="p-3 text-center font-mono tabular-nums whitespace-nowrap" onClick={() => handleEdit(p)}>{(() => {
-                  if (!p.validade) return '-';
-                  const d = p.validade instanceof Date ? p.validade : parseISO(String(p.validade));
-                  return isNaN(d) ? '-' : format(d, 'dd/MM/yy');
-                })()}</td>
-                                        <td className="p-3 text-center whitespace-nowrap" onClick={() => handleEdit(p)}>
-                                            <span className={cn(
-                                                "px-2 py-1 text-xs font-bold rounded-full",
-                                                p.status === 'active' && 'bg-success/10 text-success',
-                                                p.status === 'low_stock' && 'bg-warning/10 text-warning',
-                                                p.status === 'inactive' && 'bg-danger/10 text-danger'
-                                            )}>{p.status === 'active' ? 'Ativo' : p.status === 'low_stock' ? 'Estoque Baixo' : 'Inativo' }</span>
-                                        </td>
-                                        <td className="p-3 whitespace-nowrap">
-                                            <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                <Button variant="ghost" size="icon" className="h-8 w-8 text-text-muted hover:text-danger" onClick={(e) => { e.stopPropagation(); handleAskDelete(p); }}>
-                                                    <Trash2 size={14} />
-                                                </Button>
-                                            </div>
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                          </table>
+                  {/* Estado vazio (comum) */}
+                  {sortedProducts.length === 0 && !loading && (
+                    <div className="p-10 text-center text-text-secondary">
+                      <p className="text-lg mb-3">Nenhum produto cadastrado.</p>
+                      <Button onClick={handleAddNew}><Plus className="mr-2 h-4 w-4" />Cadastrar primeiro produto</Button>
+                    </div>
+                  )}
+
+                  {/* Layout Mobile - Cards (sempre em mobile, base Quadras) */}
+                  <div className="md:hidden p-4 space-y-3">
+                    {loading ? (
+                      Array.from({ length: 3 }).map((_, i) => (
+                        <div key={i} className="rounded-lg border border-border bg-surface p-4 animate-pulse">
+                          <div className="h-4 w-1/2 bg-surface-2 rounded mb-3" />
+                          <div className="h-3 w-1/3 bg-surface-2 rounded mb-4" />
+                          <div className="grid grid-cols-2 gap-3">
+                            <div className="h-4 w-3/4 bg-surface-2 rounded" />
+                            <div className="h-4 w-1/2 bg-surface-2 rounded" />
+                          </div>
                         </div>
+                      ))
                     ) : (
-                       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 p-4">
-                            {sortedProducts.map(p => (
-                               <div key={p.id} className="bg-surface-2 rounded-lg border border-border p-4 flex flex-col text-center items-center gap-2 hover:border-border-hover hover:shadow-md cursor-pointer transition-all" onClick={() => handleEdit(p)}>
-                                   <p className="font-semibold mt-1 text-text-primary truncate w-full" title={p.name}>{p.name}</p>
-                                   <p className="text-xs text-text-secondary">{p.category || '—'}</p>
-                                   <p className="text-base font-bold text-text-primary">R$ {p.price.toFixed(2)}</p>
-                                   <span className="text-xs text-text-muted">Estoque: {p.stock}</span>
-                               </div>
-                            ))}
+                      sortedProducts.map((p) => (
+                        <div key={p.id} className="rounded-lg border border-border bg-surface p-4 space-y-3">
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="flex-1 min-w-0">
+                              <div className="font-semibold text-base text-text-primary truncate" title={p.name}>{p.name}</div>
+                              <div className="text-xs text-text-muted truncate">{p.category || '—'}</div>
+                            </div>
+                            <span className={cn(
+                              "inline-flex px-2 py-0.5 rounded-full text-xs border flex-shrink-0",
+                              p.status === 'active' && 'bg-emerald-50/5 border-emerald-500/30 text-emerald-400',
+                              p.status === 'low_stock' && 'bg-amber-50/5 border-amber-500/30 text-amber-400',
+                              p.status === 'inactive' && 'bg-surface-2 border-border text-text-muted'
+                            )}>
+                              {p.status === 'active' ? 'Ativo' : p.status === 'low_stock' ? 'Estoque Baixo' : 'Inativo'}
+                            </span>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-3">
+                            <div>
+                              <span className="text-xs text-text-muted block mb-1">Preço</span>
+                              <span className="text-sm font-medium">R$ {Number(p.price || 0).toFixed(2)}</span>
+                            </div>
+                            <div>
+                              <span className="text-xs text-text-muted block mb-1">Estoque</span>
+                              <span className="text-sm font-medium">{Number(p.stock || 0)}</span>
+                            </div>
+                            <div className="col-span-2">
+                              <span className="text-xs text-text-muted block mb-1">Validade</span>
+                              <span className="text-sm font-medium">
+                                {(() => {
+                                  if (!p.validade) return '-';
+                                  const d = p.validade instanceof Date ? p.validade : parseISO(String(p.validade));
+                                  return isNaN(d) ? '-' : format(d, 'dd/MM/yy');
+                                })()}
+                              </span>
+                            </div>
+                          </div>
+
+                          <Button variant="outline" size="sm" onClick={() => handleEdit(p)} className="w-full">Editar Produto</Button>
                         </div>
+                      ))
                     )}
+                  </div>
+
+                  {/* Layout Desktop - Tabela/Grelha existente */}
+                  <div className="hidden md:block">
+                    {viewMode === 'list' ? (
+                      <div className="rounded-lg border border-border overflow-hidden">
+                        <table className="w-full text-sm bg-surface table-fixed">
+                          <thead className="bg-surface-2 text-text-secondary">
+                            <tr className="border-b border-border">
+                              <th className="p-3 text-left font-semibold select-none cursor-pointer whitespace-nowrap w-[110px]" onClick={() => toggleSort('code')}>
+                                Código {sort.by === 'code' ? (sort.dir === 'asc' ? '▲' : '▼') : ''}
+                              </th>
+                              <th className="p-3 text-left font-semibold select-none cursor-pointer whitespace-nowrap w-[40%]" onClick={() => toggleSort('name')}>
+                                Produto {sort.by === 'name' ? (sort.dir === 'asc' ? '▲' : '▼') : ''}
+                              </th>
+                              <th className="p-3 text-left font-semibold whitespace-nowrap w-[18%]">Categoria</th>
+                              <th className="p-3 text-right font-semibold whitespace-nowrap w-[120px]">Preço</th>
+                              <th className="p-3 text-right font-semibold whitespace-nowrap w-[110px]">Estoque</th>
+                              <th className="p-3 text-center font-semibold select-none cursor-pointer whitespace-nowrap w-[120px]" onClick={() => toggleSort('validade')}>
+                                Validade {sort.by === 'validade' ? (sort.dir === 'asc' ? '▲' : '▼') : ''}
+                              </th>
+                              <th className="p-3 text-center font-semibold whitespace-nowrap w-[140px]">Status</th>
+                              <th className="p-3 text-right font-semibold whitespace-nowrap w-[90px]">Ações</th>
+                            </tr>
+                          </thead>
+                          <tbody className="text-text-primary divide-y divide-border">
+                            {sortedProducts.map(p => (
+                              <tr key={p.id} className="hover:bg-surface-2 transition-colors group cursor-pointer align-middle">
+                                <td className="p-3 font-mono text-sm text-text-secondary align-middle whitespace-nowrap" onClick={() => handleEdit(p)}>{p.code || '-'}</td>
+                                <td className="p-3 font-semibold align-middle text-text-primary whitespace-nowrap overflow-hidden text-ellipsis" onClick={() => handleEdit(p)} title={p.name}>{p.name}</td>
+                                <td className="p-3 text-text-secondary align-middle whitespace-nowrap" onClick={() => handleEdit(p)}>{p.category}</td>
+                                <td className="p-3 text-right font-mono tabular-nums align-middle whitespace-nowrap" onClick={() => handleEdit(p)}>R$ {p.price.toFixed(2)}</td>
+                                <td className="p-3 text-right font-mono tabular-nums align-middle whitespace-nowrap" onClick={() => handleEdit(p)}>{p.stock}</td>
+                                <td className="p-3 text-center font-mono tabular-nums whitespace-nowrap" onClick={() => handleEdit(p)}>{(() => {
+                                  if (!p.validade) return '-';
+                                  const d = p.validade instanceof Date ? p.validade : parseISO(String(p.validade));
+                                  return isNaN(d) ? '-' : format(d, 'dd/MM/yy');
+                                })()}</td>
+                                <td className="p-3 text-center whitespace-nowrap" onClick={() => handleEdit(p)}>
+                                  <span className={cn(
+                                    "px-2 py-1 text-xs font-bold rounded-full",
+                                    p.status === 'active' && 'bg-success/10 text-success',
+                                    p.status === 'low_stock' && 'bg-warning/10 text-warning',
+                                    p.status === 'inactive' && 'bg-danger/10 text-danger'
+                                  )}>{p.status === 'active' ? 'Ativo' : p.status === 'low_stock' ? 'Estoque Baixo' : 'Inativo' }</span>
+                                </td>
+                                <td className="p-3 whitespace-nowrap">
+                                  <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <Button variant="ghost" size="icon" className="h-8 w-8 text-text-muted hover:text-danger" onClick={(e) => { e.stopPropagation(); handleAskDelete(p); }}>
+                                      <Trash2 size={14} />
+                                    </Button>
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 p-4">
+                        {sortedProducts.map(p => (
+                          <div key={p.id} className="bg-surface-2 rounded-lg border border-border p-4 flex flex-col text-center items-center gap-2 hover:border-border-hover hover:shadow-md cursor-pointer transition-all" onClick={() => handleEdit(p)}>
+                            <p className="font-semibold mt-1 text-text-primary truncate w-full" title={p.name}>{p.name}</p>
+                            <p className="text-xs text-text-secondary">{p.category || '—'}</p>
+                            <p className="text-base font-bold text-text-primary">R$ {p.price.toFixed(2)}</p>
+                            <span className="text-xs text-text-muted">Estoque: {p.stock}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
             </motion.div>
         </motion.div>
+
+        {/* FAB Mobile: Novo Produto */}
+        <div className="md:hidden fixed bottom-5 right-5 z-40">
+          <Button size="icon" className="h-14 w-14 rounded-full shadow-2" onClick={handleAddNew} aria-label="Adicionar produto">
+            <Plus className="h-6 w-6" />
+          </Button>
+        </div>
 
         <ProductFormModal 
             open={isFormOpen} 
