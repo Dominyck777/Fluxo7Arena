@@ -486,6 +486,16 @@ function ClientDetailsModal({ open, onOpenChange, client, onEdit, onInactivate, 
                     <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold border ${client.status === 'active' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-400/30' : 'bg-rose-500/10 text-rose-400 border-rose-400/30'}`}>
                       {client.status === 'active' ? 'Ativo' : 'Inativo'}
                     </span>
+                    {client.flag_cliente && (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-500/10 text-blue-500 border border-blue-500/30">
+                        Cliente
+                      </span>
+                    )}
+                    {client.flag_fornecedor && (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-purple-500/10 text-purple-500 border border-purple-500/30">
+                        Fornecedor
+                      </span>
+                    )}
                   </div>
                   <span className="mt-2 block text-sm text-text-secondary truncate">{client.email || '—'}</span>
                 </div>
@@ -759,7 +769,7 @@ function ClientesPage() {
     const [isDetailsOpen, setIsDetailsOpen] = useState(false);
     const [selectedClient, setSelectedClient] = useState(null);
     const [editingClient, setEditingClient] = useState(null);
-    const [filters, setFilters] = useState({ searchTerm: '', status: 'all' });
+    const [filters, setFilters] = useState({ searchTerm: '', status: 'all', tipo: 'todos' });
     // Retry control para contornar atrasos de token/RLS no Vercel
     const clientsRetryRef = useRef(false);
     const lastLoadTsRef = useRef(0);
@@ -1014,7 +1024,18 @@ function ClientesPage() {
               (client.cpf || '').includes(filters.searchTerm) ||
               (client.telefone || '').includes(filters.searchTerm);
           const statusMatch = filters.status === 'all' || client.status === filters.status;
-          return searchTermMatch && statusMatch;
+          
+          // Filtro de tipo
+          let tipoMatch = true;
+          if (filters.tipo === 'clientes') {
+            tipoMatch = client.flag_cliente === true;
+          } else if (filters.tipo === 'fornecedores') {
+            tipoMatch = client.flag_fornecedor === true;
+          } else if (filters.tipo === 'ambos') {
+            tipoMatch = client.flag_cliente === true && client.flag_fornecedor === true;
+          }
+          
+          return searchTermMatch && statusMatch && tipoMatch;
       });
     }, [clients, filters]);
 
@@ -1086,23 +1107,23 @@ function ClientesPage() {
     };
     
     const handleClearFilters = () => {
-      setFilters({ searchTerm: '', status: 'all' });
+      setFilters({ searchTerm: '', status: 'all', tipo: 'todos' });
     }
     
-    const hasActiveFilters = filters.searchTerm !== '' || filters.status !== 'all';
+    const hasActiveFilters = filters.searchTerm !== '' || filters.status !== 'all' || filters.tipo !== 'todos';
 
     return (
       <>
         <Helmet>
-          <title>Clientes - Fluxo7 Arena</title>
-          <meta name="description" content="Gerenciamento completo de clientes (CRM)." />
+          <title>Clientes & Fornecedores - Fluxo7 Arena</title>
+          <meta name="description" content="Gerenciamento completo de clientes e fornecedores (CRM)." />
         </Helmet>
         <div className="h-full flex flex-col">
             <motion.div variants={pageVariants} initial="hidden" animate="visible">
                 <motion.div variants={itemVariants} className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
                     <div className="flex-1 min-w-0">
-                        <h1 className="text-2xl sm:text-3xl font-black text-text-primary tracking-tighter">Controle de Clientes</h1>
-                        <p className="text-sm text-text-secondary">controle financeiro dos seus clientes.</p>
+                        <h1 className="text-2xl sm:text-3xl font-black text-text-primary tracking-tighter">Clientes & Fornecedores</h1>
+                        <p className="text-sm text-text-secondary">Gestão completa de clientes e fornecedores</p>
                     </div>
                     <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
                       <Button variant="outline" size="icon" onClick={() => setShowStats(s => !s)} title={showStats ? 'Ocultar resumo' : 'Mostrar resumo'} aria-label={showStats ? 'Ocultar resumo' : 'Mostrar resumo'} className="flex-shrink-0">
@@ -1118,10 +1139,39 @@ function ClientesPage() {
                 </motion.div>
 
                 {showStats && (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-6">
-                      <StatCard icon={Users} title="Total de Clientes" value={stats.total} color="text-brand" />
-                      <StatCard icon={Gift} title="Aniversariantes do Mês" value={stats.birthdays} color="text-info" />
-                      <StatCard icon={TrendingUp} title="Clientes Ativos" value={stats.active} color="text-success" />
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                      <StatCard 
+                        icon={Users} 
+                        title="Total de Clientes" 
+                        value={clients.filter(c => c.flag_cliente).length} 
+                        color="text-brand"
+                        onClick={() => setFilters(prev => ({...prev, tipo: 'clientes'}))}
+                        isActive={filters.tipo === 'clientes'}
+                      />
+                      <StatCard 
+                        icon={Users} 
+                        title="Total de Fornecedores" 
+                        value={clients.filter(c => c.flag_fornecedor).length} 
+                        color="text-purple-500"
+                        onClick={() => setFilters(prev => ({...prev, tipo: 'fornecedores'}))}
+                        isActive={filters.tipo === 'fornecedores'}
+                      />
+                      <StatCard 
+                        icon={Gift} 
+                        title="Aniversariantes do Mês" 
+                        value={stats.birthdays} 
+                        color="text-info"
+                        onClick={() => setFilters(prev => ({...prev, tipo: 'todos'}))}
+                        isActive={filters.tipo === 'todos'}
+                      />
+                      <StatCard 
+                        icon={TrendingUp} 
+                        title="Ativos" 
+                        value={stats.active} 
+                        color="text-success"
+                        onClick={() => setFilters(prev => ({...prev, status: 'active'}))}
+                        isActive={filters.status === 'active'}
+                      />
                   </div>
                 )}
 
@@ -1138,6 +1188,17 @@ function ClientesPage() {
                                 />
                             </div>
                             <div className="flex flex-col sm:flex-row gap-2">
+                               <Select value={filters.tipo} onValueChange={(value) => setFilters(prev => ({...prev, tipo: value}))}>
+                                 <SelectTrigger className="w-full sm:w-[200px]">
+                                   <SelectValue placeholder="Tipo" />
+                                 </SelectTrigger>
+                                 <SelectContent>
+                                   <SelectItem value="todos">Todos</SelectItem>
+                                   <SelectItem value="clientes">Apenas Clientes</SelectItem>
+                                   <SelectItem value="fornecedores">Apenas Fornecedores</SelectItem>
+                                   <SelectItem value="ambos">Clientes e Fornecedores</SelectItem>
+                                 </SelectContent>
+                               </Select>
                                <Select value={filters.status} onValueChange={(value) => setFilters(prev => ({...prev, status: value}))}>
                                  <SelectTrigger className="w-full sm:w-[180px]">
                                    <SelectValue placeholder="Status" />
@@ -1182,6 +1243,20 @@ function ClientesPage() {
                                   </p>
                                 </div>
 
+                                {/* Badges de Tipo */}
+                                <div className="flex flex-wrap gap-1.5">
+                                  {client.flag_cliente && (
+                                    <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-blue-500/10 text-blue-500 border border-blue-500/30">
+                                      Cliente
+                                    </span>
+                                  )}
+                                  {client.flag_fornecedor && (
+                                    <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-purple-500/10 text-purple-500 border border-purple-500/30">
+                                      Fornecedor
+                                    </span>
+                                  )}
+                                </div>
+
                                 {/* Contato */}
                                 {(client.telefone || client.email) && (
                                   <div>
@@ -1223,13 +1298,14 @@ function ClientesPage() {
                                         Cliente {sort.by === 'nome' ? (sort.dir === 'asc' ? '▲' : '▼') : ''}
                                       </TableHead>
                                       <TableHead className="text-text-secondary">Contato</TableHead>
+                                      <TableHead className="text-text-secondary">Tipo</TableHead>
                                       <TableHead className="text-text-secondary">Status</TableHead>
                                   </TableRow>
                               </TableHeader>
                               <TableBody>
                                   {loading ? (
                                     <TableRow>
-                                      <TableCell colSpan={4} className="h-24 text-center">Carregando...</TableCell>
+                                      <TableCell colSpan={5} className="h-24 text-center">Carregando...</TableCell>
                                     </TableRow>
                                   ) : sortedClients.length > 0 ? (
                                       sortedClients.map(client => (
@@ -1250,6 +1326,21 @@ function ClientesPage() {
                                                       <span className="text-sm truncate">{client.telefone || client.email || '—'}</span>
                                                   </div>
                                               </TableCell>
+                                              {/* Tipo */}
+                                              <TableCell>
+                                                  <div className="flex flex-wrap gap-1">
+                                                    {client.flag_cliente && (
+                                                      <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-blue-500/10 text-blue-500 border border-blue-500/30">
+                                                        Cliente
+                                                      </span>
+                                                    )}
+                                                    {client.flag_fornecedor && (
+                                                      <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-purple-500/10 text-purple-500 border border-purple-500/30">
+                                                        Fornecedor
+                                                      </span>
+                                                    )}
+                                                  </div>
+                                              </TableCell>
                                               {/* Status */}
                                               <TableCell>
                                                   <span className={cn(
@@ -1263,7 +1354,7 @@ function ClientesPage() {
                                       ))
                                   ) : (
                                       <TableRow>
-                                          <TableCell colSpan={4} className="h-24 text-center">
+                                          <TableCell colSpan={5} className="h-24 text-center">
                                               Nenhum cliente encontrado com os filtros aplicados.
                                           </TableCell>
                                       </TableRow>
