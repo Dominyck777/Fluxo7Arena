@@ -1491,7 +1491,7 @@ function ProdutosPage() {
           <title>Produtos - Fluxo7 Arena</title>
           <meta name="description" content="Gerenciamento completo de produtos e estoque." />
         </Helmet>
-        <motion.div variants={pageVariants} initial="hidden" animate="visible" className="h-full flex flex-col">
+        <motion.div variants={pageVariants} initial="hidden" animate="visible" className="flex flex-col">
             <motion.div variants={itemVariants} className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
                 <div>
                     <h1 className="text-3xl font-black text-text-primary tracking-tighter">Controle de Produtos</h1>
@@ -1506,7 +1506,7 @@ function ProdutosPage() {
                     <Button variant="secondary" onClick={() => setIsXmlImportOpen(true)} className="hidden sm:flex"><FileText className="mr-2 h-4 w-4" /> Importar XML</Button>
                     <Button variant="secondary" onClick={() => setIsXmlImportOpen(true)} className="sm:hidden"><FileText className="h-4 w-4 mr-1" /> XML</Button>
                     <Button onClick={handleAddNew} className="hidden sm:flex"><Plus className="mr-2 h-4 w-4" /> Novo Produto</Button>
-                    <Button onClick={handleAddNew} size="icon" className="sm:hidden"><Plus className="h-4 w-4" /></Button>
+                    <Button onClick={handleAddNew} className="sm:hidden"><Plus className="h-4 w-4 mr-1" /> Produto</Button>
                 </div>
             </motion.div>
 
@@ -1607,8 +1607,8 @@ function ProdutosPage() {
               </DialogContent>
             </Dialog>
 
-            <motion.div variants={itemVariants} className="bg-surface rounded-lg border border-border flex-1 flex flex-col min-h-0">
-                <div className="p-3 pb-4 sm:p-4 border-b border-border space-y-3">
+            <motion.div variants={itemVariants} className="bg-surface rounded-lg border border-border flex flex-col">
+                <div className="p-3 pb-4 sm:p-4 border-b border-border space-y-3 flex-shrink-0">
                     {/* Busca */}
                     <div className="relative w-full">
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted" />
@@ -1656,7 +1656,7 @@ function ProdutosPage() {
                     </div>
                 </div>
                 
-                <div className="flex-1">
+                <div>
                     {sortedProducts.length === 0 ? (
                       <div className="p-10 text-center text-text-secondary">
                         <p className="text-lg mb-3">Nenhum produto cadastrado.</p>
