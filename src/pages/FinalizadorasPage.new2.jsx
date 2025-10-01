@@ -1,4 +1,3 @@
-// Página de Finalizadoras - Versão Nova e Limpa - Updated 2025-10-01 12:06
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Helmet } from 'react-helmet';
 import { motion } from 'framer-motion';
@@ -50,7 +49,6 @@ const StatCard = ({ icon: Icon, title, value, subtitle, color, onClick, isActive
 );
 
 export default function FinalizadorasPage() {
-  console.log('🟢 NOVA VERSÃO DA PÁGINA CARREGADA - 12:06');
   const { toast } = useToast();
   const { userProfile, authReady } = useAuth();
   

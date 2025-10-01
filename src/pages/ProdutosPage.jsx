@@ -1474,18 +1474,21 @@ function ProdutosPage() {
           <meta name="description" content="Gerenciamento completo de produtos e estoque." />
         </Helmet>
         <motion.div variants={pageVariants} initial="hidden" animate="visible" className="h-full flex flex-col">
-            <motion.div variants={itemVariants} className="flex items-center justify-between mb-6">
+            <motion.div variants={itemVariants} className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
                 <div>
                     <h1 className="text-3xl font-black text-text-primary tracking-tighter">Controle de Produtos</h1>
                     <p className="text-text-secondary">Controle total sobre seu inventário e estoque.</p>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                     <Button variant="outline" size="icon" onClick={() => setShowStats(s => !s)} title={showStats ? 'Ocultar resumo' : 'Mostrar resumo'} aria-label={showStats ? 'Ocultar resumo' : 'Mostrar resumo'}>
                       {showStats ? <EyeOff className="h-4 w-4"/> : <Eye className="h-4 w-4"/>}
                     </Button>
-                    <Button variant="outline" onClick={handleExport}><Download className="mr-2 h-4 w-4" /> Exportar</Button>
-                    <Button variant="secondary" onClick={() => setIsXmlImportOpen(true)}><FileText className="mr-2 h-4 w-4" /> Importar XML</Button>
-                    <Button onClick={handleAddNew}><Plus className="mr-2 h-4 w-4" /> Novo Produto</Button>
+                    <Button variant="outline" onClick={handleExport} className="hidden sm:flex"><Download className="mr-2 h-4 w-4" /> Exportar</Button>
+                    <Button variant="outline" onClick={handleExport} size="icon" className="sm:hidden"><Download className="h-4 w-4" /></Button>
+                    <Button variant="secondary" onClick={() => setIsXmlImportOpen(true)} className="hidden sm:flex"><FileText className="mr-2 h-4 w-4" /> Importar XML</Button>
+                    <Button variant="secondary" onClick={() => setIsXmlImportOpen(true)} size="icon" className="sm:hidden"><FileText className="h-4 w-4" /></Button>
+                    <Button onClick={handleAddNew} className="hidden sm:flex"><Plus className="mr-2 h-4 w-4" /> Novo Produto</Button>
+                    <Button onClick={handleAddNew} size="icon" className="sm:hidden"><Plus className="h-4 w-4" /></Button>
                 </div>
             </motion.div>
 
@@ -1609,8 +1612,74 @@ function ProdutosPage() {
                         <p className="text-lg mb-3">Nenhum produto cadastrado.</p>
                         <Button onClick={handleAddNew}><Plus className="mr-2 h-4 w-4" />Cadastrar primeiro produto</Button>
                       </div>
-                    ) : viewMode === 'list' ? (
-                        <div className="rounded-lg border border-border overflow-hidden">
+                    ) : (
+                      <>
+                        {/* Layout Mobile - Cards */}
+                        <div className="md:hidden p-4 space-y-3">
+                          {sortedProducts.map(p => (
+                            <div key={p.id} className="rounded-lg border border-border bg-surface p-4 space-y-3">
+                              {/* Header: Nome + Status */}
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="flex-1 min-w-0">
+                                  <h3 className="font-semibold text-base text-text-primary truncate" title={p.name}>{p.name}</h3>
+                                  <p className="text-xs text-text-muted mt-0.5">{p.category || 'Sem categoria'}</p>
+                                </div>
+                                <span className={cn(
+                                  "inline-flex px-2 py-0.5 rounded-full text-xs border flex-shrink-0",
+                                  p.status === 'active' && 'bg-emerald-50/5 border-emerald-500/30 text-emerald-400',
+                                  p.status === 'low_stock' && 'bg-amber-50/5 border-amber-500/30 text-amber-400',
+                                  p.status === 'inactive' && 'bg-surface-2 border-border text-text-muted'
+                                )}>
+                                  {p.status === 'active' ? 'Ativo' : p.status === 'low_stock' ? 'Estoque Baixo' : 'Inativo'}
+                                </span>
+                              </div>
+
+                              {/* Código */}
+                              {p.code && (
+                                <div>
+                                  <span className="text-xs text-text-muted">Código: </span>
+                                  <span className="text-sm font-mono">{p.code}</span>
+                                </div>
+                              )}
+
+                              {/* Grid de Informações */}
+                              <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                  <span className="text-xs text-text-muted block mb-1">Preço</span>
+                                  <span className="text-sm font-bold text-text-primary">R$ {p.price.toFixed(2)}</span>
+                                </div>
+                                <div>
+                                  <span className="text-xs text-text-muted block mb-1">Estoque</span>
+                                  <span className="text-sm font-medium">{p.stock}</span>
+                                </div>
+                                {p.validade && (
+                                  <div className="col-span-2">
+                                    <span className="text-xs text-text-muted block mb-1">Validade</span>
+                                    <span className="text-sm font-medium">
+                                      {(() => {
+                                        const d = p.validade instanceof Date ? p.validade : parseISO(String(p.validade));
+                                        return isNaN(d) ? '-' : format(d, 'dd/MM/yyyy');
+                                      })()}
+                                    </span>
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Botões de Ação */}
+                              <div className="flex gap-2 pt-2">
+                                <Button variant="outline" size="sm" onClick={() => handleEdit(p)} className="flex-1">
+                                  <Edit className="h-3 w-3 mr-1" /> Editar
+                                </Button>
+                                <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); handleAskDelete(p); }} className="text-danger hover:text-danger">
+                                  <Trash2 className="h-3 w-3" />
+                                </Button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* Layout Desktop - Tabela */}
+                        <div className="hidden md:block rounded-lg border border-border overflow-hidden">
                           <table className="w-full text-sm bg-surface table-fixed">
                             <thead className="bg-surface-2 text-text-secondary">
                                 <tr className="border-b border-border">
@@ -1663,17 +1732,7 @@ function ProdutosPage() {
                             </tbody>
                           </table>
                         </div>
-                    ) : (
-                       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 p-4">
-                            {sortedProducts.map(p => (
-                               <div key={p.id} className="bg-surface-2 rounded-lg border border-border p-4 flex flex-col text-center items-center gap-2 hover:border-border-hover hover:shadow-md cursor-pointer transition-all" onClick={() => handleEdit(p)}>
-                                   <p className="font-semibold mt-1 text-text-primary truncate w-full" title={p.name}>{p.name}</p>
-                                   <p className="text-xs text-text-secondary">{p.category || '—'}</p>
-                                   <p className="text-base font-bold text-text-primary">R$ {p.price.toFixed(2)}</p>
-                                   <span className="text-xs text-text-muted">Estoque: {p.stock}</span>
-                               </div>
-                            ))}
-                        </div>
+                      </>
                     )}
                 </div>
             </motion.div>

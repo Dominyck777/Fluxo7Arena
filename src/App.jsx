@@ -15,7 +15,7 @@ import PlaceholderPage from '@/pages/PlaceholderPage';
 import FinanceiroPage from '@/pages/FinanceiroPage';
 import QuadrasPage from '@/pages/QuadrasPage';
 import EmpresasPage from '@/pages/EmpresasPage';
-import FinalizadorasPage from '@/pages/FinalizadorasPage.new';
+import FinalizadorasPage from '@/pages/FinalizadorasPage';
 import TestPage from '@/pages/TestPage';
 import ResetPasswordPage from '@/pages/ResetPasswordPage';
 import HistoricoComandasPage from '@/pages/HistoricoComandasPage';
