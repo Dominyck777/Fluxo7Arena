@@ -1590,18 +1590,50 @@ function ProdutosPage() {
             </Dialog>
 
             <motion.div variants={itemVariants} className="bg-surface rounded-lg border border-border flex-1 flex flex-col min-h-0">
-                <div className="p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between border-b border-border gap-4">
-                    <div className="relative w-full sm:max-w-sm">
+                <div className="p-3 sm:p-4 border-b border-border space-y-3">
+                    {/* Busca */}
+                    <div className="relative w-full">
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted" />
-                        <Input placeholder="Buscar por nome ou código..." className="pl-9" value={searchTerm} onChange={(e)=>setSearchTerm(e.target.value)} />
+                        <Input placeholder="Buscar por nome ou código..." className="pl-9 text-sm" value={searchTerm} onChange={(e)=>setSearchTerm(e.target.value)} />
                     </div>
-                     <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
-                        <Filter size={16} className="text-text-muted hidden sm:block"/>
-                        <Select value={filters.type} onValueChange={v => handleFilterChange('type', v)}><SelectTrigger className="w-full sm:w-[150px] text-xs sm:text-sm"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="all">Todos Tipos</SelectItem><SelectItem value="Venda">Venda</SelectItem><SelectItem value="Uso Interno">Uso Interno</SelectItem></SelectContent></Select>
-                        <Select value={filters.category} onValueChange={v => handleFilterChange('category', v)}><SelectTrigger className="w-full sm:w-[150px] text-xs sm:text-sm"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="all">Categorias</SelectItem>{categories.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent></Select>
-                        <Select value={filters.status} onValueChange={v => handleFilterChange('status', v)}><SelectTrigger className="w-full sm:w-[150px] text-xs sm:text-sm"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="all">Todos Status</SelectItem><SelectItem value="active">Ativo</SelectItem><SelectItem value="low_stock">Estoque Baixo</SelectItem><SelectItem value="inactive">Inativo</SelectItem></SelectContent></Select>
-                        <Button variant="outline" onClick={() => setIsCategoryModalOpen(true)} className="w-full sm:w-auto text-xs sm:text-sm">
-                          <Tag className="h-3 w-3 sm:h-4 sm:w-4 mr-2"/> Categorias
+                    
+                    {/* Filtros em Grid 2x2 no mobile */}
+                    <div className="grid grid-cols-2 sm:flex sm:flex-row sm:items-center gap-2">
+                        <Select value={filters.type} onValueChange={v => handleFilterChange('type', v)}>
+                          <SelectTrigger className="text-xs sm:text-sm">
+                            <SelectValue/>
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">Todos Tipos</SelectItem>
+                            <SelectItem value="Venda">Venda</SelectItem>
+                            <SelectItem value="Uso Interno">Uso Interno</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        
+                        <Select value={filters.category} onValueChange={v => handleFilterChange('category', v)}>
+                          <SelectTrigger className="text-xs sm:text-sm">
+                            <SelectValue/>
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">Categorias</SelectItem>
+                            {categories.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                        
+                        <Select value={filters.status} onValueChange={v => handleFilterChange('status', v)}>
+                          <SelectTrigger className="text-xs sm:text-sm">
+                            <SelectValue/>
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">Todos Status</SelectItem>
+                            <SelectItem value="active">Ativo</SelectItem>
+                            <SelectItem value="low_stock">Estoque Baixo</SelectItem>
+                            <SelectItem value="inactive">Inativo</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        
+                        <Button variant="outline" onClick={() => setIsCategoryModalOpen(true)} className="text-xs sm:text-sm" size="sm">
+                          <Tag className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2"/> Categorias
                         </Button>
                     </div>
                 </div>
