@@ -547,12 +547,33 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
         </DialogHeader>
         <form onSubmit={handleSave} className="grid gap-4 py-2 flex-1 overflow-y-auto pr-1 fx-scroll">
           <Tabs defaultValue="dados" className="w-full">
-            <TabsList className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-1 text-xs sm:text-sm">
-              <TabsTrigger value="dados" className="text-xs sm:text-sm">Dados</TabsTrigger>
-              <TabsTrigger value="estoque" className="text-xs sm:text-sm">Estoque</TabsTrigger>
-              <TabsTrigger value="preco" className="text-xs sm:text-sm">Preço</TabsTrigger>
-              <TabsTrigger value="impostos" className="text-xs sm:text-sm">Impostos</TabsTrigger>
-              <TabsTrigger value="outras" className="text-xs sm:text-sm">Outras</TabsTrigger>
+            {/* Select para Mobile */}
+            <div className="sm:hidden mb-4">
+              <Select defaultValue="dados" onValueChange={(value) => {
+                const tabs = document.querySelector('[role="tablist"]');
+                const trigger = tabs?.querySelector(`[value="${value}"]`);
+                trigger?.click();
+              }}>
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="dados">Dados</SelectItem>
+                  <SelectItem value="estoque">Estoque</SelectItem>
+                  <SelectItem value="preco">Preço e Lucro</SelectItem>
+                  <SelectItem value="impostos">Impostos</SelectItem>
+                  <SelectItem value="outras">Outras Info</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Tabs para Desktop */}
+            <TabsList className="hidden sm:grid grid-cols-5 gap-1">
+              <TabsTrigger value="dados">Dados</TabsTrigger>
+              <TabsTrigger value="estoque">Estoque</TabsTrigger>
+              <TabsTrigger value="preco">Preço e Lucro</TabsTrigger>
+              <TabsTrigger value="impostos">Impostos</TabsTrigger>
+              <TabsTrigger value="outras">Outras Info</TabsTrigger>
             </TabsList>
 
             <div className="mt-2 text-[10px] sm:text-[11px] text-text-muted">* Campo obrigatório</div>
@@ -1590,7 +1611,7 @@ function ProdutosPage() {
             </Dialog>
 
             <motion.div variants={itemVariants} className="bg-surface rounded-lg border border-border flex-1 flex flex-col min-h-0">
-                <div className="p-3 sm:p-4 border-b border-border space-y-3">
+                <div className="p-3 pb-4 sm:p-4 border-b border-border space-y-3">
                     {/* Busca */}
                     <div className="relative w-full">
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted" />
