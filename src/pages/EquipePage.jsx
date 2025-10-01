@@ -419,24 +419,13 @@ export default function EquipePage() {
                             <h1 className="text-2xl sm:text-3xl font-black text-text-primary tracking-tighter">Gestão de Equipe</h1>
                             <p className="text-sm sm:text-base text-text-secondary">Controle de funcionários, permissões e logs.</p>
                         </div>
-                        <div className="flex gap-2">
-                          <Button
-                            onClick={handleAddNew}
-                            disabled={!authReady || !company?.codigo_empresa}
-                            title={!authReady ? 'Aguardando autenticação...' : (!company?.codigo_empresa ? 'Empresa sem código. Defina o código da empresa antes.' : '')}
-                            className="hidden sm:flex"
-                          >
-                            <Plus className="mr-2 h-4 w-4" /> Novo Funcionário
-                          </Button>
-                          <Button
-                            onClick={handleAddNew}
-                            disabled={!authReady || !company?.codigo_empresa}
-                            size="icon"
-                            className="sm:hidden"
-                          >
-                            <Plus className="h-4 w-4" />
-                          </Button>
-                        </div>
+                        <Button
+                          onClick={handleAddNew}
+                          disabled={!authReady || !company?.codigo_empresa}
+                          title={!authReady ? 'Aguardando autenticação...' : (!company?.codigo_empresa ? 'Empresa sem código. Defina o código da empresa antes.' : '')}
+                        >
+                          <Plus className="mr-2 h-4 w-4" /> Novo Funcionário
+                        </Button>
                     </motion.div>
 
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
