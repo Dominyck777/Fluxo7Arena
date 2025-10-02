@@ -129,22 +129,58 @@ export default function XMLSalesImportModal({ open, onOpenChange, codigoEmpresa,
         if (itensError) throw itensError;
       }
       
-      // 3. Registrar pagamento (valor total da nota)
-      const totalVenda = parsedData.produtos.reduce((acc, p) => acc + (p.valorTotal || 0), 0);
+      // 3. Registrar pagamentos do XML
+      const pagamentosXML = parsedData.pagamentos || [];
       
-      const { error: pagamentoError } = await supabase
-        .from('pagamentos')
-        .insert({
-          comanda_id: comanda.id,
-          finalizadora_id: null,
-          metodo: 'outros',
-          valor: totalVenda,
-          status: 'Pago',
-          recebido_em: dataEmissao.toISOString(),
-          codigo_empresa: codigoEmpresa
+      if (pagamentosXML.length > 0) {
+        // Buscar finalizadoras para mapear código SEFAZ
+        const { data: finalizadoras } = await supabase
+          .from('finalizadoras')
+          .select('id, codigo_sefaz, nome')
+          .eq('codigo_empresa', codigoEmpresa)
+          .eq('ativo', true);
+        
+        const finalizadorasPorCodigo = new Map(
+          (finalizadoras || []).map(f => [f.codigo_sefaz, f])
+        );
+        
+        const pagamentosParaInserir = pagamentosXML.map(pag => {
+          const finalizadora = finalizadorasPorCodigo.get(pag.codigoSefaz);
+          
+          return {
+            comanda_id: comanda.id,
+            finalizadora_id: finalizadora?.id || null,
+            metodo: pag.descricao.toLowerCase(),
+            valor: pag.valor,
+            status: 'Pago',
+            recebido_em: dataEmissao.toISOString(),
+            codigo_empresa: codigoEmpresa
+          };
         });
-      
-      if (pagamentoError) throw pagamentoError;
+        
+        const { error: pagamentoError } = await supabase
+          .from('pagamentos')
+          .insert(pagamentosParaInserir);
+        
+        if (pagamentoError) throw pagamentoError;
+      } else {
+        // Fallback: registrar como "outros" se XML não tiver pagamentos
+        const totalVenda = parsedData.produtos.reduce((acc, p) => acc + (p.valorTotal || 0), 0);
+        
+        const { error: pagamentoError } = await supabase
+          .from('pagamentos')
+          .insert({
+            comanda_id: comanda.id,
+            finalizadora_id: null,
+            metodo: 'outros',
+            valor: totalVenda,
+            status: 'Pago',
+            recebido_em: dataEmissao.toISOString(),
+            codigo_empresa: codigoEmpresa
+          });
+        
+        if (pagamentoError) throw pagamentoError;
+      }
       
       // Resultado
       console.log('[XMLSalesImport] Venda importada com sucesso. Comanda ID:', comanda.id);
@@ -336,6 +372,27 @@ export default function XMLSalesImportModal({ open, onOpenChange, codigoEmpresa,
                   ))}
                 </div>
               </div>
+
+              {/* Formas de Pagamento do XML */}
+              {parsedData.pagamentos && parsedData.pagamentos.length > 0 && (
+                <div className="bg-surface-2 rounded-lg p-4 border border-border">
+                  <h3 className="font-semibold mb-3">Formas de Pagamento ({parsedData.pagamentos.length})</h3>
+                  <div className="space-y-2">
+                    {parsedData.pagamentos.map((pag, idx) => (
+                      <div 
+                        key={idx} 
+                        className="p-3 rounded-lg border border-border bg-surface flex items-center justify-between"
+                      >
+                        <div>
+                          <p className="font-semibold text-sm">{pag.descricao}</p>
+                          <p className="text-xs text-text-muted">Código SEFAZ: {pag.codigoSefaz}</p>
+                        </div>
+                        <p className="text-sm font-semibold">R$ {pag.valor.toFixed(2)}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <div className="bg-warning/10 border border-warning/30 rounded-lg p-4">
                 <div className="flex items-start gap-3">
