@@ -206,6 +206,7 @@ function Sidebar({ onNavigate, isVisible, setIsVisible, sidebarPinned }) {
             </button>
             {openCadastros && (
               <ul className="mt-2 ml-8 space-y-2">
+                {/* 1. Clientes & Fornecedores */}
                 <li>
                   <NavLink
                     to="/clientes"
@@ -215,6 +216,7 @@ function Sidebar({ onNavigate, isVisible, setIsVisible, sidebarPinned }) {
                     <Users className="h-4 w-4 mr-3" /> Clientes & Fornecedores
                   </NavLink>
                 </li>
+                {/* 2. Finalizadoras */}
                 <li>
                   <NavLink
                     to="/finalizadoras"
@@ -224,15 +226,7 @@ function Sidebar({ onNavigate, isVisible, setIsVisible, sidebarPinned }) {
                     <CreditCard className="h-4 w-4 mr-3" /> Finalizadoras
                   </NavLink>
                 </li>
-                <li>
-                  <NavLink
-                    to="/quadras"
-                    onClick={handleNavClick}
-                    className={({ isActive }) => isActive ? 'flex items-center h-[40px] px-3 rounded-sm bg-brand/20 text-text-primary font-medium text-sm' : 'flex items-center h-[40px] px-3 rounded-sm text-text-secondary hover:bg-surface-2 hover:text-text-primary transition-colors text-sm'}
-                  >
-                    <Layers className="h-4 w-4 mr-3" /> Quadras
-                  </NavLink>
-                </li>
+                {/* 3. Produtos */}
                 <li>
                   <NavLink
                     to="/produtos"
@@ -242,6 +236,7 @@ function Sidebar({ onNavigate, isVisible, setIsVisible, sidebarPinned }) {
                     <Package className="h-4 w-4 mr-3" /> Produtos
                   </NavLink>
                 </li>
+                {/* 4. Equipe */}
                 <li>
                   <NavLink
                     to="/equipe"
@@ -251,6 +246,17 @@ function Sidebar({ onNavigate, isVisible, setIsVisible, sidebarPinned }) {
                     <UserCog className="h-4 w-4 mr-3" /> Equipe
                   </NavLink>
                 </li>
+                {/* 5. Quadras */}
+                <li>
+                  <NavLink
+                    to="/quadras"
+                    onClick={handleNavClick}
+                    className={({ isActive }) => isActive ? 'flex items-center h-[40px] px-3 rounded-sm bg-brand/20 text-text-primary font-medium text-sm' : 'flex items-center h-[40px] px-3 rounded-sm text-text-secondary hover:bg-surface-2 hover:text-text-primary transition-colors text-sm'}
+                  >
+                    <Layers className="h-4 w-4 mr-3" /> Quadras
+                  </NavLink>
+                </li>
+                {/* 6. Empresa */}
                 <li>
                   <NavLink
                     to="/empresas"
