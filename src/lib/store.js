@@ -149,28 +149,41 @@ export async function listarClientesPorComandas(comandaIds = [], codigoEmpresa) 
   return map;
 }
 
-// Busca finalizadoras em lote e retorna mapa { comanda_id: 'Pix, Dinheiro' }
+// Busca finalizadoras em lote e retorna mapa { comanda_id: 'Pix +2' ou 'Dinheiro' }
 export async function listarFinalizadorasPorComandas(comandaIds = [], codigoEmpresa) {
   if (!Array.isArray(comandaIds) || comandaIds.length === 0) return {};
   const codigo = codigoEmpresa || getCachedCompanyCode();
   let q = supabase
     .from('pagamentos')
-    .select('comanda_id, metodo, status')
+    .select('comanda_id, metodo, status, finalizadoras!pagamentos_finalizadora_id_fkey(nome)')
     .in('comanda_id', comandaIds);
   if (codigo) q = q.eq('codigo_empresa', codigo);
   const { data, error } = await q;
   if (error) throw error;
+  
   const map = {};
   for (const pg of (data || [])) {
     const ok = (pg.status || 'Pago') !== 'Cancelado' && (pg.status || 'Pago') !== 'Estornado';
     if (!ok) continue;
     const id = pg.comanda_id;
-    const m = pg.metodo || '';
-    if (!map[id]) map[id] = new Set();
-    if (m) map[id].add(m);
+    // Priorizar nome da finalizadora, fallback para metodo
+    const nome = pg?.finalizadoras?.nome || pg.metodo || 'Outros';
+    if (!map[id]) map[id] = [];
+    map[id].push(nome);
   }
+  
+  // Formatar: primeira finalizadora + contador se houver mais
   const out = {};
-  for (const [k, set] of Object.entries(map)) out[k] = Array.from(set).join(', ');
+  for (const [k, nomes] of Object.entries(map)) {
+    if (nomes.length === 0) {
+      out[k] = '—';
+    } else if (nomes.length === 1) {
+      out[k] = nomes[0];
+    } else {
+      // Mostrar primeira + contador
+      out[k] = `${nomes[0]} +${nomes.length - 1}`;
+    }
+  }
   return out;
 }
 

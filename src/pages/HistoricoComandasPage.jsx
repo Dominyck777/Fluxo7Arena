@@ -929,69 +929,7 @@ export default function HistoricoComandasPage() {
               </div>
             </div>
           )}
-          <DialogFooter className="flex gap-2">
-            <Button 
-              size="sm" 
-              variant="outline" 
-              onClick={async () => {
-                try {
-                  const xml = await gerarXMLNFe({ 
-                    comandaId: detailId, 
-                    codigoEmpresa: userProfile?.codigo_empresa,
-                    modelo: '55'
-                  });
-                  const nomeArquivo = `NFe_${detailId}_${new Date().getTime()}.xml`;
-                  downloadXML(xml, nomeArquivo);
-                  toast({ 
-                    title: 'XML NF-e gerado', 
-                    description: `Modelo 55 - ${nomeArquivo}`, 
-                    variant: 'success',
-                    className: 'bg-amber-500 text-black shadow-xl'
-                  });
-                } catch (err) {
-                  console.error('Erro ao gerar XML:', err);
-                  toast({ 
-                    title: 'Erro ao gerar XML', 
-                    description: err?.message || 'Tente novamente', 
-                    variant: 'destructive' 
-                  });
-                }
-              }}
-            >
-              <Download className="h-4 w-4 mr-2" />
-              NF-e (55)
-            </Button>
-            <Button 
-              size="sm" 
-              variant="outline" 
-              onClick={async () => {
-                try {
-                  const xml = await gerarXMLNFe({ 
-                    comandaId: detailId, 
-                    codigoEmpresa: userProfile?.codigo_empresa,
-                    modelo: '65'
-                  });
-                  const nomeArquivo = `NFCe_${detailId}_${new Date().getTime()}.xml`;
-                  downloadXML(xml, nomeArquivo);
-                  toast({ 
-                    title: 'XML NFC-e gerado', 
-                    description: `Modelo 65 - ${nomeArquivo}`, 
-                    variant: 'success',
-                    className: 'bg-amber-500 text-black shadow-xl'
-                  });
-                } catch (err) {
-                  console.error('Erro ao gerar XML:', err);
-                  toast({ 
-                    title: 'Erro ao gerar XML', 
-                    description: err?.message || 'Tente novamente', 
-                    variant: 'destructive' 
-                  });
-                }
-              }}
-            >
-              <Download className="h-4 w-4 mr-2" />
-              NFC-e (65)
-            </Button>
+          <DialogFooter>
             <Button size="sm" variant="secondary" onClick={() => { setDetailId(null); }}>Fechar</Button>
           </DialogFooter>
         </DialogContent>
