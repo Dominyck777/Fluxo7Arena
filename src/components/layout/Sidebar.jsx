@@ -49,7 +49,7 @@ const NavItem = ({ to, icon: Icon, label, index, onNavigate }) => {
   );
 };
 
-function Sidebar({ onNavigate, isVisible, setIsVisible }) {
+function Sidebar({ onNavigate, isVisible, setIsVisible, sidebarPinned }) {
   const location = useLocation();
   const groupPaths = ['/produtos', '/clientes', '/equipe', '/quadras', '/empresas', '/finalizadoras'];
   const groupActive = useMemo(() => groupPaths.includes(location.pathname), [location.pathname]);
@@ -73,6 +73,8 @@ function Sidebar({ onNavigate, isVisible, setIsVisible }) {
     const handleMouseMove = (e) => {
       // Apenas em desktop (> 768px)
       if (window.innerWidth < 768) return;
+      // Se estiver fixada (pinned), não auto-abre/fecha por hover
+      if (sidebarPinned) return;
       
       // Zona de trigger: 30px da borda esquerda
       if (e.clientX <= 30 && !isVisible) {
@@ -86,7 +88,7 @@ function Sidebar({ onNavigate, isVisible, setIsVisible }) {
 
     window.addEventListener('mousemove', handleMouseMove);
     return () => window.removeEventListener('mousemove', handleMouseMove);
-  }, [isVisible]);
+  }, [isVisible, sidebarPinned]);
 
   // Touch events para mobile (swipe da esquerda)
   useEffect(() => {
@@ -154,7 +156,7 @@ function Sidebar({ onNavigate, isVisible, setIsVisible }) {
       <div 
         ref={triggerZoneRef}
         className="hidden md:block fixed left-0 top-0 w-8 h-full z-30 pointer-events-auto"
-        onMouseEnter={() => setIsVisible(true)}
+        onMouseEnter={() => { if (!sidebarPinned) setIsVisible(true); }}
       />
 
 
@@ -162,7 +164,7 @@ function Sidebar({ onNavigate, isVisible, setIsVisible }) {
       <motion.aside
         ref={sidebarRef}
         initial={false}
-        animate={{ width: isVisible ? 280 : 0 }}
+        animate={{ width: (sidebarPinned || isVisible) ? 280 : 0 }}
         transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
         className="h-screen flex-shrink-0 bg-surface flex flex-col border-r border-border shadow-xl shadow-black/20 overflow-hidden"
       >
