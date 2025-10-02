@@ -286,14 +286,18 @@ function VendasPage() {
           return t;
         });
         if (!mountedRef.current || loadReqIdRef.current !== myReq) { clearTimeout(slowFallback); clearTimeout(safetyTimer); return; }
-        // Se vier tudo vazio após idle, preservar cache e agendar um retry leve
+        
+        // Sempre atualizar com o que veio do banco (mesmo se vazio)
+        setTables(uiTables);
+        
+        // Se veio vazio do banco, limpar cache também
         if ((uiTables || []).length === 0) {
-          hydrateFromCache();
-          setTimeout(() => { if (mountedRef.current && loadReqIdRef.current === myReq) load(); }, 800);
+          try { if (cacheKey) localStorage.removeItem(cacheKey); } catch {}
         } else {
-          setTables(uiTables);
+          // Salvar cache apenas se houver mesas
           try { if (cacheKey) localStorage.setItem(cacheKey, JSON.stringify(uiTables)); } catch {}
         }
+        
         lastTablesSizeRef.current = Array.isArray(uiTables) ? uiTables.length : 0;
         lastTablesLoadTsRef.current = Date.now();
         // Restaurar seleção anterior pelo cache (se houver)
