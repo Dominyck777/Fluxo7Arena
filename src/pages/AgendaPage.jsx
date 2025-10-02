@@ -3982,7 +3982,14 @@ function AgendaPage() {
                         className="bg-sky-600 hover:bg-sky-500 text-white w-full sm:w-auto"
                         onClick={splitEqually}
                         disabled={!paymentTotal || participantsCount === 0}
-                      >Dividir igualmente</Button>
+                      >
+                        {(() => {
+                          const total = parseBRL(paymentTotal);
+                          const show = Number.isFinite(total) && participantsCount > 0;
+                          const per = show ? (total / participantsCount) : 0;
+                          return `Dividir igualmente${show ? ` (R$ ${per.toFixed(2)} p/ cada)` : ''}`;
+                        })()}
+                      </Button>
                       <Button 
                         type="button" 
                         variant="ghost" 
@@ -4421,7 +4428,7 @@ function AgendaPage() {
                         toast({
                           title: 'Pagamentos salvos',
                           description: 'Total não alcançado.',
-                          variant: 'destructive',
+                          variant: 'warning',
                         });
                       } else if (pendingCount > 0) {
                         toast({
