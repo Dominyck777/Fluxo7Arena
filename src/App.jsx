@@ -24,7 +24,25 @@ import { Helmet } from 'react-helmet';
 
 function PrivateApp() {
   const [sidebarVisible, setSidebarVisible] = useState(true);
-  const toggleSidebar = () => setSidebarVisible(v => !v);
+  const [sidebarPinned, setSidebarPinned] = useState(false);
+  const handleSidebarButton = () => {
+    try {
+      if (typeof window !== 'undefined' && window.innerWidth >= 768) {
+        // Desktop: toggle pin. When pinning, ensure visible
+        setSidebarPinned((p) => {
+          const next = !p;
+          if (next) setSidebarVisible(true);
+          return next;
+        });
+      } else {
+        // Mobile: just toggle visibility
+        setSidebarVisible((v) => !v);
+      }
+    } catch {
+      // Fallback safe toggle
+      setSidebarVisible((v) => !v);
+    }
+  };
   const location = useLocation();
   const isAgendaPage = location.pathname === '/agenda';
 
@@ -35,9 +53,9 @@ function PrivateApp() {
           <meta name="description" content="Software para gestão de quadras esportivas." />
       </Helmet>
       
-      <Sidebar isVisible={sidebarVisible} setIsVisible={setSidebarVisible} />
+      <Sidebar isVisible={sidebarVisible} setIsVisible={setSidebarVisible} sidebarPinned={sidebarPinned} />
       <div className="flex-1 flex flex-col overflow-hidden">
-        <Header onToggleSidebar={toggleSidebar} sidebarVisible={sidebarVisible} />
+        <Header onToggleSidebar={handleSidebarButton} sidebarVisible={sidebarVisible} sidebarPinned={sidebarPinned} />
         <main className={cn("flex-1 overflow-x-hidden overflow-y-auto bg-background", isAgendaPage ? "p-0 md:p-8" : "p-8")}>
           <Routes>
             <Route path="/" element={<DashboardPage />} />

@@ -1,13 +1,13 @@
 import React from 'react';
 import { useLocation } from 'react-router-dom';
 
-import { Calendar, Bell, LogOut, Building, Menu, X, PanelLeftClose, PanelLeft } from 'lucide-react';
+import { Calendar, Bell, LogOut, Building, Menu, X, PanelLeftClose, PanelLeft, Lock, Unlock } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { useToast } from "@/components/ui/use-toast";
 import { useAuth } from '@/contexts/AuthContext';
 
-function Header({ onToggleSidebar, sidebarVisible }) {
+function Header({ onToggleSidebar, sidebarVisible, sidebarPinned }) {
   const { toast } = useToast();
   const { signOut, userProfile, company, user } = useAuth();
   // Extrair apenas nome e sobrenome (primeiras duas palavras)
@@ -128,6 +128,14 @@ function Header({ onToggleSidebar, sidebarVisible }) {
           ) : (
             <PanelLeft className="w-7 h-7 hidden md:block text-text-primary transition-colors" />
           )}
+          {/* Indicador de fixação (desktop) */}
+          <span className="hidden md:inline-flex items-center justify-center ml-1">
+            {sidebarPinned ? (
+              <Lock className="w-3.5 h-3.5 text-brand/80" />
+            ) : (
+              <Unlock className="w-3.5 h-3.5 text-text-secondary" />
+            )}
+          </span>
         </Button>
         <div
           className="group pl-3 pr-5 py-1.5 rounded-full border border-white/10 bg-gradient-to-b from-surface-2/60 to-surface/60 text-text-primary flex items-center gap-4 shadow-sm hover:border-white/20 transition-colors"
