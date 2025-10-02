@@ -1510,8 +1510,8 @@ function VendasPage() {
   };
 
   const ProductsPanel = () => {
-    // Ordenar produtos por código
-    const sortedProducts = (products.length ? products : productsData).slice().sort((a, b) => {
+    // Ordenar produtos por código (somente produtos reais do catálogo)
+    const sortedProducts = (products || []).slice().sort((a, b) => {
       const codeA = a.code || '';
       const codeB = b.code || '';
       // Se ambos são números, comparar numericamente
@@ -1525,14 +1525,19 @@ function VendasPage() {
     return (
     <div className="flex flex-col h-full">
        <div className="p-4 border-b border-border">
-           <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted" />
-              <Input placeholder="Buscar produto..." className="pl-9" />
-           </div>
+          <div className="relative">
+             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted" />
+             <Input placeholder="Buscar produto..." className="pl-9" />
+          </div>
        </div>
        <div className="flex-1 overflow-y-auto p-4 thin-scroll">
           <ul className="space-y-2">
-              {sortedProducts.map(prod => {
+              {sortedProducts.length === 0 ? (
+                <li className="text-center text-text-muted py-8">
+                  <div className="mb-3">Nenhum produto cadastrado. Cadastre produtos para começar a vender.</div>
+                  <Button size="sm" onClick={() => navigate('/produtos')}>Cadastrar Produtos</Button>
+                </li>
+              ) : sortedProducts.map(prod => {
                   const q = qtyByProductId.get(prod.id) || 0;
                   const stock = Number(prod.stock ?? prod.currentStock ?? 0);
                   const remaining = Math.max(0, stock - q);
@@ -1721,7 +1726,7 @@ function VendasPage() {
               </div>
               <div className="flex-1 overflow-y-auto -mr-4 pr-4 thin-scroll">
                 <ul className="space-y-2">
-                  {(products.length ? products : productsData).filter(p => {
+                  {(products || []).filter(p => {
                     const s = counterSearch.trim().toLowerCase();
                     if (!s) return true;
                     return (p.name || '').toLowerCase().includes(s) || (p.code || '').toLowerCase().includes(s);
@@ -1758,6 +1763,12 @@ function VendasPage() {
               </li>
             );
           })}
+                  {(!products || products.length === 0) && (
+                    <li className="text-center text-text-muted py-8">
+                      <div className="mb-3">Nenhum produto cadastrado. Cadastre produtos para vender no balcão.</div>
+                      <Button size="sm" onClick={() => navigate('/produtos')}>Cadastrar Produtos</Button>
+                    </li>
+                  )}
                 </ul>
               </div>
             </div>
