@@ -66,6 +66,7 @@ table,public,caixa_sessoes,null,table,postgres,null
 table,public,caixa_movimentos,null,table,postgres,null
 table,public,comanda_clientes,null,table,postgres,null
 table,public,finalizadoras,null,table,postgres,null
+table,realtime,messages_2025_10_05,null,table,supabase_admin,null
 table,auth,oauth_clients,null,table,supabase_auth_admin,null
 table,public,agenda_settings,null,table,postgres,Configurações de automação da agenda por empresa (1:1 com empresas).
 table,public,caixa_resumos,null,table,postgres,null
@@ -657,6 +658,7 @@ column,storage,level,idx_prefixes_lower_name,integer default null,null,null
 column,storage,string_to_array,idx_prefixes_lower_name,text default null,null,null
 column,storage,lower,idx_prefixes_lower_name,text default null,null,null
 column,public,comanda_id,estoque_baixa_log_pkey,uuid default null,null,null
+column,public,codigo,idx_finalizadoras_codigo,text default null,null,null
 column,realtime,topic,messages,text default null,null,null
 column,realtime,extension,messages,text default null,null,null
 column,realtime,payload,messages,jsonb default null,null,null
@@ -727,6 +729,7 @@ column,public,codigo_empresa,colaboradores_codigo_empresa_idx,text default null,
 column,public,codigo_empresa,agendamentos_codigo_empresa_idx,text default null,null,null
 column,public,codigo_empresa,idx_agp_codigo_empresa,character varying(10) default null,null,null
 column,public,comanda_id,idx_comanda_clientes_comanda,uuid default null,null,null
+column,public,codigo_sefaz,idx_finalizadoras_codigo_sefaz,text default null,null,null
 column,realtime,id,messages_2025_09_28_pkey,uuid default null,null,null
 column,realtime,inserted_at,messages_2025_09_28_pkey,timestamp without time zone default null,null,null
 column,public,codigo_empresa,produtos_codigo_empresa_nome_unique,character varying(10) default null,null,null
@@ -821,6 +824,10 @@ column,public,recebido_em,pagamentos,timestamp with time zone default now(),null
 column,public,created_at,pagamentos,timestamp with time zone default now(),null,null
 column,public,updated_at,pagamentos,timestamp with time zone default now(),null,null
 column,public,finalizadora_id,pagamentos,uuid default null,null,null
+column,realtime,id,messages_2025_10_05_pkey,uuid default null,null,null
+column,realtime,inserted_at,messages_2025_10_05_pkey,timestamp without time zone default null,null,null
+column,realtime,inserted_at,messages_2025_10_05_inserted_at_topic_idx,timestamp without time zone default null,null,null
+column,realtime,topic,messages_2025_10_05_inserted_at_topic_idx,text default null,null,null
 column,public,id,mesas,uuid default gen_random_uuid(),null,null
 column,public,codigo_empresa,mesas,text default get_my_company_code(),null,null
 column,public,numero,mesas,integer default null,null,null
@@ -893,13 +900,6 @@ column,public,codigo_empresa,comanda_clientes,text default null,null,null
 column,public,created_at,comanda_clientes,timestamp with time zone default now(),null,null
 column,public,id,comanda_clientes_pkey,uuid default null,null,null
 column,public,id,finalizadoras_pkey,uuid default null,null,null
-column,public,codigo_empresa,idx_finalizadoras_empresa,text default null,null,null
-column,public,ativo,idx_finalizadoras_ativo,boolean default null,null,null
-column,public,ordem,idx_finalizadoras_ordem,integer default null,null,null
-column,public,cliente_id,comanda_clientes_cliente_idx,uuid default null,null,null
-column,public,codigo_empresa,comanda_clientes_empresa_idx,text default null,null,null
-column,public,finalizadora_id,idx_pagamentos_finalizadora,uuid default null,null,null
-column,public,recebido_em,idx_pagamentos_recebido_em,timestamp with time zone default null,null,null
 column,public,id,finalizadoras,uuid default gen_random_uuid(),null,null
 column,public,codigo_empresa,finalizadoras,text default null,null,null
 column,public,nome,finalizadoras,text default null,null,null
@@ -910,6 +910,23 @@ column,public,taxa_percentual,finalizadoras,"numeric(8,4) default null",null,nul
 column,public,observacao,finalizadoras,text default null,null,null
 column,public,created_at,finalizadoras,timestamp with time zone default now(),null,null
 column,public,updated_at,finalizadoras,timestamp with time zone default now(),null,null
+column,public,codigo_interno,finalizadoras,text default null,null,"Código interno sequencial (01, 02, 03...)"
+column,public,codigo_sefaz,finalizadoras,text default null,null,Código oficial SEFAZ para XML NF-e/NFC-e
+column,public,codigo_empresa,idx_finalizadoras_empresa,text default null,null,null
+column,public,ativo,idx_finalizadoras_ativo,boolean default null,null,null
+column,public,ordem,idx_finalizadoras_ordem,integer default null,null,null
+column,realtime,topic,messages_2025_10_05,text default null,null,null
+column,realtime,extension,messages_2025_10_05,text default null,null,null
+column,realtime,payload,messages_2025_10_05,jsonb default null,null,null
+column,realtime,event,messages_2025_10_05,text default null,null,null
+column,realtime,private,messages_2025_10_05,boolean default false,null,null
+column,realtime,updated_at,messages_2025_10_05,timestamp without time zone default now(),null,null
+column,realtime,inserted_at,messages_2025_10_05,timestamp without time zone default now(),null,null
+column,realtime,id,messages_2025_10_05,uuid default gen_random_uuid(),null,null
+column,public,cliente_id,comanda_clientes_cliente_idx,uuid default null,null,null
+column,public,codigo_empresa,comanda_clientes_empresa_idx,text default null,null,null
+column,public,finalizadora_id,idx_pagamentos_finalizadora,uuid default null,null,null
+column,public,recebido_em,idx_pagamentos_recebido_em,timestamp with time zone default null,null,null
 column,auth,id,oauth_clients_pkey,uuid default null,null,null
 column,auth,client_id,oauth_clients_client_id_key,text default null,null,null
 column,auth,client_id,oauth_clients_client_id_idx,text default null,null,null
@@ -1190,6 +1207,7 @@ constraint,public,fk_comanda_clientes_cliente,comanda_clientes,FOREIGN KEY (clie
 constraint,public,finalizadoras_empresa_nome_unique,finalizadoras,"UNIQUE (codigo_empresa, nome)",null,null
 constraint,public,finalizadoras_pkey,finalizadoras,PRIMARY KEY (id),null,null
 constraint,public,finalizadoras_tipo_check,finalizadoras,"CHECK ((tipo = ANY (ARRAY['dinheiro'::text, 'credito'::text, 'debito'::text, 'pix'::text, 'voucher'::text, 'outros'::text])))",null,null
+constraint,realtime,messages_2025_10_05_pkey,messages_2025_10_05,"PRIMARY KEY (id, inserted_at)",null,null
 constraint,auth,oauth_clients_client_id_key,oauth_clients,UNIQUE (client_id),null,null
 constraint,auth,oauth_clients_client_name_length,oauth_clients,CHECK ((char_length(client_name) <= 1024)),null,null
 constraint,auth,oauth_clients_client_uri_length,oauth_clients,CHECK ((char_length(client_uri) <= 2048)),null,null
@@ -1388,6 +1406,10 @@ index,public,idx_finalizadoras_ativo,finalizadoras,CREATE INDEX idx_finalizadora
 index,public,idx_finalizadoras_ordem,finalizadoras,CREATE INDEX idx_finalizadoras_ordem ON public.finalizadoras USING btree (ordem),null,null
 index,public,finalizadoras_empresa_nome_unique,finalizadoras,"CREATE UNIQUE INDEX finalizadoras_empresa_nome_unique ON public.finalizadoras USING btree (codigo_empresa, nome)",null,null
 index,public,uq_finalizadoras_empresa_nome,finalizadoras,"CREATE UNIQUE INDEX uq_finalizadoras_empresa_nome ON public.finalizadoras USING btree (codigo_empresa, lower(nome))",null,null
+index,public,idx_finalizadoras_codigo,finalizadoras,CREATE INDEX idx_finalizadoras_codigo ON public.finalizadoras USING btree (codigo_interno),null,null
+index,public,idx_finalizadoras_codigo_sefaz,finalizadoras,CREATE INDEX idx_finalizadoras_codigo_sefaz ON public.finalizadoras USING btree (codigo_sefaz),null,null
+index,realtime,messages_2025_10_05_pkey,messages_2025_10_05,"CREATE UNIQUE INDEX messages_2025_10_05_pkey ON realtime.messages_2025_10_05 USING btree (id, inserted_at)",null,null
+index,realtime,messages_2025_10_05_inserted_at_topic_idx,messages_2025_10_05,"CREATE INDEX messages_2025_10_05_inserted_at_topic_idx ON realtime.messages_2025_10_05 USING btree (inserted_at DESC, topic) WHERE ((extension = 'broadcast'::text) AND (private IS TRUE))",null,null
 index,auth,oauth_clients_pkey,oauth_clients,CREATE UNIQUE INDEX oauth_clients_pkey ON auth.oauth_clients USING btree (id),null,null
 index,auth,oauth_clients_client_id_key,oauth_clients,CREATE UNIQUE INDEX oauth_clients_client_id_key ON auth.oauth_clients USING btree (client_id),null,null
 index,auth,oauth_clients_client_id_idx,oauth_clients,CREATE INDEX oauth_clients_client_id_idx ON auth.oauth_clients USING btree (client_id),null,null
@@ -1715,6 +1737,7 @@ type,public,v_agendamento_participantes,null,v_agendamento_participantes,null,nu
 type,public,agendamento_participantes,null,agendamento_participantes,null,null
 type,realtime,messages_2025_10_04,null,realtime.messages_2025_10_04,null,null
 type,public,comanda_clientes,null,comanda_clientes,null,null
+type,realtime,messages_2025_10_05,null,realtime.messages_2025_10_05,null,null
 type,public,caixa_resumos,null,caixa_resumos,null,null
 type,public,caixa_movimentacoes,null,caixa_movimentacoes,null,null
 extension,pg_catalog,plpgsql,null,1.0,null,PL/pgSQL procedural language
@@ -1888,6 +1911,7 @@ grant,realtime,subscription_id_seq,null,"supabase_admin=rwU/supabase_admin,postg
 grant,public,estoque_baixa_log,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
 grant,storage,idx_prefixes_lower_name,null,null,supabase_storage_admin,null
 grant,public,estoque_baixa_log_pkey,null,null,postgres,null
+grant,public,idx_finalizadoras_codigo,null,null,postgres,null
 grant,realtime,messages,null,"supabase_realtime_admin=arwdDxtm/supabase_realtime_admin,postgres=arwdDxtm/supabase_realtime_admin,dashboard_user=arwdDxtm/supabase_realtime_admin,anon=arw/supabase_realtime_admin,authenticated=arw/supabase_realtime_admin,service_role=arw/supabase_realtime_admin",supabase_realtime_admin,null
 grant,public,user_profiles_pkey,null,null,postgres,null
 grant,public,agendamentos,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
@@ -1913,6 +1937,7 @@ grant,public,colaboradores_codigo_empresa_idx,null,null,postgres,null
 grant,public,agendamentos_codigo_empresa_idx,null,null,postgres,null
 grant,public,idx_agp_codigo_empresa,null,null,postgres,null
 grant,public,idx_comanda_clientes_comanda,null,null,postgres,null
+grant,public,idx_finalizadoras_codigo_sefaz,null,null,postgres,null
 grant,realtime,messages_2025_09_28_pkey,null,null,supabase_admin,null
 grant,public,produtos_codigo_empresa_nome_unique,null,null,postgres,null
 grant,public,idx_produtos_codigo_empresa,null,null,postgres,null
@@ -1942,6 +1967,8 @@ grant,realtime,messages_2025_10_02,null,"supabase_admin=arwdDxtm/supabase_admin,
 grant,public,pagamentos_pkey,null,null,postgres,null
 grant,public,idx_pagamentos_empresa,null,null,postgres,null
 grant,public,pagamentos,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
+grant,realtime,messages_2025_10_05_pkey,null,null,supabase_admin,null
+grant,realtime,messages_2025_10_05_inserted_at_topic_idx,null,null,supabase_admin,null
 grant,public,mesas,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
 grant,public,comanda_itens,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
 grant,public,caixa_sessoes,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
@@ -1965,14 +1992,15 @@ grant,public,uq_clientes_empresa_email_lower,null,null,postgres,null
 grant,public,comanda_clientes,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
 grant,public,comanda_clientes_pkey,null,null,postgres,null
 grant,public,finalizadoras_pkey,null,null,postgres,null
+grant,public,finalizadoras,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
 grant,public,idx_finalizadoras_empresa,null,null,postgres,null
 grant,public,idx_finalizadoras_ativo,null,null,postgres,null
 grant,public,idx_finalizadoras_ordem,null,null,postgres,null
+grant,realtime,messages_2025_10_05,null,"supabase_admin=arwdDxtm/supabase_admin,postgres=arwdDxtm/supabase_admin,dashboard_user=arwdDxtm/supabase_admin",supabase_admin,null
 grant,public,comanda_clientes_cliente_idx,null,null,postgres,null
 grant,public,comanda_clientes_empresa_idx,null,null,postgres,null
 grant,public,idx_pagamentos_finalizadora,null,null,postgres,null
 grant,public,idx_pagamentos_recebido_em,null,null,postgres,null
-grant,public,finalizadoras,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
 grant,auth,oauth_clients_pkey,null,null,supabase_auth_admin,null
 grant,auth,oauth_clients_client_id_key,null,null,supabase_auth_admin,null
 grant,auth,oauth_clients_client_id_idx,null,null,supabase_auth_admin,null

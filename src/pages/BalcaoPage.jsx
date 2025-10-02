@@ -1229,8 +1229,7 @@ export default function BalcaoPage() {
             ) : (
               <ul className="space-y-3 pr-1">
                 {items.map(it => (
-                  <li key={it.id} className="p-2 rounded-md border border-border/30 bg-surface hover:bg-surface-2 transition-colors cursor-pointer" 
-                    onClick={() => setSelectedCommandItem(it)}>
+                  <li key={it.id} className="p-2 rounded-md border border-border/30 bg-surface hover:bg-surface-2 transition-colors">
                     <div className="min-w-0 flex-1">
                       <div className="font-medium truncate" title={it.name}>
                         {it.name.length > 25 ? `${it.name.substring(0, 25)}...` : it.name}
@@ -1238,7 +1237,8 @@ export default function BalcaoPage() {
                     </div>
                     <div className="mt-1 flex items-center justify-between gap-2">
                       <div className="flex items-center gap-1">
-                        <Button size="icon" variant="outline" className="h-7 w-7" onClick={async () => {
+                        <Button size="icon" variant="outline" className="h-7 w-7" onClick={async (e) => {
+                        e.stopPropagation();
                         const codigoEmpresa = userProfile?.codigo_empresa;
                         if (!codigoEmpresa) { toast({ title: 'Empresa não definida', variant: 'destructive' }); return; }
                         const next = Number(it.quantity || 1) - 1;
@@ -1268,7 +1268,8 @@ export default function BalcaoPage() {
                         }
                       }}>-</Button>
                       <span className="w-7 text-center font-semibold text-sm">{it.quantity}</span>
-                      <Button size="icon" variant="outline" className="h-7 w-7" onClick={async () => {
+                      <Button size="icon" variant="outline" className="h-7 w-7" onClick={async (e) => {
+                        e.stopPropagation();
                         const codigoEmpresa = userProfile?.codigo_empresa;
                         if (!codigoEmpresa) { toast({ title: 'Empresa não definida', variant: 'destructive' }); return; }
                         const next = Number(it.quantity || 1) + 1;

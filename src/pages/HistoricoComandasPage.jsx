@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useToast } from '@/components/ui/use-toast';
 import { CalendarDays, FileText, Search, Loader2, Copy, Download } from 'lucide-react';
 import { listarComandas, listarItensDaComanda, listarTotaisPorComanda, listarPagamentos, listMesas, listarClientesDaComanda, listarFechamentosCaixa, listarResumoPeriodo, getCaixaResumo, listarMovimentacoesCaixa, listarClientesPorComandas, listarFinalizadorasPorComandas } from '@/lib/store';
+import { gerarXMLNFe, downloadXML } from '@/lib/nfe';
 import { cn } from '@/lib/utils';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
@@ -928,7 +929,69 @@ export default function HistoricoComandasPage() {
               </div>
             </div>
           )}
-          <DialogFooter>
+          <DialogFooter className="flex gap-2">
+            <Button 
+              size="sm" 
+              variant="outline" 
+              onClick={async () => {
+                try {
+                  const xml = await gerarXMLNFe({ 
+                    comandaId: detailId, 
+                    codigoEmpresa: userProfile?.codigo_empresa,
+                    modelo: '55'
+                  });
+                  const nomeArquivo = `NFe_${detailId}_${new Date().getTime()}.xml`;
+                  downloadXML(xml, nomeArquivo);
+                  toast({ 
+                    title: 'XML NF-e gerado', 
+                    description: `Modelo 55 - ${nomeArquivo}`, 
+                    variant: 'success',
+                    className: 'bg-amber-500 text-black shadow-xl'
+                  });
+                } catch (err) {
+                  console.error('Erro ao gerar XML:', err);
+                  toast({ 
+                    title: 'Erro ao gerar XML', 
+                    description: err?.message || 'Tente novamente', 
+                    variant: 'destructive' 
+                  });
+                }
+              }}
+            >
+              <Download className="h-4 w-4 mr-2" />
+              NF-e (55)
+            </Button>
+            <Button 
+              size="sm" 
+              variant="outline" 
+              onClick={async () => {
+                try {
+                  const xml = await gerarXMLNFe({ 
+                    comandaId: detailId, 
+                    codigoEmpresa: userProfile?.codigo_empresa,
+                    modelo: '65'
+                  });
+                  const nomeArquivo = `NFCe_${detailId}_${new Date().getTime()}.xml`;
+                  downloadXML(xml, nomeArquivo);
+                  toast({ 
+                    title: 'XML NFC-e gerado', 
+                    description: `Modelo 65 - ${nomeArquivo}`, 
+                    variant: 'success',
+                    className: 'bg-amber-500 text-black shadow-xl'
+                  });
+                } catch (err) {
+                  console.error('Erro ao gerar XML:', err);
+                  toast({ 
+                    title: 'Erro ao gerar XML', 
+                    description: err?.message || 'Tente novamente', 
+                    variant: 'destructive' 
+                  });
+                }
+              }}
+            >
+              <Download className="h-4 w-4 mr-2" />
+              NFC-e (65)
+            </Button>
             <Button size="sm" variant="secondary" onClick={() => { setDetailId(null); }}>Fechar</Button>
           </DialogFooter>
         </DialogContent>

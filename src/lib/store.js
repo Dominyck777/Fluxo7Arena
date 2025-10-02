@@ -48,6 +48,8 @@ export async function listarFinalizadoras({ somenteAtivas = true, codigoEmpresa 
 export async function criarFinalizadora(payload, codigoEmpresa) {
   const codigo = codigoEmpresa || getCachedCompanyCode()
   const row = {
+    codigo_interno: payload?.codigo_interno || null,
+    codigo_sefaz: payload?.codigo_sefaz || null,
     nome: (payload?.nome || '').trim(),
     tipo: payload?.tipo || 'outros',
     ativo: payload?.ativo ?? true,
@@ -64,6 +66,8 @@ export async function atualizarFinalizadora(id, payload, codigoEmpresa) {
   if (!id) throw new Error('ID inválido')
   const codigo = codigoEmpresa || getCachedCompanyCode()
   const row = {
+    codigo_interno: payload?.codigo_interno || null,
+    codigo_sefaz: payload?.codigo_sefaz || null,
     nome: (payload?.nome || '').trim(),
     tipo: payload?.tipo || 'outros',
     ativo: payload?.ativo ?? true,
@@ -240,14 +244,40 @@ export async function listarComandaBalcaoAberta({ codigoEmpresa } = {}) {
 
 export async function getOrCreateComandaBalcao({ codigoEmpresa } = {}) {
   const codigo = codigoEmpresa || getCachedCompanyCode()
+  console.log('[getOrCreateComandaBalcao] Iniciando com codigo_empresa:', codigo)
+  
   // Bloqueio: exigir caixa aberto
   await assertCaixaAberto({ codigoEmpresa: codigo })
+  
   const atual = await listarComandaBalcaoAberta({ codigoEmpresa: codigo })
-  if (atual) return atual
-  const payload = { status: 'open', mesa_id: null, aberto_em: new Date().toISOString() }
-  if (codigo) payload.codigo_empresa = codigo
-  const { data, error } = await supabase.from('comandas').insert(payload).select('id,status,aberto_em').single()
-  if (error) throw error
+  if (atual) {
+    console.log('[getOrCreateComandaBalcao] Comanda existente encontrada:', atual)
+    return atual
+  }
+  
+  // IMPORTANTE: Apenas campos básicos - tudo mais é gerado automaticamente
+  // codigo_empresa: DEFAULT get_my_company_code()
+  // tipo e is_balcao: colunas geradas
+  const payload = { 
+    status: 'open', 
+    mesa_id: null, 
+    aberto_em: new Date().toISOString()
+  }
+  
+  console.log('[getOrCreateComandaBalcao] Criando nova comanda (codigo_empresa via DEFAULT):', payload)
+  const { data, error } = await supabase.from('comandas').insert(payload).select('id,status,aberto_em,tipo,codigo_empresa').single()
+  
+  if (error) {
+    console.error('[getOrCreateComandaBalcao] ERRO ao criar comanda:', error)
+    throw error
+  }
+  
+  console.log('[getOrCreateComandaBalcao] Comanda criada com sucesso:', data)
+  console.log('[getOrCreateComandaBalcao] Codigo da comanda criada:', data?.codigo_empresa, 'vs esperado:', codigo)
+  
+  // Aguardar um momento para o RLS processar (consistência eventual)
+  await new Promise(r => setTimeout(r, 100))
+  
   return data
 }
 
@@ -256,21 +286,25 @@ export async function criarComandaBalcao({ codigoEmpresa } = {}) {
   const codigo = codigoEmpresa || getCachedCompanyCode()
   // Bloqueio: exigir caixa aberto
   await assertCaixaAberto({ codigoEmpresa: codigo })
-  const payload = { 
-    tipo: 'balcao',
-    status: 'open', 
-    mesa_id: null, 
-    aberto_em: new Date().toISOString() 
-  }
-  if (codigo) payload.codigo_empresa = codigo
   
-  console.log('[criarComandaBalcao] Criando comanda:', payload)
-  const { data, error } = await supabase.from('vendas').insert(payload).select('id,status,aberto_em,tipo').single()
+  // Apenas campos básicos - resto é gerado
+  const payload = {
+    status: 'open',
+    mesa_id: null,
+    aberto_em: new Date().toISOString()
+  }
+  
+  console.log('[criarComandaBalcao] Criando comanda (codigo_empresa via DEFAULT):', payload)
+  const { data, error } = await supabase.from('comandas').insert(payload).select('id,status,aberto_em,tipo,codigo_empresa').single()
   if (error) {
     console.error('[criarComandaBalcao] Erro ao criar:', error)
     throw error
   }
-  console.log('[criarComandaBalcao] Comanda criada com ID:', data?.id, 'tipo:', typeof data?.id)
+  console.log('[criarComandaBalcao] Comanda criada:', data)
+  
+  // Aguardar processamento do RLS
+  await new Promise(r => setTimeout(r, 100))
+  
   return data
 }
 
@@ -433,10 +467,10 @@ export async function listarResumoSessaoCaixaAtual({ codigoEmpresa } = {}) {
 
 export async function listarPagamentos({ comandaId, codigoEmpresa } = {}) {
   const codigo = codigoEmpresa || getCachedCompanyCode()
-  // Carregar pagamentos com JOIN para pegar nome da finalizadora (especificando a FK correta)
+  // Carregar pagamentos com JOIN para pegar nome e codigo_sefaz da finalizadora
   let q = supabase
     .from('pagamentos')
-    .select('*, finalizadoras!pagamentos_finalizadora_id_fkey(id, nome)')
+    .select('*, finalizadoras!pagamentos_finalizadora_id_fkey(id, nome, codigo_sefaz, codigo_interno)')
     .order('recebido_em', { ascending: true })
   if (comandaId) q = q.eq('comanda_id', comandaId)
   if (codigo) q = q.eq('codigo_empresa', codigo)
@@ -790,61 +824,39 @@ export async function abrirComandaParaMesa({ mesaId, codigoEmpresa } = {}) {
   
   console.log(`[abrirComandaParaMesa] Iniciando para mesaId: ${mesaId}, codigo_empresa: ${codigo}`)
   
-  // PRIMEIRO: Testar se conseguimos inserir algo simples na tabela comandas
-  console.log(`[abrirComandaParaMesa] TESTE: Verificando se conseguimos inserir na tabela comandas...`)
-  
   try {
-    // Teste básico de inserção - payload mínimo
-    const testePayload = { 
+    // Apenas campos básicos - resto é gerado
+    const payload = { 
       status: 'open', 
       aberto_em: new Date().toISOString()
     }
     
-    // Se temos código da empresa, adicionar
-    if (codigo) {
-      testePayload.codigo_empresa = codigo
-    }
-    
-    // Se temos mesa, adicionar
     if (mesaId) {
-      testePayload.mesa_id = mesaId
+      payload.mesa_id = mesaId
     }
     
-    console.log(`[abrirComandaParaMesa] TESTE: Payload para inserção:`, testePayload)
+    console.log(`[abrirComandaParaMesa] Payload (codigo_empresa via DEFAULT):`, payload)
     
     const { data, error } = await supabase
       .from('comandas')
-      .insert(testePayload)
+      .insert(payload)
       .select('*')
       .single()
     
     if (error) {
-      console.error(`[abrirComandaParaMesa] ERRO CRÍTICO na inserção:`, {
-        error,
-        message: error.message,
-        details: error.details,
-        hint: error.hint,
-        code: error.code,
-        payload: testePayload
-      })
-      
-      // Vamos tentar descobrir o que está acontecendo
-      console.log(`[abrirComandaParaMesa] Tentando consultar estrutura da tabela...`)
-      const { data: estrutura, error: erroEstrutura } = await supabase
-        .from('comandas')
-        .select('*')
-        .limit(1)
-      
-      console.log(`[abrirComandaParaMesa] Resultado consulta estrutura:`, { estrutura, erroEstrutura })
-      
+      console.error(`[abrirComandaParaMesa] ERRO ao criar comanda:`, error)
       throw error
     }
     
-    console.log(`[abrirComandaParaMesa] ✅ SUCESSO! Comanda criada:`, data)
+    console.log(`[abrirComandaParaMesa] ✅ Comanda criada:`, data)
+    
+    // Aguardar processamento do RLS
+    await new Promise(r => setTimeout(r, 100))
+    
     return data
     
   } catch (err) {
-    console.error(`[abrirComandaParaMesa] ERRO GERAL:`, err)
+    console.error(`[abrirComandaParaMesa] ERRO:`, err)
     throw err
   }
 }
@@ -926,7 +938,7 @@ export async function adicionarClientesAComanda({ comandaId, clienteIds = [], no
   const codigo = codigoEmpresa || getCachedCompanyCode()
   if (!comandaId) throw new Error('comandaId é obrigatório')
   
-  console.log(`[adicionarClientesAComanda] Adicionando clientes à comanda ${comandaId}:`, { clienteIds, nomesLivres })
+  console.log(`[adicionarClientesAComanda] Adicionando clientes à comanda ${comandaId}:`, { clienteIds, nomesLivres, codigo })
   
   // NÃO deletar clientes existentes - apenas adicionar os novos
   // Verificar se já existem para evitar duplicatas
@@ -958,10 +970,13 @@ export async function adicionarClientesAComanda({ comandaId, clienteIds = [], no
   }
   
   const payload = rows.map(r => (codigo ? { ...r, codigo_empresa: codigo } : r))
-  console.log(`[adicionarClientesAComanda] Inserindo ${payload.length} novos vínculos`)
+  console.log(`[adicionarClientesAComanda] Payload para inserção:`, payload)
   
   const { error } = await supabase.from('comanda_clientes').insert(payload)
-  if (error) throw error
+  if (error) {
+    console.error(`[adicionarClientesAComanda] ERRO ao inserir clientes:`, error)
+    throw error
+  }
   
   console.log(`[adicionarClientesAComanda] Clientes adicionados com sucesso`)
   return true
@@ -1005,6 +1020,8 @@ export async function listarClientesDaComanda({ comandaId, codigoEmpresa } = {})
 // Itens (depende de tabela 'produtos' existir)
 export async function adicionarItem({ comandaId, produtoId, descricao, quantidade, precoUnitario, desconto = 0, codigoEmpresa }) {
   const codigo = codigoEmpresa || getCachedCompanyCode()
+  console.log(`[adicionarItem] Adicionando item à comanda ${comandaId}:`, { produtoId, descricao, quantidade, precoUnitario, codigo })
+  
   // 1) Backstop: impedir venda com estoque zerado e avisos para estoque baixo
   try {
     let qp = supabase
@@ -1188,17 +1205,23 @@ export async function registrarPagamento({ comandaId, finalizadoraId, metodo, va
     metodo: metodoNormalizado,
     valor: Math.max(0, Number(valor) || 0),
     status: statusValido,
-    cliente_id: clienteId || null,
     recebido_em: new Date().toISOString(),
     codigo_empresa: codigo // Sempre inclui o código da empresa
+  }
+  
+  // Adiciona cliente_id apenas se a coluna existir (evita erro de schema)
+  if (clienteId) {
+    payload.cliente_id = clienteId;
   }
   
   console.log('[registrarPagamento] Iniciando registro de pagamento:', {
     comandaId,
     finalizadoraId,
+    metodo: metodoNormalizado,
     valor: payload.valor,
     status: payload.status,
-    codigoEmpresa: codigo
+    codigoEmpresa: codigo,
+    payload: payload
   })
   
   try {
@@ -1210,6 +1233,7 @@ export async function registrarPagamento({ comandaId, finalizadoraId, metodo, va
       .single()
     
     if (error) {
+      console.error('[registrarPagamento] Erro na primeira tentativa:', error)
       const msg = `${error?.message || ''} ${error?.details || ''}`.toLowerCase()
       const isUndefinedColumn = (error?.code === '42703') || msg.includes("column") && msg.includes("cliente_id")
       if (isUndefinedColumn) {
@@ -1221,6 +1245,7 @@ export async function registrarPagamento({ comandaId, finalizadoraId, metodo, va
           .select()
           .single()
         if (e2) throw e2
+        console.log('[registrarPagamento] Pagamento registrado sem cliente_id:', d2)
         return d2
       }
       // Se for erro de enum, tenta segunda abordagem simples sem casts complexos
@@ -1237,7 +1262,7 @@ export async function registrarPagamento({ comandaId, finalizadoraId, metodo, va
             .single()
           
           if (simpleError) throw simpleError
-          console.log('[registrarPagamento] Pagamento registrado com sucesso (abordagem alternativa)')
+          console.log('[registrarPagamento] Pagamento registrado com sucesso (abordagem alternativa):', data)
           return data
         } catch (fallbackError) {
           console.error('[registrarPagamento] Falha na abordagem alternativa:', fallbackError)
@@ -1246,6 +1271,7 @@ export async function registrarPagamento({ comandaId, finalizadoraId, metodo, va
       }
       throw error
     }
+    console.log('[registrarPagamento] Pagamento registrado com sucesso:', data)
     return data
   } catch (error) {
     console.error('[registrarPagamento] Erro ao registrar pagamento:', {
