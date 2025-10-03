@@ -329,8 +329,13 @@ function VendasPage() {
           setIsCashierOpen(!!sessao);
         } catch { setIsCashierOpen(false); }
         try {
-          const prods = await listProducts({ includeInactive: false, codigoEmpresa });
-          setProducts(prods);
+          let prods = await listProducts({ includeInactive: false, codigoEmpresa });
+          if (!Array.isArray(prods) || prods.length === 0) {
+            console.warn('[VendasPage] Nenhum produto ativo encontrado. Tentando carregar inativos também...');
+            prods = await listProducts({ includeInactive: true, codigoEmpresa });
+          }
+          setProducts(prods || []);
+          console.info('[VendasPage] Produtos carregados:', (prods || []).length);
         } catch (e) { console.warn('Falha ao carregar produtos:', e?.message || e); }
         try { console.log('ok', { tables: uiTables.length, openComandas: (openComandas || []).length }); } catch {}
         try { console.groupEnd(); } catch {}
@@ -1312,46 +1317,59 @@ function VendasPage() {
             <div className="flex items-center gap-2">
               {table.comandaId ? (
                 <>
-                  <Button size="sm" variant="outline" className="h-7 px-2.5 rounded-full text-[12px] font-medium leading-none whitespace-nowrap" onClick={() => setIsManageClientsOpen(true)}>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-8 px-3 rounded-full text-[12px] font-semibold leading-none whitespace-nowrap bg-sky-600 hover:bg-sky-500 text-white border border-sky-600/70 shadow-sm"
+                    onClick={() => setIsManageClientsOpen(true)}
+                  >
                     <Users size={12} className="mr-1.5" /> Clientes
                   </Button>
-                  <Button size="sm" variant="secondary" className="h-7 px-2.5 rounded-full text-[12px] font-medium leading-none whitespace-nowrap" onClick={() => setIsOrderDetailsOpen(true)}>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    className="h-8 px-3 rounded-full text-[12px] font-semibold leading-none whitespace-nowrap bg-indigo-600 hover:bg-indigo-500 text-white border border-indigo-600/70 shadow-sm"
+                    onClick={() => setIsOrderDetailsOpen(true)}
+                  >
                     <FileText size={12} className="mr-1.5" /> Comanda
                   </Button>
-                  <Button size="sm" variant="destructive" className="h-7 px-2.5 rounded-full text-[12px] font-medium leading-none whitespace-nowrap" onClick={async () => {
-                    try {
-                      console.log('[Cancelar Comanda] Iniciando cancelamento da comanda:', table.comandaId);
-                      
-                      // Cancelar comanda sem enviar para histórico
-                      await cancelarComandaEMesa({ comandaId: table.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
-                      console.log('[Cancelar Comanda] Comanda cancelada com sucesso');
-                      
-                      // Atualizar estado local imediatamente
-                      setSelectedTable(null);
-                      
-                      // Recarregar mesas (com feedback)
-                      await refreshTablesLight({ showToast: true });
-                      console.log('[Cancelar Comanda] Mesas atualizadas');
-                      
-                      toast({ title: 'Comanda cancelada', variant: 'success' });
-                    } catch (e) {
-                      console.error('[Cancelar Comanda] Erro:', e);
-                      toast({ 
-                        title: 'Falha ao cancelar comanda', 
-                        description: e?.message || 'Tente novamente', 
-                        variant: 'destructive' 
-                      });
-                      
-                      // Em caso de erro, tentar recarregar as mesas para sincronizar (com feedback)
-                      try {
-                        await refreshTablesLight({ showToast: true });
-                      } catch (refreshErr) {
-                        console.error('[Cancelar Comanda] Erro ao recarregar após falha:', refreshErr);
-                      }
-                    }
-                  }}>
-                    <X size={12} className="mr-1.5" /> Cancelar
-                  </Button>
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        className="h-8 px-3 rounded-full text-[12px] font-semibold leading-none whitespace-nowrap bg-red-600 hover:bg-red-500 text-white border border-red-600/70 shadow-sm"
+                      >
+                        <X size={12} className="mr-1.5" /> Cancelar
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent className="sm:max-w-[420px] animate-none" onKeyDown={(e) => e.stopPropagation()}>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Cancelar comanda?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          Esta ação não pode ser desfeita. Os itens serão descartados e a mesa voltará a ficar livre.
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Voltar</AlertDialogCancel>
+                        <AlertDialogAction onClick={async () => {
+                          try {
+                            console.log('[Cancelar Comanda] Iniciando cancelamento da comanda:', table.comandaId);
+                            await cancelarComandaEMesa({ comandaId: table.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
+                            console.log('[Cancelar Comanda] Comanda cancelada com sucesso');
+                            setSelectedTable(null);
+                            await refreshTablesLight({ showToast: true });
+                            console.log('[Cancelar Comanda] Mesas atualizadas');
+                            toast({ title: 'Comanda cancelada', variant: 'success' });
+                          } catch (e) {
+                            console.error('[Cancelar Comanda] Erro:', e);
+                            toast({ title: 'Falha ao cancelar comanda', description: e?.message || 'Tente novamente', variant: 'destructive' });
+                            try { await refreshTablesLight({ showToast: true }); } catch (refreshErr) { console.error('[Cancelar Comanda] Erro ao recarregar após falha:', refreshErr); }
+                          }
+                        }}>Confirmar Cancelamento</AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
                 </>
               ) : (
                 <Button size="sm" className="h-7 px-2.5 rounded-full text-[12px] font-medium leading-none whitespace-nowrap" onClick={() => { setPendingTable(table); setIsOpenTableDialog(true); }}>Abrir Mesa</Button>
@@ -1562,7 +1580,7 @@ function VendasPage() {
                           <span className="inline-flex items-center justify-center text-[10px] sm:text-[11px] px-1.5 py-0.5 rounded-full bg-surface-2 text-text-secondary border border-border flex-shrink-0">Qtd {remaining}</span>
                         </div>
                       </div>
-                      <Button size="icon" variant="outline" className="flex-shrink-0" onClick={(e) => { e.stopPropagation(); addProductToComanda(prod); }} aria-label={`Adicionar ${prod.name}`}>
+                      <Button size="icon" className="flex-shrink-0 bg-amber-500 hover:bg-amber-400 text-black border border-amber-500/60" onClick={(e) => { e.stopPropagation(); addProductToComanda(prod); }} aria-label={`Adicionar ${prod.name}`}>
                         <Plus size={16} />
                       </Button>
                     </li>
@@ -1757,7 +1775,7 @@ function VendasPage() {
                     <span className="inline-flex items-center justify-center text-[11px] px-1.5 py-0.5 rounded-full bg-surface-2 text-text-secondary border border-border flex-shrink-0">Qtd {remaining}</span>
                   </div>
                 </div>
-                <Button size="icon" variant="outline" className="flex-shrink-0" onClick={(e) => { e.stopPropagation(); addProductToCounter(prod); }} aria-label={`Adicionar ${prod.name}`}>
+                <Button size="icon" className="flex-shrink-0 bg-amber-500 hover:bg-amber-400 text-black border border-amber-500/60" onClick={(e) => { e.stopPropagation(); addProductToCounter(prod); }} aria-label={`Adicionar ${prod.name}`}>
                   <Plus size={16} />
                 </Button>
               </li>
@@ -1816,9 +1834,42 @@ function VendasPage() {
                   <span>Total</span>
                   <span>R$ {total.toFixed(2)}</span>
                 </div>
-                <Button size="lg" className="w-full" onClick={payCounter} disabled={counterLoading || total <= 0}>
-                  <DollarSign className="mr-2" /> Finalizar Pagamento
-                </Button>
+                <div className="flex gap-3">
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button
+                        size="lg"
+                        className="flex-1 bg-red-600 hover:bg-red-500 text-white border border-red-600/70"
+                      >
+                        Cancelar
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent className="sm:max-w-[420px] animate-none" onKeyDown={(e) => e.stopPropagation()}>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Cancelar comanda do balcão?</AlertDialogTitle>
+                        <AlertDialogDescription>Os itens serão descartados e o balcão será limpo. Esta ação não pode ser desfeita.</AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Voltar</AlertDialogCancel>
+                        <AlertDialogAction onClick={async () => {
+                          try {
+                            if (!counterComandaId) { setIsCounterModeOpen(false); return; }
+                            await cancelarComandaEMesa({ comandaId: counterComandaId, codigoEmpresa: userProfile?.codigo_empresa });
+                            setCounterItems([]);
+                            setCounterComandaId(null);
+                            setIsCounterModeOpen(false);
+                            toast({ title: 'Comanda cancelada (balcão)', variant: 'success' });
+                          } catch (e) {
+                            toast({ title: 'Falha ao cancelar', description: e?.message || 'Tente novamente', variant: 'destructive' });
+                          }
+                        }}>Confirmar Cancelamento</AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                  <Button size="lg" className="flex-1" onClick={payCounter} disabled={counterLoading || total <= 0}>
+                    <DollarSign className="mr-2" /> Finalizar Pagamento
+                  </Button>
+                </div>
               </div>
             </div>
           </div>
@@ -2417,7 +2468,7 @@ function VendasPage() {
     return (
       <Dialog open={isManageClientsOpen} onOpenChange={setIsManageClientsOpen}>
         <DialogContent 
-          className="max-w-xl animate-none" 
+          className="sm:max-w-[480px] w-full animate-none" 
           onKeyDown={(e) => e.stopPropagation()} 
           onKeyDownCapture={(e) => e.stopPropagation()}
           onPointerDownOutside={(e) => { e.preventDefault(); e.stopPropagation(); }} 
@@ -2446,7 +2497,7 @@ function VendasPage() {
                 <div className="text-sm text-text-primary">
                   {localClients
                     .filter(c => localLinked.includes(c.id))
-                    .map(c => c.nome)
+                    .map(c => (c?.codigo ? `${c.codigo} - ${c?.nome || ''}` : (c?.nome || '')))
                     .join(', ') || 'Carregando...'}
                 </div>
               </div>
@@ -2475,7 +2526,7 @@ function VendasPage() {
                         style={{ userSelect: 'none', WebkitUserSelect: 'none' }}
                       >
                         <div className="flex-1 min-w-0">
-                          <div className="font-medium truncate">{client.nome}</div>
+                          <div className="font-medium truncate">{`${client?.codigo ? `${client.codigo} - ` : ''}${client?.nome || ''}`}</div>
                           {client.telefone && (
                             <div className="text-xs text-text-muted">{client.telefone}</div>
                           )}
