@@ -329,8 +329,13 @@ function VendasPage() {
           setIsCashierOpen(!!sessao);
         } catch { setIsCashierOpen(false); }
         try {
-          const prods = await listProducts({ includeInactive: false, codigoEmpresa });
-          setProducts(prods);
+          let prods = await listProducts({ includeInactive: false, codigoEmpresa });
+          if (!Array.isArray(prods) || prods.length === 0) {
+            console.warn('[VendasPage] Nenhum produto ativo encontrado. Tentando carregar inativos também...');
+            prods = await listProducts({ includeInactive: true, codigoEmpresa });
+          }
+          setProducts(prods || []);
+          console.info('[VendasPage] Produtos carregados:', (prods || []).length);
         } catch (e) { console.warn('Falha ao carregar produtos:', e?.message || e); }
         try { console.log('ok', { tables: uiTables.length, openComandas: (openComandas || []).length }); } catch {}
         try { console.groupEnd(); } catch {}
@@ -1312,46 +1317,64 @@ function VendasPage() {
             <div className="flex items-center gap-2">
               {table.comandaId ? (
                 <>
-                  <Button size="sm" variant="outline" className="h-7 px-2.5 rounded-full text-[12px] font-medium leading-none whitespace-nowrap" onClick={() => setIsManageClientsOpen(true)}>
-                    <Users size={12} className="mr-1.5" /> Clientes
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-8 px-3 rounded-full text-[12px] font-medium leading-none whitespace-nowrap bg-black/60 text-white border border-white/10 shadow-sm hover:bg-black/80 hover:shadow transition-all"
+                    onClick={() => setIsManageClientsOpen(true)}
+                  >
+                    <span className="inline-flex items-center justify-center h-5 w-5 rounded-full bg-black/40 border border-white/10 mr-1.5">
+                      <Users size={12} className="text-white/80" />
+                    </span>
+                    Clientes
                   </Button>
-                  <Button size="sm" variant="secondary" className="h-7 px-2.5 rounded-full text-[12px] font-medium leading-none whitespace-nowrap" onClick={() => setIsOrderDetailsOpen(true)}>
-                    <FileText size={12} className="mr-1.5" /> Comanda
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-8 px-3 rounded-full text-[12px] font-medium leading-none whitespace-nowrap bg-black/60 text-white border border-white/10 shadow-sm hover:bg-black/80 hover:shadow transition-all"
+                    onClick={() => setIsOrderDetailsOpen(true)}
+                  >
+                    <span className="inline-flex items-center justify-center h-5 w-5 rounded-full bg-black/40 border border-white/10 mr-1.5">
+                      <FileText size={12} className="text-white/80" />
+                    </span>
+                    Comanda
                   </Button>
-                  <Button size="sm" variant="destructive" className="h-7 px-2.5 rounded-full text-[12px] font-medium leading-none whitespace-nowrap" onClick={async () => {
-                    try {
-                      console.log('[Cancelar Comanda] Iniciando cancelamento da comanda:', table.comandaId);
-                      
-                      // Cancelar comanda sem enviar para histórico
-                      await cancelarComandaEMesa({ comandaId: table.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
-                      console.log('[Cancelar Comanda] Comanda cancelada com sucesso');
-                      
-                      // Atualizar estado local imediatamente
-                      setSelectedTable(null);
-                      
-                      // Recarregar mesas (com feedback)
-                      await refreshTablesLight({ showToast: true });
-                      console.log('[Cancelar Comanda] Mesas atualizadas');
-                      
-                      toast({ title: 'Comanda cancelada', variant: 'success' });
-                    } catch (e) {
-                      console.error('[Cancelar Comanda] Erro:', e);
-                      toast({ 
-                        title: 'Falha ao cancelar comanda', 
-                        description: e?.message || 'Tente novamente', 
-                        variant: 'destructive' 
-                      });
-                      
-                      // Em caso de erro, tentar recarregar as mesas para sincronizar (com feedback)
-                      try {
-                        await refreshTablesLight({ showToast: true });
-                      } catch (refreshErr) {
-                        console.error('[Cancelar Comanda] Erro ao recarregar após falha:', refreshErr);
-                      }
-                    }
-                  }}>
-                    <X size={12} className="mr-1.5" /> Cancelar
-                  </Button>
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button
+                        size="sm"
+                        className="h-7 px-2.5 rounded-full text-[12px] font-medium leading-none whitespace-nowrap bg-red-600 hover:bg-red-500 text-white border border-red-600/70 focus:outline-none focus:ring-0 focus-visible:ring-0 shadow-none"
+                      >
+                        Cancelar
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent className="sm:max-w-[420px] animate-none" onKeyDown={(e) => e.stopPropagation()}>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Cancelar comanda?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          Esta ação não pode ser desfeita. Os itens serão descartados e a mesa voltará a ficar livre.
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Voltar</AlertDialogCancel>
+                        <AlertDialogAction onClick={async () => {
+                          try {
+                            console.log('[Cancelar Comanda] Iniciando cancelamento da comanda:', table.comandaId);
+                            await cancelarComandaEMesa({ comandaId: table.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
+                            console.log('[Cancelar Comanda] Comanda cancelada com sucesso');
+                            setSelectedTable(null);
+                            await refreshTablesLight({ showToast: true });
+                            console.log('[Cancelar Comanda] Mesas atualizadas');
+                            toast({ title: 'Comanda cancelada', variant: 'success' });
+                          } catch (e) {
+                            console.error('[Cancelar Comanda] Erro:', e);
+                            toast({ title: 'Falha ao cancelar comanda', description: e?.message || 'Tente novamente', variant: 'destructive' });
+                            try { await refreshTablesLight({ showToast: true }); } catch (refreshErr) { console.error('[Cancelar Comanda] Erro ao recarregar após falha:', refreshErr); }
+                          }
+                        }}>Confirmar Cancelamento</AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
                 </>
               ) : (
                 <Button size="sm" className="h-7 px-2.5 rounded-full text-[12px] font-medium leading-none whitespace-nowrap" onClick={() => { setPendingTable(table); setIsOpenTableDialog(true); }}>Abrir Mesa</Button>
@@ -1510,8 +1533,8 @@ function VendasPage() {
   };
 
   const ProductsPanel = () => {
-    // Ordenar produtos por código
-    const sortedProducts = (products.length ? products : productsData).slice().sort((a, b) => {
+    // Ordenar produtos por código (somente produtos reais do catálogo)
+    const sortedProducts = (products || []).slice().sort((a, b) => {
       const codeA = a.code || '';
       const codeB = b.code || '';
       // Se ambos são números, comparar numericamente
@@ -1525,14 +1548,19 @@ function VendasPage() {
     return (
     <div className="flex flex-col h-full">
        <div className="p-4 border-b border-border">
-           <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted" />
-              <Input placeholder="Buscar produto..." className="pl-9" />
-           </div>
+          <div className="relative">
+             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted" />
+             <Input placeholder="Buscar produto..." className="pl-9" />
+          </div>
        </div>
        <div className="flex-1 overflow-y-auto p-4 thin-scroll">
           <ul className="space-y-2">
-              {sortedProducts.map(prod => {
+              {sortedProducts.length === 0 ? (
+                <li className="text-center text-text-muted py-8">
+                  <div className="mb-3">Nenhum produto cadastrado. Cadastre produtos para começar a vender.</div>
+                  <Button size="sm" onClick={() => navigate('/produtos')}>Cadastrar Produtos</Button>
+                </li>
+              ) : sortedProducts.map(prod => {
                   const q = qtyByProductId.get(prod.id) || 0;
                   const stock = Number(prod.stock ?? prod.currentStock ?? 0);
                   const remaining = Math.max(0, stock - q);
@@ -1557,7 +1585,7 @@ function VendasPage() {
                           <span className="inline-flex items-center justify-center text-[10px] sm:text-[11px] px-1.5 py-0.5 rounded-full bg-surface-2 text-text-secondary border border-border flex-shrink-0">Qtd {remaining}</span>
                         </div>
                       </div>
-                      <Button size="icon" variant="outline" className="flex-shrink-0" onClick={(e) => { e.stopPropagation(); addProductToComanda(prod); }} aria-label={`Adicionar ${prod.name}`}>
+                      <Button size="icon" className="flex-shrink-0 bg-amber-500 hover:bg-amber-400 text-black border border-amber-500/60" onClick={(e) => { e.stopPropagation(); addProductToComanda(prod); }} aria-label={`Adicionar ${prod.name}`}>
                         <Plus size={16} />
                       </Button>
                     </li>
@@ -1721,7 +1749,7 @@ function VendasPage() {
               </div>
               <div className="flex-1 overflow-y-auto -mr-4 pr-4 thin-scroll">
                 <ul className="space-y-2">
-                  {(products.length ? products : productsData).filter(p => {
+                  {(products || []).filter(p => {
                     const s = counterSearch.trim().toLowerCase();
                     if (!s) return true;
                     return (p.name || '').toLowerCase().includes(s) || (p.code || '').toLowerCase().includes(s);
@@ -1752,12 +1780,18 @@ function VendasPage() {
                     <span className="inline-flex items-center justify-center text-[11px] px-1.5 py-0.5 rounded-full bg-surface-2 text-text-secondary border border-border flex-shrink-0">Qtd {remaining}</span>
                   </div>
                 </div>
-                <Button size="icon" variant="outline" className="flex-shrink-0" onClick={(e) => { e.stopPropagation(); addProductToCounter(prod); }} aria-label={`Adicionar ${prod.name}`}>
+                <Button size="icon" className="flex-shrink-0 bg-amber-500 hover:bg-amber-400 text-black border border-amber-500/60" onClick={(e) => { e.stopPropagation(); addProductToCounter(prod); }} aria-label={`Adicionar ${prod.name}`}>
                   <Plus size={16} />
                 </Button>
               </li>
             );
           })}
+                  {(!products || products.length === 0) && (
+                    <li className="text-center text-text-muted py-8">
+                      <div className="mb-3">Nenhum produto cadastrado. Cadastre produtos para vender no balcão.</div>
+                      <Button size="sm" onClick={() => navigate('/produtos')}>Cadastrar Produtos</Button>
+                    </li>
+                  )}
                 </ul>
               </div>
             </div>
@@ -1805,9 +1839,42 @@ function VendasPage() {
                   <span>Total</span>
                   <span>R$ {total.toFixed(2)}</span>
                 </div>
-                <Button size="lg" className="w-full" onClick={payCounter} disabled={counterLoading || total <= 0}>
-                  <DollarSign className="mr-2" /> Finalizar Pagamento
-                </Button>
+                <div className="flex gap-3">
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button
+                        size="lg"
+                        className="flex-1 bg-red-600 hover:bg-red-500 text-white border border-red-600/70"
+                      >
+                        Cancelar
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent className="sm:max-w-[420px] animate-none" onKeyDown={(e) => e.stopPropagation()}>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Cancelar comanda do balcão?</AlertDialogTitle>
+                        <AlertDialogDescription>Os itens serão descartados e o balcão será limpo. Esta ação não pode ser desfeita.</AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Voltar</AlertDialogCancel>
+                        <AlertDialogAction onClick={async () => {
+                          try {
+                            if (!counterComandaId) { setIsCounterModeOpen(false); return; }
+                            await cancelarComandaEMesa({ comandaId: counterComandaId, codigoEmpresa: userProfile?.codigo_empresa });
+                            setCounterItems([]);
+                            setCounterComandaId(null);
+                            setIsCounterModeOpen(false);
+                            toast({ title: 'Comanda cancelada (balcão)', variant: 'success' });
+                          } catch (e) {
+                            toast({ title: 'Falha ao cancelar', description: e?.message || 'Tente novamente', variant: 'destructive' });
+                          }
+                        }}>Confirmar Cancelamento</AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                  <Button size="lg" className="flex-1" onClick={payCounter} disabled={counterLoading || total <= 0}>
+                    <DollarSign className="mr-2" /> Finalizar Pagamento
+                  </Button>
+                </div>
               </div>
             </div>
           </div>
@@ -2406,7 +2473,7 @@ function VendasPage() {
     return (
       <Dialog open={isManageClientsOpen} onOpenChange={setIsManageClientsOpen}>
         <DialogContent 
-          className="max-w-xl animate-none" 
+          className="sm:max-w-[480px] w-full animate-none" 
           onKeyDown={(e) => e.stopPropagation()} 
           onKeyDownCapture={(e) => e.stopPropagation()}
           onPointerDownOutside={(e) => { e.preventDefault(); e.stopPropagation(); }} 
@@ -2435,7 +2502,7 @@ function VendasPage() {
                 <div className="text-sm text-text-primary">
                   {localClients
                     .filter(c => localLinked.includes(c.id))
-                    .map(c => c.nome)
+                    .map(c => (c?.codigo ? `${c.codigo} - ${c?.nome || ''}` : (c?.nome || '')))
                     .join(', ') || 'Carregando...'}
                 </div>
               </div>
@@ -2464,7 +2531,7 @@ function VendasPage() {
                         style={{ userSelect: 'none', WebkitUserSelect: 'none' }}
                       >
                         <div className="flex-1 min-w-0">
-                          <div className="font-medium truncate">{client.nome}</div>
+                          <div className="font-medium truncate">{`${client?.codigo ? `${client.codigo} - ` : ''}${client?.nome || ''}`}</div>
                           {client.telefone && (
                             <div className="text-xs text-text-muted">{client.telefone}</div>
                           )}

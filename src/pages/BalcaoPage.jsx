@@ -1215,7 +1215,33 @@ export default function BalcaoPage() {
               {clientChosen && (
                 <Button size="sm" variant="outline" className="whitespace-nowrap" onClick={() => setIsClientWizardOpen(true)}>+ Cliente</Button>
               )}
-              <Button size="sm" variant="outline" onClick={cancelSale} disabled={cancelLoading}>{cancelLoading ? 'Cancelando...' : 'Cancelar Venda'}</Button>
+              {clientChosen ? (
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button
+                      size="sm"
+                      className="bg-red-600 hover:bg-red-500 text-white border border-red-600/70 focus:outline-none focus:ring-0 focus-visible:ring-0 shadow-none"
+                      disabled={cancelLoading}
+                    >
+                      {cancelLoading ? 'Cancelando...' : 'Cancelar'}
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent className="sm:max-w-[420px] animate-none" onKeyDown={(e) => e.stopPropagation()}>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Cancelar venda do balcão?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        Os itens serão descartados e a venda será limpa. Esta ação não pode ser desfeita.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Voltar</AlertDialogCancel>
+                      <AlertDialogAction onClick={cancelSale}>Confirmar Cancelamento</AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              ) : (
+                <Button size="sm" variant="outline" className="opacity-60 cursor-not-allowed" disabled>Cancelar</Button>
+              )}
             </div>
           </div>
           <div className="flex-1 overflow-y-auto p-4 thin-scroll">

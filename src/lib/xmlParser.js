@@ -25,12 +25,16 @@ export function parseNFeXML(xmlText) {
     // Extrair produtos
     const produtos = extractProdutos(xmlDoc);
     
+    // Extrair pagamentos
+    const pagamentos = extractPagamentos(xmlDoc);
+    
     // Calcular total da nota
     const totalNota = produtos.reduce((acc, p) => acc + (p.valorTotal || 0), 0);
     
     return {
       produtos,
       fornecedor,
+      pagamentos,
       nfe: { ...nfeInfo, totalNota },
       success: true
     };
@@ -168,6 +172,59 @@ function extractProdutos(xmlDoc) {
   
   // Converter Map para Array
   return Array.from(produtosMap.values());
+}
+
+/**
+ * Extrai formas de pagamento do XML (tag <pag>)
+ */
+function extractPagamentos(xmlDoc) {
+  const pagElements = xmlDoc.querySelectorAll('pag');
+  const pagamentos = [];
+  
+  pagElements.forEach((pag) => {
+    const tPag = getTextContent(pag, 'tPag'); // Código SEFAZ
+    const vPag = parseFloat(getTextContent(pag, 'vPag') || '0');
+    
+    if (tPag && vPag > 0) {
+      pagamentos.push({
+        codigoSefaz: tPag,
+        valor: vPag,
+        descricao: mapCodigoSefazToNome(tPag)
+      });
+    }
+  });
+  
+  return pagamentos;
+}
+
+/**
+ * Mapeia código SEFAZ para nome da forma de pagamento
+ */
+function mapCodigoSefazToNome(codigo) {
+  const mapa = {
+    '01': 'Dinheiro',
+    '02': 'Cheque',
+    '03': 'Cartão de Crédito',
+    '04': 'Cartão de Débito',
+    '05': 'Cartão da Loja',
+    '10': 'Vale Alimentação',
+    '11': 'Vale Refeição',
+    '12': 'Vale Presente',
+    '13': 'Vale Combustível',
+    '14': 'Duplicata Mercantil',
+    '15': 'Boleto Bancário',
+    '16': 'Depósito Bancário',
+    '17': 'PIX Dinâmico',
+    '18': 'Transferência Bancária',
+    '19': 'Programa de Fidelidade',
+    '20': 'PIX Estático',
+    '21': 'Crédito em Loja',
+    '22': 'Pagamento Eletrônico',
+    '90': 'Sem Pagamento',
+    '99': 'Outros'
+  };
+  
+  return mapa[codigo] || 'Outros';
 }
 
 /**
