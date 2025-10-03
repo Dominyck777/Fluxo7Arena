@@ -1184,6 +1184,10 @@ function AgendaPage() {
             localStorage.removeItem('quadras:list');
             localStorage.removeItem('agenda:selectedCourts');
             setDbCourts([]);
+            // Evita mostrar nome de quadra de outra empresa no SelectValue
+            try { setSelectedCourts([]); } catch {}
+            try { setActiveCourtFilter(null); } catch {}
+            try { setForm((f) => ({ ...f, court: '' })); } catch {}
           }
         }
       } catch {}
@@ -1232,6 +1236,23 @@ function AgendaPage() {
       loadCourts();
     }
   }, [authReady, userProfile?.codigo_empresa]);
+
+  // Corrige o valor exibido do select de quadra quando a lista disponível muda
+  useEffect(() => {
+    try {
+      if (courtsLoading) return;
+      const list = availableCourts || [];
+      // Se a quadra atual não existe na empresa/consulta atual, seleciona a primeira disponível
+      if (form?.court && !list.includes(form.court)) {
+        setForm((f) => ({ ...f, court: list[0] || '' }));
+      }
+      // Se não há nenhuma selecionada e existem quadras, seleciona a primeira
+      if ((!form?.court || form.court === '') && list.length > 0) {
+        setForm((f) => ({ ...f, court: list[0] }));
+      }
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [courtsLoading, availableCourts, userProfile?.codigo_empresa]);
 
   // Restaurar seleção e filtros de localStorage ao montar e sincronizar com quadras disponíveis
   useEffect(() => {
@@ -2760,10 +2781,14 @@ function AgendaPage() {
         // Marca como inicializado após preencher o formulário de edição
         initializedRef.current = true;
       } else if (prefill) {
+        // Sanitize: garante que a quadra do prefill pertença às quadras disponíveis da empresa atual
+        const safeCourt = (availableCourts || []).includes(prefill.court)
+          ? prefill.court
+          : ((availableCourts || [])[0] || '');
         setForm({
           selectedClients: userSelectedOnceRef.current ? (Array.isArray(form.selectedClients) ? form.selectedClients : []) : [],
-          court: prefill.court ?? (availableCourts[0] || ''),
-          modality: (() => { const c = prefill.court ?? (availableCourts[0] || ''); const allowed = courtsMap[c]?.modalidades || modalities; return allowed[0] || ''; })(),
+          court: safeCourt,
+          modality: (() => { const c = safeCourt; const allowed = courtsMap[c]?.modalidades || modalities; return allowed[0] || ''; })(),
           status: 'scheduled',
           date: prefill.date ?? currentDate,
           startMinutes: prefill.startMinutes ?? nearestSlot(),
@@ -5243,7 +5268,12 @@ function AgendaPage() {
 
                           // Limpa completamente o estado antes de abrir novo agendamento
                           setEditingBooking(null);
-                          setPrefill({ court, date: currentDate, startMinutes: clickedStart, endMinutes: clickedEnd });
+                          // Sanitize court at click time to ensure it exists for the current company
+                          {
+                            const list = availableCourts || [];
+                            const safeCourt = list.includes(court) ? court : (list[0] || '');
+                            setPrefill({ court: safeCourt, date: currentDate, startMinutes: clickedStart, endMinutes: clickedEnd });
+                          }
                           // Limpa seleção de clientes para evitar carregar dados de agendamento anterior
                           try {
                             lastNonEmptySelectionRef.current = [];
