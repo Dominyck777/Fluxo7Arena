@@ -1320,27 +1320,32 @@ function VendasPage() {
                   <Button
                     size="sm"
                     variant="outline"
-                    className="h-8 px-3 rounded-full text-[12px] font-semibold leading-none whitespace-nowrap bg-sky-600 hover:bg-sky-500 text-white border border-sky-600/70 shadow-sm"
+                    className="h-8 px-3 rounded-full text-[12px] font-medium leading-none whitespace-nowrap bg-black/60 text-white border border-white/10 shadow-sm hover:bg-black/80 hover:shadow transition-all"
                     onClick={() => setIsManageClientsOpen(true)}
                   >
-                    <Users size={12} className="mr-1.5" /> Clientes
+                    <span className="inline-flex items-center justify-center h-5 w-5 rounded-full bg-black/40 border border-white/10 mr-1.5">
+                      <Users size={12} className="text-white/80" />
+                    </span>
+                    Clientes
                   </Button>
                   <Button
                     size="sm"
-                    variant="secondary"
-                    className="h-8 px-3 rounded-full text-[12px] font-semibold leading-none whitespace-nowrap bg-indigo-600 hover:bg-indigo-500 text-white border border-indigo-600/70 shadow-sm"
+                    variant="outline"
+                    className="h-8 px-3 rounded-full text-[12px] font-medium leading-none whitespace-nowrap bg-black/60 text-white border border-white/10 shadow-sm hover:bg-black/80 hover:shadow transition-all"
                     onClick={() => setIsOrderDetailsOpen(true)}
                   >
-                    <FileText size={12} className="mr-1.5" /> Comanda
+                    <span className="inline-flex items-center justify-center h-5 w-5 rounded-full bg-black/40 border border-white/10 mr-1.5">
+                      <FileText size={12} className="text-white/80" />
+                    </span>
+                    Comanda
                   </Button>
                   <AlertDialog>
                     <AlertDialogTrigger asChild>
                       <Button
                         size="sm"
-                        variant="destructive"
-                        className="h-8 px-3 rounded-full text-[12px] font-semibold leading-none whitespace-nowrap bg-red-600 hover:bg-red-500 text-white border border-red-600/70 shadow-sm"
+                        className="h-7 px-2.5 rounded-full text-[12px] font-medium leading-none whitespace-nowrap bg-red-600 hover:bg-red-500 text-white border border-red-600/70 focus:outline-none focus:ring-0 focus-visible:ring-0 shadow-none"
                       >
-                        <X size={12} className="mr-1.5" /> Cancelar
+                        Cancelar
                       </Button>
                     </AlertDialogTrigger>
                     <AlertDialogContent className="sm:max-w-[420px] animate-none" onKeyDown={(e) => e.stopPropagation()}>
