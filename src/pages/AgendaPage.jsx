@@ -5285,6 +5285,7 @@ function AgendaPage() {
                           openBookingModal();
                         }}
                         title={`Livre: ${sLabel}–${eLabel}`}
+                      >
                         {hoverSlot !== null && (
                           <div
                             className="pointer-events-none absolute left-[6px] right-[6px] rounded-md border border-white/10 bg-white/5"
