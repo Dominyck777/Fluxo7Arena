@@ -2781,10 +2781,14 @@ function AgendaPage() {
         // Marca como inicializado após preencher o formulário de edição
         initializedRef.current = true;
       } else if (prefill) {
+        // Sanitize: garante que a quadra do prefill pertença às quadras disponíveis da empresa atual
+        const safeCourt = (availableCourts || []).includes(prefill.court)
+          ? prefill.court
+          : ((availableCourts || [])[0] || '');
         setForm({
           selectedClients: userSelectedOnceRef.current ? (Array.isArray(form.selectedClients) ? form.selectedClients : []) : [],
-          court: prefill.court ?? (availableCourts[0] || ''),
-          modality: (() => { const c = prefill.court ?? (availableCourts[0] || ''); const allowed = courtsMap[c]?.modalidades || modalities; return allowed[0] || ''; })(),
+          court: safeCourt,
+          modality: (() => { const c = safeCourt; const allowed = courtsMap[c]?.modalidades || modalities; return allowed[0] || ''; })(),
           status: 'scheduled',
           date: prefill.date ?? currentDate,
           startMinutes: prefill.startMinutes ?? nearestSlot(),
@@ -5264,7 +5268,12 @@ function AgendaPage() {
 
                           // Limpa completamente o estado antes de abrir novo agendamento
                           setEditingBooking(null);
-                          setPrefill({ court, date: currentDate, startMinutes: clickedStart, endMinutes: clickedEnd });
+                          // Sanitize court at click time to ensure it exists for the current company
+                          {
+                            const list = availableCourts || [];
+                            const safeCourt = list.includes(court) ? court : (list[0] || '');
+                            setPrefill({ court: safeCourt, date: currentDate, startMinutes: clickedStart, endMinutes: clickedEnd });
+                          }
                           // Limpa seleção de clientes para evitar carregar dados de agendamento anterior
                           try {
                             lastNonEmptySelectionRef.current = [];
@@ -5276,7 +5285,6 @@ function AgendaPage() {
                           openBookingModal();
                         }}
                         title={`Livre: ${sLabel}–${eLabel}`}
-                      >
                         {hoverSlot !== null && (
                           <div
                             className="pointer-events-none absolute left-[6px] right-[6px] rounded-md border border-white/10 bg-white/5"
