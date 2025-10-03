@@ -1184,6 +1184,10 @@ function AgendaPage() {
             localStorage.removeItem('quadras:list');
             localStorage.removeItem('agenda:selectedCourts');
             setDbCourts([]);
+            // Evita mostrar nome de quadra de outra empresa no SelectValue
+            try { setSelectedCourts([]); } catch {}
+            try { setActiveCourtFilter(null); } catch {}
+            try { setForm((f) => ({ ...f, court: '' })); } catch {}
           }
         }
       } catch {}
@@ -1232,6 +1236,23 @@ function AgendaPage() {
       loadCourts();
     }
   }, [authReady, userProfile?.codigo_empresa]);
+
+  // Corrige o valor exibido do select de quadra quando a lista disponível muda
+  useEffect(() => {
+    try {
+      if (courtsLoading) return;
+      const list = availableCourts || [];
+      // Se a quadra atual não existe na empresa/consulta atual, seleciona a primeira disponível
+      if (form?.court && !list.includes(form.court)) {
+        setForm((f) => ({ ...f, court: list[0] || '' }));
+      }
+      // Se não há nenhuma selecionada e existem quadras, seleciona a primeira
+      if ((!form?.court || form.court === '') && list.length > 0) {
+        setForm((f) => ({ ...f, court: list[0] }));
+      }
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [courtsLoading, availableCourts, userProfile?.codigo_empresa]);
 
   // Restaurar seleção e filtros de localStorage ao montar e sincronizar com quadras disponíveis
   useEffect(() => {
