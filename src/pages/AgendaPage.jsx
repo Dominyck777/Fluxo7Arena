@@ -268,44 +268,21 @@ function AgendaPage() {
     setIsModalOpen(true);
     hasOpenedRef.current = true;
   }, [isModalOpen]); // ✅ CORREÇÃO: Adiciona isModalOpen nas dependências
-  const [viewFilter, setViewFilter] = useState(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem('agenda:viewFilter') || '{}');
-      if (saved && typeof saved === 'object') {
-        return { scheduled: true, available: true, canceledOnly: false, ...saved };
-      }
-    } catch {}
-    return { scheduled: true, available: true, canceledOnly: false };
-  });
+  const [viewFilter, setViewFilter] = useState({ scheduled: true, available: true, canceledOnly: false });
 
   // Lista de quadras vinda do banco (objetos com nome, modalidades, horario)
-  const [dbCourts, setDbCourts] = useState(() => {
-    try {
-      const cached = JSON.parse(localStorage.getItem('quadras:list') || '[]');
-      return Array.isArray(cached) ? cached : null;
-    } catch {
-      return null;
-    }
-  });
-  const [courtsLoading, setCourtsLoading] = useState(() => {
-    try {
-      const cached = JSON.parse(localStorage.getItem('quadras:list') || '[]');
-      return !(Array.isArray(cached) && cached.length > 0);
-    } catch {
-      return true;
-    }
-  });
+  const [dbCourts, setDbCourts] = useState(null);
+  const [courtsLoading, setCourtsLoading] = useState(true);
 
   const courtsMap = useMemo(() => Object.fromEntries((dbCourts ?? []).map(c => [c.nome, c])), [dbCourts]);
   const availableCourts = useMemo(() => (dbCourts ?? []).map(c => c.nome), [dbCourts]);
-  const [selectedCourts, setSelectedCourts] = useState(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem('agenda:selectedCourts') || '[]');
-      return Array.isArray(saved) ? saved : [];
-    } catch {
-      return [];
-    }
-  });
+  const [selectedCourts, setSelectedCourts] = useState([]);
+
+  // Chaves de cache por empresa
+  const companyCode = userProfile?.codigo_empresa;
+  const courtsCacheKey = useMemo(() => companyCode ? `quadras:list:${companyCode}` : 'quadras:list', [companyCode]);
+  const selectedCourtsKey = useMemo(() => companyCode ? `agenda:selectedCourts:${companyCode}` : 'agenda:selectedCourts', [companyCode]);
+  const viewFilterKey = useMemo(() => companyCode ? `agenda:viewFilter:${companyCode}` : 'agenda:viewFilter', [companyCode]);
   
   // Estado para filtrar qual quadra está sendo visualizada (primeira quadra por padrão)
   const [activeCourtFilter, setActiveCourtFilter] = useState(null);
@@ -1160,15 +1137,16 @@ function AgendaPage() {
 
   // Carregar quadras do banco por empresa (inclui modalidades e horários)
   useEffect(() => {
-    // Hidratar quadras de cache para evitar sumiço ao trocar de aba
+    // Hidratar quadras do cache específico da empresa para evitar sumiço ao trocar de aba
+    if (!companyCode) return;
     try {
-      const cached = JSON.parse(localStorage.getItem('quadras:list') || '[]');
+      const cached = JSON.parse(localStorage.getItem(courtsCacheKey) || '[]');
       if (Array.isArray(cached) && cached.length && (!dbCourts || dbCourts.length === 0)) {
         setDbCourts(cached);
         setCourtsLoading(false);
       }
     } catch {}
-  }, []);
+  }, [companyCode, courtsCacheKey]);
 
   useEffect(() => {
     const loadCourts = async () => {
@@ -1176,13 +1154,13 @@ function AgendaPage() {
       
       // ✅ CORREÇÃO: Verifica se o cache é da empresa atual, senão limpa
       try {
-        const cached = JSON.parse(localStorage.getItem('quadras:list') || '[]');
+        const cached = JSON.parse(localStorage.getItem(courtsCacheKey) || '[]');
         if (Array.isArray(cached) && cached.length > 0) {
           const cachedEmpresa = cached[0]?.codigo_empresa;
           if (cachedEmpresa && cachedEmpresa !== userProfile.codigo_empresa) {
             console.warn('🧹 [Cache Limpo] Quadras de outra empresa detectadas e removidas');
-            localStorage.removeItem('quadras:list');
-            localStorage.removeItem('agenda:selectedCourts');
+            localStorage.removeItem(courtsCacheKey);
+            localStorage.removeItem(selectedCourtsKey);
             setDbCourts([]);
             // Evita mostrar nome de quadra de outra empresa no SelectValue
             try { setSelectedCourts([]); } catch {}
@@ -1229,13 +1207,13 @@ function AgendaPage() {
         quadras: rows.map(q => ({ id: q.id, nome: q.nome }))
       });
       setDbCourts(rows);
-      try { localStorage.setItem('quadras:list', JSON.stringify(rows)); } catch {}
+      try { localStorage.setItem(courtsCacheKey, JSON.stringify(rows)); } catch {}
       setCourtsLoading(false);
     };
     if (authReady && userProfile?.codigo_empresa) {
       loadCourts();
     }
-  }, [authReady, userProfile?.codigo_empresa]);
+  }, [authReady, userProfile?.codigo_empresa, courtsCacheKey, selectedCourtsKey]);
 
   // Corrige o valor exibido do select de quadra quando a lista disponível muda
   useEffect(() => {
@@ -1259,10 +1237,10 @@ function AgendaPage() {
     // só roda quando quadras carregadas
     if (courtsLoading) return;
     const savedSel = (() => {
-      try { return JSON.parse(localStorage.getItem('agenda:selectedCourts') || '[]'); } catch { return []; }
+      try { return JSON.parse(localStorage.getItem(selectedCourtsKey) || '[]'); } catch { return []; }
     })();
     const savedFilter = (() => {
-      try { return JSON.parse(localStorage.getItem('agenda:viewFilter') || '{}'); } catch { return {}; }
+      try { return JSON.parse(localStorage.getItem(viewFilterKey) || '{}'); } catch { return {}; }
     })();
     // Interseção com quadras disponíveis
     const validSavedSel = savedSel.filter((c) => availableCourts.includes(c));
@@ -1281,11 +1259,11 @@ function AgendaPage() {
 
   // Persistir seleção e filtros
   useEffect(() => {
-    try { localStorage.setItem('agenda:selectedCourts', JSON.stringify(selectedCourts)); } catch {}
-  }, [selectedCourts]);
+    try { localStorage.setItem(selectedCourtsKey, JSON.stringify(selectedCourts)); } catch {}
+  }, [selectedCourts, selectedCourtsKey]);
   useEffect(() => {
-    try { localStorage.setItem('agenda:viewFilter', JSON.stringify(viewFilter)); } catch {}
-  }, [viewFilter]);
+    try { localStorage.setItem(viewFilterKey, JSON.stringify(viewFilter)); } catch {}
+  }, [viewFilter, viewFilterKey]);
 
   // Definir janela dinâmica do grid com base nas quadras selecionadas (precisão de minutos)
   const dayStartHour = useMemo(() => {

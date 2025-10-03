@@ -707,6 +707,8 @@ export default function QuadrasPage() {
                   <Button
                     type="button"
                     variant="secondary"
+                    className={`bg-amber-500 hover:bg-amber-400 text-black disabled:opacity-50 disabled:cursor-not-allowed`}
+                    disabled={!newMod.trim()}
                     onClick={() => {
                       const v = newMod.trim();
                       if (!v) return;
@@ -717,6 +719,8 @@ export default function QuadrasPage() {
                       });
                       setNewMod('');
                     }}
+                    aria-label="Adicionar modalidade"
+                    title="Adicionar modalidade"
                   >
                     +
                   </Button>
