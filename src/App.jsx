@@ -12,6 +12,7 @@ import ProdutosPage from '@/pages/ProdutosPage';
 import ClientesPage from '@/pages/ClientesPage';
 import EquipePage from '@/pages/EquipePage';
 import PlaceholderPage from '@/pages/PlaceholderPage';
+import SuportePage from '@/pages/SuportePage';
 import FinanceiroPage from '@/pages/FinanceiroPage';
 import QuadrasPage from '@/pages/QuadrasPage';
 import EmpresasPage from '@/pages/EmpresasPage';
@@ -71,7 +72,7 @@ function PrivateApp() {
             <Route path="/finalizadoras" element={<FinalizadorasPage />} />
             <Route path="/test-page" element={<TestPage />} />
             <Route path="/historico" element={<HistoricoComandasPage />} />
-            <Route path="/suporte" element={<PlaceholderPage title="Suporte" />} />
+            <Route path="/suporte" element={<SuportePage />} />
           </Routes>
         </main>
       </div>

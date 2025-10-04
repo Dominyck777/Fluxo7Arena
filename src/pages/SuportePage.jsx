@@ -1,0 +1,276 @@
+import React, { useMemo, useState } from 'react';
+import { useLocation } from 'react-router-dom';
+import { useAuth } from '@/contexts/AuthContext';
+import { LifeBuoy, MessageCircle, Mail, Bug, ClipboardCopy, CheckCircle2, ExternalLink } from 'lucide-react';
+
+const APP_VERSION = 'v1.0.0'; // ajuste aqui se tiver uma fonte de versão global
+
+function SectionCard({ title, icon: Icon, children, className = '', collapsible = false, defaultOpen = true }) {
+  if (collapsible) {
+    return (
+      <div className={`bg-surface rounded-lg border border-border shadow-sm ${className}`}>
+        <details className="group" open={defaultOpen}>
+          <summary className="list-none cursor-pointer select-none p-4 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              {Icon && <Icon className="w-5 h-5 text-brand" />}
+              <h3 className="text-base font-semibold">{title}</h3>
+            </div>
+            <span className="text-xs text-text-secondary group-open:rotate-180 transition-transform">▾</span>
+          </summary>
+          <div className="px-4 pb-4">
+            {children}
+          </div>
+        </details>
+      </div>
+    );
+  }
+  return (
+    <div className={`bg-surface rounded-lg border border-border shadow-sm p-4 ${className}`}>
+      <div className="flex items-center gap-2 mb-3">
+        {Icon && <Icon className="w-5 h-5 text-brand" />}
+        <h3 className="text-base font-semibold">{title}</h3>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function Row({ label, value }) {
+  return (
+    <div className="flex items-center justify-between gap-3 py-1 text-sm">
+      <span className="text-text-secondary">{label}</span>
+      <span className="font-medium truncate">{value || '—'}</span>
+    </div>
+  );
+}
+
+export default function SuportePage() {
+  const { userProfile, company, authReady, loading } = useAuth();
+  const { pathname } = useLocation();
+
+  // Formulário simples de report (sem backend)
+  const [categoria, setCategoria] = useState('Agenda');
+  const [severidade, setSeveridade] = useState('Média');
+  const [assunto, setAssunto] = useState('');
+  const [descricao, setDescricao] = useState('');
+  const [copied, setCopied] = useState(false);
+
+  const appName = 'Fluxo7 Arena';
+  const supportEmail = 'fluxo7team@gmail.com';
+  const whatsappUrl = 'https://wa.me/5534998936088';
+
+  const diagnostico = useMemo(() => {
+    try {
+      return {
+        empresa: company?.codigo_empresa || '—',
+        usuario: userProfile?.id || '—',
+        cargo: userProfile?.cargo || '—',
+        rota: pathname,
+        versao: APP_VERSION,
+        dataHora: new Date().toLocaleString('pt-BR'),
+        navegador: typeof navigator !== 'undefined' ? navigator.userAgent : '—',
+        authReady: String(!!authReady),
+        loading: String(!!loading),
+      };
+    } catch {
+      return {
+        empresa: '—', usuario: '—', cargo: '—', rota: pathname, versao: APP_VERSION, dataHora: new Date().toLocaleString('pt-BR'), navegador: '—', authReady: '—', loading: '—',
+      };
+    }
+  }, [company?.codigo_empresa, userProfile?.id, userProfile?.cargo, pathname, authReady, loading]);
+
+  const mensagemTemplate = useMemo(() => {
+    return [
+      `[${appName} - Suporte]`,
+      `Assunto: ${assunto || '(sem assunto)'} `,
+      `Categoria: ${categoria} `,
+      `Severidade: ${severidade}`,
+      '',
+      'Descrição:',
+      (descricao || '(adicione uma descrição detalhada, passos para reproduzir, prints se possível)') + '\n',
+      '— Diagnóstico —',
+      `Empresa: ${diagnostico.empresa}`,
+      `Usuário: ${diagnostico.usuario} (${diagnostico.cargo})`,
+      `Rota: ${diagnostico.rota}`,
+      `Versão: ${diagnostico.versao}`,
+      `Data/Hora: ${diagnostico.dataHora}`,
+      `Navegador: ${diagnostico.navegador}`,
+    ].join('\n');
+  }, [assunto, categoria, severidade, descricao, diagnostico]);
+
+  const handleCopy = async (text) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1200);
+    } catch {}
+  };
+
+  const whatsappHref = `${whatsappUrl}?text=${encodeURIComponent(mensagemTemplate)}`;
+  const emailHref = `mailto:${supportEmail}?subject=${encodeURIComponent(`[Suporte] ${assunto || 'Assunto'}`)}&body=${encodeURIComponent(mensagemTemplate)}`;
+
+  return (
+    <div className="px-4 md:px-6 lg:px-8 py-4 md:py-6">
+      {/* Header/Hero */}
+      <div className="bg-surface rounded-xl border border-border p-5 md:p-6 mb-6">        
+        <div className="flex items-start md:items-center justify-between gap-4 flex-col md:flex-row">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-brand/10 border border-brand/30 flex items-center justify-center">
+              <LifeBuoy className="w-5 h-5 text-brand" />
+            </div>
+            <div>
+              <h1 className="text-xl md:text-2xl font-semibold">Suporte</h1>
+              <p className="text-sm text-text-secondary">Precisa de ajuda? Fale com a gente ou consulte as respostas rápidas abaixo.</p>
+            </div>
+          </div>
+          <div className="text-right">
+            <div className="text-sm font-medium">{appName}</div>
+            <div className="text-xs text-text-secondary">Versão {APP_VERSION}</div>
+          </div>
+        </div>
+
+        {/* Status rápido */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-4">
+          <SectionCard title="Status" icon={CheckCircle2}>
+            <div className="grid grid-cols-1 gap-1">
+              <Row label="Autenticação" value={authReady ? 'Pronto' : 'Aguardando'} />
+              <Row label="Empresa" value={diagnostico.empresa} />
+              <Row label="Usuário" value={`${diagnostico.usuario}`}/>
+            </div>
+          </SectionCard>
+          <SectionCard title="Contato Rápido" icon={MessageCircle}>
+            <div className="flex flex-wrap gap-2">
+              <a href={whatsappUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 px-3 py-2 rounded-md bg-brand text-black hover:opacity-90 transition">
+                <MessageCircle className="w-4 h-4" /> WhatsApp
+              </a>
+              <a href={`mailto:${supportEmail}`} className="inline-flex items-center gap-2 px-3 py-2 rounded-md border border-border hover:bg-surface-2 transition">
+                <Mail className="w-4 h-4" /> E-mail
+              </a>
+            </div>
+          </SectionCard>
+          <SectionCard title="Links úteis" icon={ExternalLink}>
+            <div className="text-sm text-text-secondary">Sem links adicionais no momento.</div>
+          </SectionCard>
+        </div>
+      </div>
+
+      {/* Conteúdo principal */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* FAQ */}
+        <div className="lg:col-span-2 space-y-3">
+          <SectionCard title="Perguntas Frequentes (FAQ)">
+            <div className="divide-y divide-border/60">
+              <details className="py-3">
+                <summary className="cursor-pointer select-none font-medium">Como abrir comanda de balcão?</summary>
+                <p className="mt-2 text-sm text-text-secondary">Abra o caixa antes. A tela de balcão utiliza uma comanda sem mesa (mesa_id nulo). Se não existir, o sistema cria ao abrir o balcão; caso o caixa esteja fechado, a abertura da comanda é bloqueada.</p>
+              </details>
+              <details className="py-3">
+                <summary className="cursor-pointer select-none font-medium">Por que não consigo fechar o caixa?</summary>
+                <p className="mt-2 text-sm text-text-secondary">O fechamento é bloqueado se houver comandas com itens em aberto (inclui balcão e mesas). Finalize ou feche as comandas pendentes antes de encerrar o caixa.</p>
+              </details>
+              <details className="py-3">
+                <summary className="cursor-pointer select-none font-medium">Como adicionar participantes no agendamento?</summary>
+                <p className="mt-2 text-sm text-text-secondary">No modal de agendamento, selecione um ou mais clientes. Após salvar, o chip de pagamentos é atualizado imediatamente. Se não visualizar, recarregue os dados da agenda.</p>
+              </details>
+              <details className="py-3">
+                <summary className="cursor-pointer select-none font-medium">O seletor de clientes fecha sozinho. O que fazer?</summary>
+                <p className="mt-2 text-sm text-text-secondary">Essa situação foi mitigada com melhorias no controle de efeitos e limpeza de estado. Se persistir, feche e reabra o modal, e limpe o cache do navegador como passo adicional.</p>
+              </details>
+              <details className="py-3">
+                <summary className="cursor-pointer select-none font-medium">Como ver o histórico completo do cliente?</summary>
+                <p className="mt-2 text-sm text-text-secondary">Abra o cliente e utilize o “Histórico Recente”, que combina comandas e agendamentos em uma única timeline com totais e status.</p>
+              </details>
+              <details className="py-3">
+                <summary className="cursor-pointer select-none font-medium">Como ajustar estoque mínimo e ver mais vendidos?</summary>
+                <p className="mt-2 text-sm text-text-secondary">Na aba de Produtos você pode gerenciar estoque, preços e relatórios. Utilize filtros e exportações para análise.</p>
+              </details>
+              <details className="py-3">
+                <summary className="cursor-pointer select-none font-medium">Login e multi-empresa</summary>
+                <p className="mt-2 text-sm text-text-secondary">O login carrega seu perfil e a empresa associada. Se trocar de empresa, garanta que o perfil possua o código correto (multi-tenant por <code>codigo_empresa</code>).</p>
+              </details>
+            </div>
+          </SectionCard>
+        </div>
+
+        {/* Ações de suporte */}
+        <div className="lg:col-span-1">
+          <div className="space-y-3 lg:sticky lg:top-6">
+          <SectionCard title="Fale com a gente" icon={MessageCircle}>
+            <p className="text-sm text-text-secondary mb-3">Escolha um canal e descreva sua necessidade. Responderemos o quanto antes.</p>
+            <div className="flex flex-col gap-2">
+              <a href={whatsappUrl} target="_blank" rel="noreferrer" className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-md bg-brand text-black hover:opacity-90 transition">
+                <MessageCircle className="w-4 h-4" /> Abrir WhatsApp
+              </a>
+              <a href={`mailto:${supportEmail}`} className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-md border border-border hover:bg-surface-2 transition">
+                <Mail className="w-4 h-4" /> Enviar E-mail
+              </a>
+            </div>
+          </SectionCard>
+
+          <SectionCard title="Reportar um problema" icon={Bug} collapsible defaultOpen={false}>
+            <div className="space-y-2">
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-xs text-text-secondary">Categoria</label>
+                  <select value={categoria} onChange={(e) => setCategoria(e.target.value)} className="w-full mt-1 px-2 py-2 rounded-md bg-background border border-border">
+                    <option>Agenda</option>
+                    <option>Vendas</option>
+                    <option>Clientes</option>
+                    <option>Produtos</option>
+                    <option>Financeiro</option>
+                    <option>Outros</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-text-secondary">Severidade</label>
+                  <select value={severidade} onChange={(e) => setSeveridade(e.target.value)} className="w-full mt-1 px-2 py-2 rounded-md bg-background border border-border">
+                    <option>Baixa</option>
+                    <option>Média</option>
+                    <option>Alta</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="text-xs text-text-secondary">Assunto</label>
+                <input value={assunto} onChange={(e) => setAssunto(e.target.value)} placeholder="Ex.: Erro ao salvar agendamento" className="w-full mt-1 px-3 py-2 rounded-md bg-background border border-border" />
+              </div>
+              <div>
+                <label className="text-xs text-text-secondary">Descrição</label>
+                <textarea value={descricao} onChange={(e) => setDescricao(e.target.value)} rows={4} placeholder="Descreva o que aconteceu, passos para reproduzir, expectativa."
+                  className="w-full mt-1 px-3 py-2 rounded-md bg-background border border-border resize-y" />
+              </div>
+              <div className="flex flex-wrap gap-2 pt-1">
+                <button onClick={() => handleCopy(mensagemTemplate)} className="inline-flex items-center gap-2 px-3 py-2 rounded-md border border-border hover:bg-surface-2 transition">
+                  <ClipboardCopy className="w-4 h-4" /> {copied ? 'Copiado!' : 'Copiar mensagem'}
+                </button>
+                <a href={whatsappHref} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 px-3 py-2 rounded-md bg-brand text-black hover:opacity-90 transition">
+                  <MessageCircle className="w-4 h-4" /> Enviar no WhatsApp
+                </a>
+                <a href={emailHref} className="inline-flex items-center gap-2 px-3 py-2 rounded-md border border-border hover:bg-surface-2 transition">
+                  <Mail className="w-4 h-4" /> Enviar por E-mail
+                </a>
+              </div>
+            </div>
+          </SectionCard>
+
+          <SectionCard title="Diagnóstico" icon={ClipboardCopy}>
+            <div className="space-y-1 text-sm">
+              <Row label="Empresa" value={diagnostico.empresa} />
+              <Row label="Usuário" value={`${diagnostico.usuario} (${diagnostico.cargo})`} />
+              <Row label="Rota" value={diagnostico.rota} />
+              <Row label="Versão" value={diagnostico.versao} />
+              <Row label="Data/Hora" value={diagnostico.dataHora} />
+              <Row label="Navegador" value={diagnostico.navegador} />
+            </div>
+            <div className="mt-3">
+              <button onClick={() => handleCopy(mensagemTemplate)} className="inline-flex items-center gap-2 px-3 py-2 rounded-md border border-border hover:bg-surface-2 transition">
+                <ClipboardCopy className="w-4 h-4" /> Copiar diagnóstico + mensagem
+              </button>
+            </div>
+          </SectionCard>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
