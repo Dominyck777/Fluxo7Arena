@@ -1,9 +1,9 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
-import { LifeBuoy, MessageCircle, Mail, Bug, ClipboardCopy, CheckCircle2, ExternalLink } from 'lucide-react';
+import { LifeBuoy, MessageCircle, Mail, Bug, ClipboardCopy, CheckCircle2, Phone, Trophy } from 'lucide-react';
 
-const APP_VERSION = 'v1.0.0'; // ajuste aqui se tiver uma fonte de versão global
+const APP_VERSION = 'v0.0.4'; // ajuste aqui se tiver uma fonte de versão global
 
 function SectionCard({ title, icon: Icon, children, className = '', collapsible = false, defaultOpen = true }) {
   if (collapsible) {
@@ -53,31 +53,48 @@ export default function SuportePage() {
   const [severidade, setSeveridade] = useState('Média');
   const [assunto, setAssunto] = useState('');
   const [descricao, setDescricao] = useState('');
-  const [copied, setCopied] = useState(false);
+  const [isDesktop, setIsDesktop] = useState(true);
 
   const appName = 'Fluxo7 Arena';
   const supportEmail = 'fluxo7team@gmail.com';
   const whatsappUrl = 'https://wa.me/5534998936088';
+  const phoneHref = 'tel:+5534998936088';
+  const displayPhone = '+55 (34) 99893-6088';
+
+  useEffect(() => {
+    try {
+      const mq = window.matchMedia('(pointer:fine)');
+      const update = () => setIsDesktop(mq.matches);
+      update();
+      mq.addEventListener?.('change', update);
+      return () => mq.removeEventListener?.('change', update);
+    } catch {
+      setIsDesktop(true);
+    }
+  }, []);
 
   const diagnostico = useMemo(() => {
     try {
       return {
-        empresa: company?.codigo_empresa || '—',
-        usuario: userProfile?.id || '—',
-        cargo: userProfile?.cargo || '—',
-        rota: pathname,
-        versao: APP_VERSION,
+        empresa:
+          company?.nome ||
+          company?.fantasia ||
+          company?.razao_social ||
+          company?.razaoSocial ||
+          company?.displayName ||
+          company?.codigo_empresa ||
+          '—',
+        usuario: userProfile?.nome || userProfile?.name || userProfile?.email || '—',
         dataHora: new Date().toLocaleString('pt-BR'),
-        navegador: typeof navigator !== 'undefined' ? navigator.userAgent : '—',
-        authReady: String(!!authReady),
-        loading: String(!!loading),
       };
     } catch {
       return {
-        empresa: '—', usuario: '—', cargo: '—', rota: pathname, versao: APP_VERSION, dataHora: new Date().toLocaleString('pt-BR'), navegador: '—', authReady: '—', loading: '—',
+        empresa: '—',
+        usuario: '—',
+        dataHora: new Date().toLocaleString('pt-BR'),
       };
     }
-  }, [company?.codigo_empresa, userProfile?.id, userProfile?.cargo, pathname, authReady, loading]);
+  }, [company?.nome, company?.fantasia, company?.razao_social, company?.razaoSocial, company?.displayName, company?.codigo_empresa, userProfile?.nome, userProfile?.name, userProfile?.email]);
 
   const mensagemTemplate = useMemo(() => {
     return [
@@ -88,23 +105,12 @@ export default function SuportePage() {
       '',
       'Descrição:',
       (descricao || '(adicione uma descrição detalhada, passos para reproduzir, prints se possível)') + '\n',
-      '— Diagnóstico —',
+      '— Dados —',
       `Empresa: ${diagnostico.empresa}`,
-      `Usuário: ${diagnostico.usuario} (${diagnostico.cargo})`,
-      `Rota: ${diagnostico.rota}`,
-      `Versão: ${diagnostico.versao}`,
+      `Usuário: ${diagnostico.usuario}`,
       `Data/Hora: ${diagnostico.dataHora}`,
-      `Navegador: ${diagnostico.navegador}`,
     ].join('\n');
   }, [assunto, categoria, severidade, descricao, diagnostico]);
-
-  const handleCopy = async (text) => {
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1200);
-    } catch {}
-  };
 
   const whatsappHref = `${whatsappUrl}?text=${encodeURIComponent(mensagemTemplate)}`;
   const emailHref = `mailto:${supportEmail}?subject=${encodeURIComponent(`[Suporte] ${assunto || 'Assunto'}`)}&body=${encodeURIComponent(mensagemTemplate)}`;
@@ -124,21 +130,29 @@ export default function SuportePage() {
             </div>
           </div>
           <div className="text-right">
-            <div className="text-sm font-medium">{appName}</div>
-            <div className="text-xs text-text-secondary">Versão {APP_VERSION}</div>
+            <div className="flex items-center justify-end gap-2">
+              <div className="w-10 h-10 bg-brand rounded-xl flex items-center justify-center">
+                <Trophy className="w-6 h-6 text-primary-foreground" />
+              </div>
+              <div className="flex items-baseline">
+                <span className="font-extrabold text-base md:text-xl" style={{ color: '#FF6600' }}>Fluxo</span>
+                <span className="font-extrabold text-base md:text-xl" style={{ color: '#FFAA33' }}>7</span>
+                <span className="font-medium text-base md:text-xl" style={{ color: '#B0B0B0' }}> Arena</span>
+              </div>
+            </div>
+            <div className="text-xs text-text-secondary mt-1">Versão {APP_VERSION}</div>
           </div>
         </div>
 
         {/* Status rápido */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4">
           <SectionCard title="Status" icon={CheckCircle2}>
             <div className="grid grid-cols-1 gap-1">
-              <Row label="Autenticação" value={authReady ? 'Pronto' : 'Aguardando'} />
               <Row label="Empresa" value={diagnostico.empresa} />
               <Row label="Usuário" value={`${diagnostico.usuario}`}/>
             </div>
           </SectionCard>
-          <SectionCard title="Contato Rápido" icon={MessageCircle}>
+          <SectionCard title="Fale com a gente" icon={MessageCircle}>
             <div className="flex flex-wrap gap-2">
               <a href={whatsappUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 px-3 py-2 rounded-md bg-brand text-black hover:opacity-90 transition">
                 <MessageCircle className="w-4 h-4" /> WhatsApp
@@ -146,10 +160,10 @@ export default function SuportePage() {
               <a href={`mailto:${supportEmail}`} className="inline-flex items-center gap-2 px-3 py-2 rounded-md border border-border hover:bg-surface-2 transition">
                 <Mail className="w-4 h-4" /> E-mail
               </a>
+              <a href={phoneHref} className="inline-flex items-center gap-2 px-3 py-2 rounded-md border border-border hover:bg-surface-2 transition">
+                <Phone className="w-4 h-4" /> {isDesktop ? displayPhone : 'Telefone'}
+              </a>
             </div>
-          </SectionCard>
-          <SectionCard title="Links úteis" icon={ExternalLink}>
-            <div className="text-sm text-text-secondary">Sem links adicionais no momento.</div>
           </SectionCard>
         </div>
       </div>
@@ -172,10 +186,7 @@ export default function SuportePage() {
                 <summary className="cursor-pointer select-none font-medium">Como adicionar participantes no agendamento?</summary>
                 <p className="mt-2 text-sm text-text-secondary">No modal de agendamento, selecione um ou mais clientes. Após salvar, o chip de pagamentos é atualizado imediatamente. Se não visualizar, recarregue os dados da agenda.</p>
               </details>
-              <details className="py-3">
-                <summary className="cursor-pointer select-none font-medium">O seletor de clientes fecha sozinho. O que fazer?</summary>
-                <p className="mt-2 text-sm text-text-secondary">Essa situação foi mitigada com melhorias no controle de efeitos e limpeza de estado. Se persistir, feche e reabra o modal, e limpe o cache do navegador como passo adicional.</p>
-              </details>
+              
               <details className="py-3">
                 <summary className="cursor-pointer select-none font-medium">Como ver o histórico completo do cliente?</summary>
                 <p className="mt-2 text-sm text-text-secondary">Abra o cliente e utilize o “Histórico Recente”, que combina comandas e agendamentos em uma única timeline com totais e status.</p>
@@ -184,10 +195,7 @@ export default function SuportePage() {
                 <summary className="cursor-pointer select-none font-medium">Como ajustar estoque mínimo e ver mais vendidos?</summary>
                 <p className="mt-2 text-sm text-text-secondary">Na aba de Produtos você pode gerenciar estoque, preços e relatórios. Utilize filtros e exportações para análise.</p>
               </details>
-              <details className="py-3">
-                <summary className="cursor-pointer select-none font-medium">Login e multi-empresa</summary>
-                <p className="mt-2 text-sm text-text-secondary">O login carrega seu perfil e a empresa associada. Se trocar de empresa, garanta que o perfil possua o código correto (multi-tenant por <code>codigo_empresa</code>).</p>
-              </details>
+              
             </div>
           </SectionCard>
         </div>
@@ -195,18 +203,6 @@ export default function SuportePage() {
         {/* Ações de suporte */}
         <div className="lg:col-span-1">
           <div className="space-y-3 lg:sticky lg:top-6">
-          <SectionCard title="Fale com a gente" icon={MessageCircle}>
-            <p className="text-sm text-text-secondary mb-3">Escolha um canal e descreva sua necessidade. Responderemos o quanto antes.</p>
-            <div className="flex flex-col gap-2">
-              <a href={whatsappUrl} target="_blank" rel="noreferrer" className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-md bg-brand text-black hover:opacity-90 transition">
-                <MessageCircle className="w-4 h-4" /> Abrir WhatsApp
-              </a>
-              <a href={`mailto:${supportEmail}`} className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-md border border-border hover:bg-surface-2 transition">
-                <Mail className="w-4 h-4" /> Enviar E-mail
-              </a>
-            </div>
-          </SectionCard>
-
           <SectionCard title="Reportar um problema" icon={Bug} collapsible defaultOpen={false}>
             <div className="space-y-2">
               <div className="grid grid-cols-2 gap-2">
@@ -240,14 +236,14 @@ export default function SuportePage() {
                   className="w-full mt-1 px-3 py-2 rounded-md bg-background border border-border resize-y" />
               </div>
               <div className="flex flex-wrap gap-2 pt-1">
-                <button onClick={() => handleCopy(mensagemTemplate)} className="inline-flex items-center gap-2 px-3 py-2 rounded-md border border-border hover:bg-surface-2 transition">
-                  <ClipboardCopy className="w-4 h-4" /> {copied ? 'Copiado!' : 'Copiar mensagem'}
-                </button>
                 <a href={whatsappHref} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 px-3 py-2 rounded-md bg-brand text-black hover:opacity-90 transition">
                   <MessageCircle className="w-4 h-4" /> Enviar no WhatsApp
                 </a>
                 <a href={emailHref} className="inline-flex items-center gap-2 px-3 py-2 rounded-md border border-border hover:bg-surface-2 transition">
                   <Mail className="w-4 h-4" /> Enviar por E-mail
+                </a>
+                <a href={phoneHref} className="inline-flex items-center gap-2 px-3 py-2 rounded-md border border-border hover:bg-surface-2 transition">
+                  <Phone className="w-4 h-4" /> {isDesktop ? displayPhone : 'Ligar agora'}
                 </a>
               </div>
             </div>
@@ -256,16 +252,11 @@ export default function SuportePage() {
           <SectionCard title="Diagnóstico" icon={ClipboardCopy}>
             <div className="space-y-1 text-sm">
               <Row label="Empresa" value={diagnostico.empresa} />
-              <Row label="Usuário" value={`${diagnostico.usuario} (${diagnostico.cargo})`} />
-              <Row label="Rota" value={diagnostico.rota} />
-              <Row label="Versão" value={diagnostico.versao} />
+              <Row label="Usuário" value={`${diagnostico.usuario}`} />
               <Row label="Data/Hora" value={diagnostico.dataHora} />
-              <Row label="Navegador" value={diagnostico.navegador} />
-            </div>
-            <div className="mt-3">
-              <button onClick={() => handleCopy(mensagemTemplate)} className="inline-flex items-center gap-2 px-3 py-2 rounded-md border border-border hover:bg-surface-2 transition">
-                <ClipboardCopy className="w-4 h-4" /> Copiar diagnóstico + mensagem
-              </button>
+              <Row label="Canal - WhatsApp" value="(34) 99893-6088" />
+              <Row label="Canal - E-mail" value="fluxo7team@gmail.com" />
+              <Row label="Canal - Telefone" value="(34) 99893-6088" />
             </div>
           </SectionCard>
           </div>
