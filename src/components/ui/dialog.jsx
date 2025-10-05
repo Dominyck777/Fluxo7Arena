@@ -12,46 +12,57 @@ const DialogPortal = DialogPrimitive.Portal
 
 const DialogClose = DialogPrimitive.Close
 
-const DialogOverlay = React.forwardRef(({ className, disableAnimations, ...props }, ref) => (
-  <DialogPrimitive.Overlay
-    ref={ref}
-    className={cn(
-      "fixed inset-0 z-50 bg-background/80 backdrop-blur-sm",
-      disableAnimations
-        ? "data-[state=open]:animate-none data-[state=closed]:animate-none"
-        : "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
-      className
-    )}
-    {...props}
-  />
-))
-DialogOverlay.displayName = DialogPrimitive.Overlay.displayName
-
-const DialogContent = React.forwardRef(({ className, children, overlayClassName, disableAnimations, alignTop, ...props }, ref) => (
-  <DialogPortal>
-    <DialogOverlay disableAnimations={disableAnimations} className={overlayClassName} />
-    <DialogPrimitive.Content
+const DialogOverlay = React.forwardRef(({ className, disableAnimations, ...props }, ref) => {
+  // Mobile detection: coarse pointer is a good proxy for touch devices
+  const isMobile = typeof window !== 'undefined' && (window.matchMedia?.('(pointer: coarse)')?.matches || window.innerWidth < 768);
+  const prefersReduce = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
+  const noAnim = (disableAnimations ?? false) || isMobile || prefersReduce;
+  return (
+    <DialogPrimitive.Overlay
       ref={ref}
       className={cn(
-        "fixed z-50 grid w-full max-w-lg gap-4 border border-border bg-surface p-6 shadow-lg duration-200 sm:rounded-lg",
-        alignTop
-          ? "left-1/2 top-[10%] -translate-x-1/2"
-          : "left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2",
-        disableAnimations
+        "fixed inset-0 z-50 bg-background/80 backdrop-blur-sm",
+        noAnim
           ? "data-[state=open]:animate-none data-[state=closed]:animate-none"
           : "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
         className
       )}
       {...props}
-    >
-      {children}
-      <DialogPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground">
-        <X className="h-4 w-4" />
-        <span className="sr-only">Close</span>
-      </DialogPrimitive.Close>
-    </DialogPrimitive.Content>
-  </DialogPortal>
-))
+    />
+  )
+})
+DialogOverlay.displayName = DialogPrimitive.Overlay.displayName
+
+const DialogContent = React.forwardRef(({ className, children, overlayClassName, disableAnimations, alignTop, ...props }, ref) => {
+  const isMobile = typeof window !== 'undefined' && (window.matchMedia?.('(pointer: coarse)')?.matches || window.innerWidth < 768);
+  const prefersReduce = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
+  const noAnim = (disableAnimations ?? false) || isMobile || prefersReduce;
+  return (
+    <DialogPortal>
+      <DialogOverlay disableAnimations={noAnim} className={overlayClassName} />
+      <DialogPrimitive.Content
+        ref={ref}
+        className={cn(
+          "fixed z-50 grid w-full max-w-lg gap-4 border border-border bg-surface p-6 shadow-lg duration-200 sm:rounded-lg",
+          alignTop
+            ? "left-1/2 top-[10%] -translate-x-1/2"
+            : "left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2",
+          noAnim
+            ? "data-[state=open]:animate-none data-[state=closed]:animate-none"
+            : "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
+          className
+        )}
+        {...props}
+      >
+        {children}
+        <DialogPrimitive.Close className="absolute right-3 top-3 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground p-1">
+          <X className="h-5 w-5" />
+          <span className="sr-only">Close</span>
+        </DialogPrimitive.Close>
+      </DialogPrimitive.Content>
+    </DialogPortal>
+  )
+})
 DialogContent.displayName = DialogPrimitive.Content.displayName
 
 const DialogHeader = ({ className, ...props }) => (
