@@ -1,11 +1,11 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 
 import { Helmet } from 'react-helmet';
 import { motion } from 'framer-motion';
 import { DragDropContext, Droppable, Draggable } from 'react-beautiful-dnd';
 import { Button } from '@/components/ui/button';
 import { useToast } from "@/components/ui/use-toast";
-import { Plus, GripVertical, Search, CheckCircle, Clock, FileText, ShoppingBag, Trash2, DollarSign, X, Store, Lock, Unlock, Minus, Banknote, ArrowDownCircle, ArrowUpCircle, CalendarDays, Users, ChevronRight } from 'lucide-react';
+import { Plus, GripVertical, Search, CheckCircle, Clock, FileText, ShoppingBag, Trash2, DollarSign, X, Store, Lock, Unlock, Minus, Banknote, ArrowDownCircle, ArrowUpCircle, CalendarDays, Users, ChevronRight, AlertCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -58,6 +58,8 @@ function VendasPage() {
 
   const [selectedTable, setSelectedTable] = useState(null);
   const [isCashierOpen, setIsCashierOpen] = useState(false);
+  const [openComandasCount, setOpenComandasCount] = useState(0);
+  const autoReopenTriedRef = useRef(false);
   const [isCounterModeOpen, setIsCounterModeOpen] = useState(false);
   const [counterOrder, setCounterOrder] = useState([]);
   const [isCashierDetailsOpen, setIsCashierDetailsOpen] = useState(false);
@@ -127,6 +129,17 @@ function VendasPage() {
       try { document.body.style.paddingRight = prevPaddingRightRef.current || ''; } catch {}
       try { document.documentElement.classList.remove('no-dialog-anim'); } catch {}
     };
+
+  // Reabrir sessão de caixa rapidamente (sem teclado, sem modal) – útil quando há comandas abertas
+  const quickReopenCashier = useCallback(async () => {
+    try {
+      await ensureCaixaAberto({ codigoEmpresa: userProfile?.codigo_empresa });
+      await refreshCashierStatus();
+      toast({ title: 'Sessão do caixa revalidada', variant: 'success' });
+    } catch (e) {
+      toast({ title: 'Não foi possível reabrir o caixa', description: e?.message || 'Tente novamente', variant: 'destructive' });
+    }
+  }, [refreshCashierStatus, userProfile?.codigo_empresa]);
   }, [anyDialogOpen]);
 
   // Recarrega e mescla resumo do caixa com saldo_inicial e total de sangrias
@@ -319,11 +332,38 @@ function VendasPage() {
         } else {
           if (!isPayOpen) setSelectedTable(nextSelected);
         }
-        // Detectar sessão de caixa já aberta (não cria se não existir)
-        try {
-          const sessao = await getCaixaAberto({ codigoEmpresa });
-          setIsCashierOpen(!!sessao);
-        } catch { setIsCashierOpen(false); }
+        // (removido) hooks aninhados: refreshCashierStatus e efeitos — agora definidos no topo do componente
+
+        // Auto-recover: se houver comandas abertas mas o caixa parece fechado, tenta reabrir silenciosamente (uma vez)
+        useEffect(() => {
+          const tryAuto = async () => {
+            if (autoReopenTriedRef.current) return;
+            if (openComandasCount > 0 && !isCashierOpen) {
+              autoReopenTriedRef.current = true;
+              try {
+                await ensureCaixaAberto({ codigoEmpresa: userProfile?.codigo_empresa });
+                await refreshCashierStatus();
+              } catch {
+                // se falhar, deixamos o banner com botão de reabrir
+              }
+            }
+          };
+          tryAuto();
+        }, [openComandasCount, isCashierOpen, refreshCashierStatus, userProfile?.codigo_empresa]);
+
+        // Mobile hint: quantidade de comandas abertas quando o caixa está aberto
+        useEffect(() => {
+          let mounted = true;
+          (async () => {
+            try {
+              if (!isCashierOpen) { if (mounted) setOpenComandasCount(0); return; }
+              const abertas = await listarComandasAbertas({ codigoEmpresa: userProfile?.codigo_empresa });
+              if (!mounted) return;
+              setOpenComandasCount(Array.isArray(abertas) ? abertas.length : 0);
+            } catch { if (mounted) setOpenComandasCount(0); }
+          })();
+          return () => { mounted = false; };
+        }, [isCashierOpen, userProfile?.codigo_empresa, tables.length]);
         try {
           let prods = await listProducts({ includeInactive: false, codigoEmpresa });
           if (!Array.isArray(prods) || prods.length === 0) {
@@ -760,12 +800,14 @@ function VendasPage() {
     const [nextPayLineId, setNextPayLineId] = useState(1);
     const [payClients, setPayClients] = useState([]); // {id, nome}
     const valueRefs = useRef(new Map());
+    const isMobile = typeof window !== 'undefined' && window.innerWidth <= 640;
 
     const parseBRL = (s) => { const d = String(s || '').replace(/\D/g, ''); return d ? Number(d) / 100 : 0; };
     const sumPayments = () => (paymentLines || []).reduce((acc, ln) => acc + parseBRL(ln.value), 0);
 
     const focusNextValue = (currentEl, currentId) => {
       try {
+        if (isMobile) return; // não focar automatico no mobile para evitar teclado
         // 1) Tenta pelo array de linhas (lógico)
         const idx = (paymentLines || []).findIndex(l => l.id === currentId);
         if (idx >= 0) {
@@ -797,10 +839,12 @@ function VendasPage() {
           
           // agenda foco após render
           setNextPayLineId(n => n + 1);
-          setTimeout(() => {
-            const el = valueRefs.current.get(newId);
-            if (el) try { el.focus(); el.select?.(); } catch {}
-          }, 0);
+          if (!isMobile) {
+            setTimeout(() => {
+              const el = valueRefs.current.get(newId);
+              if (el) try { el.focus(); el.select?.(); } catch {}
+            }, 0);
+          }
           return nextState;
         });
       } catch {}
@@ -914,7 +958,9 @@ function VendasPage() {
         await ensureCaixaAberto({ codigoEmpresa: userProfile?.codigo_empresa });
         for (const ln of paymentLines) {
           const v = parseBRL(ln.value);
-          await registrarPagamento({ comandaId: selectedTable.comandaId, finalizadoraId: ln.methodId, metodo: (payMethods.find(m => m.id === ln.methodId)?.tipo || 'outros'), valor: v, status: 'Pago', codigoEmpresa, clienteId: ln.clientId || null });
+          const fin = payMethods.find(m => String(m.id) === String(ln.methodId));
+          const metodo = fin?.nome || fin?.tipo || 'outros';
+          await registrarPagamento({ comandaId: selectedTable.comandaId, finalizadoraId: ln.methodId, metodo, valor: v, status: 'Pago', codigoEmpresa, clienteId: ln.clientId || null });
         }
         await fecharComandaEMesa({ comandaId: selectedTable.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
         setTables((prev) => prev.map((t) => (t.id === selectedTable.id ? { ...t, status: 'available', order: [], comandaId: null, customer: null, totalHint: 0 } : t)));
@@ -1124,7 +1170,7 @@ function VendasPage() {
     return (
       <Dialog open={isCashierDetailsOpen} onOpenChange={setIsCashierDetailsOpen}>
         <DialogContent
-          className="max-w-lg"
+          className="sm:max-w-lg w-[92vw] max-h-[85vh] animate-none flex flex-col overflow-hidden"
           onKeyDown={(e) => e.stopPropagation()}
           onKeyDownCapture={(e) => e.stopPropagation()}
           onPointerDownOutside={(e) => e.stopPropagation()}
@@ -1136,55 +1182,57 @@ function VendasPage() {
               {cashLoading ? 'Carregando resumo...' : (cashSummary ? 'Resumo da sessão atual do caixa.' : 'Nenhuma sessão de caixa aberta.')}
             </DialogDescription>
           </DialogHeader>
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
-            <div className="bg-surface-2 rounded-lg p-3 border border-border text-center">
-              <div className="text-[12px] text-text-secondary whitespace-nowrap mb-1">Saldo Inicial</div>
-              <div className="text-base md:text-lg font-bold tabular-nums leading-tight">{fmt(saldoInicial)}</div>
+          <div className="flex-1 overflow-y-auto pr-1">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+              <div className="bg-surface-2 rounded-lg p-3 border border-border text-center">
+                <div className="text-[12px] text-text-secondary whitespace-nowrap mb-1">Saldo Inicial</div>
+                <div className="text-base md:text-lg font-bold tabular-nums leading-tight">{fmt(saldoInicial)}</div>
+              </div>
+              <div className="bg-surface-2 rounded-lg p-3 border border-border text-center">
+                <div className="text-[12px] text-text-secondary whitespace-nowrap mb-1">Entradas</div>
+                <div className="text-base md:text-lg font-bold text-success tabular-nums leading-tight">{fmt(entradasCalc)}</div>
+              </div>
+              <div className="bg-surface-2 rounded-lg p-3 border border-border text-center">
+                <div className="text-[12px] text-text-secondary whitespace-nowrap mb-1">Saídas</div>
+                <div className="text-base md:text-lg font-bold text-danger tabular-nums leading-tight">{fmt(saidas)}</div>
+              </div>
+              <div className="bg-surface-2 rounded-lg p-3 border border-border text-center">
+                <div className="text-[12px] text-text-secondary whitespace-nowrap mb-1">Saldo Atual</div>
+                <div className="text-base md:text-lg font-bold tabular-nums leading-tight">{fmt(saldoAtual)}</div>
+              </div>
             </div>
-            <div className="bg-surface-2 rounded-lg p-3 border border-border text-center">
-              <div className="text-[12px] text-text-secondary whitespace-nowrap mb-1">Entradas</div>
-              <div className="text-base md:text-lg font-bold text-success tabular-nums leading-tight">{fmt(entradasCalc)}</div>
-            </div>
-            <div className="bg-surface-2 rounded-lg p-3 border border-border text-center">
-              <div className="text-[12px] text-text-secondary whitespace-nowrap mb-1">Saídas</div>
-              <div className="text-base md:text-lg font-bold text-danger tabular-nums leading-tight">{fmt(saidas)}</div>
-            </div>
-            <div className="bg-surface-2 rounded-lg p-3 border border-border text-center">
-              <div className="text-[12px] text-text-secondary whitespace-nowrap mb-1">Saldo Atual</div>
-              <div className="text-base md:text-lg font-bold tabular-nums leading-tight">{fmt(saldoAtual)}</div>
-            </div>
-          </div>
-          <div className="mt-5">
-            <div className="flex items-center justify-between mb-3">
-              <h4 className="text-sm font-semibold text-text-secondary">Totais por Finalizadora</h4>
-              {/* Atualização automática já é feita ao abrir/registrar; botão removido para evitar inconsistência de saldo inicial */}
-            </div>
-            {cashLoading ? (
-              <div className="text-sm text-text-muted">Atualizando...</div>
-            ) : (
-              <>
-                {Object.keys(porFinalizadora).length === 0 ? (
-                  <div className="p-3 text-sm text-text-muted border rounded-md">Nenhuma finalizadora registrada ainda.</div>
-                ) : (
-                  <>
-                    <ul className="rounded-md border border-border overflow-hidden divide-y divide-border">
-                      {Object.entries(porFinalizadora).map(([nome, valor]) => (
-                        <li key={nome} className="bg-surface px-3 py-2 flex items-center justify-between">
-                          <span className="text-sm text-text-secondary truncate pr-3">{String(nome)}</span>
-                          <span className="text-sm font-semibold tabular-nums">{fmt(valor)}</span>
-                        </li>
-                      ))}
-                    </ul>
-                    <div className="mt-2 rounded-md border border-border bg-surface px-3 py-2 flex items-center justify-between">
-                      <span className="text-sm text-text-secondary truncate pr-3">Sangrias</span>
-                      <span className="text-sm font-semibold tabular-nums text-danger">{fmt(sangriaVal)}</span>
-                    </div>
-                  </>
-                )}
-              </>
-            )}
-            <div className="mt-3 text-xs text-text-muted leading-relaxed">
-              Saídas incluem sangrias e ajustes. Use "Registrar Sangria" para lançar uma retirada.
+            <div className="mt-5">
+              <div className="flex items-center justify-between mb-3">
+                <h4 className="text-sm font-semibold text-text-secondary">Totais por Finalizadora</h4>
+                {/* Atualização automática já é feita ao abrir/registrar; botão removido para evitar inconsistência de saldo inicial */}
+              </div>
+              {cashLoading ? (
+                <div className="text-sm text-text-muted">Atualizando...</div>
+              ) : (
+                <>
+                  {Object.keys(porFinalizadora).length === 0 ? (
+                    <div className="p-3 text-sm text-text-muted border rounded-md">Nenhuma finalizadora registrada ainda.</div>
+                  ) : (
+                    <>
+                      <ul className="rounded-md border border-border overflow-hidden divide-y divide-border">
+                        {Object.entries(porFinalizadora).map(([nome, valor]) => (
+                          <li key={nome} className="bg-surface px-3 py-2 flex items-center justify-between">
+                            <span className="text-sm text-text-secondary truncate pr-3">{String(nome)}</span>
+                            <span className="text-sm font-semibold tabular-nums">{fmt(valor)}</span>
+                          </li>
+                        ))}
+                      </ul>
+                      <div className="mt-2 rounded-md border border-border bg-surface px-3 py-2 flex items-center justify-between">
+                        <span className="text-sm text-text-secondary truncate pr-3">Sangrias</span>
+                        <span className="text-sm font-semibold tabular-nums text-danger">{fmt(sangriaVal)}</span>
+                      </div>
+                    </>
+                  )}
+                </>
+              )}
+              <div className="mt-3 text-xs text-text-muted leading-relaxed">
+                Saídas incluem sangrias e ajustes. Use "Registrar Sangria" para lançar uma retirada.
+              </div>
             </div>
           </div>
           <DialogFooter className="flex items-center justify-between gap-2">
@@ -1193,7 +1241,7 @@ function VendasPage() {
             <Button variant="secondary" onClick={() => setIsCashierDetailsOpen(false)}>Fechar</Button>
           </DialogFooter>
           <Dialog open={isSangriaOpen} onOpenChange={setIsSangriaOpen}>
-            <DialogContent className="max-w-sm" onKeyDown={(e) => e.stopPropagation()} onKeyDownCapture={(e) => e.stopPropagation()}>
+            <DialogContent className="sm:max-w-sm w-[92vw] max-h-[85vh] animate-none" onKeyDown={(e) => e.stopPropagation()} onKeyDownCapture={(e) => e.stopPropagation()}>
               <DialogHeader>
                 <DialogTitle className="text-xl font-bold">Registrar Sangria</DialogTitle>
                 <DialogDescription>Informe o valor a retirar do caixa e, opcionalmente, uma observação.</DialogDescription>
@@ -2890,7 +2938,7 @@ function VendasPage() {
       <ProductDetailsDialog />
       <CounterProductDetailsDialog />
       <motion.div variants={pageVariantsActive} initial={false} animate={anyDialogOpen ? false : "visible"} layout={false} className="h-full flex flex-col">
-        <motion.div variants={itemVariantsActive} initial={false} animate={anyDialogOpen ? false : undefined} layout={false} className="flex items-center justify-between mb-4 md:mb-6 gap-2 md:gap-4 flex-wrap">
+        <motion.div variants={itemVariantsActive} initial={false} animate={anyDialogOpen ? false : undefined} layout={false} className="flex items-center justify-between mb-2 md:mb-6 gap-2 md:gap-4 flex-wrap">
           <div className="flex items-center gap-2 md:gap-3">
             <Tabs value="mesas" onValueChange={(v) => {
               if (v === 'mesas') navigate('/vendas');
@@ -2917,10 +2965,36 @@ function VendasPage() {
             </Button>
           </div>
         </motion.div>
+        {/* Mobile-only hint to finalize comandas before closing cashier */}
+        {isCashierOpen && openComandasCount > 0 && (
+          <div className="md:hidden mb-3 text-[11px] text-warning flex items-center gap-1">
+            <AlertCircle className="h-3 w-3" />
+            Para fechar o caixa, finalize as {openComandasCount} comandas abertas.
+          </div>
+        )}
+        {!isCashierOpen && openComandasCount > 0 && (
+          <div className="md:hidden mb-3 text-[11px] text-warning flex items-center gap-2">
+            <AlertCircle className="h-3 w-3" />
+            Há comandas abertas, mas o caixa parece fechado.
+            <Button size="sm" variant="outline" className="h-6 px-2 text-[11px]" onClick={quickReopenCashier}>Reabrir sessão</Button>
+          </div>
+        )}
         
         <div className="flex-1 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 overflow-hidden min-h-0">
             <motion.div variants={itemVariantsActive} initial={false} animate={anyDialogOpen ? false : undefined} layout={false} className="lg:col-span-2 bg-surface rounded-lg border border-border p-4 md:p-6 overflow-y-auto thin-scroll min-h-0">
-              <h2 className="text-xl font-bold mb-4">Mapa de Mesas</h2>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-bold">Mapa de Mesas</h2>
+                {/* Mobile-only '+' button to create a new mesa */}
+                <Button
+                  type="button"
+                  className="md:hidden h-9 w-9 p-0 bg-amber-400 text-black hover:bg-amber-300"
+                  size="icon"
+                  title="Nova Mesa"
+                  onClick={() => setIsCreateMesaOpen(true)}
+                >
+                  <Plus className="h-5 w-5" />
+                </Button>
+              </div>
               
               {/* View Mobile: Lista/Tabela */}
               <TableViewMobile />
@@ -2973,37 +3047,6 @@ function VendasPage() {
             </motion.div>
         </div>
 
-        {/* Floating Action Buttons (FABs) - Apenas Mobile */}
-        {/* FAB: Fechar Conta - aparece quando há mesa selecionada */}
-        {selectedTable && selectedTable.order && selectedTable.order.length > 0 && (
-          <motion.button
-            initial={{ scale: 0, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            exit={{ scale: 0, opacity: 0 }}
-            transition={{ type: "spring", stiffness: 300, damping: 20 }}
-            onClick={async () => {
-              // Usa o fluxo oficial de pagamento para garantir finalizadoras e validação de caixa
-              setIsOrderDetailsOpen(false);
-              await openPayDialog();
-            }}
-            className="md:hidden fixed bottom-24 right-4 z-40 w-14 h-14 bg-success hover:bg-success/90 text-white rounded-full shadow-lg flex items-center justify-center transition-all duration-200 active:scale-95"
-            aria-label="Fechar Conta"
-          >
-            <DollarSign className="h-6 w-6" />
-          </motion.button>
-        )}
-
-        {/* FAB: Nova Mesa - sempre visível no mobile */}
-        <motion.button
-          initial={{ scale: 0, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          transition={{ type: "spring", stiffness: 300, damping: 20, delay: 0.1 }}
-          onClick={() => setIsCreateMesaOpen(true)}
-          className="md:hidden fixed bottom-6 right-4 z-40 w-14 h-14 bg-brand hover:bg-brand/90 text-black rounded-full shadow-lg flex items-center justify-center transition-all duration-200 active:scale-95"
-          aria-label="Nova Mesa"
-        >
-          <Plus className="h-6 w-6" />
-        </motion.button>
       </motion.div>
       <MobileTableModal />
       <CounterModeModal />

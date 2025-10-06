@@ -30,16 +30,87 @@ function useDebounced(value, delay = 300) {
 function DateInput({ value, onChange }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef(null);
-  
-  // Fechar ao clicar fora
+  const inputRef = useRef(null);
+  const popRef = useRef(null);
+  const [popPos, setPopPos] = useState({ top: 0, left: 0, width: 0, center: false, mode: 'fixed' });
+
+  // Fechar ao clicar fora (considerando popover fixo)
   useEffect(() => {
     function onDocClick(e) {
-      if (!wrapRef.current) return;
-      if (!wrapRef.current.contains(e.target)) setOpen(false);
+      const target = e.target;
+      const inWrap = wrapRef.current && wrapRef.current.contains(target);
+      const inPop = popRef.current && popRef.current.contains(target);
+      if (!inWrap && !inPop) setOpen(false);
     }
-    document.addEventListener('mousedown', onDocClick);
-    return () => document.removeEventListener('mousedown', onDocClick);
-  }, []);
+    function onEsc(e) { if (e.key === 'Escape') setOpen(false); }
+    function onScroll() { if (open) positionPopover(); }
+    window.addEventListener('mousedown', onDocClick);
+    window.addEventListener('keydown', onEsc);
+    window.addEventListener('scroll', onScroll, true);
+    window.addEventListener('resize', onScroll);
+    return () => {
+      window.removeEventListener('mousedown', onDocClick);
+      window.removeEventListener('keydown', onEsc);
+      window.removeEventListener('scroll', onScroll, true);
+      window.removeEventListener('resize', onScroll);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  // Reposiciona ao abrir (após render) com requestAnimationFrame para evitar medições precoces
+  useEffect(() => {
+    if (open) {
+      const raf1 = requestAnimationFrame(() => {
+        positionPopover();
+        const raf2 = requestAnimationFrame(() => positionPopover());
+        return () => cancelAnimationFrame(raf2);
+      });
+      return () => cancelAnimationFrame(raf1);
+    }
+  }, [open]);
+
+  // Body scroll lock for overlay mode (mobile)
+  useEffect(() => {
+    if (open && popPos.mode === 'overlay') {
+      const prev = document.body.style.overflow;
+      document.body.style.overflow = 'hidden';
+      return () => { document.body.style.overflow = prev; };
+    }
+  }, [open, popPos.mode]);
+
+  const positionPopover = () => {
+    try {
+      const el = inputRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      const pad = 8;
+      const desiredWidth = Math.max(rect.width, 280);
+      const maxWidth = Math.min(vw - pad * 2, 360);
+      const width = Math.min(desiredWidth, maxWidth);
+
+      // Medir altura do calendário se já existe, senão heurística
+      let calH = 320;
+      if (popRef.current) {
+        try { calH = popRef.current.getBoundingClientRect().height || calH; } catch {}
+      }
+
+      // Mobile: usar OVERLAY centralizado para evitar teclado/scroll bagunçar posição
+      if (vw <= 640) {
+        setPopPos({ top: 0, left: 0, width: Math.min(vw - pad * 2, 360), center: true, mode: 'overlay' });
+        return;
+      }
+
+      // Desktop/tablet: usar ANCORADO ao wrapper (absolute) para alinhar perfeitamente
+      // Usaremos top relativo ao wrapper e largura mínima igual ao input
+      const wrap = wrapRef.current;
+      const wrapRect = wrap ? wrap.getBoundingClientRect() : rect;
+      const relTop = (rect.bottom - wrapRect.top) + 6; // abaixo do input, relativo ao wrapper
+      const minW = Math.max(rect.width, 280);
+      setPopPos({ top: relTop, left: 0, width: minW, center: false, mode: 'anchor' });
+    } catch {}
+  };
 
   // Util: parse/format
   const parseISODate = (s) => {
@@ -73,20 +144,63 @@ function DateInput({ value, onChange }) {
       <button
         type="button"
         className="absolute left-2 top-1/2 -translate-y-1/2 p-1 rounded hover:bg-warning/10 focus:outline-none"
-        onClick={() => setOpen((v) => !v)}
+        onMouseDown={(e) => { e.preventDefault(); }}
+        onClick={() => { setOpen((v) => !v); setTimeout(positionPopover, 0); }}
         aria-label="Abrir calendário"
       >
         <CalendarDays className="h-4 w-4 text-warning" />
       </button>
-      <Input
-        type="text"
-        readOnly
-        onClick={() => setOpen((v) => !v)}
-        className="pl-9 pr-3 w-full bg-surface text-text-primary border border-warning/40 focus-visible:ring-warning focus-visible:border-warning"
-        value={display}
-      />
+      {typeof window !== 'undefined' && window.innerWidth <= 640 ? (
+        <button
+          type="button"
+          ref={inputRef}
+          onMouseDown={(e) => { e.preventDefault(); }}
+          onClick={() => { setOpen(true); setTimeout(positionPopover, 0); }}
+          className="pl-9 pr-3 h-10 w-full text-left bg-surface text-text-primary border border-warning/40 rounded-md"
+        >
+          {display || 'Selecionar data'}
+        </button>
+      ) : (
+        <Input
+          type="text"
+          readOnly
+          ref={inputRef}
+          inputMode="none"
+          onMouseDown={(e) => { e.preventDefault(); }}
+          onClick={() => { setOpen((v) => !v); setTimeout(positionPopover, 0); }}
+          className="pl-9 pr-3 w-full bg-surface text-text-primary border border-warning/40 focus-visible:ring-warning focus-visible:border-warning"
+          value={display}
+        />
+      )}
       {open && (
-        <div className="absolute z-50 mt-1 left-0 bg-black text-white border border-warning/40 rounded-md shadow-xl p-2">
+        popPos.mode === 'overlay' ? (
+          <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/50" onClick={(e) => { if (e.target === e.currentTarget) setOpen(false); }}>
+            <div ref={popRef} className="bg-black text-white border border-warning/40 rounded-md shadow-xl p-2 w-[92vw] max-w-[360px]">
+              <Calendar
+                mode="single"
+                selected={selected || undefined}
+                onSelect={(d) => { if (d) { onChange(formatYMD(d)); setOpen(false); } }}
+                showOutsideDays
+                className=""
+                classNames={{
+                  caption_label: 'text-sm font-medium text-white',
+                  head_cell: 'text-xs text-warning/80 w-9',
+                  day: 'h-9 w-9 p-0 font-normal text-white hover:bg-warning/10 rounded-md',
+                  day_selected: 'bg-warning text-black hover:bg-warning focus:bg-warning',
+                  day_today: 'border border-warning text-white',
+                  day_outside: 'text-white/30',
+                  nav_button: 'h-7 w-7 p-0 text-white hover:bg-warning/10 rounded-md',
+                  table: 'w-full',
+                }}
+              />
+            </div>
+          </div>
+        ) : popPos.mode === 'anchor' ? (
+          <div
+            ref={popRef}
+            className="absolute z-[999] bg-black text-white border border-warning/40 rounded-md shadow-xl p-2 left-0"
+            style={{ top: `${popPos.top}px`, minWidth: `${popPos.width}px`, maxWidth: '92vw' }}
+          >
           <Calendar
             mode="single"
             selected={selected || undefined}
@@ -105,6 +219,31 @@ function DateInput({ value, onChange }) {
             }}
           />
         </div>
+        ) : (
+          <div
+            ref={popRef}
+            className="fixed z-[999] bg-black text-white border border-warning/40 rounded-md shadow-xl p-2"
+            style={{ top: `${popPos.top}px`, left: `${popPos.left}px`, width: `${popPos.width}px`, maxWidth: '92vw' }}
+          >
+          <Calendar
+            mode="single"
+            selected={selected || undefined}
+            onSelect={(d) => { if (d) { onChange(formatYMD(d)); setOpen(false); } }}
+            showOutsideDays
+            className=""
+            classNames={{
+              caption_label: 'text-sm font-medium text-white',
+              head_cell: 'text-xs text-warning/80 w-9',
+              day: 'h-9 w-9 p-0 font-normal text-white hover:bg-warning/10 rounded-md',
+              day_selected: 'bg-warning text-black hover:bg-warning focus:bg-warning',
+              day_today: 'border border-warning text-white',
+              day_outside: 'text-white/30',
+              nav_button: 'h-7 w-7 p-0 text-white hover:bg-warning/10 rounded-md',
+              table: 'w-full',
+            }}
+          />
+        </div>
+        )
       )}
     </div>
   );
@@ -123,6 +262,7 @@ export default function HistoricoComandasPage() {
   const debouncedSearch = useDebounced(search, 350);
   const [tipo, setTipo] = useState('all'); // all | comanda | balcao
   const [tab, setTab] = useState('comandas'); // comandas | fechamentos
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
 
   const [detailId, setDetailId] = useState(null);
   const [detail, setDetail] = useState({ loading: false, itens: [], pagamentos: [] });
@@ -131,6 +271,7 @@ export default function HistoricoComandasPage() {
   
   // XML Import
   const [isXmlImportOpen, setIsXmlImportOpen] = useState(false);
+  const [mobileActionsOpen, setMobileActionsOpen] = useState(false);
   
   // Mostrar todas (sem filtro de data)
   const [showAll, setShowAll] = useState(false);
@@ -248,7 +389,12 @@ export default function HistoricoComandasPage() {
       const safetyTimer = setTimeout(() => setLoading(false), 10000);
       if (tab === 'comandas') {
         // Busca base de comandas (sem depender do id no filtro de busca)
-        const list = await listarComandas({ status, from, to, search: debouncedSearch || '', limit: PAGE_LIMIT, offset });
+        // Não enviar 'search' ao backend; buscamos tudo do período e filtramos no client
+        // Quando há termo de busca, ampliamos o limite e ignoramos paginação para melhor cobertura
+        const searching = !!(debouncedSearch && debouncedSearch.trim());
+        const effLimit = searching ? 1000 : PAGE_LIMIT;
+        const effOffset = searching ? 0 : offset;
+        const list = await listarComandas({ status, from, to, limit: effLimit, offset: effOffset });
         // Carrega totais em lote
         const ids = (list || []).map(r => r.id);
         let totals = {};
@@ -264,16 +410,20 @@ export default function HistoricoComandasPage() {
         let finsByComanda = {};
         try { namesByComanda = await listarClientesPorComandas(ids); } catch { namesByComanda = {}; }
         try { finsByComanda = await listarFinalizadorasPorComandas(ids); } catch { finsByComanda = {}; }
-        const withTotals = (list || []).map(r => ({
-          ...r,
-          // status derivado: se existe fechado_em, considerar 'closed' para exibição/filtragem
-          statusDerived: r.fechado_em ? 'closed' : (r.status || 'open'),
-          total: Number(totals[r.id] || 0),
-          mesaNumero: mapMesaNumero.get(r.mesa_id),
-          clientesStr: namesByComanda[r.id] || '',
-          finalizadorasStr: finsByComanda[r.id] || ''
-        }));
-        setHasMore((list || []).length === PAGE_LIMIT);
+        const withTotals = (list || []).map(r => {
+          const names = namesByComanda[r.id];
+          const fins = finsByComanda[r.id];
+          return {
+            ...r,
+            // status derivado: se existe fechado_em, considerar 'closed' para exibição/filtragem
+            statusDerived: r.fechado_em ? 'closed' : (r.status || 'open'),
+            total: Number(totals[r.id] || 0),
+            mesaNumero: mapMesaNumero.get(r.mesa_id),
+            clientesStr: Array.isArray(names) ? names.join(', ') : (names || ''),
+            finalizadorasStr: Array.isArray(fins) ? fins.join(', ') : (fins || '')
+          };
+        });
+        setHasMore(searching ? false : ((list || []).length === PAGE_LIMIT));
         if (append) {
           setRows(prev => [...prev, ...withTotals]);
         } else {
@@ -318,10 +468,7 @@ export default function HistoricoComandasPage() {
 
   // Recarrega lista ao trocar filtros/abas, resetando paginação
   useEffect(() => {
-    if (tab === 'comandas') {
-      setOffset(0);
-      setHasMore(false);
-    }
+    if (tab === 'comandas') { setOffset(0); setHasMore(false); }
     load({ append: false });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status, debouncedSearch, from, to, tab]);
@@ -451,8 +598,10 @@ export default function HistoricoComandasPage() {
     return { sum };
   }, [rows]);
 
+  const normalize = (s) => (s || '').toString().toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu, '');
   const filtered = useMemo(() => {
-    const term = (debouncedSearch || '').trim().toLowerCase();
+    const raw = (debouncedSearch || '').trim();
+    const term = normalize(raw);
     // 1) Sempre aplica filtro por Tipo
     const byTipo = rows.filter(r => {
       const isBalcao = (r.mesa_id == null);
@@ -472,11 +621,17 @@ export default function HistoricoComandasPage() {
     if (!term) return byStatus;
     // 3) Aplica busca textual adicional
     return byStatus.filter(r => {
-      const mesaTxt = (r.mesaNumero != null ? String(r.mesaNumero) : '').toLowerCase();
-      const statusTxt = (r.statusDerived || r.status || '').toLowerCase();
-      const clientesTxt = (r.clientesStr || '').toLowerCase();
-      const tipoTxt = (r.mesa_id == null) ? 'balcao' : 'comanda';
-      return mesaTxt.includes(term) || statusTxt.includes(term) || clientesTxt.includes(term) || tipoTxt.includes(term);
+      const mesaNumero = r.mesaNumero != null ? String(r.mesaNumero) : '';
+      const mesaLabel = r.mesa_id == null ? 'balcao' : `mesa ${mesaNumero}`;
+      const texto = [
+        mesaNumero,
+        mesaLabel,
+        r.clientesStr || '',
+        r.finalizadorasStr || '',
+        (r.mesa_id == null ? 'balcao' : 'comanda'),
+        (r.statusDerived || r.status || '')
+      ].map(normalize).join(' | ');
+      return texto.includes(term);
     });
   }, [rows, debouncedSearch, tipo, status]);
 
@@ -519,41 +674,72 @@ export default function HistoricoComandasPage() {
         <meta name="description" content="Histórico de vendas, comandas e fechamentos de caixa." />
       </Helmet>
 
-      <motion.div variants={itemVariants} className="flex items-center justify-between mb-6 gap-4 flex-wrap">
+      <motion.div variants={itemVariants} className="mb-6 gap-3 flex flex-col sm:flex-row sm:items-center sm:justify-between">
         <Tabs value="historico" onValueChange={(v) => {
           if (v === 'mesas') navigate('/vendas');
           if (v === 'balcao') navigate('/balcao');
           if (v === 'historico') navigate('/historico');
         }}>
-          <TabsList className="grid grid-cols-3">
+          <TabsList className="w-full grid grid-cols-3 sm:w-auto sm:inline-flex">
             <TabsTrigger value="mesas">Mesas</TabsTrigger>
             <TabsTrigger value="balcao">Balcão</TabsTrigger>
             <TabsTrigger value="historico">Histórico</TabsTrigger>
           </TabsList>
         </Tabs>
-        {/* Abas internas do Histórico movidas para a barra superior (lado direito) */}
-        <div className="flex items-center gap-3">
+        {/* Abas internas do Histórico: Select no mobile, Tabs no desktop */}
+        <div className="w-full flex items-center gap-2 sm:gap-3">
+          {/* Mobile control */}
+          <div className="flex sm:hidden items-center gap-2 w-full">
+            <Select value={tab} onValueChange={setTab}>
+              <SelectTrigger className="w-[160px] text-sm">
+                <SelectValue placeholder="Selecionar" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="comandas">Comandas</SelectItem>
+                <SelectItem value="fechamentos">Fechamentos</SelectItem>
+              </SelectContent>
+            </Select>
+            <div className="ml-auto text-xs text-text-secondary whitespace-nowrap">
+              Total: <span className="font-semibold text-text-primary">R$ {totals.sum.toFixed(2)}</span>
+            </div>
+            {/* Mobile actions icon */}
+            {tab === 'comandas' && (
+              <Button type="button" size="icon" variant="outline" className="h-9 w-9 sm:hidden" onClick={() => setMobileActionsOpen(true)} title="Ações">
+                <Download className="h-4 w-4" />
+              </Button>
+            )}
+          </div>
+          {/* Desktop tabs */}
+          <div className="hidden sm:flex items-center gap-2 sm:gap-3 ml-auto">
+            <Tabs value={tab} onValueChange={setTab} className="w-full sm:w-auto">
+              <TabsList className="w-full grid grid-cols-2 sm:w-auto sm:inline-flex text-sm">
+                <TabsTrigger value="comandas" className="text-sm">Comandas</TabsTrigger>
+                <TabsTrigger value="fechamentos" className="text-sm">Fechamentos</TabsTrigger>
+              </TabsList>
+            </Tabs>
+          </div>
+        </div>
+        {/* Ações (desktop somente) + Total já mostrado no mobile acima */}
+        <div className="hidden sm:flex w-full sm:w-auto items-center gap-2 sm:gap-3">
           {tab === 'comandas' && (
             <>
-              <Button variant="secondary" size="sm" onClick={() => setIsXmlImportOpen(true)}>
+              <Button variant="secondary" size="sm" className="hidden sm:inline-flex" onClick={() => setIsXmlImportOpen(true)}>
                 <FileText className="mr-2 h-4 w-4" />
                 Importar XML
               </Button>
-              <Button variant="outline" size="sm" onClick={exportarCSV}>
+              <Button variant="outline" size="sm" className="hidden sm:inline-flex" onClick={exportarCSV}>
                 <Download className="mr-1 h-3 w-3" />
                 Exportar
               </Button>
               <button
-                className="text-xs text-text-muted hover:text-text-primary transition-colors"
+                className="hidden sm:inline-block text-xs text-text-muted hover:text-text-primary transition-colors"
                 onClick={() => {
                   if (showAll) {
-                    // Voltar ao normal (hoje)
                     const hoje = new Date().toISOString().slice(0, 10);
                     setFrom(hoje);
                     setTo(hoje);
                     setShowAll(false);
                   } else {
-                    // Mostrar todas
                     setFrom('');
                     setTo('');
                     setShowAll(true);
@@ -564,17 +750,29 @@ export default function HistoricoComandasPage() {
               >
                 {showAll ? '◀' : '●'}
               </button>
-              <div className="text-xs sm:text-sm text-text-secondary whitespace-nowrap">Total: <span className="font-semibold text-text-primary">R$ {totals.sum.toFixed(2)}</span></div>
+              <div className="text-sm text-text-secondary whitespace-nowrap ml-auto">Total: <span className="font-semibold text-text-primary">R$ {totals.sum.toFixed(2)}</span></div>
             </>
           )}
-          <Tabs value={tab} onValueChange={setTab}>
-            <TabsList className="grid grid-cols-2 text-sm">
-              <TabsTrigger value="comandas" className="text-sm">Comandas</TabsTrigger>
-              <TabsTrigger value="fechamentos" className="text-sm">Fechamentos</TabsTrigger>
-            </TabsList>
-          </Tabs>
         </div>
       </motion.div>
+
+      {/* Mobile actions (Importar/Exportar) */}
+      <Dialog open={mobileActionsOpen} onOpenChange={setMobileActionsOpen}>
+        <DialogContent className="sm:hidden w-[92vw] max-w-[360px] p-2" onOpenAutoFocus={(e) => e.preventDefault()} onKeyDown={(e) => e.stopPropagation()}>
+          <DialogHeader>
+            <DialogTitle className="text-base">Ações</DialogTitle>
+            <DialogDescription>Escolha uma ação para Comandas</DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col gap-2">
+            <Button variant="secondary" onClick={() => { setMobileActionsOpen(false); setIsXmlImportOpen(true); }}>
+              <FileText className="mr-2 h-4 w-4" /> Importar XML
+            </Button>
+            <Button variant="outline" onClick={() => { setMobileActionsOpen(false); exportarCSV(); }}>
+              <Download className="mr-2 h-4 w-4" /> Exportar CSV
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Paginação - Comandas */}
       {tab === 'comandas' && (
@@ -590,10 +788,28 @@ export default function HistoricoComandasPage() {
         </div>
       )}
 
+      {/* Barra compacta de busca + toggle filtros (mobile) */}
+      {tab === 'comandas' && (
+        <div className="sm:hidden bg-surface rounded-lg border border-border p-3 mb-3">
+          <div className="flex items-center gap-2">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted" />
+              <Input placeholder="Buscar..." className="pl-9 h-9 text-sm" value={search} onChange={(e) => setSearch(e.target.value)} />
+            </div>
+            <Button size="sm" variant="outline" className="h-9" onClick={() => setMobileFiltersOpen(v => !v)}>
+              {mobileFiltersOpen ? 'Ocultar' : 'Filtros'}
+            </Button>
+          </div>
+          <div className="mt-1 text-[11px] text-text-secondary truncate">
+            {from || '—'} • {to || '—'}
+          </div>
+        </div>
+      )}
+
       {/* Abas internas foram movidas para o topo; aqui removidas para ganhar espaço */}
       
       {tab === 'comandas' && (
-      <motion.div variants={itemVariants} className="bg-surface rounded-lg border border-border p-4 mb-4">
+      <motion.div variants={itemVariants} className={`bg-surface rounded-lg border border-border p-4 mb-4 ${mobileFiltersOpen ? '' : 'hidden'} sm:block`}>
         <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
           <div>
             <Label className="mb-1 block">Período Inicial</Label>
@@ -603,7 +819,7 @@ export default function HistoricoComandasPage() {
             <Label className="mb-1 block">Período Final</Label>
             <DateInput value={to} onChange={setTo} />
           </div>
-          <div className="md:col-span-2">
+          <div className="md:col-span-2 hidden sm:block">
             <Label className="mb-1 block">Busca</Label>
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted" />
@@ -642,7 +858,8 @@ export default function HistoricoComandasPage() {
 
       {tab === 'comandas' && (
       <motion.div variants={itemVariants} className="bg-surface rounded-lg border border-border p-0 overflow-hidden">
-        <div className="overflow-x-auto pr-2 sm:pr-3">
+        {/* Desktop table (>= sm) */}
+        <div className="hidden sm:block overflow-x-auto pr-2 sm:pr-3">
           <table className="min-w-full text-sm">
             <thead className="bg-surface-2 text-text-secondary">
               <tr>
@@ -683,13 +900,58 @@ export default function HistoricoComandasPage() {
             </tbody>
           </table>
         </div>
+        {/* Mobile card list */}
+        <div className="sm:hidden divide-y divide-border">
+          {filtered.length === 0 && (
+            <div className="p-4 text-center text-text-muted">Nenhuma comanda encontrada no período.</div>
+          )}
+          {filtered.map(r => (
+            <button
+              key={r.id}
+              className="w-full text-left p-3 active:bg-warning/10"
+              onClick={() => openDetail(r.id)}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="text-xs text-text-secondary">{r.mesa_id == null ? 'Balcão' : (r.mesaNumero != null ? `Mesa ${r.mesaNumero}` : 'Comanda')}</div>
+                  <div className="font-semibold truncate max-w-[220px]">
+                    {r.clientesStr || 'Sem cliente'}
+                  </div>
+                </div>
+                <div>
+                  <div className={cn("inline-flex items-center text-[10px] font-medium px-2 py-0.5 rounded-full border", statusBadgeClass(r.statusDerived || r.status))}>
+                    {statusPt(r.statusDerived || r.status)}
+                  </div>
+                </div>
+              </div>
+              <div className="mt-1 text-xs text-text-secondary truncate">
+                {r.finalizadorasStr || '—'}
+              </div>
+              <div className="mt-2 flex items-center justify-between gap-2">
+                <div className="flex-1 min-w-0 text-[11px] text-text-muted truncate pr-2">
+                  {fmtDate(r.aberto_em)}{r.fechado_em ? ` • ${fmtDate(r.fechado_em)}` : ''}
+                </div>
+                <div className="flex-shrink-0 font-mono font-semibold whitespace-nowrap text-right min-w-[84px]">{fmtMoney(r.total)}</div>
+              </div>
+            </button>
+          ))}
+        </div>
       </motion.div>
 
       )}
 
       {tab === 'fechamentos' && (
       <>
-      <motion.div variants={itemVariants} className="bg-surface rounded-lg border border-border p-4 mb-4">
+      {/* Toggle filtros mobile (fechamentos) */}
+      <div className="sm:hidden bg-surface rounded-lg border border-border p-3 mb-3">
+        <div className="flex items-center justify-between gap-2">
+          <div className="text-sm font-medium">Filtros</div>
+          <Button size="sm" variant="outline" onClick={() => setMobileFiltersOpen(v => !v)}>
+            {mobileFiltersOpen ? 'Ocultar filtros' : 'Mostrar filtros'}
+          </Button>
+        </div>
+      </div>
+      <motion.div variants={itemVariants} className={`bg-surface rounded-lg border border-border p-4 mb-4 ${mobileFiltersOpen ? '' : 'hidden'} sm:block`}>
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
           <div>
             <Label className="mb-1 block">Período Inicial</Label>
@@ -773,7 +1035,7 @@ export default function HistoricoComandasPage() {
 
       {tab === 'comandas' && (
       <Dialog open={!!detailId} onOpenChange={(v) => { if (!v) { detailOpenRef.current = false; setDetailId(null); setDetail({ loading: false, itens: [], pagamentos: [] }); setDetailMeta(null); } else { detailOpenRef.current = true; } }}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col" onKeyDown={(e) => e.stopPropagation()}>
+        <DialogContent className="sm:max-w-4xl w-[92vw] max-h-[90vh] overflow-hidden flex flex-col animate-none" onKeyDown={(e) => e.stopPropagation()}>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 flex-wrap">
               <span>

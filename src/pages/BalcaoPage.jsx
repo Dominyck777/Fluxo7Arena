@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 
 import { Helmet } from 'react-helmet';
-import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -55,6 +54,9 @@ export default function BalcaoPage() {
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [isProductDetailsOpen, setIsProductDetailsOpen] = useState(false);
   const [selectedCommandItem, setSelectedCommandItem] = useState(null);
+  // Product picker (mobile): abre um seletor de produtos em modal em vez de listar na tela
+  const [isProductPickerOpen, setIsProductPickerOpen] = useState(false);
+  const [pickerSearch, setPickerSearch] = useState('');
 
   // Cliente
   const [clientMode, setClientMode] = useState('cadastrado'); // fixo: apenas 'cadastrado'
@@ -246,8 +248,9 @@ export default function BalcaoPage() {
       await ensureCaixaAberto({ codigoEmpresa });
       for (const ln of paymentLines) {
         const valor = Number(String(ln.value||'').replace(/\D/g, ''))/100 || 0;
-        const metodoTipo = (payMethods.find(m => m.id === ln.methodId)?.tipo || 'outros');
-        await registrarPagamento({ comandaId, finalizadoraId: ln.methodId, metodo: metodoTipo, valor, status: 'Pago', codigoEmpresa, clienteId: ln.clientId || null });
+        const fin = payMethods.find(m => String(m.id) === String(ln.methodId));
+        const metodo = fin?.nome || fin?.tipo || 'outros';
+        await registrarPagamento({ comandaId, finalizadoraId: ln.methodId, metodo, valor, status: 'Pago', codigoEmpresa, clienteId: ln.clientId || null });
       }
       await fecharComandaEMesa({ comandaId, codigoEmpresa });
       // Limpeza de estado e cache
@@ -295,7 +298,13 @@ export default function BalcaoPage() {
   const OpenCashContent = () => {
     const [openCashInitial, setOpenCashInitial] = useState('');
     const inputRef = useRef(null);
-    useEffect(() => { const t = setTimeout(() => { try { inputRef.current?.focus(); } catch {} }, 0); return () => clearTimeout(t); }, []);
+    useEffect(() => {
+      // Evita abrir teclado automaticamente no mobile
+      const isMobile = typeof window !== 'undefined' && window.innerWidth <= 640;
+      if (isMobile) return;
+      const t = setTimeout(() => { try { inputRef.current?.focus(); } catch {} }, 0);
+      return () => clearTimeout(t);
+    }, []);
     return (
       <>
         <AlertDialogHeader>
@@ -350,11 +359,17 @@ export default function BalcaoPage() {
   const OpenCashierDialog = () => (
     <AlertDialog open={openCashDialogOpen} onOpenChange={setOpenCashDialogOpen}>
       <AlertDialogTrigger asChild>
-        <Button variant="success" disabled={isCashierOpen} onClick={() => setOpenCashDialogOpen(true)}>
-          <Unlock className="mr-2 h-4 w-4"/> Abrir Caixa
+        <Button
+          variant="success"
+          disabled={isCashierOpen}
+          onClick={() => setOpenCashDialogOpen(true)}
+          className="h-9 w-9 p-0 rounded-md sm:h-10 sm:w-auto sm:px-3"
+        >
+          <Unlock className="h-4 w-4" />
+          <span className="hidden sm:inline ml-2">Abrir Caixa</span>
         </Button>
       </AlertDialogTrigger>
-      <AlertDialogContent className="sm:max-w-[425px] animate-none" onKeyDown={(e) => e.stopPropagation()} onPointerDownOutside={(e) => { e.preventDefault(); e.stopPropagation(); }} onInteractOutside={(e) => { e.preventDefault(); e.stopPropagation(); }}>
+      <AlertDialogContent className="sm:max-w-[425px] w-[92vw] animate-none" onKeyDown={(e) => e.stopPropagation()} onPointerDownOutside={(e) => { e.preventDefault(); e.stopPropagation(); }} onInteractOutside={(e) => { e.preventDefault(); e.stopPropagation(); }}>
         <OpenCashContent />
       </AlertDialogContent>
     </AlertDialog>
@@ -378,11 +393,17 @@ export default function BalcaoPage() {
     return (
       <AlertDialog>
         <AlertDialogTrigger asChild>
-          <Button variant="destructive" disabled={!isCashierOpen} onClick={handlePrepareClose}>
-            <Lock className="mr-2 h-4 w-4"/> Fechar Caixa
+          <Button
+            variant="destructive"
+            disabled={!isCashierOpen}
+            onClick={handlePrepareClose}
+            className="h-9 w-9 p-0 rounded-md sm:h-10 sm:w-auto sm:px-3"
+          >
+            <Lock className="h-4 w-4" />
+            <span className="hidden sm:inline ml-2">Fechar Caixa</span>
           </Button>
         </AlertDialogTrigger>
-        <AlertDialogContent className="animate-none" onKeyDown={(e) => e.stopPropagation()} onPointerDownOutside={(e) => { e.preventDefault(); e.stopPropagation(); }} onInteractOutside={(e) => { e.preventDefault(); e.stopPropagation(); }}>
+        <AlertDialogContent className="sm:max-w-[425px] w-[92vw] animate-none" onKeyDown={(e) => e.stopPropagation()} onPointerDownOutside={(e) => { e.preventDefault(); e.stopPropagation(); }} onInteractOutside={(e) => { e.preventDefault(); e.stopPropagation(); }}>
           <AlertDialogHeader>
             <AlertDialogTitle>Fechar Caixa</AlertDialogTitle>
             <AlertDialogDescription>Confira os valores e confirme o fechamento do caixa. Esta ação é irreversível.</AlertDialogDescription>
@@ -451,7 +472,7 @@ export default function BalcaoPage() {
     };
     return (
       <Dialog open={isCashierDetailsOpen} onOpenChange={setIsCashierDetailsOpen}>
-        <DialogContent className="max-w-lg" onKeyDown={(e) => e.stopPropagation()}>
+        <DialogContent className="sm:max-w-lg w-[92vw] max-h-[85vh] animate-none flex flex-col overflow-hidden" onKeyDown={(e) => e.stopPropagation()}>
           <DialogHeader>
             <DialogTitle className="text-2xl font-bold">Detalhes do Caixa</DialogTitle>
             <DialogDescription>
@@ -460,43 +481,45 @@ export default function BalcaoPage() {
           </DialogHeader>
           {cashSummary ? (
             <>
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
-                <div className="bg-surface-2 rounded-lg p-3 border border-border text-center">
-                  <div className="text-[12px] text-text-secondary whitespace-nowrap mb-1">Saldo Inicial</div>
-                  <div className="text-base md:text-lg font-bold tabular-nums leading-tight">{fmt(cashSummary.saldo_inicial)}</div>
+              <div className="flex-1 overflow-y-auto pr-1">
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+                  <div className="bg-surface-2 rounded-lg p-3 border border-border text-center">
+                    <div className="text-[12px] text-text-secondary whitespace-nowrap mb-1">Saldo Inicial</div>
+                    <div className="text-base md:text-lg font-bold tabular-nums leading-tight">{fmt(cashSummary.saldo_inicial)}</div>
+                  </div>
+                  <div className="bg-surface-2 rounded-lg p-3 border border-border text-center">
+                    <div className="text-[12px] text-text-secondary whitespace-nowrap mb-1">Entradas</div>
+                    <div className="text-base md:text-lg font-bold text-success tabular-nums leading-tight">{fmt(cashSummary.totalEntradas)}</div>
+                  </div>
+                  <div className="bg-surface-2 rounded-lg p-3 border border-border text-center">
+                    <div className="text-[12px] text-text-secondary whitespace-nowrap mb-1">Saídas</div>
+                    <div className="text-base md:text-lg font-bold text-danger tabular-nums leading-tight">{fmt(cashSummary.totalSangria)}</div>
+                  </div>
+                  <div className="bg-surface-2 rounded-lg p-3 border border-border text-center">
+                    <div className="text-[12px] text-text-secondary whitespace-nowrap mb-1">Saldo Atual</div>
+                    <div className="text-base md:text-lg font-bold tabular-nums leading-tight">{fmt((cashSummary.saldo_inicial || 0) + (cashSummary.totalEntradas || 0) - (cashSummary.totalSangria || 0))}</div>
+                  </div>
                 </div>
-                <div className="bg-surface-2 rounded-lg p-3 border border-border text-center">
-                  <div className="text-[12px] text-text-secondary whitespace-nowrap mb-1">Entradas</div>
-                  <div className="text-base md:text-lg font-bold text-success tabular-nums leading-tight">{fmt(cashSummary.totalEntradas)}</div>
-                </div>
-                <div className="bg-surface-2 rounded-lg p-3 border border-border text-center">
-                  <div className="text-[12px] text-text-secondary whitespace-nowrap mb-1">Saídas</div>
-                  <div className="text-base md:text-lg font-bold text-danger tabular-nums leading-tight">{fmt(cashSummary.totalSangria)}</div>
-                </div>
-                <div className="bg-surface-2 rounded-lg p-3 border border-border text-center">
-                  <div className="text-[12px] text-text-secondary whitespace-nowrap mb-1">Saldo Atual</div>
-                  <div className="text-base md:text-lg font-bold tabular-nums leading-tight">{fmt((cashSummary.saldo_inicial || 0) + (cashSummary.totalEntradas || 0) - (cashSummary.totalSangria || 0))}</div>
-                </div>
-              </div>
-              <div className="mt-5">
-                <div className="flex items-center justify-between mb-3">
-                  <h4 className="text-sm font-semibold text-text-secondary">Totais por Finalizadora</h4>
-                </div>
-                {Object.keys(cashSummary.totalPorFinalizadora || {}).length === 0 ? (
-                  <div className="p-3 text-sm text-text-muted border rounded-md">Nenhuma finalizadora registrada ainda.</div>
-                ) : (
-                  <ul className="rounded-md border border-border overflow-hidden divide-y divide-border">
-                    {Object.entries(cashSummary.totalPorFinalizadora || {}).map(([nome, valor]) => (
-                      <li key={nome} className="bg-surface px-3 py-2 flex items-center justify-between">
-                        <span className="text-sm text-text-secondary truncate pr-3">{String(nome)}</span>
-                        <span className="text-sm font-semibold tabular-nums">{fmt(valor)}</span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-                <div className="mt-2 rounded-md border border-border bg-surface px-3 py-2 flex items-center justify-between">
-                  <span className="text-sm text-text-secondary truncate pr-3">Sangrias</span>
-                  <span className="text-sm font-semibold tabular-nums text-danger">{fmt(cashSummary.totalSangria)}</span>
+                <div className="mt-5">
+                  <div className="flex items-center justify-between mb-3">
+                    <h4 className="text-sm font-semibold text-text-secondary">Totais por Finalizadora</h4>
+                  </div>
+                  {Object.keys(cashSummary.totalPorFinalizadora || {}).length === 0 ? (
+                    <div className="p-3 text-sm text-text-muted border rounded-md">Nenhuma finalizadora registrada ainda.</div>
+                  ) : (
+                    <ul className="rounded-md border border-border overflow-hidden divide-y divide-border">
+                      {Object.entries(cashSummary.totalPorFinalizadora || {}).map(([nome, valor]) => (
+                        <li key={nome} className="bg-surface px-3 py-2 flex items-center justify-between">
+                          <span className="text-sm text-text-secondary truncate pr-3">{String(nome)}</span>
+                          <span className="text-sm font-semibold tabular-nums">{fmt(valor)}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  <div className="mt-2 rounded-md border border-border bg-surface px-3 py-2 flex items-center justify-between">
+                    <span className="text-sm text-text-secondary truncate pr-3">Sangrias</span>
+                    <span className="text-sm font-semibold tabular-nums text-danger">{fmt(cashSummary.totalSangria)}</span>
+                  </div>
                 </div>
               </div>
               <DialogFooter className="flex items-center justify-between gap-2">
@@ -505,7 +528,7 @@ export default function BalcaoPage() {
                 <Button variant="secondary" onClick={() => setIsCashierDetailsOpen(false)}>Fechar</Button>
               </DialogFooter>
               <Dialog open={isSangriaOpen} onOpenChange={setIsSangriaOpen}>
-                <DialogContent className="max-w-sm" onKeyDown={(e) => e.stopPropagation()}>
+                <DialogContent className="sm:max-w-sm w-[92vw] max-h-[85vh] animate-none" onKeyDown={(e) => e.stopPropagation()}>
                   <DialogHeader>
                     <DialogTitle className="text-xl font-bold">Registrar Sangria</DialogTitle>
                     <DialogDescription>Informe o valor a retirar do caixa e, opcionalmente, uma observação.</DialogDescription>
@@ -513,25 +536,9 @@ export default function BalcaoPage() {
                   <div className="space-y-3">
                     <div>
                       <Label htmlFor="s-valor">Valor</Label>
-                      <Input
-                        id="s-valor"
-                        type="text"
-                        inputMode="numeric"
-                        autoComplete="off"
-                        placeholder="0,00"
-                        value={sangriaValor}
-                        onChange={(e) => {
-                          const digits = (e.target.value || '').replace(/\D/g, '');
-                          const cents = digits ? Number(digits) / 100 : 0;
-                          const formatted = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(cents);
-                          setSangriaValor(formatted);
-                        }}
-                        onKeyDown={(e) => {
-                          e.stopPropagation();
-                          const allowed = ['Backspace','Delete','ArrowLeft','ArrowRight','Tab'];
-                          if (allowed.includes(e.key)) return;
-                          if (!/^[0-9]$/.test(e.key)) { e.preventDefault(); }
-                        }}
+                      <Input id="s-valor" type="text" inputMode="numeric" autoComplete="off" placeholder="0,00" value={sangriaValor}
+                        onChange={(e) => { const digits = (e.target.value || '').replace(/\D/g, ''); const cents = digits ? Number(digits) / 100 : 0; const formatted = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(cents); setSangriaValor(formatted); }}
+                        onKeyDown={(e) => { e.stopPropagation(); const allowed = ['Backspace','Delete','ArrowLeft','ArrowRight','Tab']; if (allowed.includes(e.key)) return; if (!/^[0-9]$/.test(e.key)) { e.preventDefault(); } }}
                         onBeforeInput={(e) => { const data = e.data ?? ''; if (data && /\D/.test(data)) e.preventDefault(); }}
                       />
                     </div>
@@ -1056,34 +1063,39 @@ export default function BalcaoPage() {
   };
 
   return (
-    <motion.div variants={pageVariants} initial="hidden" animate="visible" className="h-full flex flex-col">
+    <div className="h-full flex flex-col">
       <Helmet>
         <title>Modo Balcão - Fluxo7 Arena</title>
         <meta name="description" content="Venda rápida no balcão." />
       </Helmet>
 
-      <motion.div variants={itemVariants} className="flex items-center justify-between mb-6 gap-4 flex-wrap">
-        <div className="flex items-center gap-3">
+      <div className="mb-3 space-y-2">
+        <div className="w-full">
           <Tabs value="balcao" onValueChange={(v) => {
             if (v === 'mesas') navigate('/vendas');
             if (v === 'balcao') navigate('/balcao');
             if (v === 'historico') navigate('/historico');
           }}>
-            <TabsList className="grid grid-cols-3">
+            <TabsList className="w-full grid grid-cols-3 sm:w-auto sm:inline-flex">
               <TabsTrigger value="mesas">Mesas</TabsTrigger>
               <TabsTrigger value="balcao">Balcão</TabsTrigger>
               <TabsTrigger value="historico">Histórico</TabsTrigger>
             </TabsList>
           </Tabs>
         </div>
-        <div className="flex items-center gap-3 ml-auto">
+        <div className="w-full flex items-center gap-2 justify-end">
           <OpenCashierDialog />
           <CloseCashierDialog />
-          <Button variant="outline" onClick={() => setIsCashierDetailsOpen(true)}>
-            <Banknote className="mr-2 h-4 w-4" /> Detalhes do Caixa
+          <Button
+            variant="outline"
+            onClick={() => setIsCashierDetailsOpen(true)}
+            className="h-8 w-8 p-0 rounded-md sm:h-10 sm:w-auto sm:px-3"
+          >
+            <Banknote className="h-4 w-4" />
+            <span className="hidden sm:inline ml-2">Detalhes do Caixa</span>
           </Button>
         </div>
-      </motion.div>
+      </div>
       {/* Detalhes do Caixa renderizado via componente único */}
       <CashierDetailsDialog />
 
@@ -1137,8 +1149,72 @@ export default function BalcaoPage() {
         </DialogContent>
       </Dialog>
 
-      <motion.div variants={itemVariants} className="grid grid-cols-1 md:grid-cols-2 gap-6 h-full overflow-hidden">
-        <div className="flex flex-col border rounded-lg border-border overflow-hidden">
+      {/* Product Picker (mobile e desktop) - lista de produtos em modal */}
+      <Dialog open={isProductPickerOpen} onOpenChange={setIsProductPickerOpen}>
+        <DialogContent className="sm:max-w-xl w-[92vw] max-h-[85vh] flex flex-col overflow-hidden animate-none" onOpenAutoFocus={(e) => e.preventDefault()} onKeyDown={(e) => e.stopPropagation()}>
+          <DialogHeader>
+            <DialogTitle className="text-xl font-bold">Adicionar Produtos</DialogTitle>
+            <DialogDescription>Busque e adicione produtos à comanda do balcão.</DialogDescription>
+          </DialogHeader>
+          <div className="p-4 pt-0">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted" />
+              <Input placeholder="Buscar produto..." className="pl-9" value={pickerSearch} onChange={(e) => setPickerSearch(e.target.value)} />
+            </div>
+          </div>
+          <div className="flex-1 overflow-y-auto px-4 pb-4 thin-scroll">
+            <ul className="space-y-2">
+              {(products || [])
+                .filter(p => {
+                  const q = (pickerSearch || '').toLowerCase();
+                  if (!q) return true;
+                  const name = String(p.name || p.descricao || '').toLowerCase();
+                  const code = String(p.code || p.codigo || '').toLowerCase();
+                  return name.includes(q) || code.includes(q);
+                })
+                .map(prod => {
+                  const qty = qtyByProductId.get(prod.id) || 0;
+                  const stock = Number(prod.stock ?? prod.currentStock ?? 0);
+                  const remaining = Math.max(0, stock - qty);
+                  const price = Number(prod.salePrice ?? prod.price ?? 0);
+                  return (
+                    <li key={prod.id} className="flex items-center p-2 rounded-md hover:bg-surface-2 transition-colors border border-border/40">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <p className="font-semibold truncate max-w-[200px]" title={`${prod.code ? `[${prod.code}] ` : ''}${prod.name}`}>
+                            {prod.code && <span className="text-text-muted">[{prod.code}]</span>} {prod.name}
+                          </p>
+                          {qty > 0 && (
+                            <span className="inline-flex items-center justify-center text-[11px] px-1.5 py-0.5 rounded-full bg-brand/15 text-brand border border-brand/30 flex-shrink-0">x{qty}</span>
+                          )}
+                          <span className="inline-flex items-center justify-center text-[11px] px-1.5 py-0.5 rounded-full bg-surface-2 text-text-secondary border border-border flex-shrink-0">
+                            Qtd {remaining}
+                          </span>
+                        </div>
+                        <p className="text-sm text-text-muted">R$ {price.toFixed(2)}</p>
+                      </div>
+                      <Button size="icon" variant="outline" className="flex-shrink-0" onClick={async () => { await addProduct(prod); }} aria-label={`Adicionar ${prod.name}`}>
+                        <Plus className="h-4 w-4" />
+                      </Button>
+                    </li>
+                  );
+                })}
+            </ul>
+            {Array.isArray(products) && products.length === 0 && (
+              <div className="flex flex-col items-center justify-center py-12">
+                <ShoppingBag className="w-16 h-16 text-text-muted mb-4" />
+                <p className="text-sm text-text-muted">Nenhum produto encontrado.</p>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsProductPickerOpen(false)}>Fechar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 h-full overflow-hidden">
+        <div className="hidden md:flex flex-col border rounded-lg border-border overflow-hidden">
           <div className="p-4 border-b border-border">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted" />
@@ -1206,21 +1282,39 @@ export default function BalcaoPage() {
         </div>
 
         <div className="flex flex-col border rounded-lg border-border overflow-hidden">
-          <div className="p-4 border-b border-border flex items-center justify-between">
-            <div>
-              <div className="text-sm text-text-secondary">Comanda</div>
-              <div className="text-lg font-bold">Balcão{customerName ? ` • ${customerName}` : ''}</div>
+          <div className="p-3 border-b border-border flex items-center justify-between gap-2 flex-wrap">
+            <div className="min-w-0">
+              <div className="text-xs text-text-secondary">Comanda</div>
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="text-base font-bold">Balcão</span>
+                {customerName ? (
+                  <span className="max-w-[140px] truncate text-[11px] px-2 py-0.5 rounded-full border border-border bg-surface-2 text-text-secondary">
+                    {customerName}
+                  </span>
+                ) : null}
+              </div>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1 ml-auto">
+              {/* Botão Produto */}
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 px-2 text-xs whitespace-nowrap"
+                onClick={() => setIsProductPickerOpen(true)}
+                title="Adicionar produto"
+              >
+                <Plus className="h-4 w-4 mr-1" />
+                Produto
+              </Button>
               {clientChosen && (
-                <Button size="sm" variant="outline" className="whitespace-nowrap" onClick={() => setIsClientWizardOpen(true)}>+ Cliente</Button>
+                <Button size="sm" variant="outline" className="h-8 px-2 text-xs whitespace-nowrap" onClick={() => setIsClientWizardOpen(true)}>+ Cliente</Button>
               )}
               {clientChosen ? (
                 <AlertDialog>
                   <AlertDialogTrigger asChild>
                     <Button
                       size="sm"
-                      className="bg-red-600 hover:bg-red-500 text-white border border-red-600/70 focus:outline-none focus:ring-0 focus-visible:ring-0 shadow-none"
+                      className="h-8 px-2 text-xs whitespace-nowrap bg-red-600 hover:bg-red-500 text-white border border-red-600/70 focus:outline-none focus:ring-0 focus-visible:ring-0 shadow-none"
                       disabled={cancelLoading}
                     >
                       {cancelLoading ? 'Cancelando...' : 'Cancelar'}
@@ -1240,7 +1334,7 @@ export default function BalcaoPage() {
                   </AlertDialogContent>
                 </AlertDialog>
               ) : (
-                <Button size="sm" variant="outline" className="opacity-60 cursor-not-allowed" disabled>Cancelar</Button>
+                <Button size="sm" variant="outline" className="h-8 px-2 text-xs opacity-60 cursor-not-allowed whitespace-nowrap" disabled>Cancelar</Button>
               )}
             </div>
           </div>
@@ -1251,7 +1345,7 @@ export default function BalcaoPage() {
                 <Button onClick={() => setIsClientWizardOpen(true)}>Iniciar nova venda</Button>
               </div>
             ) : items.length === 0 ? (
-              <div className="text-center text-text-muted pt-16">Comanda vazia. Adicione produtos ao lado.</div>
+              <div className="text-center text-text-muted pt-16">Comanda vazia. Use o botão "+" para adicionar produtos.</div>
             ) : (
               <ul className="space-y-3 pr-1">
                 {items.map(it => (
@@ -1336,10 +1430,10 @@ export default function BalcaoPage() {
             <Button size="lg" className="w-full" onClick={openPay} disabled={total <= 0}>Finalizar Pagamento</Button>
           </div>
         </div>
-      </motion.div>
+      </div>
 
       <Dialog open={isPayOpen} onOpenChange={setIsPayOpen}>
-        <DialogContent className="max-w-xl max-h-[85vh] flex flex-col overflow-hidden" onKeyDown={(e) => e.stopPropagation()}>
+        <DialogContent className="sm:max-w-xl w-[92vw] max-h-[85vh] flex flex-col overflow-hidden animate-none" onKeyDown={(e) => e.stopPropagation()}>
           <DialogHeader>
             <DialogTitle className="text-2xl font-bold">Fechar Conta</DialogTitle>
             <DialogDescription>Divida o pagamento entre clientes e várias finalizadoras, se necessário.</DialogDescription>
@@ -1511,7 +1605,7 @@ export default function BalcaoPage() {
 
       {/* Wizard de Cliente: obrigatório antes de vender */}
       <Dialog open={isClientWizardOpen} onOpenChange={(open) => setIsClientWizardOpen(open)}>
-        <DialogContent className="max-w-lg" onKeyDown={(e) => e.stopPropagation()}>
+        <DialogContent className="max-w-lg" onOpenAutoFocus={(e) => e.preventDefault()} onKeyDown={(e) => e.stopPropagation()}>
           <DialogHeader>
             <DialogTitle className="text-2xl font-bold">Identificar Cliente</DialogTitle>
             <DialogDescription>Selecione um cliente cadastrado para esta venda.</DialogDescription>
@@ -1771,6 +1865,6 @@ export default function BalcaoPage() {
           )}
         </DialogContent>
       </Dialog>
-    </motion.div>
+    </div>
   );
 }
