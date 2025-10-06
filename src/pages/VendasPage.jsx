@@ -1181,35 +1181,37 @@ function VendasPage() {
           onInteractOutside={(e) => e.stopPropagation()}
         >
           <DialogHeader>
-              {cashLoading ? (
-                <div className="text-sm text-text-muted">Atualizando...</div>
+            <DialogTitle className="text-2xl font-bold">Detalhes do Caixa</DialogTitle>
+            <DialogDescription>Resumo da sessão atual do caixa.</DialogDescription>
+          </DialogHeader>
+          {/* Conteúdo resumido abaixo do header para evitar erros de marcação */}
+          {cashLoading ? (
+            <div className="text-sm text-text-muted px-3">Atualizando...</div>
+          ) : (
+            <div className="px-1">
+              {Object.keys(porFinalizadora).length === 0 ? (
+                <div className="p-3 text-sm text-text-muted border rounded-md">Nenhuma finalizadora registrada ainda.</div>
               ) : (
                 <>
-                  {Object.keys(porFinalizadora).length === 0 ? (
-                    <div className="p-3 text-sm text-text-muted border rounded-md">Nenhuma finalizadora registrada ainda.</div>
-                  ) : (
-                    <>
-                      <ul className="rounded-md border border-border overflow-hidden divide-y divide-border">
-                        {Object.entries(porFinalizadora).map(([nome, valor]) => (
-                          <li key={nome} className="bg-surface px-3 py-2 flex items-center justify-between">
-                            <span className="text-sm text-text-secondary truncate pr-3">{String(nome)}</span>
-                            <span className="text-sm font-semibold tabular-nums">{fmt(valor)}</span>
-                          </li>
-                        ))}
-                      </ul>
-                      <div className="mt-2 rounded-md border border-border bg-surface px-3 py-2 flex items-center justify-between">
-                        <span className="text-sm text-text-secondary truncate pr-3">Sangrias</span>
-                        <span className="text-sm font-semibold tabular-nums text-danger">{fmt(sangriaVal)}</span>
-                      </div>
-                    </>
-                  )}
+                  <ul className="rounded-md border border-border overflow-hidden divide-y divide-border">
+                    {Object.entries(porFinalizadora).map(([nome, valor]) => (
+                      <li key={nome} className="bg-surface px-3 py-2 flex items-center justify-between">
+                        <span className="text-sm text-text-secondary truncate pr-3">{String(nome)}</span>
+                        <span className="text-sm font-semibold tabular-nums">{fmt(valor)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="mt-2 rounded-md border border-border bg-surface px-3 py-2 flex items-center justify-between">
+                    <span className="text-sm text-text-secondary truncate pr-3">Sangrias</span>
+                    <span className="text-sm font-semibold tabular-nums text-danger">{fmt(sangriaVal)}</span>
+                  </div>
                 </>
               )}
-              <div className="mt-3 text-xs text-text-muted leading-relaxed">
+              <div className="mt-3 text-xs text-text-muted leading-relaxed px-1">
                 Saídas incluem sangrias e ajustes. Use "Registrar Sangria" para lançar uma retirada.
               </div>
             </div>
-          </div>
+          )}
           <DialogFooter className="flex items-center justify-between gap-2">
             <div className="mr-auto" />
             <Button variant="destructive" onClick={() => setIsSangriaOpen(true)}>Registrar Sangria</Button>
