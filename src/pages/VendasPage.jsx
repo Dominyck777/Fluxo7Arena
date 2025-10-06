@@ -93,13 +93,22 @@ function VendasPage() {
   const [mobileTableTab, setMobileTableTab] = useState('order');
 
   // Evita movimentação do layout quando diálogos estão abertos (bloqueia scroll do fundo)
-  const anyDialogOpen = isCreateMesaOpen || isOpenTableDialog || isOrderDetailsOpen || isCashierDetailsOpen || isPayOpen || openCashDialogOpen || isCounterModeOpen || isProductDetailsOpen || isMobileModalOpen;
+  const anyDialogOpen = isCreateMesaOpen || isOpenTableDialog || isOrderDetailsOpen || isCashierDetailsOpen || isPayOpen || openCashDialogOpen || isCounterModeOpen || isProductDetailsOpen || isMobileModalOpen || false;
   // Props dinâmicos para evitar reanimações enquanto um modal está aberto
   const pageVariantsActive = anyDialogOpen ? undefined : pageVariants;
   const itemVariantsActive = anyDialogOpen ? undefined : itemVariants;
   const prevOverflowRef = useRef(null);
   const prevAnyOpenRef = useRef(false);
   const prevPaddingRightRef = useRef('');
+  // Atualiza rapidamente o status do caixa (aberto/fechado)
+  const refreshCashierStatus = useCallback(async () => {
+    try {
+      const sess = await getCaixaAberto({ codigoEmpresa: userProfile?.codigo_empresa });
+      setIsCashierOpen(!!(sess && (sess.id || sess?.length)));
+    } catch {
+      setIsCashierOpen(false);
+    }
+  }, [userProfile?.codigo_empresa]);
   useEffect(() => {
     const originalOverflow = prevOverflowRef.current ?? document.body.style.overflow;
     prevOverflowRef.current = originalOverflow;
@@ -129,17 +138,6 @@ function VendasPage() {
       try { document.body.style.paddingRight = prevPaddingRightRef.current || ''; } catch {}
       try { document.documentElement.classList.remove('no-dialog-anim'); } catch {}
     };
-
-  // Reabrir sessão de caixa rapidamente (sem teclado, sem modal) – útil quando há comandas abertas
-  const quickReopenCashier = useCallback(async () => {
-    try {
-      await ensureCaixaAberto({ codigoEmpresa: userProfile?.codigo_empresa });
-      await refreshCashierStatus();
-      toast({ title: 'Sessão do caixa revalidada', variant: 'success' });
-    } catch (e) {
-      toast({ title: 'Não foi possível reabrir o caixa', description: e?.message || 'Tente novamente', variant: 'destructive' });
-    }
-  }, [refreshCashierStatus, userProfile?.codigo_empresa]);
   }, [anyDialogOpen]);
 
   // Recarrega e mescla resumo do caixa com saldo_inicial e total de sangrias
@@ -333,37 +331,6 @@ function VendasPage() {
           if (!isPayOpen) setSelectedTable(nextSelected);
         }
         // (removido) hooks aninhados: refreshCashierStatus e efeitos — agora definidos no topo do componente
-
-        // Auto-recover: se houver comandas abertas mas o caixa parece fechado, tenta reabrir silenciosamente (uma vez)
-        useEffect(() => {
-          const tryAuto = async () => {
-            if (autoReopenTriedRef.current) return;
-            if (openComandasCount > 0 && !isCashierOpen) {
-              autoReopenTriedRef.current = true;
-              try {
-                await ensureCaixaAberto({ codigoEmpresa: userProfile?.codigo_empresa });
-                await refreshCashierStatus();
-              } catch {
-                // se falhar, deixamos o banner com botão de reabrir
-              }
-            }
-          };
-          tryAuto();
-        }, [openComandasCount, isCashierOpen, refreshCashierStatus, userProfile?.codigo_empresa]);
-
-        // Mobile hint: quantidade de comandas abertas quando o caixa está aberto
-        useEffect(() => {
-          let mounted = true;
-          (async () => {
-            try {
-              if (!isCashierOpen) { if (mounted) setOpenComandasCount(0); return; }
-              const abertas = await listarComandasAbertas({ codigoEmpresa: userProfile?.codigo_empresa });
-              if (!mounted) return;
-              setOpenComandasCount(Array.isArray(abertas) ? abertas.length : 0);
-            } catch { if (mounted) setOpenComandasCount(0); }
-          })();
-          return () => { mounted = false; };
-        }, [isCashierOpen, userProfile?.codigo_empresa, tables.length]);
         try {
           let prods = await listProducts({ includeInactive: false, codigoEmpresa });
           if (!Array.isArray(prods) || prods.length === 0) {
@@ -387,6 +354,43 @@ function VendasPage() {
     if (authReady && codigoEmpresa) load();
     return () => {};
   }, [authReady, userProfile?.codigo_empresa, anyDialogOpen]);
+
+  // Checar status do caixa assim que a autenticação estiver pronta (evita exigir abrir caixa após F5)
+  useEffect(() => {
+    if (!authReady || !userProfile?.codigo_empresa) return;
+    refreshCashierStatus();
+  }, [authReady, userProfile?.codigo_empresa, refreshCashierStatus]);
+
+  // Auto-recover: se houver comandas abertas mas o caixa parece fechado, tenta reabrir silenciosamente (uma vez)
+  useEffect(() => {
+    const tryAuto = async () => {
+      if (autoReopenTriedRef.current) return;
+      if (openComandasCount > 0 && !isCashierOpen) {
+        autoReopenTriedRef.current = true;
+        try {
+          await ensureCaixaAberto({ codigoEmpresa: userProfile?.codigo_empresa });
+          await refreshCashierStatus();
+        } catch {
+          // se falhar, deixamos o banner com botão de reabrir
+        }
+      }
+    };
+    tryAuto();
+  }, [openComandasCount, isCashierOpen, refreshCashierStatus, userProfile?.codigo_empresa]);
+
+  // Quantidade de comandas abertas (independente do caixa) – usado para auto-recover e UI
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        if (!userProfile?.codigo_empresa) { if (mounted) setOpenComandasCount(0); return; }
+        const abertas = await listarComandasAbertas({ codigoEmpresa: userProfile?.codigo_empresa });
+        if (!mounted) return;
+        setOpenComandasCount(Array.isArray(abertas) ? abertas.length : 0);
+      } catch { if (mounted) setOpenComandasCount(0); }
+    })();
+    return () => { mounted = false; };
+  }, [userProfile?.codigo_empresa, tables.length]);
 
   // Persistir selectedTable no cache e, quando mudar para uma comanda, hidratar itens se necessário
   useEffect(() => {
@@ -1177,35 +1181,6 @@ function VendasPage() {
           onInteractOutside={(e) => e.stopPropagation()}
         >
           <DialogHeader>
-            <DialogTitle className="text-2xl font-bold">Detalhes do Caixa</DialogTitle>
-            <DialogDescription>
-              {cashLoading ? 'Carregando resumo...' : (cashSummary ? 'Resumo da sessão atual do caixa.' : 'Nenhuma sessão de caixa aberta.')}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex-1 overflow-y-auto pr-1">
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
-              <div className="bg-surface-2 rounded-lg p-3 border border-border text-center">
-                <div className="text-[12px] text-text-secondary whitespace-nowrap mb-1">Saldo Inicial</div>
-                <div className="text-base md:text-lg font-bold tabular-nums leading-tight">{fmt(saldoInicial)}</div>
-              </div>
-              <div className="bg-surface-2 rounded-lg p-3 border border-border text-center">
-                <div className="text-[12px] text-text-secondary whitespace-nowrap mb-1">Entradas</div>
-                <div className="text-base md:text-lg font-bold text-success tabular-nums leading-tight">{fmt(entradasCalc)}</div>
-              </div>
-              <div className="bg-surface-2 rounded-lg p-3 border border-border text-center">
-                <div className="text-[12px] text-text-secondary whitespace-nowrap mb-1">Saídas</div>
-                <div className="text-base md:text-lg font-bold text-danger tabular-nums leading-tight">{fmt(saidas)}</div>
-              </div>
-              <div className="bg-surface-2 rounded-lg p-3 border border-border text-center">
-                <div className="text-[12px] text-text-secondary whitespace-nowrap mb-1">Saldo Atual</div>
-                <div className="text-base md:text-lg font-bold tabular-nums leading-tight">{fmt(saldoAtual)}</div>
-              </div>
-            </div>
-            <div className="mt-5">
-              <div className="flex items-center justify-between mb-3">
-                <h4 className="text-sm font-semibold text-text-secondary">Totais por Finalizadora</h4>
-                {/* Atualização automática já é feita ao abrir/registrar; botão removido para evitar inconsistência de saldo inicial */}
-              </div>
               {cashLoading ? (
                 <div className="text-sm text-text-muted">Atualizando...</div>
               ) : (
@@ -1547,6 +1522,7 @@ function VendasPage() {
       <Dialog open={isCreateMesaOpen} onOpenChange={(open) => { setIsCreateMesaOpen(open); if (!open) { setNumeroVal(''); setNomeVal(''); } }}>
         <DialogContent
           className="sm:max-w-md w-[92vw] sm:w-[400px]"
+          onOpenAutoFocus={(e) => e.preventDefault()}
           onKeyDown={(e) => e.stopPropagation()}
           onKeyDownCapture={(e) => e.stopPropagation()}
           onPointerDownOutside={(e) => e.stopPropagation()}
@@ -2180,10 +2156,12 @@ function VendasPage() {
       <Dialog open={isOpenTableDialog} onOpenChange={(open) => { setIsOpenTableDialog(open); if (!open) { setPendingTable(null); setClienteNome(''); setSelectedClientIds([]); } }}>
         <DialogContent
           className="w-[95vw] max-w-md max-h-[75vh] flex flex-col animate-none"
+          onOpenAutoFocus={(e) => e.preventDefault()}
           onKeyDown={(e) => e.stopPropagation()}
           onKeyDownCapture={(e) => e.stopPropagation()}
-          onPointerDownOutside={(e) => e.stopPropagation()}
-          onInteractOutside={(e) => e.stopPropagation()}
+          onPointerDownOutside={(e) => { e.preventDefault(); e.stopPropagation(); }}
+          onInteractOutside={(e) => { e.preventDefault(); e.stopPropagation(); }}
+          onEscapeKeyDown={(e) => e.preventDefault()}
         >
           <DialogHeader className="flex-shrink-0">
             <DialogTitle className="text-xl font-bold">Abrir Mesa {pendingTable ? `#${pendingTable.number}` : ''}</DialogTitle>
@@ -2392,6 +2370,8 @@ function VendasPage() {
 
   const CloseCashierDialog = () => {
     const [closingData, setClosingData] = useState({ loading: false, saldoInicial: 0, resumo: null });
+    const [isCloseCashOpen, setIsCloseCashOpen] = useState(false);
+    const [showMobileWarn, setShowMobileWarn] = useState(false);
     const handlePrepareClose = async () => {
       try {
         setClosingData({ loading: true, saldoInicial: 0, resumo: null });
@@ -2407,15 +2387,15 @@ function VendasPage() {
     const totalCaixa = Number(closingData.saldoInicial || 0) + somaFinalizadoras; // sem saídas por enquanto
 
     return (
-      <AlertDialog>
+      <AlertDialog open={isCloseCashOpen} onOpenChange={(open) => { setIsCloseCashOpen(open); if (open) handlePrepareClose(); }}>
         <AlertDialogTrigger asChild>
-          <Button variant="destructive" size="sm" disabled={!isCashierOpen} onClick={handlePrepareClose} className="px-2 md:px-4">
+          <Button variant="destructive" size="sm" disabled={!isCashierOpen} onClick={() => setIsCloseCashOpen(true)} className="px-2 md:px-4">
             <Lock className="h-4 w-4" />
             <span className="hidden md:inline ml-2">Fechar Caixa</span>
           </Button>
         </AlertDialogTrigger>
         <AlertDialogContent
-          className="animate-none"
+          className="sm:max-w-[425px] w-[92vw] max-h-[85vh] animate-none"
           onOpenAutoFocus={(e) => e.preventDefault()}
           onKeyDown={(e) => e.stopPropagation()}
           onKeyDownCapture={(e) => e.stopPropagation()}
@@ -2426,6 +2406,13 @@ function VendasPage() {
             <AlertDialogTitle>Fechar Caixa</AlertDialogTitle>
             <AlertDialogDescription>Confira os valores e confirme o fechamento do caixa. Esta ação é irreversível.</AlertDialogDescription>
           </AlertDialogHeader>
+          {/* Aviso inline somente no mobile, exibido na tentativa de fechar com comandas abertas */}
+          {showMobileWarn && (
+            <div className="md:hidden mb-2 text-[12px] text-warning bg-warning/10 border border-warning/30 rounded px-2 py-1 flex items-center gap-1">
+              <AlertCircle className="h-3.5 w-3.5" />
+              Existem comandas abertas. Finalize-as antes de fechar o caixa.
+            </div>
+          )}
           {closingData.loading ? (
             <div className="py-4 text-text-muted">Carregando resumo…</div>
           ) : (
@@ -2442,19 +2429,31 @@ function VendasPage() {
             </div>
           )}
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogCancel onClick={() => setIsCloseCashOpen(false)}>Cancelar</AlertDialogCancel>
             <AlertDialogAction onClick={async () => {
               try {
                 // Pré-checagem: bloquear se houver comandas abertas
                 try {
                   const abertas = await listarComandasAbertas({ codigoEmpresa: userProfile?.codigo_empresa });
                   if (abertas && abertas.length > 0) {
-                    toast({ title: 'Fechamento bloqueado', description: `Existem ${abertas.length} comandas abertas (inclui balcão). Finalize-as antes de fechar o caixa.`, variant: 'warning' });
+                    const isMobile = typeof window !== 'undefined' && window.innerWidth <= 640;
+                    if (isMobile) {
+                      setShowMobileWarn(true);
+                      setTimeout(() => setShowMobileWarn(false), 1500);
+                    } else {
+                      toast({
+                        title: 'Fechamento bloqueado',
+                        description: `Existem ${abertas.length} comandas abertas (inclui balcão). Finalize-as antes de fechar o caixa.`,
+                        variant: 'warning',
+                        duration: 2500,
+                      });
+                    }
                     return;
                   }
                 } catch {}
                 await fecharCaixa({ codigoEmpresa: userProfile?.codigo_empresa });
                 setIsCashierOpen(false);
+                setIsCloseCashOpen(false);
                 toast({ title: 'Caixa fechado!', description: 'O relatório de fechamento foi gerado.' });
               } catch (e) {
                 console.error(e);
@@ -2616,6 +2615,7 @@ function VendasPage() {
       <Dialog open={isManageClientsOpen} onOpenChange={setIsManageClientsOpen}>
         <DialogContent 
           className="sm:max-w-[480px] w-[92vw] animate-none" 
+          onOpenAutoFocus={(e) => e.preventDefault()}
           onKeyDown={(e) => e.stopPropagation()} 
           onKeyDownCapture={(e) => e.stopPropagation()}
           onPointerDownOutside={(e) => { e.preventDefault(); e.stopPropagation(); }} 
@@ -2939,20 +2939,20 @@ function VendasPage() {
       <CounterProductDetailsDialog />
       <motion.div variants={pageVariantsActive} initial={false} animate={anyDialogOpen ? false : "visible"} layout={false} className="h-full flex flex-col">
         <motion.div variants={itemVariantsActive} initial={false} animate={anyDialogOpen ? false : undefined} layout={false} className="flex items-center justify-between mb-2 md:mb-6 gap-2 md:gap-4 flex-wrap">
-          <div className="flex items-center gap-2 md:gap-3">
-            <Tabs value="mesas" onValueChange={(v) => {
+          <div className="w-full md:w-auto flex items-center gap-2 md:gap-3">
+            <Tabs value="mesas" className="w-full md:w-auto flex-1" onValueChange={(v) => {
               if (v === 'mesas') navigate('/vendas');
               if (v === 'balcao') navigate('/balcao');
               if (v === 'historico') navigate('/historico');
             }}>
-              <TabsList className="grid grid-cols-3">
+              <TabsList className="!grid w-full grid-cols-3">
                 <TabsTrigger value="mesas" className="text-xs sm:text-sm">Mesas</TabsTrigger>
                 <TabsTrigger value="balcao" className="text-xs sm:text-sm">Balcão</TabsTrigger>
                 <TabsTrigger value="historico" className="text-xs sm:text-sm">Histórico</TabsTrigger>
               </TabsList>
             </Tabs>
           </div>
-          <div className="flex items-center gap-1.5 md:gap-3 ml-auto">
+          <div className="w-full md:w-auto flex items-center gap-1.5 md:gap-3 md:ml-auto justify-end mt-1 md:mt-0">
             <OpenCashierDialog />
             <CloseCashierDialog />
             <Button variant="outline" size="sm" onClick={() => setIsCashierDetailsOpen(true)} className="px-2 md:px-4">
@@ -2965,13 +2965,7 @@ function VendasPage() {
             </Button>
           </div>
         </motion.div>
-        {/* Mobile-only hint to finalize comandas before closing cashier */}
-        {isCashierOpen && openComandasCount > 0 && (
-          <div className="md:hidden mb-3 text-[11px] text-warning flex items-center gap-1">
-            <AlertCircle className="h-3 w-3" />
-            Para fechar o caixa, finalize as {openComandasCount} comandas abertas.
-          </div>
-        )}
+        {/* Removed persistent mobile hint about closing cashier to avoid noise */}
         {!isCashierOpen && openComandasCount > 0 && (
           <div className="md:hidden mb-3 text-[11px] text-warning flex items-center gap-2">
             <AlertCircle className="h-3 w-3" />

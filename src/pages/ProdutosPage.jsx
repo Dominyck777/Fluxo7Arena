@@ -16,7 +16,7 @@ import { Calendar } from "@/components/ui/calendar";
 import { format, parseISO } from "date-fns";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Checkbox } from '@/components/ui/checkbox';
-import { listProducts, createProduct, updateProduct, deleteProduct, listCategories, createCategory, removeCategory, getMostSoldProductsToday, getSoldProductsByPeriod, adjustProductStock, updateProductPrice } from '@/lib/products';
+import { listProducts, createProduct, updateProduct, deleteProduct, listCategories, createCategory, removeCategory, getMostSoldProductsToday, getSoldProductsByPeriod, adjustProductStock } from '@/lib/products';
 import { useAuth } from '@/contexts/AuthContext';
 import XMLImportModal from '@/components/XMLImportModal';
 
@@ -28,21 +28,6 @@ const pageVariants = { hidden: { opacity: 0 }, visible: { opacity: 1, transition
 const itemVariants = { hidden: { opacity: 0, y: 20 }, visible: { opacity: 1, y: 0, transition: { duration: 0.5 } } };
 
 // ===== Export Helpers =====
-
-// Escolhe o melhor preço para exibição considerando valores vazios/strings
-const getDisplayPrice = (p) => {
-  const sp = Number(p?.salePrice);
-  if (Number.isFinite(sp) && sp > 0) return sp;
-  const pr = Number(p?.price);
-  if (Number.isFinite(pr) && pr > 0) return pr;
-  const raw = p?.salePrice ?? p?.price ?? 0;
-  if (typeof raw === 'string') {
-    const parsed = Number(raw.replace(/\./g, '').replace(',', '.'));
-    return Number.isFinite(parsed) ? parsed : 0;
-  }
-  const n = Number(raw);
-  return Number.isFinite(n) ? n : 0;
-};
 
 function downloadProductsCsv(rows) {
   // Cabeçalhos ampliados
@@ -237,7 +222,7 @@ const StatCard = ({ icon, title, value, subtitle, color, onClick, isActive }) =>
     );
 };
 
-function ProductFormModal({ open, onOpenChange, product, onSave, categories, onCreateCategory, suggestedCode, quickOnly = false }) {
+function ProductFormModal({ open, onOpenChange, product, onSave, categories, onCreateCategory, suggestedCode }) {
   const { toast } = useToast();
   const { userProfile } = useAuth();
   const [activeTab, setActiveTab] = useState('dados');
@@ -315,10 +300,6 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
   // Ajuste de estoque (dialog)
   const [isAdjustOpen, setIsAdjustOpen] = useState(false);
   const [adjustDelta, setAdjustDelta] = useState('');
-  // Quick view controls
-  const [quickMode, setQuickMode] = useState(!!quickOnly);
-  const [quickDelta, setQuickDelta] = useState('');
-  const [quickPrice, setQuickPrice] = useState('');
 
   const formatCurrencyBR = (value) => {
     const digits = String(value || '').replace(/\D/g, '');
@@ -427,18 +408,11 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
     setCest(product?.cest || '');
     // Edição sempre habilitada
     setEditEnabled(true);
-    // Quick mode initial setup
-    setQuickMode(!!quickOnly);
-    setQuickDelta('');
-    setQuickPrice(() => {
-      const n = Number(product?.salePrice ?? product?.price ?? 0);
-      return Number.isFinite(n) ? n.toFixed(2).replace('.', ',') : '';
-    });
     // Sugestão automática de código para novo produto
     if (!product && suggestedCode && !code) {
       setCode(suggestedCode);
     }
-  }, [product, open, quickOnly]);
+  }, [product, open]);
 
   // Auto-cálculos: custo e margem
   // Removido o recálculo automático baseado em "Preço Compra" e "% Custos"
@@ -464,9 +438,6 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
     if (!unit?.trim()) errors.push('Unidade');
     if (!type) errors.push('Tipo de Produto');
     if (currencyToNumber(salePrice) <= 0) errors.push('Preço de Venda');
-    // EAN-13: validar se preenchido
-    if (barcode && !isValidEAN13(barcode)) errors.push('EAN-13 (código barras) inválido');
-    if (barcodeBox && !isValidEAN13(barcodeBox)) errors.push('EAN-13 Caixa inválido');
     if (errors.length) {
       toast({ title: 'Preencha os campos obrigatórios', description: errors.join(', '), variant: 'destructive' });
       return;
@@ -576,70 +547,6 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
           </div>
         </DialogHeader>
         <form onSubmit={handleSave} className="grid gap-4 py-2 flex-1 overflow-y-auto pr-1 fx-scroll">
-          {/* Quick Actions Section */}
-          {quickMode && (
-            <div className="space-y-3 p-3 border rounded-md bg-surface-2">
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="font-semibold text-text-primary">{product?.name}</div>
-                  <div className="text-xs text-text-secondary">Código: <span className="font-mono">{product?.code || '-'}</span> • Categoria: {product?.category || '-'}</div>
-                </div>
-                <Button type="button" onClick={() => setQuickMode(false)} className="bg-amber-500 hover:bg-amber-400 text-black font-semibold">
-                  <Edit className="h-4 w-4 mr-2" /> Editar Produto
-                </Button>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="space-y-2 border rounded-md p-3">
-                  <div className="text-sm font-semibold">Ajustar Estoque</div>
-                  <div className="text-xs text-text-secondary">Atual: <span className="font-mono">{Number(stock || 0)}</span></div>
-                  <div className="flex items-center gap-3">
-                    <Button type="button" aria-label="Diminuir estoque" size="sm" className="bg-amber-500 hover:bg-amber-400 text-black" onClick={async ()=>{
-                      // eslint-disable-next-line no-console
-                      console.log('[QuickStock] click -1', { id: product?.id, stock });
-                      try {
-                        const delta = -1;
-                        const next = Number(stock || 0) + delta;
-                        await adjustProductStock({ productId: product.id, delta, codigoEmpresa: userProfile?.codigo_empresa });
-                        setStock(String(next));
-                        toast({ title: 'Estoque atualizado', description: `Novo estoque: ${next}`, variant: 'success' });
-                      } catch (err) {
-                        toast({ title: 'Falha ao ajustar estoque', description: err?.message || 'Tente novamente', variant: 'destructive' });
-                      }
-                    }}>-</Button>
-                    <span className="font-mono text-base">{Number(stock || 0)}</span>
-                    <Button type="button" aria-label="Aumentar estoque" size="sm" className="bg-amber-500 hover:bg-amber-400 text-black" onClick={async ()=>{
-                      // eslint-disable-next-line no-console
-                      console.log('[QuickStock] click +1', { id: product?.id, stock });
-                      try {
-                        const delta = 1;
-                        const next = Number(stock || 0) + delta;
-                        await adjustProductStock({ productId: product.id, delta, codigoEmpresa: userProfile?.codigo_empresa });
-                        setStock(String(next));
-                        toast({ title: 'Estoque atualizado', description: `Novo estoque: ${next}`, variant: 'success' });
-                      } catch (err) {
-                        toast({ title: 'Falha ao ajustar estoque', description: err?.message || 'Tente novamente', variant: 'destructive' });
-                      }
-                    }}>+</Button>
-                  </div>
-                </div>
-                <div className="space-y-2 border rounded-md p-3">
-                  <div className="text-sm font-semibold">Ajustar Preço</div>
-                  <div className="text-xs text-text-secondary">Atual: <span className="font-mono">R$ {Number(product?.salePrice ?? product?.price ?? 0).toFixed(2)}</span></div>
-                  <div className="flex items-center gap-2">
-                    <Input value={quickPrice} onChange={(e)=>{
-                      const digits = String(e.target.value || '').replace(/\D/g, '');
-                      const number = digits ? Number(digits) / 100 : 0;
-                      const masked = number.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-                      setQuickPrice(masked);
-                      // vincula com o campo principal para o botão Salvar aplicar a alteração
-                      setSalePrice(masked);
-                    }} placeholder="0,00" inputMode="numeric" />
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-          {!quickMode && (
           <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
             {/* Select para Mobile */}
             <div className="sm:hidden mb-4">
@@ -1031,19 +938,14 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
               <TabsContent value="param" className="space-y-3 mt-2" />
             )}
           </Tabs>
-          )}
         </form>
-        <DialogFooter className="flex items-center justify-between">
-          <div>
-            {!quickMode && product && (
-              <Button type="button" variant="outline" onClick={() => setQuickMode(true)}>Voltar</Button>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
-            <Button type="button" onClick={handleSave} disabled={saving || !editEnabled} title="F5 para salvar">
-              {saving ? 'Salvando...' : 'Salvar Produto'}
-            </Button>
-          </div>
+        <DialogFooter>
+          <DialogClose asChild>
+            <Button type="button" variant="secondary">Cancelar</Button>
+          </DialogClose>
+          <Button type="button" onClick={handleSave} disabled={saving || !editEnabled} title="F5 para salvar">
+            {saving ? 'Salvando...' : 'Salvar Produto'}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -1135,7 +1037,6 @@ function ProdutosPage() {
     const [showStats, setShowStats] = useState(true);
     const [selectedProduct, setSelectedProduct] = useState(null);
     const [isFormOpen, setIsFormOpen] = useState(false);
-    const [formQuickOnly, setFormQuickOnly] = useState(false);
     const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
     const [activeFilter, setActiveFilter] = useState('all');
     const [searchTerm, setSearchTerm] = useState('');
@@ -1144,16 +1045,6 @@ function ProdutosPage() {
     const [confirmOpen, setConfirmOpen] = useState(false);
     const [deleting, setDeleting] = useState(false);
     const [productToDelete, setProductToDelete] = useState(null);
-    // Quick Actions
-    const [isQuickOpen, setIsQuickOpen] = useState(false);
-    const [quickProduct, setQuickProduct] = useState(null);
-    const [quickStockDelta, setQuickStockDelta] = useState('');
-    const [quickPrice, setQuickPrice] = useState('');
-    const [quickLoading, setQuickLoading] = useState(false);
-    // Controla supressão do clique simples quando ocorre double-click
-    const suppressSingleClickRef = useRef(false);
-    // Timer para diferenciar single vs double click
-    const clickTimerRef = useRef(null);
     // Ordenação: by: 'code' | 'name' | 'validade'; dir: 'asc' | 'desc'
     const [sort, setSort] = useState({ by: 'code', dir: 'asc' });
 
@@ -1163,16 +1054,7 @@ function ProdutosPage() {
     const lastLoadTsRef = useRef(0);
     const lastSizeRef = useRef(0);
     const retryOnceRef = useRef(false);
-    useEffect(() => {
-      mountedRef.current = true;
-      return () => {
-        mountedRef.current = false;
-        if (clickTimerRef.current) {
-          clearTimeout(clickTimerRef.current);
-          clickTimerRef.current = null;
-        }
-      };
-    }, []);
+    useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
 
     const refetchProducts = async () => {
       const codigoEmpresa = userProfile?.codigo_empresa || null;
@@ -1446,38 +1328,7 @@ function ProdutosPage() {
 
     const handleEdit = (product) => {
         setSelectedProduct(product);
-        setFormQuickOnly(false);
         setIsFormOpen(true);
-    };
-
-    const openQuickActions = (product) => {
-      // Agenda abertura após um pequeno atraso, para permitir cancelar via dblclick
-      if (clickTimerRef.current) {
-        clearTimeout(clickTimerRef.current);
-        clickTimerRef.current = null;
-      }
-      clickTimerRef.current = setTimeout(() => {
-        clickTimerRef.current = null;
-        if (suppressSingleClickRef.current) return;
-        // Open unified modal in quick mode
-        setSelectedProduct(product);
-        setFormQuickOnly(true);
-        setIsFormOpen(true);
-      }, 220);
-    };
-
-    // Abre Ações Rápidas imediatamente (usado no botão "Ações")
-    const openQuickActionsNow = (product) => {
-      // eslint-disable-next-line no-console
-      console.log('[Produtos] openQuickActionsNow', product);
-      if (clickTimerRef.current) {
-        clearTimeout(clickTimerRef.current);
-        clickTimerRef.current = null;
-      }
-      suppressSingleClickRef.current = false;
-      setSelectedProduct(product);
-      setFormQuickOnly(true);
-      setIsFormOpen(true);
     };
 
     const handleExport = () => {
@@ -1640,6 +1491,32 @@ function ProdutosPage() {
           <title>Produtos - Fluxo7 Arena</title>
           <meta name="description" content="Gerenciamento completo de produtos e estoque." />
         </Helmet>
+        <motion.div variants={pageVariants} initial="hidden" animate="visible" className="flex flex-col">
+            <motion.div variants={itemVariants} className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
+                <div>
+                    <h1 className="text-3xl font-black text-text-primary tracking-tighter">Controle de Produtos</h1>
+                    <p className="text-text-secondary">Controle total sobre seu inventário e estoque.</p>
+                </div>
+                <div className="flex items-center gap-2 flex-wrap">
+                    <Button variant="outline" size="icon" onClick={() => setShowStats(s => !s)} title={showStats ? 'Ocultar resumo' : 'Mostrar resumo'} aria-label={showStats ? 'Ocultar resumo' : 'Mostrar resumo'}>
+                      {showStats ? <EyeOff className="h-4 w-4"/> : <Eye className="h-4 w-4"/>}
+                    </Button>
+                    <Button variant="outline" onClick={handleExport} className="hidden sm:flex"><Download className="mr-2 h-4 w-4" /> Exportar</Button>
+                    <Button variant="outline" onClick={handleExport} className="sm:hidden"><Download className="h-4 w-4 mr-1" /> CSV</Button>
+                    <Button variant="secondary" onClick={() => setIsXmlImportOpen(true)} className="hidden sm:flex"><FileText className="mr-2 h-4 w-4" /> Importar XML</Button>
+                    <Button variant="secondary" onClick={() => setIsXmlImportOpen(true)} className="sm:hidden"><FileText className="h-4 w-4 mr-1" /> XML</Button>
+                    <Button onClick={handleAddNew} className="hidden sm:flex"><Plus className="mr-2 h-4 w-4" /> Novo Produto</Button>
+                    <Button onClick={handleAddNew} className="sm:hidden"><Plus className="h-4 w-4 mr-1" /> Produto</Button>
+                </div>
+            </motion.div>
+
+            {showStats && (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+                  <StatCard icon={Trophy} title="Mais Vendido (Dia)" value={stats.mostSold} subtitle="Produto com mais saídas hoje" color="text-brand" onClick={handleOpenSalesModal} />
+                  <StatCard icon={AlertTriangle} title="Estoque Baixo" value={stats.lowStock} subtitle="Produtos precisando de reposição" color="text-warning" onClick={() => handleStatCardClick('low_stock')} isActive={activeFilter === 'low_stock'} />
+                  <StatCard icon={CalendarX} title="Vencidos" value={stats.expired} subtitle="Produtos fora da data de validade" color="text-danger" onClick={() => handleStatCardClick('expired')} isActive={activeFilter === 'expired'} />
+              </div>
+            )}
 
             {/* Dialog deslocado para o escopo de ProdutosPage */}
             <Dialog open={isSalesModalOpen} onOpenChange={setIsSalesModalOpen}>
@@ -1819,7 +1696,7 @@ function ProdutosPage() {
                               <div className="grid grid-cols-2 gap-3">
                                 <div>
                                   <span className="text-xs text-text-muted block mb-1">Preço</span>
-                                  <span className="text-sm font-bold text-text-primary">R$ {getDisplayPrice(p).toFixed(2)}</span>
+                                  <span className="text-sm font-bold text-text-primary">R$ {p.price.toFixed(2)}</span>
                                 </div>
                                 <div>
                                   <span className="text-xs text-text-muted block mb-1">Estoque</span>
@@ -1862,7 +1739,7 @@ function ProdutosPage() {
                                     <th className="p-3 text-left font-semibold select-none cursor-pointer whitespace-nowrap w-[40%]" onClick={() => toggleSort('name')}>
                                       Produto {sort.by === 'name' ? (sort.dir === 'asc' ? '▲' : '▼') : ''}
                                     </th>
-                                    <th className="p-3 text-left whitespace-nowrap w-[18%]">Categoria</th>
+                                    <th className="p-3 text-left font-semibold whitespace-nowrap w-[18%]">Categoria</th>
                                     <th className="p-3 text-right font-semibold whitespace-nowrap w-[120px]">Preço</th>
                                     <th className="p-3 text-right font-semibold whitespace-nowrap w-[110px]">Estoque</th>
                                     <th className="p-3 text-center font-semibold select-none cursor-pointer whitespace-nowrap w-[120px]" onClick={() => toggleSort('validade')}>
@@ -1874,32 +1751,18 @@ function ProdutosPage() {
                             </thead>
                             <tbody className="text-text-primary divide-y divide-border">
                                 {sortedProducts.map(p => (
-                                    <tr
-                                      key={p.id}
-                                      className="hover:bg-surface-2 transition-colors group cursor-pointer align-middle"
-                                      onDoubleClick={() => {
-                                        suppressSingleClickRef.current = true;
-                                        // Cancela qualquer abertura pendente do modal de ações rápidas
-                                        if (clickTimerRef.current) {
-                                          clearTimeout(clickTimerRef.current);
-                                          clickTimerRef.current = null;
-                                        }
-                                        // Janela curta para suprimir o clique simples que antecede o dblclick
-                                        setTimeout(() => { suppressSingleClickRef.current = false; }, 250);
-                                        handleEdit(p);
-                                      }}
-                                    >
-                                        <td className="p-3 font-mono text-sm text-text-secondary align-middle whitespace-nowrap" onClick={() => openQuickActions(p)}>{p.code || '-'}</td>
-                                        <td className="p-3 font-semibold align-middle text-text-primary whitespace-nowrap overflow-hidden text-ellipsis" onClick={() => openQuickActions(p)} title={p.name}>{p.name}</td>
-                                        <td className="p-3 text-text-secondary align-middle whitespace-nowrap" onClick={() => openQuickActions(p)}>{p.category}</td>
-                                        <td className="p-3 text-right font-mono tabular-nums align-middle whitespace-nowrap" onClick={() => openQuickActions(p)}>R$ {getDisplayPrice(p).toFixed(2)}</td>
-                                        <td className="p-3 text-right font-mono tabular-nums align-middle whitespace-nowrap" onClick={() => openQuickActions(p)}>{p.stock}</td>
-                                        <td className="p-3 text-center font-mono tabular-nums whitespace-nowrap" onClick={() => openQuickActions(p)}>{(() => {
-                                          if (!p.validade) return '-';
-                                          const d = p.validade instanceof Date ? p.validade : parseISO(String(p.validade));
-                                          return isNaN(d) ? '-' : format(d, 'dd/MM/yy');
-                                        })()}</td>
-                                        <td className="p-3 text-center whitespace-nowrap" onClick={() => openQuickActions(p)}>
+                                    <tr key={p.id} className="hover:bg-surface-2 transition-colors group cursor-pointer align-middle">
+                                        <td className="p-3 font-mono text-sm text-text-secondary align-middle whitespace-nowrap" onClick={() => handleEdit(p)}>{p.code || '-'}</td>
+                                        <td className="p-3 font-semibold align-middle text-text-primary whitespace-nowrap overflow-hidden text-ellipsis" onClick={() => handleEdit(p)} title={p.name}>{p.name}</td>
+                                        <td className="p-3 text-text-secondary align-middle whitespace-nowrap" onClick={() => handleEdit(p)}>{p.category}</td>
+                                        <td className="p-3 text-right font-mono tabular-nums align-middle whitespace-nowrap" onClick={() => handleEdit(p)}>R$ {p.price.toFixed(2)}</td>
+                                        <td className="p-3 text-right font-mono tabular-nums align-middle whitespace-nowrap" onClick={() => handleEdit(p)}>{p.stock}</td>
+                                        <td className="p-3 text-center font-mono tabular-nums whitespace-nowrap" onClick={() => handleEdit(p)}>{(() => {
+                  if (!p.validade) return '-';
+                  const d = p.validade instanceof Date ? p.validade : parseISO(String(p.validade));
+                  return isNaN(d) ? '-' : format(d, 'dd/MM/yy');
+                })()}</td>
+                                        <td className="p-3 text-center whitespace-nowrap" onClick={() => handleEdit(p)}>
                                             <span className={cn(
                                                 "px-2 py-1 text-xs font-bold rounded-full",
                                                 p.status === 'active' && 'bg-success/10 text-success',
@@ -1908,9 +1771,9 @@ function ProdutosPage() {
                                             )}>{p.status === 'active' ? 'Ativo' : p.status === 'low_stock' ? 'Estoque Baixo' : 'Inativo' }</span>
                                         </td>
                                         <td className="p-3 whitespace-nowrap">
-                                            <div className="flex items-center justify-end gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+                                            <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                                                 <Button variant="ghost" size="icon" className="h-8 w-8 text-text-muted hover:text-danger" onClick={(e) => { e.stopPropagation(); handleAskDelete(p); }}>
-                                                  <Trash2 size={14} />
+                                                    <Trash2 size={14} />
                                                 </Button>
                                             </div>
                                         </td>
@@ -1923,6 +1786,7 @@ function ProdutosPage() {
                     )}
                 </div>
             </motion.div>
+        </motion.div>
 
         <ProductFormModal 
             open={isFormOpen} 
@@ -1932,7 +1796,6 @@ function ProdutosPage() {
             onSave={handleSaveProduct}
             onCreateCategory={handleAddCategory}
             suggestedCode={selectedProduct ? undefined : suggestedCode}
-            quickOnly={formQuickOnly}
         />
         {/* Confirm Dialog for Delete */}
         <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>

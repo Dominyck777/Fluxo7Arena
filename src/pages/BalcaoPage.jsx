@@ -377,6 +377,7 @@ export default function BalcaoPage() {
 
   const CloseCashierDialog = () => {
     const [closingData, setClosingData] = useState({ loading: false, saldoInicial: 0, resumo: null });
+    const [showMobileWarn, setShowMobileWarn] = useState(false);
     const handlePrepareClose = async () => {
       try {
         setClosingData({ loading: true, saldoInicial: 0, resumo: null });
@@ -403,11 +404,17 @@ export default function BalcaoPage() {
             <span className="hidden sm:inline ml-2">Fechar Caixa</span>
           </Button>
         </AlertDialogTrigger>
-        <AlertDialogContent className="sm:max-w-[425px] w-[92vw] animate-none" onKeyDown={(e) => e.stopPropagation()} onPointerDownOutside={(e) => { e.preventDefault(); e.stopPropagation(); }} onInteractOutside={(e) => { e.preventDefault(); e.stopPropagation(); }}>
+        <AlertDialogContent className="sm:max-w-[425px] w-[92vw] max-h-[85vh] animate-none" onKeyDown={(e) => e.stopPropagation()} onPointerDownOutside={(e) => { e.preventDefault(); e.stopPropagation(); }} onInteractOutside={(e) => { e.preventDefault(); e.stopPropagation(); }}>
           <AlertDialogHeader>
             <AlertDialogTitle>Fechar Caixa</AlertDialogTitle>
             <AlertDialogDescription>Confira os valores e confirme o fechamento do caixa. Esta ação é irreversível.</AlertDialogDescription>
           </AlertDialogHeader>
+          {showMobileWarn && (
+            <div className="md:hidden mb-2 text-[12px] text-warning bg-warning/10 border border-warning/30 rounded px-2 py-1 flex items-center gap-1">
+              <AlertCircle className="h-3.5 w-3.5" />
+              Existem comandas abertas. Finalize-as antes de fechar o caixa.
+            </div>
+          )}
           {closingData.loading ? (
             <div className="py-4 text-text-muted">Carregando resumo…</div>
           ) : (
@@ -430,7 +437,18 @@ export default function BalcaoPage() {
                 try {
                   const abertas = await listarComandasAbertas({ codigoEmpresa: userProfile?.codigo_empresa });
                   if (abertas && abertas.length > 0) {
-                    toast({ title: 'Fechamento bloqueado', description: `Existem ${abertas.length} comandas abertas (inclui balcão). Finalize-as antes de fechar o caixa.`, variant: 'warning' });
+                    const isMobile = typeof window !== 'undefined' && window.innerWidth <= 640;
+                    if (isMobile) {
+                      setShowMobileWarn(true);
+                      setTimeout(() => setShowMobileWarn(false), 1500);
+                    } else {
+                      toast({
+                        title: 'Fechamento bloqueado',
+                        description: `Existem ${abertas.length} comandas abertas (inclui balcão). Finalize-as antes de fechar o caixa.`,
+                        variant: 'warning',
+                        duration: 2500,
+                      });
+                    }
                     return;
                   }
                 } catch {}

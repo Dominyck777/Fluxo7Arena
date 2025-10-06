@@ -313,51 +313,30 @@ function mapUiToDb(data) {
 }
 
 export async function listProducts(options = {}) {
-  const {
-    includeInactive = false,
-    search = '',
-    codigoEmpresa,
-    limit,
-    offset,
-    sortBy = 'nome',
-    direction = 'asc',
-    status, // optional: 'active' | 'inactive' | 'low_stock'
-    category, // optional: string
-    returnWithCount = false,
-  } = options;
+  const { includeInactive = false, search = '', codigoEmpresa } = options
   // eslint-disable-next-line no-console
-  console.info('[products.api] listProducts: start', { limit, offset, sortBy, direction, status, category, returnWithCount })
-  const { data, error, count } = await withTimeout((signal) => {
-    // when returning count, request headless count exact
-    const selectArgs = returnWithCount ? { count: 'exact' } : undefined;
+  console.info('[products.api] listProducts: start')
+  const { data, error } = await withTimeout((signal) => {
     let q = supabase
       .from('produtos')
-      .select('*', selectArgs)
-      .abortSignal(signal);
-    if (codigoEmpresa) q = q.eq('codigo_empresa', codigoEmpresa);
+      .select('*')
+      .order('nome', { ascending: true })
+      .abortSignal(signal)
+    if (codigoEmpresa) {
+      q = q.eq('codigo_empresa', codigoEmpresa)
+    }
     if (!includeInactive) {
       // Incluir linhas onde status é null (produtos antigos) e excluir onde é 'inactive'
-      q = q.or('status.is.null,status.neq.inactive');
-    }
-    if (typeof status === 'string' && status.length > 0) {
-      q = q.eq('status', status);
-    }
-    if (typeof category === 'string' && category.length > 0) {
-      q = q.eq('categoria', category);
+      q = q.or('status.is.null,status.neq.inactive')
     }
     if (search && search.trim().length > 0) {
-      const term = search.trim();
-      q = q.or(`nome.ilike.%${term}%,codigo_produto.ilike.%${term}%`);
+      const term = search.trim()
+      // Busca por nome OU código (case-insensitive)
+      q = q.or(`nome.ilike.%${term}%,codigo_produto.ilike.%${term}%`)
     }
-    // sorting (fallback to nome if invalid)
-    const sortColumn = ['nome','codigo_produto','categoria','valor_venda','estoque','status'].includes(sortBy) ? sortBy : 'nome';
-    const ascending = String(direction).toLowerCase() !== 'desc';
-    q = q.order(sortColumn, { ascending });
-    if (Number.isFinite(limit) && Number.isFinite(offset)) {
-      q = q.range(offset, offset + limit - 1);
-    }
-    return q;
-  }, 15000, 'Timeout listProducts (15s)');
+    return q
+  }
+  , 15000, 'Timeout listProducts (15s)')
   if (error) {
     // eslint-disable-next-line no-console
     console.error('[products.api] listProducts:error', error)
@@ -365,8 +344,7 @@ export async function listProducts(options = {}) {
   }
   const mapped = (data || []).map(mapDbToUi)
   // eslint-disable-next-line no-console
-  console.info('[products.api] listProducts: ok', { count: mapped.length, total: count })
-  if (returnWithCount) return { items: mapped, total: count ?? mapped.length };
+  console.info('[products.api] listProducts: ok', { count: mapped.length })
   return mapped
 }
 
@@ -498,26 +476,6 @@ export async function deleteProduct(id) {
   // eslint-disable-next-line no-console
   console.info('[products.api] deleteProduct: ok (inativado)')
   return true
-}
-
-// ===== Atualizações parciais =====
-// Atualiza apenas o preço de venda de um produto, sem tocar nos demais campos
-export async function updateProductPrice({ id, salePrice, codigoEmpresa }) {
-  const price = Number(salePrice || 0);
-  if (!id || !Number.isFinite(price) || price < 0) throw new Error('Parâmetros inválidos para atualização de preço');
-  const { data, error } = await withTimeout((signal) => {
-    let q = supabase
-      .from('produtos')
-      .update({ valor_venda: price, preco_venda: price })
-      .eq('id', id)
-      .select('*')
-      .single()
-      .abortSignal(signal);
-    if (codigoEmpresa) q = q.eq('codigo_empresa', codigoEmpresa);
-    return q;
-  }, 12000, 'Timeout updateProductPrice (12s)');
-  if (error) throw error;
-  return mapDbToUi(data);
 }
 
 // ===== Categorias =====
