@@ -16,6 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Checkbox } from '@/components/ui/checkbox';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { cn, getCourtColor } from '@/lib/utils';
+import { listarFinalizadoras } from '@/lib/store';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
 import { Link } from 'react-router-dom';
@@ -1639,14 +1640,55 @@ function AgendaPage() {
     }, []);
     // Ref para o input de busca (para focar após limpar)
     const customerQueryInputRef = useRef(null);
-    // Participantes (apenas no modo edição): { cliente_id, nome, valor_cota, status_pagamento }
+    // Participantes (apenas no modo edição): { cliente_id, nome, valor_cota, status_pagamento, finalizadora_id }
     const [participantsForm, setParticipantsForm] = useState([]);
+    // Finalizadoras para seleção por participante
+    const [payMethods, setPayMethods] = useState([]);
     const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
     const [isCancelConfirmOpen, setIsCancelConfirmOpen] = useState(false);
     const [clientsLoading, setClientsLoading] = useState(false);
     // Saving flags
     const [isSavingPayments, setIsSavingPayments] = useState(false);
     const [isSavingBooking, setIsSavingBooking] = useState(false);
+
+    // Carrega finalizadoras quando o modal de pagamentos abre
+    useEffect(() => {
+      if (!isPaymentModalOpen) return;
+      let cancelled = false;
+      (async () => {
+        try {
+          if (!authReady || !userProfile?.codigo_empresa) return;
+          const fins = await listarFinalizadoras({ somenteAtivas: true, codigoEmpresa: userProfile.codigo_empresa });
+          if (!cancelled) setPayMethods(Array.isArray(fins) ? fins : []);
+        } catch {}
+      })();
+      return () => { cancelled = true; };
+    }, [isPaymentModalOpen, authReady, userProfile?.codigo_empresa]);
+
+    // Define uma finalizadora padrão para linhas sem seleção
+    useEffect(() => {
+      if (!isPaymentModalOpen) return;
+      if (!Array.isArray(payMethods) || payMethods.length === 0) return;
+      const def = String(payMethods[0].id);
+      setParticipantsForm(prev => {
+        // Se participantsForm está vazio, inicializar com os clientes selecionados
+        if (prev.length === 0 && Array.isArray(form.selectedClients) && form.selectedClients.length > 0) {
+          const initialized = form.selectedClients.map(c => ({
+            cliente_id: c.id,
+            nome: c.nome,
+            valor_cota: '',
+            status_pagamento: 'Pendente',
+            finalizadora_id: def,
+          }));
+          console.log('[PaymentModal] Initializing participantsForm with default finalizadora:', { def, initialized });
+          return initialized;
+        }
+        const updated = prev.map(p => ({ ...p, finalizadora_id: p.finalizadora_id || def }));
+        console.log('[PaymentModal] Setting default finalizadora:', { def, prevLen: prev.length, updated });
+        return updated;
+      });
+    }, [isPaymentModalOpen, payMethods, form.selectedClients]);
+
     // Helper: aplica atualização de selectedClients com proteção contra esvaziamento indevido
     const applySelectedClients = useCallback((reason, nextArr) => {
       try {
@@ -2720,6 +2762,7 @@ function AgendaPage() {
               return maskBRL(String((Number.isFinite(num) ? num : 0).toFixed(2)));
             })(),
             status_pagamento: p.status_pagamento_text || 'Pendente',
+            finalizadora_id: p.finalizadora_id || null,
           }))
         );
         // Seleciona primeiro participante por padrão
@@ -2730,7 +2773,7 @@ function AgendaPage() {
             try {
               const { data, error } = await supabase
                 .from('agendamento_participantes')
-                .select(`cliente_id, valor_cota, status_pagamento, cliente:clientes!agendamento_participantes_cliente_id_fkey ( nome )`)
+                .select(`cliente_id, valor_cota, status_pagamento, finalizadora_id, cliente:clientes!agendamento_participantes_cliente_id_fkey ( nome )`)
                 .eq('codigo_empresa', userProfile.codigo_empresa)
                 .eq('agendamento_id', editingBooking.id);
               if (!error && Array.isArray(data)) {
@@ -2747,6 +2790,7 @@ function AgendaPage() {
                     return maskBRL(String((Number.isFinite(num) ? num : 0).toFixed(2)));
                   })(),
                   status_pagamento: p.status_pagamento || 'Pendente',
+                  finalizadora_id: p.finalizadora_id || null,
                 })));
                 setPaymentSelectedId(sel[0]?.id || null);
               }
@@ -4110,9 +4154,10 @@ function AgendaPage() {
                 <div className="border border-border rounded-md overflow-hidden">
                   {/* Header da tabela - apenas desktop */}
                   <div className="hidden md:grid grid-cols-12 items-center px-3 py-2 bg-surface-2 text-[11px] uppercase tracking-wide text-text-secondary">
-                    <div className="col-span-6">Participante</div>
-                    <div className="col-span-3">Valor</div>
-                    <div className="col-span-2 flex items-center justify-between pr-2">
+                    <div className="col-span-5">Participante</div>
+                    <div className="col-span-3">Finalizadora</div>
+                    <div className="col-span-2">Valor</div>
+                    <div className="col-span-1 flex items-center justify-between pr-2">
                       <span>Status</span>
                     </div>
                     <div className="col-span-1 text-right">Ações</div>
@@ -4132,7 +4177,7 @@ function AgendaPage() {
                         );
                       }
                       return filtered.map((c) => {
-                      const pf = participantsForm.find(p => p.cliente_id === c.id) || { cliente_id: c.id, nome: c.nome, valor_cota: '', status_pagamento: 'Pendente' };
+                      const pf = participantsForm.find(p => p.cliente_id === c.id) || { cliente_id: c.id, nome: c.nome, valor_cota: '', status_pagamento: 'Pendente', finalizadora_id: payMethods[0]?.id ? String(payMethods[0].id) : null };
                       return (
                         <div
                           key={c.id}
@@ -4143,6 +4188,32 @@ function AgendaPage() {
                           <div className="md:hidden p-3 space-y-3">
                             {/* Nome do participante */}
                             <div className="font-semibold text-base">{c.nome}</div>
+                            
+                            {/* Finalizadora (mobile) */}
+                            <div>
+                              <Label className="text-xs text-text-muted mb-1">Finalizadora</Label>
+                              <Select
+                                value={String(pf.finalizadora_id || payMethods[0]?.id || '')}
+                                onValueChange={(val) => {
+                                  setParticipantsForm(prev => {
+                                    const list = [...prev];
+                                    const idx = list.findIndex(p => p.cliente_id === c.id);
+                                    if (idx >= 0) list[idx] = { ...list[idx], finalizadora_id: val };
+                                    else list.push({ cliente_id: c.id, nome: c.nome, valor_cota: pf.valor_cota || '', status_pagamento: pf.status_pagamento || 'Pendente', finalizadora_id: val });
+                                    return list;
+                                  });
+                                }}
+                              >
+                                <SelectTrigger className="w-full h-10">
+                                  <SelectValue placeholder="Selecione" />
+                                </SelectTrigger>
+                                <SelectContent className="bg-surface border border-border">
+                                  {payMethods.map((m) => (
+                                    <SelectItem key={m.id} value={String(m.id)}>{m.nome || m.tipo || 'Outros'}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
                             
                             {/* Valor e Status */}
                             <div className="flex gap-2">
@@ -4207,41 +4278,66 @@ function AgendaPage() {
                           
                           {/* Layout Desktop - Tabela */}
                           <div className="hidden md:grid grid-cols-12 items-center px-3 py-2">
-                            <div className="col-span-6 truncate text-[15px] font-medium">{c.nome}</div>
+                            <div className="col-span-5 truncate text-[15px] font-medium">{c.nome}</div>
+                            {/* Finalizadora (desktop) */}
                             <div className="col-span-3 pr-2">
-                            <Input
-                              type="text"
-                              inputMode="decimal"
-                              step="0.01"
-                              placeholder="0,00"
-                              value={maskBRL(pf.valor_cota)}
-                              onChange={(e) => {
-                                const masked = maskBRL(e.target.value);
-                                const amount = parseBRL(masked);
-                                const autoStatus = (Number.isFinite(amount) && amount > 0) ? 'Pago' : 'Pendente';
-                                setParticipantsForm(prev => {
-                                  let list = [...prev];
-                                  const idx = list.findIndex(p => p.cliente_id === c.id);
-                                  if (idx >= 0) {
-                                    list[idx] = { ...list[idx], valor_cota: masked, status_pagamento: autoStatus };
-                                  } else {
-                                    list = [...list, { cliente_id: c.id, nome: c.nome, valor_cota: masked, status_pagamento: autoStatus }];
-                                  }
-                                  const totalTarget = parseBRL(paymentTotal);
-                                  if (Number.isFinite(totalTarget)) {
-                                    const anyCoversAll = parseBRL(masked) >= totalTarget; // participante atual cobre tudo
-                                    if (anyCoversAll) {
-                                      list = list.map(p => ({ ...p, status_pagamento: 'Pago' }));
-                                      return list;
+                              <Select
+                                value={String(pf.finalizadora_id || payMethods[0]?.id || '')}
+                                onValueChange={(val) => {
+                                  setParticipantsForm(prev => {
+                                    const list = [...prev];
+                                    const idx = list.findIndex(p => p.cliente_id === c.id);
+                                    if (idx >= 0) list[idx] = { ...list[idx], finalizadora_id: val };
+                                    else list.push({ cliente_id: c.id, nome: c.nome, valor_cota: pf.valor_cota || '', status_pagamento: pf.status_pagamento || 'Pendente', finalizadora_id: val });
+                                    return list;
+                                  });
+                                }}
+                              >
+                                <SelectTrigger className="h-8 text-sm max-w-[140px]">
+                                  <SelectValue placeholder="Selecione" />
+                                </SelectTrigger>
+                                <SelectContent className="bg-surface border border-border">
+                                  {payMethods.map((m) => (
+                                    <SelectItem key={m.id} value={String(m.id)}>{m.nome || m.tipo || 'Outros'}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            {/* Valor */}
+                            <div className="col-span-2 pr-2">
+                              <Input
+                                type="text"
+                                inputMode="decimal"
+                                step="0.01"
+                                placeholder="0,00"
+                                value={maskBRL(pf.valor_cota)}
+                                onChange={(e) => {
+                                  const masked = maskBRL(e.target.value);
+                                  const amount = parseBRL(masked);
+                                  const autoStatus = (Number.isFinite(amount) && amount > 0) ? 'Pago' : 'Pendente';
+                                  setParticipantsForm(prev => {
+                                    let list = [...prev];
+                                    const idx = list.findIndex(p => p.cliente_id === c.id);
+                                    if (idx >= 0) {
+                                      list[idx] = { ...list[idx], valor_cota: masked, status_pagamento: autoStatus };
+                                    } else {
+                                      list = [...list, { cliente_id: c.id, nome: c.nome, valor_cota: masked, status_pagamento: autoStatus }];
                                     }
-                                  }
-                                  return list;
-                                });
-                              }}
-                              className="w-24 md:w-28 text-sm"
-                            />
-                          </div>
-                          <div className="col-span-2 pr-2">
+                                    const totalTarget = parseBRL(paymentTotal);
+                                    if (Number.isFinite(totalTarget)) {
+                                      const anyCoversAll = parseBRL(masked) >= totalTarget; // participante atual cobre tudo
+                                      if (anyCoversAll) {
+                                        list = list.map(p => ({ ...p, status_pagamento: 'Pago' }));
+                                        return list;
+                                      }
+                                    }
+                                    return list;
+                                  });
+                                }}
+                                className="w-24 md:w-28 text-sm"
+                              />
+                            </div>
+                          <div className="col-span-1 pr-2">
                             {/* Status automático, apenas leitura (derivado do valor_cota) */}
                             <span
                               className={`inline-flex items-center justify-center h-8 px-2 rounded text-sm font-medium border w-full select-none ${pf.status_pagamento === 'Pago' ? 'bg-emerald-600/20 text-emerald-400 border-emerald-700/40' : 'bg-amber-600/20 text-amber-400 border-amber-700/40'}`}
@@ -4341,17 +4437,31 @@ function AgendaPage() {
                       }
                       try { console.debug('[PaymentsSave] delete ok', { ms: Date.now() - tDel0 }); } catch {}
                       
+                      console.log('[PaymentsSave] ANTES DE MONTAR ROWS:', { 
+                        effectiveSelected: effectiveSelected.map(c => ({ id: c.id, nome: c.nome })),
+                        participantsForm,
+                        payMethods: payMethods.map(m => ({ id: m.id, nome: m.nome })),
+                      });
+                      
                       const rows = effectiveSelected.map((c) => {
-                        const pf = participantsForm.find(p => p.cliente_id === c.id) || { valor_cota: null, status_pagamento: 'Pendente' };
-                        const valor = parseBRL(pf.valor_cota);
-                        return {
+                        const pf = participantsForm.find(p => p.cliente_id === c.id);
+                        if (!pf) {
+                          console.error('[PaymentsSave] ⚠️ Participante não encontrado em participantsForm:', { cliente_id: c.id, nome: c.nome, participantsFormLen: participantsForm.length });
+                        }
+                        const valor = parseBRL(pf?.valor_cota);
+                        const finId = pf?.finalizadora_id || (payMethods[0]?.id ? String(payMethods[0].id) : null);
+                        const row = {
                           codigo_empresa: codigo,
                           agendamento_id: agendamentoId,
                           cliente_id: c.id,
                           valor_cota: Number.isFinite(valor) ? valor : 0,
-                          status_pagamento: pf.status_pagamento || 'Pendente',
+                          status_pagamento: pf?.status_pagamento || 'Pendente',
+                          finalizadora_id: finId,
                         };
+                        console.log('[PaymentsSave] Row montada:', { cliente: c.nome, finalizadora_id: finId, pf });
+                        return row;
                       });
+                      console.log('[PaymentsSave] ✅ TODAS AS ROWS MONTADAS:', rows);
                       try { console.debug('[PaymentsSave] rows prepared', { count: rows.length, sample: rows.slice(0,3) }); } catch {}
                       
                       if (rows.length > 0) {
