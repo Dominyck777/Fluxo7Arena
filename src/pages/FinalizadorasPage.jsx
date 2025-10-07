@@ -408,6 +408,18 @@ export default function FinalizadorasPage() {
         return;
       }
 
+      // Validar unicidade do código interno
+      if (formData.codigo_interno?.trim()) {
+        const codigoJaExiste = finalizadoras.some(f => 
+          f.codigo_interno === formData.codigo_interno.trim() && 
+          (!editingFin || f.id !== editingFin.id)
+        );
+        if (codigoJaExiste) {
+          toast({ title: 'Código já existe', description: 'Este código interno já está em uso por outra finalizadora', variant: 'warning' });
+          return;
+        }
+      }
+
       setSaving(true);
       const codigoEmpresa = userProfile?.codigo_empresa;
       
@@ -631,7 +643,7 @@ export default function FinalizadorasPage() {
 
       {/* Modal de Criar/Editar */}
       <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
-        <DialogContent className="sm:max-w-[500px]">
+        <DialogContent className="sm:max-w-[500px] w-[92vw] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editingFin ? 'Editar Finalizadora' : 'Nova Finalizadora'}</DialogTitle>
             <DialogDescription>
@@ -734,7 +746,7 @@ export default function FinalizadorasPage() {
 
       {/* Modal de Detalhes da Finalizadora */}
       <Dialog open={detailsModalOpen} onOpenChange={setDetailsModalOpen}>
-        <DialogContent className="sm:max-w-[700px] max-h-[85vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-[700px] w-[92vw] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Detalhes da Finalizadora</DialogTitle>
             <DialogDescription>
@@ -877,6 +889,114 @@ export default function FinalizadorasPage() {
               <Edit className="h-4 w-4 mr-2" />
               Editar
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal de Ranking de Finalizadoras */}
+      <Dialog open={rankingModalOpen} onOpenChange={setRankingModalOpen}>
+        <DialogContent className="sm:max-w-[700px] w-[92vw] max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Ranking de Finalizadoras</DialogTitle>
+            <DialogDescription>Faturamento por forma de pagamento</DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-4">
+            <div className="space-y-3">
+              <div className="flex flex-wrap gap-2">
+                <Button variant={rankingPeriod === 'hoje' ? 'default' : 'outline'} size="sm" className="flex-1 min-w-[70px]" onClick={() => { setRankingPeriod('hoje'); loadRanking('hoje'); }}>Hoje</Button>
+                <Button variant={rankingPeriod === 'semana' ? 'default' : 'outline'} size="sm" className="flex-1 min-w-[70px]" onClick={() => { setRankingPeriod('semana'); loadRanking('semana'); }}>7 Dias</Button>
+                <Button variant={rankingPeriod === 'mes' ? 'default' : 'outline'} size="sm" className="flex-1 min-w-[70px]" onClick={() => { setRankingPeriod('mes'); loadRanking('mes'); }}>30 Dias</Button>
+                <Button variant={rankingPeriod === 'customizado' ? 'default' : 'outline'} size="sm" className="flex-1 min-w-[70px]" onClick={() => setRankingPeriod('customizado')}>Período</Button>
+              </div>
+
+              {rankingPeriod === 'customizado' && (
+                isMobile ? (
+                  <div className="space-y-2">
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <Label className="text-xs">Data Inicial</Label>
+                        <input type="date" className="mt-1 h-9 w-full rounded-md border border-border bg-surface px-2 text-sm text-text-primary" value={rankingDateFrom} onChange={(e) => setRankingDateFrom(e.target.value)} />
+                      </div>
+                      <div>
+                        <Label className="text-xs">Data Final</Label>
+                        <input type="date" className="mt-1 h-9 w-full rounded-md border border-border bg-surface px-2 text-sm text-text-primary" value={rankingDateTo} onChange={(e) => setRankingDateTo(e.target.value)} />
+                      </div>
+                    </div>
+                    <Button className="w-full" onClick={() => loadRanking('customizado', rankingDateFrom, rankingDateTo)} disabled={!rankingDateFrom || !rankingDateTo || loadingRanking}>{loadingRanking ? 'Buscando...' : 'Buscar'}</Button>
+                  </div>
+                ) : (
+                  <div className="flex gap-3 items-end">
+                    <div className="flex-1">
+                      <Label>Data Inicial</Label>
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <Button variant="outline" className={cn("w-full justify-start text-left font-normal", !rankingDateFrom && "text-text-muted")}> 
+                            <CalendarIcon className="mr-2 h-4 w-4" />
+                            {rankingDateFrom ? new Date(rankingDateFrom + 'T12:00:00').toLocaleDateString('pt-BR') : "Selecione"}
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-auto p-0 bg-surface border border-border" align="start">
+                          <DayPicker mode="single" selected={rankingDateFrom ? new Date(rankingDateFrom + 'T12:00:00') : undefined} onSelect={(date) => { if (date) { const y=date.getFullYear(); const m=String(date.getMonth()+1).padStart(2,'0'); const d=String(date.getDate()).padStart(2,'0'); setRankingDateFrom(`${y}-${m}-${d}`); } }} className="p-3" />
+                        </PopoverContent>
+                      </Popover>
+                    </div>
+                    <div className="flex-1">
+                      <Label>Data Final</Label>
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <Button variant="outline" className={cn("w-full justify-start text-left font-normal", !rankingDateTo && "text-text-muted")}> 
+                            <CalendarIcon className="mr-2 h-4 w-4" />
+                            {rankingDateTo ? new Date(rankingDateTo + 'T12:00:00').toLocaleDateString('pt-BR') : "Selecione"}
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-auto p-0 bg-surface border border-border" align="start">
+                          <DayPicker mode="single" selected={rankingDateTo ? new Date(rankingDateTo + 'T12:00:00') : undefined} onSelect={(date) => { if (date) { const y=date.getFullYear(); const m=String(date.getMonth()+1).padStart(2,'0'); const d=String(date.getDate()).padStart(2,'0'); setRankingDateTo(`${y}-${m}-${d}`); } }} className="p-3" />
+                        </PopoverContent>
+                      </Popover>
+                    </div>
+                    <Button onClick={() => loadRanking('customizado', rankingDateFrom, rankingDateTo)} disabled={!rankingDateFrom || !rankingDateTo || loadingRanking}>Buscar</Button>
+                  </div>
+                )
+              )}
+            </div>
+
+            {loadingRanking ? (
+              <div className="flex items-center justify-center py-12">
+                <div className="h-8 w-8 animate-spin rounded-full border-4 border-brand border-t-transparent"></div>
+              </div>
+            ) : rankingData.length === 0 ? (
+              <div className="text-center py-12 text-text-muted">
+                <p>Nenhuma transação no período selecionado</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {rankingData.map((fin, index) => (
+                  <div key={fin.id} className="bg-surface-2 rounded-lg p-3 md:p-4 border border-border">
+                    <div className="flex items-start md:items-center justify-between gap-3">
+                      <div className="flex items-start md:items-center gap-2 md:gap-3 flex-1 min-w-0">
+                        <div className={cn("flex items-center justify-center w-7 h-7 md:w-8 md:h-8 rounded-full font-bold text-xs md:text-sm flex-shrink-0", index === 0 ? "bg-warning/20 text-warning" : index === 1 ? "bg-info/20 text-info" : index === 2 ? "bg-success/20 text-success" : "bg-muted/20 text-muted")}>{index + 1}º</div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1.5 md:gap-2">
+                            <span className="font-mono text-[10px] md:text-xs text-text-muted">{fin.codigo}</span>
+                            <span className="font-semibold text-sm md:text-base text-text-primary truncate">{fin.nome}</span>
+                          </div>
+                          <p className="text-[10px] md:text-xs text-text-muted">{fin.transacoes} transações</p>
+                        </div>
+                      </div>
+                      <div className="text-right flex-shrink-0">
+                        <p className="text-base md:text-lg font-bold text-success whitespace-nowrap">R$ {fin.total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
+                        <p className="text-[10px] md:text-xs text-text-muted whitespace-nowrap">Média: R$ {(fin.total / fin.transacoes).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRankingModalOpen(false)}>Fechar</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

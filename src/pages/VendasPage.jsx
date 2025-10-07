@@ -1376,13 +1376,10 @@ function VendasPage() {
                 <>
                   <Button
                     size="sm"
-                    variant="outline"
-                    className="h-8 px-3 rounded-full text-[12px] font-medium leading-none whitespace-nowrap bg-black/60 text-white border border-white/10 shadow-sm hover:bg-black/80 hover:shadow transition-all"
+                    className="h-8 px-3 rounded-full text-[12px] font-medium leading-none whitespace-nowrap bg-black/60 text-white border border-white/10 shadow-sm hover:bg-black/80 hover:shadow transition-all flex items-center"
                     onClick={() => setIsManageClientsOpen(true)}
                   >
-                    <span className="inline-flex items-center justify-center h-5 w-5 rounded-full bg-black/40 border border-white/10 mr-1.5">
-                      <Users size={12} className="text-white/80" />
-                    </span>
+                    <Users size={12} className="text-white/80 mr-1.5" />
                     Clientes
                   </Button>
                   <Button

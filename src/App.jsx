@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Routes, Route, useLocation } from 'react-router-dom';
+import { Routes, Route, useLocation, Navigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import Sidebar from '@/components/layout/Sidebar';
 import Header from '@/components/layout/Header';
@@ -67,6 +67,7 @@ function PrivateApp() {
             <Route path="/clientes" element={<ClientesPage />} />
             <Route path="/equipe" element={<EquipePage />} />
             <Route path="/financeiro" element={<FinanceiroPage />} />
+            <Route path="/caixa" element={<Navigate to="/financeiro?tab=caixa" replace />} />
             <Route path="/quadras" element={<QuadrasPage />} />
             <Route path="/empresas" element={<EmpresasPage />} />
             <Route path="/finalizadoras" element={<FinalizadorasPage />} />
