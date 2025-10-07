@@ -2352,9 +2352,10 @@ function VendasPage() {
   const OpenCashierDialog = () => (
     <AlertDialog open={openCashDialogOpen} onOpenChange={setOpenCashDialogOpen}>
       <AlertDialogTrigger asChild>
-          <Button variant="success" size="sm" disabled={isCashierOpen} onClick={() => setOpenCashDialogOpen(true)} className="px-2 md:px-4">
-              <Unlock className="h-4 w-4" />
-              <span className="hidden md:inline ml-2">Abrir Caixa</span>
+          <Button variant="success" size="sm" disabled={isCashierOpen} onClick={() => setOpenCashDialogOpen(true)} className="px-3">
+            <Unlock className="h-4 w-4" />
+            <span className="ml-2 md:hidden">Abrir</span>
+            <span className="ml-2 hidden md:inline">Abrir Caixa</span>
           </Button>
       </AlertDialogTrigger>
        <AlertDialogContent 
@@ -2374,6 +2375,7 @@ function VendasPage() {
     const [closingData, setClosingData] = useState({ loading: false, saldoInicial: 0, resumo: null });
     const [isCloseCashOpen, setIsCloseCashOpen] = useState(false);
     const [showMobileWarn, setShowMobileWarn] = useState(false);
+    const [closing, setClosing] = useState(false);
     const handlePrepareClose = async () => {
       try {
         setClosingData({ loading: true, saldoInicial: 0, resumo: null });
@@ -2391,9 +2393,10 @@ function VendasPage() {
     return (
       <AlertDialog open={isCloseCashOpen} onOpenChange={(open) => { setIsCloseCashOpen(open); if (open) handlePrepareClose(); }}>
         <AlertDialogTrigger asChild>
-          <Button variant="destructive" size="sm" disabled={!isCashierOpen} onClick={() => setIsCloseCashOpen(true)} className="px-2 md:px-4">
+          <Button variant="destructive" size="sm" disabled={!isCashierOpen} onClick={() => setIsCloseCashOpen(true)} className="px-3">
             <Lock className="h-4 w-4" />
-            <span className="hidden md:inline ml-2">Fechar Caixa</span>
+            <span className="ml-2 md:hidden">Fechar</span>
+            <span className="ml-2 hidden md:inline">Fechar Caixa</span>
           </Button>
         </AlertDialogTrigger>
         <AlertDialogContent
@@ -2431,13 +2434,29 @@ function VendasPage() {
             </div>
           )}
           <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => setIsCloseCashOpen(false)}>Cancelar</AlertDialogCancel>
+            <AlertDialogCancel onClick={() => setIsCloseCashOpen(false)} disabled={closing}>Cancelar</AlertDialogCancel>
             <AlertDialogAction onClick={async () => {
               try {
+                if (closing) return;
+                setClosing(true);
                 // Pré-checagem: bloquear se houver comandas abertas
                 try {
                   const abertas = await listarComandasAbertas({ codigoEmpresa: userProfile?.codigo_empresa });
-                  if (abertas && abertas.length > 0) {
+                  let abertasComItens = [];
+                  if (Array.isArray(abertas) && abertas.length > 0) {
+                    try {
+                      const results = await Promise.all(abertas.map(async (c) => {
+                        try {
+                          const itens = await listarItensDaComanda({ comandaId: c?.id, codigoEmpresa: userProfile?.codigo_empresa });
+                          const temItens = (itens || []).some(it => Number(it?.quantidade || 0) > 0);
+                          return temItens ? c : null;
+                        } catch { return c; }
+                      }));
+                      abertasComItens = results.filter(Boolean);
+                    } catch { abertasComItens = abertas; }
+                  }
+
+                  if (abertasComItens.length > 0) {
                     const isMobile = typeof window !== 'undefined' && window.innerWidth <= 640;
                     if (isMobile) {
                       setShowMobileWarn(true);
@@ -2445,7 +2464,7 @@ function VendasPage() {
                     } else {
                       toast({
                         title: 'Fechamento bloqueado',
-                        description: `Existem ${abertas.length} comandas abertas (inclui balcão). Finalize-as antes de fechar o caixa.`,
+                        description: `Existem ${abertasComItens.length} comandas com itens em aberto. Finalize-as antes de fechar o caixa.`,
                         variant: 'warning',
                         duration: 2500,
                       });
@@ -2454,13 +2473,32 @@ function VendasPage() {
                   }
                 } catch {}
                 await fecharCaixa({ codigoEmpresa: userProfile?.codigo_empresa });
+                // Verifica se realmente fechou (idempotência e consistência eventual)
+                let closedOk = false;
+                for (let i = 0; i < 4; i++) {
+                  const sess = await getCaixaAberto({ codigoEmpresa: userProfile?.codigo_empresa }).catch(() => null);
+                  if (!sess || !sess.id) { closedOk = true; break; }
+                  await new Promise(r => setTimeout(r, 250));
+                }
+                if (!closedOk) {
+                  toast({ title: 'Fechamento pendente', description: 'Ainda há uma sessão marcada como aberta. Aguarde e tente novamente.', variant: 'warning' });
+                  return;
+                }
                 setIsCashierOpen(false);
-                setIsCloseCashOpen(false);
-                toast({ title: 'Caixa fechado!', description: 'O relatório de fechamento foi gerado.' });
+                // Evita condições de corrida de portal/unmount no mobile: fecha no próximo frame e só então mostra toast
+                if (typeof requestAnimationFrame === 'function') {
+                  requestAnimationFrame(() => {
+                    setIsCloseCashOpen(false);
+                    toast({ title: 'Caixa fechado!', description: 'O relatório de fechamento foi gerado.' });
+                  });
+                } else {
+                  setIsCloseCashOpen(false);
+                  toast({ title: 'Caixa fechado!', description: 'O relatório de fechamento foi gerado.' });
+                }
               } catch (e) {
                 console.error(e);
                 toast({ title: 'Falha ao fechar caixa', description: e?.message || 'Tente novamente', variant: 'destructive' });
-              }
+              } finally { setClosing(false); }
             }}>Confirmar Fechamento</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -2957,9 +2995,10 @@ function VendasPage() {
           <div className="w-full md:w-auto flex items-center gap-1.5 md:gap-3 md:ml-auto justify-end mt-1 md:mt-0">
             <OpenCashierDialog />
             <CloseCashierDialog />
-            <Button variant="outline" size="sm" onClick={() => setIsCashierDetailsOpen(true)} className="px-2 md:px-4">
+            <Button variant="outline" size="sm" onClick={() => setIsCashierDetailsOpen(true)} className="px-3">
               <Banknote className="h-4 w-4" />
-              <span className="hidden md:inline ml-2">Detalhes do Caixa</span>
+              <span className="ml-2 md:hidden">Detalhes</span>
+              <span className="ml-2 hidden md:inline">Detalhes do Caixa</span>
             </Button>
             <div className="hidden md:block w-px h-6 bg-border mx-1"></div>
             <Button onClick={() => setIsCreateMesaOpen(true)} className="hidden md:flex" size="sm">
@@ -2972,7 +3011,7 @@ function VendasPage() {
           <div className="md:hidden mb-3 text-[11px] text-warning flex items-center gap-2">
             <AlertCircle className="h-3 w-3" />
             Há comandas abertas, mas o caixa parece fechado.
-            <Button size="sm" variant="outline" className="h-6 px-2 text-[11px]" onClick={quickReopenCashier}>Reabrir sessão</Button>
+            <Button size="sm" variant="outline" className="h-6 px-2 text-[11px]" onClick={() => setOpenCashDialogOpen(true)}>Reabrir sessão</Button>
           </div>
         )}
         

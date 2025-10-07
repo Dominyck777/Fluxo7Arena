@@ -363,10 +363,11 @@ export default function BalcaoPage() {
           variant="success"
           disabled={isCashierOpen}
           onClick={() => setOpenCashDialogOpen(true)}
-          className="h-9 w-9 p-0 rounded-md sm:h-10 sm:w-auto sm:px-3"
+          className="h-9 rounded-md px-3 sm:h-10"
         >
           <Unlock className="h-4 w-4" />
-          <span className="hidden sm:inline ml-2">Abrir Caixa</span>
+          <span className="ml-2 md:hidden">Abrir</span>
+          <span className="ml-2 hidden md:inline">Abrir Caixa</span>
         </Button>
       </AlertDialogTrigger>
       <AlertDialogContent className="sm:max-w-[425px] w-[92vw] animate-none" onKeyDown={(e) => e.stopPropagation()} onPointerDownOutside={(e) => { e.preventDefault(); e.stopPropagation(); }} onInteractOutside={(e) => { e.preventDefault(); e.stopPropagation(); }}>
@@ -398,10 +399,11 @@ export default function BalcaoPage() {
             variant="destructive"
             disabled={!isCashierOpen}
             onClick={handlePrepareClose}
-            className="h-9 w-9 p-0 rounded-md sm:h-10 sm:w-auto sm:px-3"
+            className="h-9 rounded-md px-3 sm:h-10"
           >
             <Lock className="h-4 w-4" />
-            <span className="hidden sm:inline ml-2">Fechar Caixa</span>
+            <span className="ml-2 md:hidden">Fechar</span>
+            <span className="ml-2 hidden md:inline">Fechar Caixa</span>
           </Button>
         </AlertDialogTrigger>
         <AlertDialogContent className="sm:max-w-[425px] w-[92vw] max-h-[85vh] animate-none" onKeyDown={(e) => e.stopPropagation()} onPointerDownOutside={(e) => { e.preventDefault(); e.stopPropagation(); }} onInteractOutside={(e) => { e.preventDefault(); e.stopPropagation(); }}>
@@ -436,7 +438,20 @@ export default function BalcaoPage() {
               try {
                 try {
                   const abertas = await listarComandasAbertas({ codigoEmpresa: userProfile?.codigo_empresa });
-                  if (abertas && abertas.length > 0) {
+                  let abertasComItens = [];
+                  if (Array.isArray(abertas) && abertas.length > 0) {
+                    try {
+                      const results = await Promise.all(abertas.map(async (c) => {
+                        try {
+                          const itens = await listarItensDaComanda({ comandaId: c?.id, codigoEmpresa: userProfile?.codigo_empresa });
+                          const temItens = (itens || []).some(it => Number(it?.quantidade || 0) > 0);
+                          return temItens ? c : null;
+                        } catch { return c; }
+                      }));
+                      abertasComItens = results.filter(Boolean);
+                    } catch { abertasComItens = abertas; }
+                  }
+                  if (abertasComItens.length > 0) {
                     const isMobile = typeof window !== 'undefined' && window.innerWidth <= 640;
                     if (isMobile) {
                       setShowMobileWarn(true);
@@ -444,7 +459,7 @@ export default function BalcaoPage() {
                     } else {
                       toast({
                         title: 'Fechamento bloqueado',
-                        description: `Existem ${abertas.length} comandas abertas (inclui balcão). Finalize-as antes de fechar o caixa.`,
+                        description: `Existem ${abertasComItens.length} comandas com itens em aberto. Finalize-as antes de fechar o caixa.`,
                         variant: 'warning',
                         duration: 2500,
                       });
@@ -1107,10 +1122,11 @@ export default function BalcaoPage() {
           <Button
             variant="outline"
             onClick={() => setIsCashierDetailsOpen(true)}
-            className="h-8 w-8 p-0 rounded-md sm:h-10 sm:w-auto sm:px-3"
+            className="h-9 rounded-md px-3 sm:h-10"
           >
             <Banknote className="h-4 w-4" />
-            <span className="hidden sm:inline ml-2">Detalhes do Caixa</span>
+            <span className="ml-2 md:hidden">Detalhes</span>
+            <span className="ml-2 hidden md:inline">Detalhes do Caixa</span>
           </Button>
         </div>
       </div>
