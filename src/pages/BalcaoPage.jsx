@@ -9,7 +9,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/components/ui/use-toast';
-import { Search, Plus, CheckCircle, Unlock, Lock, Banknote, X, FileText, ShoppingBag } from 'lucide-react';
+import { Search, Plus, CheckCircle, Unlock, Lock, Banknote, X, FileText, ShoppingBag, AlertCircle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { listProducts } from '@/lib/products';
 import { useAuth } from '@/contexts/AuthContext';
