@@ -463,15 +463,15 @@ export default function FinalizadorasPage() {
 
       <motion.div variants={pageVariants} initial="hidden" animate="visible" className="flex-1 space-y-6 p-4 md:p-6">
         {/* Header */}
-        <motion.div variants={itemVariants} className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 md:gap-3">
+        <motion.div variants={itemVariants} className="flex items-center justify-between gap-2">
           <div className="min-w-0">
-            <h1 className="text-3xl font-black text-text-primary tracking-tight">Finalizadoras</h1>
+            <h1 className="text-2xl md:text-3xl font-black text-text-primary tracking-tight leading-tight">Finalizadoras</h1>
           </div>
-          <div className="flex items-center gap-2 flex-shrink-0 mt-1 md:mt-0">
+          <div className="flex items-center gap-2 flex-shrink-0">
             <Button variant="ghost" size="icon" onClick={() => setShowStats(!showStats)} className="h-9 w-9">
               {showStats ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
             </Button>
-            <Button onClick={handleCreate} className="gap-2 h-9 px-3">
+            <Button onClick={handleCreate} className="gap-2 h-9 px-3 whitespace-nowrap">
               <Plus className="h-4 w-4" />
               <span className="md:hidden">Nova</span>
               <span className="hidden md:inline">Nova Finalizadora</span>
