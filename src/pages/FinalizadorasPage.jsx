@@ -50,20 +50,20 @@ const StatCard = ({ icon: Icon, title, value, subtitle, color, onClick, isActive
     variants={itemVariants}
     onClick={onClick}
     className={cn(
-      "bg-surface rounded-lg border-2 p-4 transition-all",
+      "bg-surface rounded-lg border md:border-2 p-3 md:p-4 transition-all text-center h-[90px] md:h-auto",
       onClick ? "cursor-pointer hover:shadow-md" : "",
       isActive ? `border-${color} bg-${color}/5` : "border-border",
       onClick && !isActive ? "hover:border-border-hover" : ""
     )}
   >
-    <div className="flex items-center gap-3">
-      <div className={cn("p-2 rounded-lg", `bg-${color}/10`)}>
-        <Icon className={cn("w-5 h-5", `text-${color}`)} />
+    <div className="flex flex-col items-center justify-center gap-1 md:flex-row md:items-center md:gap-3 h-full">
+      <div className={cn("p-1.5 md:p-2 rounded-lg", `bg-${color}/10`)}>
+        <Icon className={cn("w-4 h-4 md:w-5 md:h-5", `text-${color}`)} />
       </div>
-      <div className="flex-1">
-        <p className="text-2xl font-bold text-text-primary">{value}</p>
-        <p className="text-xs font-semibold text-text-secondary">{title}</p>
-        <p className="text-xs text-text-muted">{subtitle}</p>
+      <div className="flex-1 md:text-left">
+        <p className="text-base md:text-2xl font-bold text-text-primary leading-none">{value}</p>
+        <p className="text-[10px] md:text-xs font-semibold text-text-secondary md:mt-0.5">{title}</p>
+        <p className="hidden md:block text-xs text-text-muted">{subtitle}</p>
       </div>
     </div>
   </motion.div>
@@ -112,6 +112,16 @@ export default function FinalizadorasPage() {
   const [rankingDateFrom, setRankingDateFrom] = useState('');
   const [rankingDateTo, setRankingDateTo] = useState('');
   const [loadingRanking, setLoadingRanking] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const update = () => {
+      try { setIsMobile(typeof window !== 'undefined' && window.innerWidth <= 640); } catch {}
+    };
+    update();
+    window.addEventListener('resize', update);
+    return () => window.removeEventListener('resize', update);
+  }, []);
   
   // Carregar finalizadoras
   const loadFinalizadoras = async () => {
@@ -158,11 +168,20 @@ export default function FinalizadorasPage() {
     // Busca por texto
     if (searchTerm) {
       const search = searchTerm.toLowerCase();
-      result = result.filter(f => 
-        f.tipo?.toLowerCase().includes(search) ||
-        f.nome?.toLowerCase().includes(search) ||
-        f.codigo?.toLowerCase().includes(search)
-      );
+      result = result.filter(f => {
+        const tipo = String(f.tipo || '').toLowerCase();
+        const nome = String(f.nome || '').toLowerCase();
+        const codInt = String(f.codigo_interno || '').toLowerCase();
+        // Permite busca por código interno (mesmo se usuário digitar sem zero à esquerda)
+        const numericSearch = search.replace(/\D/g, '');
+        const codIntNumeric = String(f.codigo_interno || '').replace(/\D/g, '');
+        return (
+          tipo.includes(search) ||
+          nome.includes(search) ||
+          codInt.includes(search) ||
+          (!!numericSearch && codIntNumeric === numericSearch)
+        );
+      });
     }
     
     // Filtro por tipo
@@ -444,25 +463,25 @@ export default function FinalizadorasPage() {
 
       <motion.div variants={pageVariants} initial="hidden" animate="visible" className="flex-1 space-y-6 p-4 md:p-6">
         {/* Header */}
-        <motion.div variants={itemVariants} className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-black text-text-primary tracking-tight">Finalizadoras</h1>
-            <p className="text-text-secondary mt-1">Gerencie os métodos de pagamento do sistema</p>
+        <motion.div variants={itemVariants} className="flex items-center justify-between gap-2">
+          <div className="min-w-0">
+            <h1 className="text-2xl md:text-3xl font-black text-text-primary tracking-tight leading-tight">Finalizadoras</h1>
           </div>
-          <div className="flex items-center gap-2">
-            <Button variant="ghost" size="icon" onClick={() => setShowStats(!showStats)}>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <Button variant="ghost" size="icon" onClick={() => setShowStats(!showStats)} className="h-9 w-9">
               {showStats ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
             </Button>
-            <Button onClick={handleCreate} className="gap-2">
+            <Button onClick={handleCreate} className="gap-2 h-9 px-3 whitespace-nowrap">
               <Plus className="h-4 w-4" />
-              Nova Finalizadora
+              <span className="md:hidden">Nova</span>
+              <span className="hidden md:inline">Nova Finalizadora</span>
             </Button>
           </div>
         </motion.div>
 
         {/* Stats Cards */}
         {showStats && (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="grid grid-cols-3 gap-3 md:grid-cols-3 md:gap-6">
             <StatCard
               icon={CreditCard}
               title="Total"
@@ -492,19 +511,18 @@ export default function FinalizadorasPage() {
 
         {/* Filtros e Busca */}
         <motion.div variants={itemVariants} className="bg-surface rounded-lg border border-border p-4">
-          <div className="flex flex-col md:flex-row gap-4">
-            <div className="flex-1 relative">
+          <div className="flex items-center gap-2">
+            <div className="relative min-w-0 basis-0 flex-grow">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-text-muted" />
               <Input
                 placeholder="Buscar finalizadora..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-10"
+                className="pl-10 h-11"
               />
             </div>
-            
             <Select value={filterStatus} onValueChange={setFilterStatus}>
-              <SelectTrigger className="w-full md:w-[200px]">
+              <SelectTrigger className="w-[110px] md:w-[180px]">
                 <SelectValue placeholder="Filtrar por status" />
               </SelectTrigger>
               <SelectContent>
@@ -516,7 +534,7 @@ export default function FinalizadorasPage() {
           </div>
         </motion.div>
 
-        {/* Tabela de Finalizadoras */}
+        {/* Lista Responsiva de Finalizadoras */}
         <motion.div variants={itemVariants} className="bg-surface rounded-lg border border-border overflow-hidden">
           {loading ? (
             <div className="p-12 text-center">
@@ -529,36 +547,59 @@ export default function FinalizadorasPage() {
               <p>Nenhuma finalizadora encontrada</p>
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="bg-surface-2 border-b border-border">
-                  <tr>
-                    <th className="text-left px-6 py-4 text-sm font-semibold text-text-secondary">Código</th>
-                    <th className="text-left px-6 py-4 text-sm font-semibold text-text-secondary">Descrição</th>
-                    <th className="text-left px-6 py-4 text-sm font-semibold text-text-secondary">Taxa (%)</th>
-                    <th className="text-center px-6 py-4 text-sm font-semibold text-text-secondary">Status</th>
-                    <th className="text-right px-6 py-4 text-sm font-semibold text-text-secondary">Ações</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
-                  {filteredFinalizadoras.map((fin) => {
-                    return (
-                      <tr 
-                        key={fin.id} 
-                        className="hover:bg-surface-2/50 transition-colors cursor-pointer"
-                        onClick={() => handleViewDetails(fin)}
-                      >
-                        <td className="px-6 py-4">
-                          <span className="font-mono text-sm text-text-primary">{fin.codigo_interno || '-'}</span>
-                        </td>
-                        <td className="px-6 py-4">
-                          <span className="font-semibold text-text-primary">{fin.nome}</span>
-                        </td>
-                        <td className="px-6 py-4">
-                          <span className="text-text-secondary">
-                            {fin.taxa_percentual ? `${fin.taxa_percentual}%` : '-'}
-                          </span>
-                        </td>
+            <>
+              {/* Mobile: Cards (sem scroll horizontal) */}
+              <div className="md:hidden divide-y divide-border">
+                {filteredFinalizadoras.map((fin) => (
+                  <div key={fin.id} className="p-3 flex flex-col gap-2 hover:bg-surface-2/50 cursor-pointer" onClick={() => handleViewDetails(fin)}>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="px-2 py-0.5 rounded-md bg-surface-2 border border-border font-mono text-xs text-text-secondary">{fin.codigo_interno || '-'}</span>
+                        <span className="font-semibold text-sm text-text-primary truncate" title={fin.nome}>{fin.nome}</span>
+                      </div>
+                      <span className={cn(
+                        "inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium",
+                        fin.ativo ? "bg-success/10 text-success" : "bg-muted/10 text-muted"
+                      )}>
+                        <span className={cn("w-1.5 h-1.5 rounded-full", fin.ativo ? "bg-success" : "bg-muted")} />
+                        {fin.ativo ? 'Ativa' : 'Inativa'}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between text-xs text-text-secondary">
+                      <div className="flex items-center gap-3">
+                        <span>Taxa: {fin.taxa_percentual ? `${fin.taxa_percentual}%` : '-'}</span>
+                      </div>
+                      <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                        <Button variant="ghost" size="sm" className="h-7 px-2" onClick={() => handleEdit(fin)}>
+                          <Edit className="h-4 w-4" />
+                        </Button>
+                        <Button variant={fin.ativo ? 'ghost' : 'default'} size="sm" className="h-7 px-2" onClick={() => handleToggleStatus(fin)}>
+                          {fin.ativo ? 'Desativar' : 'Ativar'}
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Desktop: Tabela */}
+              <div className="hidden md:block overflow-x-auto">
+                <table className="w-full">
+                  <thead className="bg-surface-2 border-b border-border">
+                    <tr>
+                      <th className="text-left px-6 py-4 text-sm font-semibold text-text-secondary">Código</th>
+                      <th className="text-left px-6 py-4 text-sm font-semibold text-text-secondary">Descrição</th>
+                      <th className="text-left px-6 py-4 text-sm font-semibold text-text-secondary">Taxa (%)</th>
+                      <th className="text-center px-6 py-4 text-sm font-semibold text-text-secondary">Status</th>
+                      <th className="text-right px-6 py-4 text-sm font-semibold text-text-secondary">Ações</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {filteredFinalizadoras.map((fin) => (
+                      <tr key={fin.id} className="hover:bg-surface-2/50 transition-colors cursor-pointer" onClick={() => handleViewDetails(fin)}>
+                        <td className="px-6 py-4"><span className="font-mono text-sm text-text-primary">{fin.codigo_interno || '-'}</span></td>
+                        <td className="px-6 py-4"><span className="font-semibold text-text-primary">{fin.nome}</span></td>
+                        <td className="px-6 py-4"><span className="text-text-secondary">{fin.taxa_percentual ? `${fin.taxa_percentual}%` : '-'}</span></td>
                         <td className="px-6 py-4 text-center">
                           <span className={cn(
                             "inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium",
@@ -569,35 +610,21 @@ export default function FinalizadorasPage() {
                           </span>
                         </td>
                         <td className="px-6 py-4">
-                          <div className="flex justify-end gap-2">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleEdit(fin);
-                              }}
-                            >
+                          <div className="flex justify-end gap-2" onClick={(e) => e.stopPropagation()}>
+                            <Button variant="ghost" size="sm" onClick={() => handleEdit(fin)}>
                               <Edit className="h-4 w-4" />
                             </Button>
-                            <Button
-                              variant={fin.ativo ? "ghost" : "default"}
-                              size="sm"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleToggleStatus(fin);
-                              }}
-                            >
+                            <Button variant={fin.ativo ? 'ghost' : 'default'} size="sm" onClick={() => handleToggleStatus(fin)}>
                               {fin.ativo ? 'Desativar' : 'Ativar'}
                             </Button>
                           </div>
                         </td>
                       </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
           )}
         </motion.div>
       </motion.div>
@@ -700,237 +727,6 @@ export default function FinalizadorasPage() {
             </Button>
             <Button onClick={handleSave} disabled={saving}>
               {saving ? 'Salvando...' : 'Salvar'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Modal de Ranking de Finalizadoras */}
-      <Dialog open={rankingModalOpen} onOpenChange={setRankingModalOpen}>
-        <DialogContent className="sm:max-w-[700px] max-h-[85vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Ranking de Finalizadoras</DialogTitle>
-            <DialogDescription>
-              Faturamento por forma de pagamento
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4 py-4">
-            {/* Filtro de Período */}
-            <div className="space-y-3">
-              <div className="flex gap-2">
-                <Button
-                  variant={rankingPeriod === 'hoje' ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => {
-                    setRankingPeriod('hoje');
-                    loadRanking('hoje');
-                  }}
-                >
-                  Hoje
-                </Button>
-                <Button
-                  variant={rankingPeriod === 'semana' ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => {
-                    setRankingPeriod('semana');
-                    loadRanking('semana');
-                  }}
-                >
-                  7 Dias
-                </Button>
-                <Button
-                  variant={rankingPeriod === 'mes' ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => {
-                    setRankingPeriod('mes');
-                    loadRanking('mes');
-                  }}
-                >
-                  30 Dias
-                </Button>
-                <Button
-                  variant={rankingPeriod === 'customizado' ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => setRankingPeriod('customizado')}
-                >
-                  Período Customizado
-                </Button>
-              </div>
-
-              {rankingPeriod === 'customizado' && (
-                <div className="flex gap-3 items-end">
-                  <div className="flex-1">
-                    <Label>Data Inicial</Label>
-                    <Popover>
-                      <PopoverTrigger asChild>
-                        <Button
-                          variant="outline"
-                          className={cn(
-                            "w-full justify-start text-left font-normal",
-                            !rankingDateFrom && "text-text-muted"
-                          )}
-                        >
-                          <CalendarIcon className="mr-2 h-4 w-4" />
-                          {rankingDateFrom ? new Date(rankingDateFrom + 'T12:00:00').toLocaleDateString('pt-BR') : "Selecione a data"}
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-auto p-0 bg-surface border border-border" align="start">
-                        <DayPicker
-                          mode="single"
-                          selected={rankingDateFrom ? new Date(rankingDateFrom + 'T12:00:00') : undefined}
-                          defaultMonth={rankingDateFrom ? new Date(rankingDateFrom + 'T12:00:00') : new Date()}
-                          onSelect={(date) => {
-                            if (date) {
-                              const year = date.getFullYear();
-                              const month = String(date.getMonth() + 1).padStart(2, '0');
-                              const day = String(date.getDate()).padStart(2, '0');
-                              setRankingDateFrom(`${year}-${month}-${day}`);
-                            }
-                          }}
-                          className="rdp-custom p-3"
-                          classNames={{
-                            months: "flex flex-col sm:flex-row space-y-4 sm:space-x-4 sm:space-y-0",
-                            month: "space-y-4",
-                            caption: "flex justify-center pt-1 relative items-center text-text-primary",
-                            caption_label: "text-sm font-medium",
-                            nav: "space-x-1 flex items-center",
-                            nav_button: "h-7 w-7 bg-transparent p-0 opacity-50 hover:opacity-100 text-text-primary hover:bg-surface-2 rounded-md",
-                            nav_button_previous: "absolute left-1",
-                            nav_button_next: "absolute right-1",
-                            table: "w-full border-collapse space-y-1",
-                            head_row: "flex",
-                            head_cell: "text-text-muted rounded-md w-9 font-normal text-[0.8rem]",
-                            row: "flex w-full mt-2",
-                            cell: "text-center text-sm p-0 relative focus-within:relative focus-within:z-20",
-                            day: "h-9 w-9 p-0 font-normal text-text-primary hover:bg-warning/20 hover:text-warning rounded-md transition-colors",
-                            day_selected: "bg-warning text-background hover:bg-warning/90 hover:text-background focus:bg-warning focus:text-background",
-                            day_today: "bg-surface-2 text-warning font-bold border border-warning/30",
-                            day_outside: "text-text-muted opacity-30",
-                            day_disabled: "text-text-muted opacity-30 cursor-not-allowed",
-                            day_hidden: "invisible",
-                          }}
-                        />
-                      </PopoverContent>
-                    </Popover>
-                  </div>
-                  <div className="flex-1">
-                    <Label>Data Final</Label>
-                    <Popover>
-                      <PopoverTrigger asChild>
-                        <Button
-                          variant="outline"
-                          className={cn(
-                            "w-full justify-start text-left font-normal",
-                            !rankingDateTo && "text-text-muted"
-                          )}
-                        >
-                          <CalendarIcon className="mr-2 h-4 w-4" />
-                          {rankingDateTo ? new Date(rankingDateTo + 'T12:00:00').toLocaleDateString('pt-BR') : "Selecione a data"}
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-auto p-0 bg-surface border border-border" align="start">
-                        <DayPicker
-                          mode="single"
-                          selected={rankingDateTo ? new Date(rankingDateTo + 'T12:00:00') : undefined}
-                          defaultMonth={rankingDateTo ? new Date(rankingDateTo + 'T12:00:00') : new Date()}
-                          onSelect={(date) => {
-                            if (date) {
-                              const year = date.getFullYear();
-                              const month = String(date.getMonth() + 1).padStart(2, '0');
-                              const day = String(date.getDate()).padStart(2, '0');
-                              setRankingDateTo(`${year}-${month}-${day}`);
-                            }
-                          }}
-                          className="rdp-custom p-3"
-                          classNames={{
-                            months: "flex flex-col sm:flex-row space-y-4 sm:space-x-4 sm:space-y-0",
-                            month: "space-y-4",
-                            caption: "flex justify-center pt-1 relative items-center text-text-primary",
-                            caption_label: "text-sm font-medium",
-                            nav: "space-x-1 flex items-center",
-                            nav_button: "h-7 w-7 bg-transparent p-0 opacity-50 hover:opacity-100 text-text-primary hover:bg-surface-2 rounded-md",
-                            nav_button_previous: "absolute left-1",
-                            nav_button_next: "absolute right-1",
-                            table: "w-full border-collapse space-y-1",
-                            head_row: "flex",
-                            head_cell: "text-text-muted rounded-md w-9 font-normal text-[0.8rem]",
-                            row: "flex w-full mt-2",
-                            cell: "text-center text-sm p-0 relative focus-within:relative focus-within:z-20",
-                            day: "h-9 w-9 p-0 font-normal text-text-primary hover:bg-warning/20 hover:text-warning rounded-md transition-colors",
-                            day_selected: "bg-warning text-background hover:bg-warning/90 hover:text-background focus:bg-warning focus:text-background",
-                            day_today: "bg-surface-2 text-warning font-bold border border-warning/30",
-                            day_outside: "text-text-muted opacity-30",
-                            day_disabled: "text-text-muted opacity-30 cursor-not-allowed",
-                            day_hidden: "invisible",
-                          }}
-                        />
-                      </PopoverContent>
-                    </Popover>
-                  </div>
-                  <Button 
-                    onClick={() => loadRanking('customizado', rankingDateFrom, rankingDateTo)}
-                    disabled={!rankingDateFrom || !rankingDateTo}
-                  >
-                    Buscar
-                  </Button>
-                </div>
-              )}
-            </div>
-
-            {/* Lista de Finalizadoras */}
-            {loadingRanking ? (
-              <div className="flex items-center justify-center py-12">
-                <div className="h-8 w-8 animate-spin rounded-full border-4 border-brand border-t-transparent"></div>
-              </div>
-            ) : rankingData.length === 0 ? (
-              <div className="text-center py-12 text-text-muted">
-                <p>Nenhuma transação no período selecionado</p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {rankingData.map((fin, index) => (
-                  <div 
-                    key={fin.id} 
-                    className="bg-surface-2 rounded-lg p-4 border border-border hover:border-brand transition-colors"
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3 flex-1">
-                        <div className={cn(
-                          "flex items-center justify-center w-8 h-8 rounded-full font-bold text-sm",
-                          index === 0 ? "bg-warning/20 text-warning" : 
-                          index === 1 ? "bg-info/20 text-info" :
-                          index === 2 ? "bg-success/20 text-success" :
-                          "bg-muted/20 text-muted"
-                        )}>
-                          {index + 1}º
-                        </div>
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2">
-                            <span className="font-mono text-xs text-text-muted">{fin.codigo}</span>
-                            <span className="font-semibold text-text-primary">{fin.nome}</span>
-                          </div>
-                          <p className="text-xs text-text-muted">{fin.transacoes} transações</p>
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-lg font-bold text-success">
-                          R$ {fin.total.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </p>
-                        <p className="text-xs text-text-muted">
-                          Média: R$ {(fin.total / fin.transacoes).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setRankingModalOpen(false)}>
-              Fechar
             </Button>
           </DialogFooter>
         </DialogContent>
