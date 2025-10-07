@@ -1104,8 +1104,8 @@ function AgendaPage() {
       }
       const reqId = ++participantsReqIdRef.current;
       const { data, error } = await supabase
-        .from('v_agendamento_participantes')
-        .select('*')
+        .from('agendamento_participantes')
+        .select('id, agendamento_id, codigo_empresa, cliente_id, nome, valor_cota, status_pagamento, finalizadora_id')
         .in('agendamento_id', ids);
       // Ignora respostas atrasadas
       if (participantsReqIdRef.current !== reqId) return;
@@ -1391,7 +1391,7 @@ function AgendaPage() {
 
     // Participantes agregados (pago/total)
     const participants = participantsByAgendamento[booking.id] || [];
-    const paidCount = participants.filter(p => (p.status_pagamento_text || '').toLowerCase() === 'pago').length;
+    const paidCount = participants.filter(p => String(p.status_pagamento || '').toLowerCase() === 'pago').length;
     const totalParticipants = participants.length;
 
     return (
@@ -2547,8 +2547,7 @@ function AgendaPage() {
                 cliente_id: row.cliente_id,
                 nome: form.selectedClients.find(c => c.id === row.cliente_id)?.nome || '',
                 valor_cota: row.valor_cota,
-                status_pagamento: row.status_pagamento,
-                status_pagamento_text: 'Pendente'
+                status_pagamento: row.status_pagamento
               }));
               setParticipantsByAgendamento(prev => ({
                 ...prev,
@@ -2712,7 +2711,7 @@ function AgendaPage() {
               const num = Number.isFinite(Number(p.valor_cota)) ? Number(p.valor_cota) : parseBRL(p.valor_cota);
               return maskBRL(String((Number.isFinite(num) ? num : 0).toFixed(2)));
             })(),
-            status_pagamento: p.status_pagamento_text || 'Pendente',
+            status_pagamento: p.status_pagamento || 'Pendente',
             finalizadora_id: p.finalizadora_id || null,
           }))
         );
@@ -2834,7 +2833,7 @@ function AgendaPage() {
               const num = Number.isFinite(Number(p.valor_cota)) ? Number(p.valor_cota) : parseBRL(p.valor_cota);
               return maskBRL(String((Number.isFinite(num) ? num : 0).toFixed(2)));
             })(),
-            status_pagamento: p.status_pagamento_text || 'Pendente',
+            status_pagamento: p.status_pagamento || 'Pendente',
           }))
         );
         setPaymentSelectedId(selectedFromParts[0]?.id || null);
@@ -4454,8 +4453,8 @@ function AgendaPage() {
                       try {
                         const tRf0 = Date.now();
                         const { data: freshParts, error: freshErr } = await supabase
-                          .from('v_agendamento_participantes')
-                          .select('id, agendamento_id, codigo_empresa, cliente_id, nome, valor_cota, status_pagamento_text')
+                          .from('agendamento_participantes')
+                          .select('id, agendamento_id, codigo_empresa, cliente_id, nome, valor_cota, status_pagamento, finalizadora_id')
                           .eq('codigo_empresa', codigo)
                           .eq('agendamento_id', agendamentoId);
                         if (!freshErr) {
