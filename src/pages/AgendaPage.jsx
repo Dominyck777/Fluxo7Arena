@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+﻿import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { Helmet } from 'react-helmet';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
@@ -1105,7 +1105,7 @@ function AgendaPage() {
       const reqId = ++participantsReqIdRef.current;
       const { data, error } = await supabase
         .from('agendamento_participantes')
-        .select('id, agendamento_id, codigo_empresa, cliente_id, nome, valor_cota, status_pagamento, finalizadora_id')
+        .select('id, agendamento_id, codigo_empresa, cliente_id, nome, valor_cota, status_pagamento, finalizadora_id, cliente:clientes!agendamento_participantes_cliente_id_fkey(nome)')
         .in('agendamento_id', ids);
       // Ignora respostas atrasadas
       if (participantsReqIdRef.current !== reqId) return;
@@ -1117,8 +1117,12 @@ function AgendaPage() {
       const map = {};
       for (const row of (data || [])) {
         const k = row.agendamento_id;
+
         if (!map[k]) map[k] = [];
-        map[k].push(row);
+
+        const nomeResolvido = (Array.isArray(row.cliente) ? row.cliente[0]?.nome : row.cliente?.nome) || row.nome || '';
+
+        map[k].push({ ...row, nome: nomeResolvido });
       }
       dbg('Participants:loaded', { bookings: ids.length, rows: (data || []).length }); pulseLog('parts:loaded', { rows: (data||[]).length });
       lastParticipantsDateKeyRef.current = dateKey;
@@ -2712,7 +2716,7 @@ function AgendaPage() {
               return maskBRL(String((Number.isFinite(num) ? num : 0).toFixed(2)));
             })(),
             status_pagamento: p.status_pagamento || 'Pendente',
-            finalizadora_id: p.finalizadora_id || null,
+            finalizadora_id: p.finalizadora_id ? String(p.finalizadora_id) : null,
           }))
         );
         // Seleciona primeiro participante por padrão
@@ -2740,7 +2744,7 @@ function AgendaPage() {
                     return maskBRL(String((Number.isFinite(num) ? num : 0).toFixed(2)));
                   })(),
                   status_pagamento: p.status_pagamento || 'Pendente',
-                  finalizadora_id: p.finalizadora_id || null,
+                  finalizadora_id: p.finalizadora_id ? String(p.finalizadora_id) : null,
                 })));
                 setPaymentSelectedId(sel[0]?.id || null);
               }
