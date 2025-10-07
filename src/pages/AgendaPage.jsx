@@ -1588,13 +1588,6 @@ function AgendaPage() {
       const cur = Array.isArray(form.selectedClients) ? form.selectedClients.length : -1;
       const prev = prevSelLenRef.current;
       if (cur !== prev) {
-        try {
-          console.warn('[CustomerPicker][SEL:transition]', { id: mountIdRef.current, prev, cur, pickerOpen: isCustomerPickerOpen, effectiveOpen: effectiveCustomerPickerOpen, ts: new Date().toISOString() });
-          if (prev > 0 && cur === 0) {
-            console.warn('[CustomerPicker][SEL:became-empty]', { id: mountIdRef.current, reasonHint: lastSelActionRef?.current, clearedByUser: !!clearedByUserRef?.current });
-            if (debugOn && typeof console.trace === 'function') console.trace('[CustomerPicker][TRACE] selection became empty');
-          }
-        } catch {}
         prevSelLenRef.current = cur;
       }
     }, [form.selectedClients, isCustomerPickerOpen, effectiveCustomerPickerOpen]);
@@ -1633,9 +1626,6 @@ function AgendaPage() {
     const [chipsSnapshot, setChipsSnapshot] = useState([]);
     // Setter com log para chipsSnapshot (declarado após o state para evitar referências indefinidas)
     const setChipsSnapshotSafe = useCallback((arr) => {
-      try {
-        console.warn('[CustomerPicker][chips:set]', { ts: new Date().toISOString(), len: Array.isArray(arr) ? arr.length : NaN });
-      } catch {}
       setChipsSnapshot(arr);
     }, []);
     // Ref para o input de busca (para focar após limpar)
@@ -1680,11 +1670,11 @@ function AgendaPage() {
             status_pagamento: 'Pendente',
             finalizadora_id: def,
           }));
-          console.log('[PaymentModal] Initializing participantsForm with default finalizadora:', { def, initialized });
+          // Removed verbose PaymentModal log
           return initialized;
         }
         const updated = prev.map(p => ({ ...p, finalizadora_id: p.finalizadora_id || def }));
-        console.log('[PaymentModal] Setting default finalizadora:', { def, prevLen: prev.length, updated });
+        // Removed verbose PaymentModal log
         return updated;
       });
     }, [isPaymentModalOpen, payMethods, form.selectedClients]);
@@ -1714,19 +1704,7 @@ function AgendaPage() {
             }
           }
         } catch {}
-        // Detailed decision log
-        try {
-          console.warn('[CustomerPicker][applySelectedClients]', {
-            id: mountIdRef.current,
-            reason,
-            nextLen: Array.isArray(nextArr) ? nextArr.length : -1,
-            finalLen: Array.isArray(finalArr) ? finalArr.length : -1,
-            pickerClosed,
-            guardActive,
-            clearedByUser: !!clearedByUserRef.current,
-            desiredOpen: !!customerPickerDesiredOpenRef.current,
-          });
-        } catch {}
+        // Removed verbose applySelectedClients log
         setForm((f) => ({ ...f, selectedClients: finalArr }));
         if (Array.isArray(finalArr) && finalArr.length > 0) {
           lastNonEmptySelectionRef.current = finalArr;
@@ -1736,7 +1714,7 @@ function AgendaPage() {
         }
         try { lastSelActionRef.current = reason; } catch {}
       } catch (e) {
-        try { console.warn('[CustomerPicker][applySelectedClients:error]', e?.message || e); } catch {}
+        // Removed verbose applySelectedClients:error log
       }
     }, [effectiveCustomerPickerOpen, setForm, setChipsSnapshotSafe, persistLastKey]);
     // Pagamentos: busca por participante
@@ -1775,25 +1753,7 @@ function AgendaPage() {
         const intent = customerPickerIntentRef.current;
         const desired = !!customerPickerDesiredOpenRef.current;
         const closedByOutside = !!closedByOutsideRef.current;
-        console.groupCollapsed(`[CustomerPicker] ${event} @ ${ts}`);
-        console.log('state', {
-          isModalOpen,
-          isCustomerPickerOpen,
-          effectiveCustomerPickerOpen,
-          clientsLoading,
-          isClientFormOpen,
-          intent,
-          desired,
-          closedByOutside,
-        });
-        try {
-          console.log('focus', {
-            activeTag: document?.activeElement?.tagName,
-            activeClasses: document?.activeElement?.className,
-          });
-        } catch {}
-        if (extra && Object.keys(extra).length) console.log('extra', extra);
-        console.groupEnd();
+        // Removed verbose CustomerPicker debug logs
       } catch {}
     }, [debugOn, isModalOpen, isCustomerPickerOpen, effectiveCustomerPickerOpen, clientsLoading, isClientFormOpen]);
 
@@ -1824,7 +1784,6 @@ function AgendaPage() {
         setForm((f) => ({ ...f, selectedClients: last }));
         try { console.warn('[CustomerPicker][GLOBAL:restore]', { id: mountIdRef.current, lastLen: last.length, lockActive }); } catch {}
       } else if (cur.length === 0 && last.length > 0 && clearedByUserRef.current && !lockActive) {
-        // Se usuário limpou e não há lock, garante que lastNonEmpty também está limpo
         try { 
           lastNonEmptySelectionRef.current = [];
           console.warn('[CustomerPicker][GLOBAL:ensure-cleared]', { id: mountIdRef.current });
@@ -1923,7 +1882,8 @@ function AgendaPage() {
               clientsLoading: !!clientsLoading,
               suppressUntil,
             };
-            console.warn('[CustomerPicker][ANOMALY] selection empty post-close', stateDump);
+            // Removed verbose ANOMALY log
+            // console.warn('[CustomerPicker][ANOMALY] selection empty post-close', stateDump);
           } catch {}
           // attempt immediate restore and after short delays using refs to avoid stale closures
           setChipsSnapshotSafe(last);
@@ -1961,7 +1921,6 @@ function AgendaPage() {
     // Guarda forte: enquanto restoreGuardUntil estiver ativo, qualquer transição para array vazio é revertida de imediato
     useEffect(() => {
       try {
-        const now = Date.now();
         const guardActive = now < (restoreGuardUntilRef.current || 0);
         const cur = Array.isArray(selectedClientsRef.current) ? selectedClientsRef.current : [];
         const last = Array.isArray(lastNonEmptySelectionRef.current) ? lastNonEmptySelectionRef.current : [];
@@ -2421,14 +2380,6 @@ function AgendaPage() {
         }
         const primaryClient = selNow[0];
         const clientesArr = selNow.map(getCustomerName).filter(Boolean);
-        // Targeted diagnostics for save
-        try {
-          console.groupCollapsed('[BookingSave] pre-validate');
-          console.log('selectedClients.len', selNow.length);
-          console.log('primaryClient', primaryClient);
-          console.log('clientesArr.len', clientesArr.length, 'sample', clientesArr.slice(0,3));
-          console.groupEnd();
-        } catch {}
 
         // Validação: para NOVO agendamento é obrigatório selecionar pelo menos 1 cliente
         if (!editingBooking?.id) {
@@ -2670,7 +2621,7 @@ function AgendaPage() {
           return;
         }
         if (Array.isArray(data)) {
-          try { console.log('[Clientes:load] retornou', data.length, 'itens'); } catch {}
+          // Removed verbose Clientes:load log
           if (data.length === 0) {
             // Não sobrescrever com vazio; tenta de novo se houver cache
             let cachedLen = 0;
@@ -3239,7 +3190,7 @@ function AgendaPage() {
                     curLen: Array.isArray(selectedClientsRef.current) ? selectedClientsRef.current.length : NaN,
                     lastLen: Array.isArray(lastNonEmptySelectionRef.current) ? lastNonEmptySelectionRef.current.length : NaN,
                   };
-                  console.warn('[CustomerPicker][DIALOG:interactOutside:block]', dump);
+                  // Removed verbose DIALOG:interactOutside:block log
                 } catch {}
                 e.preventDefault();
                 return;
@@ -3462,7 +3413,7 @@ function AgendaPage() {
                             clearedByUser: !!clearedByUserRef?.current,
                             suppressUntil: suppressPickerCloseRef.current,
                           };
-                          console.warn('[CustomerPicker][CLOSE:pointerOutside]', dump);
+                          // Removed verbose CLOSE:pointerOutside log
                         } catch {}
                         closedByOutsideRef.current = true;
                         customerPickerIntentRef.current = 'close';
@@ -3964,23 +3915,15 @@ function AgendaPage() {
                   disabled={isSavingBooking}
                   onClick={async () => {
                     const clickTs = Date.now();
-                    const traceId = `[Click:SaveBooking ${clickTs}]`;
-                    try { console.group(traceId); } catch {}
                     try {
-                      try { console.log('Start', { isSavingBooking, hasEditing: !!editingBooking, formSnapshot: { court: form?.court, start: form?.startMinutes, end: form?.endMinutes, status: form?.status } }); } catch {}
                       if (isSavingBooking) {
-                        try { console.warn('Ignored click: already saving'); } catch {}
                         return;
                       }
-                      // Marca como pendente e executa; se algo interromper (ex.: troca de aba), auto-resume via visibilitychange
                       pendingSaveRef.current = true;
                       completedSaveRef.current = false;
                       await saveBookingOnce();
-                      try { console.log('Completed saveBookingOnce()'); } catch {}
                     } catch (e) {
-                      try { console.error('Unhandled click error (Salvar agendamento)', e); } catch {}
-                    } finally {
-                      try { console.groupEnd(); } catch {}
+                      // Error handled in saveBookingOnce
                     }
                   }}
                 >
