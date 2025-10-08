@@ -7,7 +7,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { BarChart as ReBarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, CartesianGrid, LineChart, Line, PieChart, Pie, Cell } from 'recharts';
-import { TrendingUp, Wallet, CreditCard, CalendarRange, Banknote, ArrowDownCircle, ArrowUpCircle, FileText, Download, Search, Filter, DollarSign, ShoppingCart, Users, Package } from 'lucide-react';
+import { TrendingUp, Wallet, CreditCard, CalendarRange, Banknote, ArrowDownCircle, ArrowUpCircle, FileText, Download, Search, Filter, DollarSign, ShoppingCart, Users, Package, Calendar as CalendarIcon } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useSearchParams } from 'react-router-dom';
 import { 
@@ -22,6 +22,10 @@ import {
   listarPagamentos 
 } from '@/lib/store';
 import { supabase } from '@/lib/supabase';
+import { Calendar } from '@/components/ui/calendar';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { format } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
 
 const pageVariants = {
   hidden: { opacity: 0 },
@@ -65,8 +69,15 @@ export default function FinanceiroPage() {
   
   // Estados gerais
   const [loading, setLoading] = useState(false);
-  const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate] = useState('');
+  // Inicializar com o mês atual completo
+  const [startDate, setStartDate] = useState(() => {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
+  });
+  const [endDate, setEndDate] = useState(() => {
+    const now = new Date();
+    return now.toISOString().slice(0, 10);
+  });
   
   // Estados da Visão Geral
   const [summary, setSummary] = useState(null);
@@ -100,6 +111,9 @@ export default function FinanceiroPage() {
       const d = new Date(now);
       d.setDate(d.getDate() - 29);
       start = d.toISOString().slice(0, 10);
+    } else if (type === 'mes') {
+      // Mês atual completo
+      start = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
     } else if (type === 'ytd') {
       const y = new Date(now.getFullYear(), 0, 1);
       start = y.toISOString().slice(0, 10);
@@ -152,8 +166,44 @@ export default function FinanceiroPage() {
         setTopProdutos(topProds);
       }
       
-      // Top 5 Clientes (simplificado - pode melhorar depois)
-      setTopClientes([]);
+      // Top 5 Clientes
+      if (codigo) {
+        try {
+          // Buscar pagamentos do período com clientes
+          let qPag = supabase
+            .from('pagamentos')
+            .select('cliente_id, valor, status, clientes!pagamentos_cliente_id_fkey(nome)')
+            .eq('codigo_empresa', codigo)
+            .neq('status', 'Cancelado')
+            .neq('status', 'Estornado');
+          
+          if (from) qPag = qPag.gte('recebido_em', new Date(from).toISOString());
+          if (to) qPag = qPag.lte('recebido_em', new Date(to).toISOString());
+          
+          const { data: pagamentosClientes } = await qPag;
+          
+          // Agrupar por cliente
+          const clienteMap = {};
+          (pagamentosClientes || []).forEach(pag => {
+            if (!pag.cliente_id) return;
+            const nome = pag.clientes?.nome || 'Cliente sem nome';
+            const valor = Number(pag.valor || 0);
+            if (!clienteMap[pag.cliente_id]) {
+              clienteMap[pag.cliente_id] = { nome, valor: 0 };
+            }
+            clienteMap[pag.cliente_id].valor += valor;
+          });
+          
+          const topClis = Object.values(clienteMap)
+            .sort((a, b) => b.valor - a.valor)
+            .slice(0, 5);
+          
+          setTopClientes(topClis);
+        } catch (err) {
+          console.error('Erro ao carregar top clientes:', err);
+          setTopClientes([]);
+        }
+      }
       
     } catch (e) {
       toast({ title: 'Falha ao carregar visão geral', description: e?.message || 'Tente novamente', variant: 'destructive' });
@@ -278,29 +328,64 @@ export default function FinanceiroPage() {
               <h1 className="text-2xl font-bold text-text-primary">Financeiro</h1>
               <p className="text-sm text-text-secondary">Gestão completa das finanças da empresa</p>
             </div>
-            <div className="flex flex-wrap items-end gap-2">
-              <div className="flex flex-col">
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex flex-col justify-center">
                 <label className="text-xs text-text-secondary mb-1">Início</label>
-                <Input
-                  type="date"
-                  value={startDate}
-                  onChange={(e) => setStartDate(e.target.value)}
-                  className="h-9 w-[140px]"
-                />
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" className="h-9 w-[160px] pl-3 pr-3 flex items-center gap-2 justify-start text-left font-medium bg-black border-warning/40 text-white hover:bg-black/80 hover:border-warning">
+                      <CalendarIcon className="h-5 w-5 text-warning flex-shrink-0" />
+                      <span className="font-mono tracking-wide text-sm leading-none">{startDate ? format(new Date(startDate + 'T00:00:00'), 'dd/MM/yyyy', { locale: ptBR }) : 'Selecione'}</span>
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0 bg-black border-warning/40" align="start">
+                    <Calendar
+                      mode="single"
+                      selected={startDate ? new Date(startDate + 'T00:00:00') : undefined}
+                      onSelect={(date) => date && setStartDate(format(date, 'yyyy-MM-dd'))}
+                      initialFocus
+                      classNames={{
+                        caption_label: 'text-sm font-medium text-white',
+                        head_cell: 'text-xs text-warning/80 w-9',
+                        day: 'h-9 w-9 p-0 font-normal text-white hover:bg-warning/10 rounded-md',
+                        day_selected: 'bg-warning text-black hover:bg-warning focus:bg-warning',
+                        day_today: 'border border-warning text-white',
+                        day_outside: 'text-white/30',
+                        nav_button: 'h-7 w-7 p-0 text-white hover:bg-warning/10 rounded-md border-warning/40',
+                      }}
+                    />
+                  </PopoverContent>
+                </Popover>
               </div>
-              <div className="flex flex-col">
+              <div className="flex flex-col justify-center">
                 <label className="text-xs text-text-secondary mb-1">Fim</label>
-                <Input
-                  type="date"
-                  value={endDate}
-                  onChange={(e) => setEndDate(e.target.value)}
-                  className="h-9 w-[140px]"
-                />
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" className="h-9 w-[160px] pl-3 pr-3 flex items-center gap-2 justify-start text-left font-medium bg-black border-warning/40 text-white hover:bg-black/80 hover:border-warning">
+                      <CalendarIcon className="h-5 w-5 text-warning flex-shrink-0" />
+                      <span className="font-mono tracking-wide text-sm leading-none">{endDate ? format(new Date(endDate + 'T00:00:00'), 'dd/MM/yyyy', { locale: ptBR }) : 'Selecione'}</span>
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0 bg-black border-warning/40" align="start">
+                    <Calendar
+                      mode="single"
+                      selected={endDate ? new Date(endDate + 'T00:00:00') : undefined}
+                      onSelect={(date) => date && setEndDate(format(date, 'yyyy-MM-dd'))}
+                      initialFocus
+                      classNames={{
+                        caption_label: 'text-sm font-medium text-white',
+                        head_cell: 'text-xs text-warning/80 w-9',
+                        day: 'h-9 w-9 p-0 font-normal text-white hover:bg-warning/10 rounded-md',
+                        day_selected: 'bg-warning text-black hover:bg-warning focus:bg-warning',
+                        day_today: 'border border-warning text-white',
+                        day_outside: 'text-white/30',
+                        nav_button: 'h-7 w-7 p-0 text-white hover:bg-warning/10 rounded-md border-warning/40',
+                      }}
+                    />
+                  </PopoverContent>
+                </Popover>
               </div>
-              <Button variant="outline" size="sm" onClick={() => setPreset('7')}>7 dias</Button>
-              <Button variant="outline" size="sm" onClick={() => setPreset('30')}>30 dias</Button>
-              <Button variant="outline" size="sm" onClick={() => setPreset('ytd')}>Ano</Button>
-              <Button variant="ghost" size="sm" onClick={() => setPreset('clear')}>Limpar</Button>
+              {/* Presets removidos a pedido do usuário - ficam apenas os dois calendários */}
             </div>
           </div>
         </motion.div>
@@ -337,13 +422,24 @@ export default function FinanceiroPage() {
               ) : (
                 <div className="h-[280px]">
                   <ResponsiveContainer width="100%" height="100%">
-                    <ReBarChart data={finalizadoraChart} margin={{ top: 8, right: 8, left: 0, bottom: 8 }}>
+                    <ReBarChart data={finalizadoraChart} margin={{ top: 8, right: 8, left: 8, bottom: 8 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#333" />
                       <XAxis dataKey="name" stroke="#aaa" />
-                      <YAxis stroke="#aaa" tickFormatter={(v) => fmtBRL(v)} />
-                      <Tooltip formatter={(v) => fmtBRL(v)} labelFormatter={(l) => `Finalizadora: ${l}`} />
+                      <YAxis stroke="#aaa" tickFormatter={(v) => fmtBRL(v)} width={80} />
+                      <Tooltip 
+                        formatter={(v) => fmtBRL(v)} 
+                        labelFormatter={(l) => `Finalizadora: ${l}`}
+                        contentStyle={{
+                          background: 'rgba(10, 10, 10, 0.95)',
+                          border: '1px solid #fbbf24',
+                          borderRadius: '8px',
+                          padding: '8px 12px',
+                          color: '#fff'
+                        }}
+                        cursor={{ fill: 'rgba(251, 191, 36, 0.1)' }}
+                      />
                       <Legend />
-                      <Bar dataKey="valor" name="Valor" fill="#22c55e" />
+                      <Bar dataKey="valor" name="Valor" fill="#fbbf24" />
                     </ReBarChart>
                   </ResponsiveContainer>
                 </div>
@@ -376,7 +472,18 @@ export default function FinanceiroPage() {
                   <Users className="w-4 h-4 text-brand" />
                   <span>Top 5 Clientes</span>
                 </div>
-                <div className="text-sm text-text-muted">Em desenvolvimento...</div>
+                {topClientes.length === 0 ? (
+                  <div className="text-sm text-text-muted">Sem dados no período.</div>
+                ) : (
+                  <div className="space-y-2">
+                    {topClientes.map((cliente, idx) => (
+                      <div key={idx} className="flex items-center justify-between py-2 border-b border-border last:border-0">
+                        <span className="text-sm text-text-primary">{idx + 1}. {cliente.nome}</span>
+                        <span className="text-sm font-bold text-success">{fmtBRL(cliente.valor)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </motion.div>
             </div>
           </TabsContent>
