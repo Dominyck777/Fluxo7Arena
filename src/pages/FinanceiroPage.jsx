@@ -19,13 +19,15 @@ import {
   listarResumoSessaoCaixaAtual, 
   criarMovimentacaoCaixa, 
   listarMovimentacoesCaixa,
-  listarPagamentos 
+  listarPagamentos,
+  getCaixaResumo
 } from '@/lib/store';
 import { supabase } from '@/lib/supabase';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 
 const pageVariants = {
   hidden: { opacity: 0 },
@@ -83,7 +85,16 @@ export default function FinanceiroPage() {
   const [summary, setSummary] = useState(null);
   const [topProdutos, setTopProdutos] = useState([]);
   const [topClientes, setTopClientes] = useState([]);
+  const [allProdutos, setAllProdutos] = useState([]);
+  const [allClientes, setAllClientes] = useState([]);
   const [evolucaoDiaria, setEvolucaoDiaria] = useState([]);
+  // Modais de listas completas
+  const [openProdutosModal, setOpenProdutosModal] = useState(false);
+  const [openClientesModal, setOpenClientesModal] = useState(false);
+  // Detalhes do cliente selecionado (no modal)
+  const [selectedCliente, setSelectedCliente] = useState(null);
+  const [selectedClientePagamentos, setSelectedClientePagamentos] = useState([]);
+  const [loadingClienteDetalhes, setLoadingClienteDetalhes] = useState(false);
   
   // Estados do Caixa
   const [isOpen, setIsOpen] = useState(false);
@@ -91,6 +102,10 @@ export default function FinanceiroPage() {
   const [movs, setMovs] = useState([]);
   const [history, setHistory] = useState([]);
   const [movModal, setMovModal] = useState({ open: false, tipo: 'suprimento', valor: '', observacao: '', loading: false });
+  // Modal de detalhes de fechamento específico
+  const [caixaModalOpen, setCaixaModalOpen] = useState(false);
+  const [caixaModalLoading, setCaixaModalLoading] = useState(false);
+  const [caixaModalData, setCaixaModalData] = useState(null); // { resumo, movimentacoes, sessao }
   
   // Estados de Recebimentos
   const [pagamentos, setPagamentos] = useState([]);
@@ -130,25 +145,41 @@ export default function FinanceiroPage() {
   const loadVisaoGeral = async () => {
     try {
       setLoading(true);
-      const from = startDate || undefined;
-      const to = endDate || undefined;
+      const fromISO = mkStart(startDate) || undefined;
+      const toISO = mkEnd(endDate) || undefined;
       const codigo = userProfile?.codigo_empresa;
+      console.debug('[Financeiro][VisaoGeral] Carregando com período:', { fromISO, toISO, codigo });
       
       // Resumo do período
-      const sum = await listarResumoPeriodo({ from, to }).catch(() => null);
+      const sum = await listarResumoPeriodo({ from: fromISO, to: toISO }).catch(() => null);
       setSummary(sum || { totalPorFinalizadora: {}, totalEntradas: 0, totalVendasBrutas: 0, totalDescontos: 0, totalVendasLiquidas: 0 });
+      console.debug('[Financeiro][VisaoGeral] Resumo calculado:', sum);
       
-      // Top 5 Produtos
+      // Produtos (map completo + top 5)
       if (codigo) {
-        let q = supabase
-          .from('comanda_itens')
-          .select('produto_id, quantidade, preco_unitario, produtos!comanda_itens_produto_id_fkey(nome)')
-          .eq('codigo_empresa', codigo);
-        
-        if (from) q = q.gte('criado_em', new Date(from).toISOString());
-        if (to) q = q.lte('criado_em', new Date(to).toISOString());
-        
-        const { data: itens } = await q;
+        // 1) Buscar comandas fechadas no período
+        let qc = supabase
+          .from('comandas')
+          .select('id')
+          .eq('status', 'closed');
+        if (codigo) qc = qc.eq('codigo_empresa', codigo);
+        if (fromISO) qc = qc.gte('fechado_em', fromISO);
+        if (toISO) qc = qc.lte('fechado_em', toISO);
+        const { data: cmds, error: errCmds } = await qc;
+        if (errCmds) throw errCmds;
+        const comandaIds = (cmds || []).map(c => c.id);
+        console.debug('[Financeiro][VisaoGeral] Comandas fechadas:', comandaIds.length);
+        let itens = [];
+        if (comandaIds.length > 0) {
+          // 2) Trazer itens dessas comandas
+          let qi = supabase
+            .from('comanda_itens')
+            .select('produto_id, quantidade, preco_unitario, produtos!comanda_itens_produto_id_fkey(nome)')
+            .in('comanda_id', comandaIds);
+          if (codigo) qi = qi.eq('codigo_empresa', codigo);
+          const { data: itensData } = await qi;
+          itens = itensData || [];
+        }
         
         // Agrupar por produto
         const prodMap = {};
@@ -158,50 +189,136 @@ export default function FinanceiroPage() {
           prodMap[nome] = (prodMap[nome] || 0) + valor;
         });
         
-        const topProds = Object.entries(prodMap)
+        const produtosArr = Object.entries(prodMap)
           .map(([nome, valor]) => ({ nome, valor }))
-          .sort((a, b) => b.valor - a.valor)
-          .slice(0, 5);
-        
-        setTopProdutos(topProds);
+          .sort((a, b) => b.valor - a.valor);
+        setAllProdutos(produtosArr);
+        setTopProdutos(produtosArr.slice(0, 5));
+        console.debug('[Financeiro][VisaoGeral] Produtos agregados:', { total: produtosArr.length, top5: produtosArr.slice(0,5) });
       }
       
-      // Top 5 Clientes
+      // Clientes (map completo + top 5) — via comanda_clientes
       if (codigo) {
         try {
-          // Buscar pagamentos do período com clientes
+          // 1) Pagamentos do período (por comanda)
           let qPag = supabase
             .from('pagamentos')
-            .select('cliente_id, valor, status, clientes!pagamentos_cliente_id_fkey(nome)')
+            .select('comanda_id, valor, status')
             .eq('codigo_empresa', codigo)
             .neq('status', 'Cancelado')
             .neq('status', 'Estornado');
-          
-          if (from) qPag = qPag.gte('recebido_em', new Date(from).toISOString());
-          if (to) qPag = qPag.lte('recebido_em', new Date(to).toISOString());
-          
-          const { data: pagamentosClientes } = await qPag;
-          
-          // Agrupar por cliente
-          const clienteMap = {};
-          (pagamentosClientes || []).forEach(pag => {
-            if (!pag.cliente_id) return;
-            const nome = pag.clientes?.nome || 'Cliente sem nome';
-            const valor = Number(pag.valor || 0);
-            if (!clienteMap[pag.cliente_id]) {
-              clienteMap[pag.cliente_id] = { nome, valor: 0 };
-            }
-            clienteMap[pag.cliente_id].valor += valor;
+          if (fromISO) qPag = qPag.gte('recebido_em', fromISO);
+          if (toISO) qPag = qPag.lte('recebido_em', toISO);
+          const { data: pgs } = await qPag;
+          console.debug('[Financeiro][VisaoGeral] Pagamentos carregados:', (pgs||[]).length);
+
+          const comandaIds = Array.from(new Set((pgs || []).map(p => p.comanda_id).filter(Boolean)));
+          let vinculos = [];
+          if (comandaIds.length > 0) {
+            // 2) Buscar clientes vinculados a essas comandas
+            let qc = supabase
+              .from('comanda_clientes')
+              .select('comanda_id, cliente_id, nome_livre')
+              .in('comanda_id', comandaIds)
+              .eq('codigo_empresa', codigo);
+            const { data: vinc } = await qc;
+            vinculos = vinc || [];
+          }
+          console.debug('[Financeiro][VisaoGeral] Vinculos comanda_clientes:', vinculos.length);
+          // 3) Mapear id->nome (buscando nomes de clientes quando houver cliente_id)
+          const ids = Array.from(new Set(vinculos.map(v => v.cliente_id).filter(Boolean)));
+          const clientesById = {};
+          if (ids.length > 0) {
+            const { data: cliRows } = await supabase
+              .from('clientes')
+              .select('id, nome')
+              .in('id', ids)
+              .eq('codigo_empresa', codigo);
+            (cliRows || []).forEach(r => { clientesById[r.id] = r.nome; });
+          }
+          const nomesPorComanda = {};
+          vinculos.forEach(v => {
+            const nome = v.nome_livre || clientesById[v.cliente_id] || `Cliente ${v.cliente_id || '—'}`;
+            if (!nomesPorComanda[v.comanda_id]) nomesPorComanda[v.comanda_id] = new Set();
+            if (nome) nomesPorComanda[v.comanda_id].add(nome);
           });
-          
-          const topClis = Object.values(clienteMap)
-            .sort((a, b) => b.valor - a.valor)
-            .slice(0, 5);
-          
-          setTopClientes(topClis);
+          // 4) Agregar: atribuir o valor do pagamento para cada nome vinculado à comanda
+          const clienteMap = {};
+          (pgs || []).forEach(pg => {
+            const nomes = Array.from(nomesPorComanda[pg.comanda_id] || []);
+            const valor = Number(pg.valor || 0);
+            if (nomes.length === 0) {
+              const key = 'Sem cliente';
+              if (!clienteMap[key]) clienteMap[key] = { id: null, nome: key, valor: 0 };
+              clienteMap[key].valor += valor;
+            } else {
+              nomes.forEach(nome => {
+                if (!clienteMap[nome]) clienteMap[nome] = { id: null, nome, valor: 0 };
+                clienteMap[nome].valor += valor;
+              });
+            }
+          });
+
+          // 5) Somar agendamentos (participantes pagos no período) via view v_agendamento_participantes
+          try {
+            const nomeByClienteId = new Map(Object.values(clientesById).map((n, i) => [Object.keys(clientesById)[i], n]));
+            // Passo A: trazer participantes (sem filtro de data, pois a view não expõe pago_em)
+            let qa = supabase
+              .from('v_agendamento_participantes')
+              .select('agendamento_id, cliente_id, valor_cota, status_pagamento, status_pagamento_text');
+            if (codigo) qa = qa.eq('codigo_empresa', codigo);
+            let { data: parts } = await qa;
+            parts = parts || [];
+            // Passo B: filtrar por período usando a data de início do agendamento
+            const agIds = Array.from(new Set(parts.map(p => p.agendamento_id).filter(Boolean)));
+            let agInRange = new Set();
+            if (agIds.length > 0) {
+              let qag = supabase
+                .from('agendamentos')
+                .select('id, inicio')
+                .in('id', agIds);
+              if (codigo) qag = qag.eq('codigo_empresa', codigo);
+              const { data: agRows } = await qag;
+              const fromMs = fromISO ? new Date(fromISO).getTime() : null;
+              const toMs = toISO ? new Date(toISO).getTime() : null;
+              (agRows || []).forEach(a => {
+                const t = a?.inicio ? new Date(a.inicio).getTime() : null;
+                const ok = t != null && (fromMs == null || t >= fromMs) && (toMs == null || t <= toMs);
+                if (ok) agInRange.add(a.id);
+              });
+            }
+            const partsInRange = parts.filter(p => agInRange.has(p.agendamento_id));
+            console.debug('[Financeiro][Agendamentos] participantes no período (by agendamento.inicio):', partsInRange.length);
+            // Completar nomes ausentes consultando clientes quando necessário
+            const idsFromParts = Array.from(new Set((partsInRange||[]).map(p => p.cliente_id).filter(Boolean).map(String)));
+            const missingIds = idsFromParts.filter(id => !nomeByClienteId.has(id));
+            if (missingIds.length > 0) {
+              const { data: cliExtra } = await supabase
+                .from('clientes')
+                .select('id,nome')
+                .in('id', missingIds);
+              (cliExtra || []).forEach(c => nomeByClienteId.set(String(c.id), c.nome));
+            }
+            (partsInRange || []).forEach(p => {
+              const ok = String(p.status_pagamento || p.status_pagamento_text || 'pago').toLowerCase();
+              if (['cancelado','estornado'].includes(ok)) return;
+              const id = p.cliente_id;
+              const nome = id ? (nomeByClienteId.get(String(id)) || `Cliente ${id}`) : null;
+              if (!nome) return; // sem cliente vinculado, ignorar por ora
+              const v = Number(p.valor_cota || 0);
+              if (!clienteMap[nome]) clienteMap[nome] = { id: id || null, nome, valor: 0 };
+              clienteMap[nome].valor += v;
+            });
+          } catch {}
+
+          const clientesArr = Object.values(clienteMap).sort((a, b) => b.valor - a.valor);
+          setAllClientes(clientesArr);
+          setTopClientes(clientesArr.slice(0, 5));
+          console.debug('[Financeiro][VisaoGeral] Clientes agregados:', { total: clientesArr.length, top5: clientesArr.slice(0,5) });
         } catch (err) {
           console.error('Erro ao carregar top clientes:', err);
           setTopClientes([]);
+          setAllClientes([]);
         }
       }
       
@@ -244,17 +361,17 @@ export default function FinanceiroPage() {
     try {
       setLoading(true);
       const codigo = userProfile?.codigo_empresa;
-      const from = startDate || undefined;
-      const to = endDate || undefined;
+      const fromISO = mkStart(startDate) || undefined;
+      const toISO = mkEnd(endDate) || undefined;
       
       let q = supabase
         .from('pagamentos')
-        .select('*, finalizadoras!pagamentos_finalizadora_id_fkey(nome), clientes!pagamentos_cliente_id_fkey(nome)')
+        .select('*, finalizadoras!pagamentos_finalizadora_id_fkey(nome)')
         .eq('codigo_empresa', codigo)
         .order('recebido_em', { ascending: false });
       
-      if (from) q = q.gte('recebido_em', new Date(from).toISOString());
-      if (to) q = q.lte('recebido_em', new Date(to).toISOString());
+      if (fromISO) q = q.gte('recebido_em', fromISO);
+      if (toISO) q = q.lte('recebido_em', toISO);
       
       const { data, error } = await q;
       if (error) throw error;
@@ -271,6 +388,24 @@ export default function FinanceiroPage() {
   useEffect(() => {
     setSearchParams({ tab: activeTab });
   }, [activeTab]);
+
+  // Helpers para início/fim do dia (limites inclusivos)
+  const mkStart = (d) => {
+    if (!d) return null;
+    if (typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d)) {
+      const [y, m, day] = d.split('-').map(Number);
+      return new Date(y, m - 1, day, 0, 0, 0, 0).toISOString();
+    }
+    return new Date(d).toISOString();
+  };
+  const mkEnd = (d) => {
+    if (!d) return null;
+    if (typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d)) {
+      const [y, m, day] = d.split('-').map(Number);
+      return new Date(y, m - 1, day, 23, 59, 59, 999).toISOString();
+    }
+    return new Date(d).toISOString();
+  };
 
   // Carregar dados quando mudar de aba ou período
   useEffect(() => {
@@ -448,10 +583,13 @@ export default function FinanceiroPage() {
 
             {/* Top 5 Produtos e Clientes */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <motion.div variants={itemVariants} className="fx-card p-4">
+              <motion.div variants={itemVariants} className="fx-card p-4 border-0 ring-0 outline-none focus-visible:outline-none shadow-none cursor-pointer" onClick={() => setOpenProdutosModal(true)}>
                 <div className="flex items-center gap-2 text-text-secondary text-xs font-semibold uppercase tracking-wider mb-3">
                   <Package className="w-4 h-4 text-brand" />
-                  <span>Top 5 Produtos</span>
+                  <span>Produtos (por faturamento)</span>
+                  {allProdutos.length > 5 && (
+                    <Button variant="outline" size="xs" className="ml-auto h-7 px-2" onClick={() => setOpenProdutosModal(true)}>Ver todos</Button>
+                  )}
                 </div>
                 {topProdutos.length === 0 ? (
                   <div className="text-sm text-text-muted">Sem dados no período.</div>
@@ -467,20 +605,24 @@ export default function FinanceiroPage() {
                 )}
               </motion.div>
 
-              <motion.div variants={itemVariants} className="fx-card p-4">
+              <motion.div variants={itemVariants} className="fx-card p-4 border-0 ring-0 outline-none focus-visible:outline-none shadow-none cursor-pointer" onClick={() => setOpenClientesModal(true)}>
                 <div className="flex items-center gap-2 text-text-secondary text-xs font-semibold uppercase tracking-wider mb-3">
                   <Users className="w-4 h-4 text-brand" />
-                  <span>Top 5 Clientes</span>
+                  <span>Clientes (por valor pago)</span>
+                  {allClientes.length > 5 && (
+                    <Button variant="outline" size="xs" className="ml-auto h-7 px-2" onClick={() => setOpenClientesModal(true)}>Ver todos</Button>
+                  )}
                 </div>
                 {topClientes.length === 0 ? (
                   <div className="text-sm text-text-muted">Sem dados no período.</div>
                 ) : (
                   <div className="space-y-2">
                     {topClientes.map((cliente, idx) => (
-                      <div key={idx} className="flex items-center justify-between py-2 border-b border-border last:border-0">
+                      <button key={idx} className="w-full flex items-center justify-between py-2 border-b border-border last:border-0 hover:bg-surface-2 rounded-sm px-2 text-left"
+                        onClick={() => { setSelectedCliente(cliente); setOpenClientesModal(true); }}>
                         <span className="text-sm text-text-primary">{idx + 1}. {cliente.nome}</span>
                         <span className="text-sm font-bold text-success">{fmtBRL(cliente.valor)}</span>
-                      </div>
+                      </button>
                     ))}
                   </div>
                 )}
@@ -490,89 +632,6 @@ export default function FinanceiroPage() {
 
           {/* ABA 2: CAIXA */}
           <TabsContent value="caixa" className="space-y-6 mt-6">
-            <motion.div variants={itemVariants} className="fx-card p-4">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-bold">Sessão do Caixa</h2>
-                <div className="flex gap-2">
-                  {!isOpen ? (
-                    <Button onClick={async () => {
-                      try {
-                        setLoading(true);
-                        await ensureCaixaAberto({ codigoEmpresa: userProfile?.codigo_empresa });
-                        await loadCaixa();
-                        toast({ title: 'Caixa aberto', description: 'Sessão iniciada com sucesso.' });
-                      } catch (e) {
-                        toast({ title: 'Falha ao abrir caixa', description: e?.message, variant: 'destructive' });
-                      } finally { setLoading(false); }
-                    }} size="sm" disabled={loading}>
-                      <Wallet className="h-4 w-4 mr-2" /> Abrir Caixa
-                    </Button>
-                  ) : (
-                    <Button onClick={async () => {
-                      try {
-                        await fecharCaixa({ codigoEmpresa: userProfile?.codigo_empresa });
-                        await loadCaixa();
-                        toast({ title: 'Caixa fechado', description: 'Sessão encerrada com sucesso.' });
-                      } catch (e) {
-                        toast({ title: 'Falha ao fechar caixa', description: e?.message, variant: 'destructive' });
-                      }
-                    }} variant="outline" size="sm">
-                      <FileText className="h-4 w-4 mr-2" /> Fechar Caixa
-                    </Button>
-                  )}
-                </div>
-              </div>
-
-              {isOpen && (
-                <>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
-                    <div className="bg-surface-2 rounded-lg p-3 border border-border">
-                      <p className="text-xs text-text-secondary">Vendas Brutas</p>
-                      <p className="text-2xl font-bold tabular-nums">{fmtBRL(sessionSummary?.totalVendasBrutas)}</p>
-                    </div>
-                    <div className="bg-surface-2 rounded-lg p-3 border border-border">
-                      <p className="text-xs text-text-secondary">Descontos</p>
-                      <p className="text-2xl font-bold text-warning tabular-nums">{fmtBRL(sessionSummary?.totalDescontos)}</p>
-                    </div>
-                    <div className="bg-surface-2 rounded-lg p-3 border border-border">
-                      <p className="text-xs text-text-secondary">Entradas</p>
-                      <p className="text-2xl font-bold text-success tabular-nums">
-                        {(() => {
-                          const supr = movs.filter(m => m.tipo === 'suprimento').reduce((a, b) => a + Number(b.valor || 0), 0);
-                          return fmtBRL(Number(sessionSummary?.totalEntradas || 0) + supr);
-                        })()}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="mb-4">
-                    <h4 className="text-sm font-semibold mb-2">Por Finalizadora</h4>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
-                      {sessionSummary && sessionSummary.totalPorFinalizadora && Object.keys(sessionSummary.totalPorFinalizadora).length > 0 ? (
-                        Object.entries(sessionSummary.totalPorFinalizadora).map(([metodo, valor]) => (
-                          <div key={metodo} className="bg-surface-2 rounded-md p-2 border border-border flex items-center justify-between">
-                            <span className="text-sm text-text-secondary truncate">{String(metodo)}</span>
-                            <span className="text-sm font-semibold">{fmtBRL(valor)}</span>
-                          </div>
-                        ))
-                      ) : (
-                        <div className="text-sm text-text-muted">Sem pagamentos na sessão.</div>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="flex gap-2">
-                    <Button onClick={() => setMovModal({ open: true, tipo: 'suprimento', valor: '', observacao: '', loading: false })} variant="outline" size="sm">
-                      <ArrowUpCircle className="h-4 w-4 mr-2 text-success" /> Suprimento
-                    </Button>
-                    <Button onClick={() => setMovModal({ open: true, tipo: 'sangria', valor: '', observacao: '', loading: false })} variant="outline" size="sm">
-                      <ArrowDownCircle className="h-4 w-4 mr-2 text-danger" /> Sangria
-                    </Button>
-                  </div>
-                </>
-              )}
-            </motion.div>
-
             {/* Histórico de Fechamentos */}
             <motion.div variants={itemVariants} className="fx-card p-4">
               <h3 className="text-base font-bold mb-3">Fechamentos Anteriores</h3>
@@ -592,7 +651,101 @@ export default function FinanceiroPage() {
                     </TableHeader>
                     <TableBody>
                       {history.map((h) => (
-                        <TableRow key={h.id}>
+                        <TableRow key={h.id} className="cursor-pointer hover:bg-surface-2" onClick={async () => {
+                          setCaixaModalOpen(true);
+                          setCaixaModalLoading(true);
+                          setCaixaModalData(null);
+                          try {
+                            const codigo = userProfile?.codigo_empresa;
+                            const t0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+                            console.log('[Caixa][Fechamento][Open]', { sessaoId: h.id, from: h.aberto_em, to: h.fechado_em, codigo });
+                            // Tentar snapshot pronto
+                            let resumoSnap = await getCaixaResumo({ caixaSessaoId: h.id, codigoEmpresa: codigo });
+                            // Normalizador para alinhar snapshot ao formato da UI
+                            const normalizeResumo = (r) => {
+                              if (!r) return null;
+                              // Snapshot (caixa_resumos) usa chaves diferentes
+                              if (r.total_bruto != null || r.por_finalizadora != null) {
+                                let porFin = r.por_finalizadora;
+                                if (porFin && typeof porFin === 'string') {
+                                  try { porFin = JSON.parse(porFin); } catch { porFin = {}; }
+                                }
+                                return {
+                                  from: r.periodo_de || null,
+                                  to: r.periodo_ate || null,
+                                  totalPorFinalizadora: porFin || {},
+                                  totalEntradas: Number(r.total_entradas || 0),
+                                  totalVendasBrutas: Number(r.total_bruto || 0),
+                                  totalDescontos: Number(r.total_descontos || 0),
+                                  totalVendasLiquidas: Number(r.total_liquido || 0),
+                                };
+                              }
+                              // Já no formato de período
+                              return r;
+                            };
+                            let resumo = normalizeResumo(resumoSnap);
+                            if (!resumo) {
+                              console.log('[Caixa][Fechamento] Snapshot ausente, calculando resumo por período...');
+                              // Calcular dinâmico via período do fechamento
+                              resumo = await listarResumoPeriodo({ from: h.aberto_em, to: h.fechado_em || new Date().toISOString(), codigoEmpresa: codigo });
+                            }
+                            // Fallback: se não houver totalPorFinalizadora, calcular diretamente dos pagamentos
+                            const needFallbackPF = !resumo || !resumo.totalPorFinalizadora || Object.keys(resumo.totalPorFinalizadora).length === 0;
+                            if (needFallbackPF) {
+                              try {
+                                const fromIso = h.aberto_em;
+                                const toIso = h.fechado_em || new Date().toISOString();
+                                let qp = supabase
+                                  .from('pagamentos')
+                                  .select('metodo, valor, status, recebido_em, finalizadoras:finalizadoras!pagamentos_finalizadora_id_fkey(nome)')
+                                  .gte('recebido_em', fromIso)
+                                  .lte('recebido_em', toIso);
+                                if (codigo) qp = qp.eq('codigo_empresa', codigo);
+                                const { data: pays } = await qp;
+                                const map = {};
+                                let totalEntradas = 0;
+                                for (const pg of (pays || [])) {
+                                  const ok = (pg.status || 'Pago') !== 'Cancelado' && (pg.status || 'Pago') !== 'Estornado';
+                                  if (!ok) continue;
+                                  const key = (pg.finalizadoras?.nome) || pg.metodo || 'Outros';
+                                  const v = Number(pg.valor || 0);
+                                  map[key] = (map[key] || 0) + v;
+                                  totalEntradas += v;
+                                }
+                                resumo = {
+                                  ...(resumo || {}),
+                                  totalPorFinalizadora: map,
+                                  totalEntradas: Number(resumo?.totalEntradas || 0) || totalEntradas,
+                                };
+                                console.log('[Caixa][Fechamento][FallbackPF]', { methods: Object.keys(map).length });
+                              } catch {}
+                            }
+                            // Movimentações da sessão
+                            const movimentacoes = await listarMovimentacoesCaixa({ caixaSessaoId: h.id, codigoEmpresa: codigo });
+                            // Recebimentos no período do fechamento
+                            const fromIso = h.aberto_em;
+                            const toIso = h.fechado_em || new Date().toISOString();
+                            let qpDet = supabase
+                              .from('pagamentos')
+                              .select('id, valor, status, metodo, recebido_em, finalizadoras:finalizadoras!pagamentos_finalizadora_id_fkey(nome)')
+                              .gte('recebido_em', fromIso)
+                              .lte('recebido_em', toIso)
+                              .order('recebido_em', { ascending: false });
+                            if (codigo) qpDet = qpDet.eq('codigo_empresa', codigo);
+                            const { data: pagamentosDet } = await qpDet;
+                            console.log('[Caixa][Fechamento][Pays]', { count: (pagamentosDet||[]).length });
+                            setCaixaModalData({ resumo, movimentacoes, pagamentos: (pagamentosDet||[]), sessao: h });
+                            const t1 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+                            const movCount = Array.isArray(movimentacoes) ? movimentacoes.length : 0;
+                            const finCount = resumo && resumo.totalPorFinalizadora ? Object.keys(resumo.totalPorFinalizadora).length : 0;
+                            console.log('[Caixa][Fechamento][Loaded]', { sessaoId: h.id, finCount, movCount, ms: Math.round(t1 - t0) });
+                          } catch (e) {
+                            console.error('[Caixa][Fechamento][Error]', { sessaoId: h.id, message: e?.message, code: e?.code });
+                            toast({ title: 'Falha ao carregar fechamento', description: e?.message || 'Tente novamente', variant: 'destructive' });
+                          } finally {
+                            setCaixaModalLoading(false);
+                          }
+                        }}>
                           <TableCell>{h.aberto_em ? new Date(h.aberto_em).toLocaleString('pt-BR') : '—'}</TableCell>
                           <TableCell>{h.fechado_em ? new Date(h.fechado_em).toLocaleString('pt-BR') : '—'}</TableCell>
                           <TableCell className="text-right">{fmtBRL(h.saldo_inicial)}</TableCell>
@@ -634,38 +787,25 @@ export default function FinanceiroPage() {
                   <p className="mt-4 text-text-muted">Carregando...</p>
                 </div>
               ) : filteredPagamentos.length === 0 ? (
-                <div className="text-center py-8 text-text-muted">
-                  <Wallet className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                  <p>Nenhum recebimento encontrado</p>
-                </div>
+                <div className="text-sm text-text-muted">Sem registros no período.</div>
               ) : (
                 <div className="overflow-x-auto">
                   <Table>
                     <TableHeader>
                       <TableRow>
                         <TableHead>Data/Hora</TableHead>
-                        <TableHead>Cliente</TableHead>
                         <TableHead>Finalizadora</TableHead>
                         <TableHead className="text-right">Valor</TableHead>
                         <TableHead>Status</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {filteredPagamentos.map((pag) => (
-                        <TableRow key={pag.id}>
-                          <TableCell>{pag.recebido_em ? new Date(pag.recebido_em).toLocaleString('pt-BR') : '—'}</TableCell>
-                          <TableCell>{pag.clientes?.nome || '—'}</TableCell>
-                          <TableCell>{pag.finalizadoras?.nome || pag.metodo || '—'}</TableCell>
-                          <TableCell className="text-right font-semibold">{fmtBRL(pag.valor)}</TableCell>
-                          <TableCell>
-                            <span className={`inline-flex px-2 py-1 rounded-full text-xs font-medium ${
-                              pag.status === 'Pago' ? 'bg-success/10 text-success' :
-                              pag.status === 'Cancelado' ? 'bg-danger/10 text-danger' :
-                              'bg-warning/10 text-warning'
-                            }`}>
-                              {pag.status || 'Pago'}
-                            </span>
-                          </TableCell>
+                      {filteredPagamentos.map((pg) => (
+                        <TableRow key={pg.id}>
+                          <TableCell>{pg.recebido_em ? new Date(pg.recebido_em).toLocaleString('pt-BR') : '—'}</TableCell>
+                          <TableCell>{pg.finalizadoras?.nome || pg.metodo || '—'}</TableCell>
+                          <TableCell className="text-right font-semibold">{fmtBRL(pg.valor)}</TableCell>
+                          <TableCell>{pg.status || '—'}</TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
@@ -687,6 +827,377 @@ export default function FinanceiroPage() {
             </motion.div>
           </TabsContent>
         </Tabs>
+
+        {/* Modal: Todos os Produtos */}
+        <Dialog open={openProdutosModal} onOpenChange={setOpenProdutosModal}>
+          <DialogContent className="max-w-2xl bg-surface text-text-primary border-0">
+            <DialogHeader>
+              <DialogTitle>Todos os Produtos</DialogTitle>
+              <DialogDescription>Ordenados por faturamento no período selecionado</DialogDescription>
+            </DialogHeader>
+            <div className="max-h-[60vh] overflow-y-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Produto</TableHead>
+                    <TableHead className="text-right">Valor</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {allProdutos.map((p, i) => (
+                    <TableRow key={`${p.nome}-${i}`}>
+                      <TableCell>{i + 1}. {p.nome}</TableCell>
+                      <TableCell className="text-right font-semibold">{fmtBRL(p.valor)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Modal: Detalhes do Fechamento do Caixa */}
+        <Dialog open={caixaModalOpen} onOpenChange={setCaixaModalOpen}>
+          <DialogContent className="sm:max-w-[900px] w-full max-h-[85vh] overflow-y-auto bg-surface text-text-primary border-0">
+            <DialogHeader>
+              <DialogTitle>Fechamento do Caixa</DialogTitle>
+              <DialogDescription>
+                {caixaModalData?.sessao?.aberto_em ? `${new Date(caixaModalData.sessao.aberto_em).toLocaleString('pt-BR')}` : '—'}
+                {caixaModalData?.sessao?.fechado_em ? ` → ${new Date(caixaModalData.sessao.fechado_em).toLocaleString('pt-BR')}` : ''}
+              </DialogDescription>
+            </DialogHeader>
+            {caixaModalLoading ? (
+              <div className="text-sm text-text-muted">Carregando...</div>
+            ) : !caixaModalData ? (
+              <div className="text-sm text-text-muted">Sem dados.</div>
+            ) : (
+              <div className="space-y-6">
+                {/* KPIs de Saldo da Sessão */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="bg-surface-2 rounded-lg p-3 border border-border">
+                    <p className="text-xs text-text-secondary">Saldo Inicial</p>
+                    <p className="text-2xl font-bold tabular-nums">{fmtBRL(caixaModalData.sessao?.saldo_inicial)}</p>
+                  </div>
+                  <div className="bg-surface-2 rounded-lg p-3 border border-border">
+                    <p className="text-xs text-text-secondary">Entradas</p>
+                    <p className="text-2xl font-bold text-success tabular-nums">{
+                      (() => {
+                        const si = Number(caixaModalData.sessao?.saldo_inicial || 0);
+                        const sf = Number(caixaModalData.sessao?.saldo_final || 0);
+                        const ent = sf - si;
+                        return fmtBRL(ent);
+                      })()
+                    }</p>
+                  </div>
+                  <div className="bg-surface-2 rounded-lg p-3 border border-border">
+                    <p className="text-xs text-text-secondary">Saldo Final</p>
+                    <p className="text-2xl font-bold tabular-nums">{fmtBRL(caixaModalData.sessao?.saldo_final)}</p>
+                  </div>
+                </div>
+
+                {/* KPIs de Vendas */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="bg-surface-2 rounded-lg p-3 border border-border">
+                    <p className="text-xs text-text-secondary">Bruto</p>
+                    <p className="text-2xl font-bold tabular-nums">{fmtBRL(caixaModalData.resumo?.totalVendasBrutas)}</p>
+                  </div>
+                  <div className="bg-surface-2 rounded-lg p-3 border border-border">
+                    <p className="text-xs text-text-secondary">Descontos</p>
+                    <p className="text-2xl font-bold text-warning tabular-nums">{fmtBRL(caixaModalData.resumo?.totalDescontos)}</p>
+                  </div>
+                  <div className="bg-surface-2 rounded-lg p-3 border border-border">
+                    <p className="text-xs text-text-secondary">Líquido</p>
+                    <p className="text-2xl font-bold tabular-nums">{fmtBRL(caixaModalData.resumo?.totalVendasLiquidas)}</p>
+                  </div>
+                </div>
+
+                <div>
+                  <h4 className="text-sm font-semibold mb-2">Entradas por Finalizadora</h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+                    {caixaModalData.resumo?.totalPorFinalizadora && Object.keys(caixaModalData.resumo.totalPorFinalizadora).length > 0 ? (
+                      Object.entries(caixaModalData.resumo.totalPorFinalizadora).map(([metodo, valor]) => (
+                        <div key={metodo} className="bg-surface-2 rounded-md p-2 border border-border flex items-center justify-between">
+                          <span className="text-sm text-text-secondary truncate">{String(metodo)}</span>
+                          <span className="text-sm font-semibold">{fmtBRL(valor)}</span>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="text-sm text-text-muted">Sem pagamentos.</div>
+                    )}
+                  </div>
+                </div>
+
+                <div>
+                  <h4 className="text-sm font-semibold mb-2">Movimentações</h4>
+                  {(!caixaModalData.movimentacoes || caixaModalData.movimentacoes.length === 0) ? (
+                    <div className="text-sm text-text-muted">Sem movimentações nesta sessão.</div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Data</TableHead>
+                            <TableHead>Tipo</TableHead>
+                            <TableHead>Obs</TableHead>
+                            <TableHead className="text-right">Valor</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {caixaModalData.movimentacoes.map((m) => (
+                            <TableRow key={m.id}>
+                              <TableCell>{m.created_at ? new Date(m.created_at).toLocaleString('pt-BR') : '—'}</TableCell>
+                              <TableCell className="capitalize">{m.tipo || '—'}</TableCell>
+                              <TableCell className="truncate max-w-[280px]" title={m.observacao || ''}>{m.observacao || '—'}</TableCell>
+                              <TableCell className="text-right font-semibold">{fmtBRL(m.valor)}</TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <h4 className="text-sm font-semibold mb-2">Recebimentos</h4>
+                  {(!caixaModalData.pagamentos || caixaModalData.pagamentos.length === 0) ? (
+                    <div className="text-sm text-text-muted">Sem recebimentos no período deste caixa.</div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Data/Hora</TableHead>
+                            <TableHead>Finalizadora</TableHead>
+                            <TableHead className="text-right">Valor</TableHead>
+                            <TableHead>Status</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {caixaModalData.pagamentos.map((pg) => (
+                            <TableRow key={pg.id}>
+                              <TableCell>{pg.recebido_em ? new Date(pg.recebido_em).toLocaleString('pt-BR') : '—'}</TableCell>
+                              <TableCell>{pg.finalizadoras?.nome || pg.metodo || '—'}</TableCell>
+                              <TableCell className="text-right font-semibold">{fmtBRL(pg.valor)}</TableCell>
+                              <TableCell>{pg.status || '—'}</TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
+
+        {/* Modal: Clientes (lista + detalhes) */}
+        <Dialog open={openClientesModal} onOpenChange={(v) => { setOpenClientesModal(v); if (!v) { setSelectedCliente(null); setSelectedClientePagamentos([]); } }}>
+          <DialogContent className="max-w-3xl bg-surface text-text-primary border-0">
+            <DialogHeader>
+              <DialogTitle>Clientes</DialogTitle>
+              <DialogDescription>Ordenados por valor pago no período selecionado</DialogDescription>
+            </DialogHeader>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="max-h-[60vh] overflow-y-auto border border-border rounded-md">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Cliente</TableHead>
+                      <TableHead className="text-right">Pago</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {allClientes.map((c, idx) => (
+                      <TableRow key={`${c.nome}-${idx}`} className={`cursor-pointer ${selectedCliente?.nome === c.nome ? 'bg-brand/10' : ''}`} onClick={async () => {
+                        setSelectedCliente(c);
+                        setLoadingClienteDetalhes(true);
+                        try {
+                          const fromISO = mkStart(startDate);
+                          const toISO = mkEnd(endDate);
+                          const nomeAlvo = (c.nome || '').trim();
+                          const codigo = userProfile?.codigo_empresa;
+                          // 1) Buscar possíveis clientes cujo nome case-insensitive contenha o alvo
+                          let qCli = supabase
+                            .from('clientes')
+                            .select('id, nome')
+                            .eq('codigo_empresa', codigo)
+                            .ilike('nome', `%${nomeAlvo}%`);
+                          const { data: cliMatch } = await qCli;
+                          const idMatches = new Set((cliMatch || []).map(r => r.id));
+                          // 2a) Vínculos por nome_livre ilike
+                          let qV1 = supabase
+                            .from('comanda_clientes')
+                            .select('comanda_id')
+                            .eq('codigo_empresa', codigo)
+                            .ilike('nome_livre', `%${nomeAlvo}%`);
+                          const { data: vincNome } = await qV1;
+                          // 2b) Vínculos por cliente_id
+                          let comIdsSet = new Set((vincNome || []).map(v => v.comanda_id));
+                          if (idMatches.size > 0) {
+                            let qV2 = supabase
+                              .from('comanda_clientes')
+                              .select('comanda_id, cliente_id')
+                              .eq('codigo_empresa', codigo)
+                              .in('cliente_id', Array.from(idMatches));
+                            const { data: vincCli } = await qV2;
+                            (vincCli || []).forEach(v => comIdsSet.add(v.comanda_id));
+                          }
+                          const comIds = Array.from(comIdsSet);
+                          let qp = supabase
+                            .from('pagamentos')
+                            .select('id, valor, recebido_em, metodo, finalizadoras!pagamentos_finalizadora_id_fkey(nome), comanda_id, status')
+                            .in('comanda_id', comIds)
+                            .neq('status','Cancelado')
+                            .neq('status','Estornado')
+                            .order('recebido_em', { ascending: false })
+                            .limit(50);
+                          if (fromISO) qp = qp.gte('recebido_em', fromISO);
+                          if (toISO) qp = qp.lte('recebido_em', toISO);
+                          const { data } = await qp;
+                          const rows = data || [];
+                          // Mapear origem dos pagamentos
+                          const comIdsInPg = Array.from(new Set(rows.map(r => r.comanda_id).filter(Boolean)));
+                          const origemByComanda = {};
+                          if (comIdsInPg.length > 0) {
+                            // Carregar comandas (tipo, mesa)
+                            let qCom = supabase
+                              .from('comandas')
+                              .select('id, tipo, mesa_id')
+                              .in('id', comIdsInPg);
+                            const { data: comRows } = await qCom;
+                            const mesaIds = Array.from(new Set((comRows || []).map(c => c.mesa_id).filter(Boolean)));
+                            const mesaNumById = {};
+                            if (mesaIds.length > 0) {
+                              let qMesas = supabase
+                                .from('mesas')
+                                .select('id, numero, nome')
+                                .in('id', mesaIds);
+                              const { data: mesaRows } = await qMesas;
+                              (mesaRows || []).forEach(m => { mesaNumById[m.id] = (m.nome || `Mesa ${m.numero || ''}`).trim(); });
+                            }
+                            (comRows || []).forEach(c => {
+                              let origem = '—';
+                              const t = String(c?.tipo || '').toLowerCase();
+                              if (t === 'balcao' || t === 'balcão') origem = 'Balcão';
+                              else if (t === 'mesa' || c.mesa_id) origem = mesaNumById[c.mesa_id] || 'Mesa';
+                              else if (t === 'agendamento') origem = 'Agendamento';
+                              origemByComanda[c.id] = origem;
+                            });
+                          }
+                          let enriched = rows.map(r => ({ ...r, origem: r.comanda_id ? (origemByComanda[r.comanda_id] || '—') : '—' }));
+
+                          // Incluir pagamentos de agendamento (participantes pagos) via v_agendamento_participantes
+                          try {
+                            const codigo = userProfile?.codigo_empresa;
+                            // Construir idMatches por nome do cliente (já fizemos acima ao clicar)
+                            let paCli = [];
+                            if (idMatches && idMatches.size > 0) {
+                              let qa2 = supabase
+                                .from('v_agendamento_participantes')
+                                .select('id, agendamento_id, cliente_id, valor_cota, status_pagamento, status_pagamento_text')
+                                .in('cliente_id', Array.from(idMatches));
+                              if (codigo) qa2 = qa2.eq('codigo_empresa', codigo);
+                              const { data: pa2 } = await qa2; paCli = pa2 || [];
+                              if (paCli.length === 0 && codigo) {
+                                let qa2b = supabase
+                                  .from('v_agendamento_participantes')
+                                  .select('id, agendamento_id, cliente_id, valor_cota, status_pagamento, status_pagamento_text')
+                                  .in('cliente_id', Array.from(idMatches));
+                                const { data: pa2b } = await qa2b; paCli = pa2b || [];
+                              }
+                            }
+                            // Filtrar por período usando agendamentos.inicio
+                            let merged = [...paCli];
+                            const agIds = Array.from(new Set(merged.map(p => p.agendamento_id).filter(Boolean)));
+                            let agInRange = new Set();
+                            const agInicioById = {};
+                            if (agIds.length > 0) {
+                              let qag = supabase
+                                .from('agendamentos')
+                                .select('id, inicio')
+                                .in('id', agIds);
+                              if (codigo) qag = qag.eq('codigo_empresa', codigo);
+                              const { data: agRows } = await qag;
+                              const fromMs = fromISO ? new Date(fromISO).getTime() : null;
+                              const toMs = toISO ? new Date(toISO).getTime() : null;
+                              (agRows || []).forEach(a => {
+                                const t = a?.inicio ? new Date(a.inicio).getTime() : null;
+                                const ok = t != null && (fromMs == null || t >= fromMs) && (toMs == null || t <= toMs);
+                                if (ok) agInRange.add(a.id);
+                                if (a?.id) agInicioById[a.id] = a.inicio || null;
+                              });
+                            }
+                            merged = merged.filter(p => agInRange.has(p.agendamento_id));
+                            const seen = new Set();
+                            console.debug('[Financeiro][Agendamentos][Detalhe] encontrados:', merged.length);
+                            merged.forEach(p => {
+                              const key = `${p.id}`;
+                              if (seen.has(key)) return; seen.add(key);
+                              const ok = String(p.status_pagamento || p.status_pagamento_text || 'pago').toLowerCase();
+                              if (['cancelado','estornado'].includes(ok)) return;
+                              const metodoNome = p.finalizadora_nome || p.metodo || p.metodo_pagamento || p.forma_pagamento || 'Agendamento';
+                              enriched.push({
+                                id: `ag-${p.id}`,
+                                recebido_em: agInicioById[p.agendamento_id] || null,
+                                finalizadoras: metodoNome ? { nome: metodoNome } : null,
+                                metodo: metodoNome,
+                                origem: 'Agendamento',
+                                valor: p.valor_cota,
+                              });
+                            });
+                          } catch {}
+
+                          setSelectedClientePagamentos(enriched);
+                        } finally {
+                          setLoadingClienteDetalhes(false);
+                        }
+                      }}>
+                        <TableCell>{c.nome}</TableCell>
+                        <TableCell className="text-right font-semibold">{fmtBRL(c.valor)}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+              <div className="max-h-[60vh] overflow-y-auto overflow-x-auto pr-1">
+                {!selectedCliente ? (
+                  <div className="text-sm text-text-muted p-4">Selecione um cliente para ver detalhes</div>
+                ) : (
+                  <div className="space-y-3">
+                    <h4 className="text-sm font-semibold">Detalhes de {selectedCliente.nome}</h4>
+                    {loadingClienteDetalhes ? (
+                      <div className="text-sm text-text-muted">Carregando...</div>
+                    ) : selectedClientePagamentos.length === 0 ? (
+                      <div className="text-sm text-text-muted">Sem pagamentos no período.</div>
+                    ) : (
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Data</TableHead>
+                            <TableHead>Finalizadora</TableHead>
+                            <TableHead>Origem</TableHead>
+                            <TableHead className="text-right">Valor</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {selectedClientePagamentos.map((pg) => (
+                            <TableRow key={pg.id}>
+                              <TableCell>{pg.recebido_em ? new Date(pg.recebido_em).toLocaleString('pt-BR') : '—'}</TableCell>
+                              <TableCell>{pg.finalizadoras?.nome || pg.metodo || '—'}</TableCell>
+                              <TableCell>{pg.origem || '—'}</TableCell>
+                              <TableCell className="text-right font-semibold">{fmtBRL(pg.valor)}</TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
       </motion.div>
     </>
   );
