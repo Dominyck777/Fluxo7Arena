@@ -403,7 +403,7 @@ export function convertXMLProductToSystemFormat(produtoXML, codigoEmpresa) {
     status: 'active',
     active: true,
     type: 'Venda',
-    category: 'Importado',
+    category: 'Importados',
     
     // Dados fiscais
     cfopInterno: produtoXML.cfop || '',
@@ -418,6 +418,13 @@ export function convertXMLProductToSystemFormat(produtoXML, codigoEmpresa) {
     cstIpi: produtoXML.impostos?.ipi?.cst || '',
     aliqIpiPercent: produtoXML.impostos?.ipi?.aliquota || 0,
     
-    codigo_empresa: codigoEmpresa
+    codigo_empresa: codigoEmpresa,
+
+    // Flags/metadados de origem XML (serão mapeados para colunas do BD em products.mapUiToDb)
+    importedViaXML: true,
+    xmlChave: produtoXML?.xmlChave || null,
+    xmlNumero: produtoXML?.xmlNumero || null,
+    xmlSerie: produtoXML?.xmlSerie || null,
+    xmlEmissao: produtoXML?.xmlEmissao || null
   };
 }

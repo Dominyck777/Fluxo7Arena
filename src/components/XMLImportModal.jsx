@@ -88,6 +88,15 @@ export default function XMLImportModal({ open, onOpenChange, products, codigoEmp
         if (item.isNew) {
           // Criar produto novo
           const productData = convertXMLProductToSystemFormat(item.xml, codigoEmpresa);
+          // Garantir marcação/metadata de XML e categoria
+          productData.importedViaXML = true;
+          productData.category = 'Importados';
+          if (parsedData?.nfe) {
+            productData.xmlChave = parsedData.nfe.chaveAcesso || null;
+            productData.xmlNumero = parsedData.nfe.numero || null;
+            productData.xmlSerie = parsedData.nfe.serie || null;
+            productData.xmlEmissao = parsedData.nfe.dataEmissao || null;
+          }
           
           try {
             await createProduct(productData);

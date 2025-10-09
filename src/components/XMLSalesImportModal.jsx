@@ -83,7 +83,9 @@ export default function XMLSalesImportModal({ open, onOpenChange, codigoEmpresa,
           status: 'closed',
           aberto_em: dataEmissao.toISOString(),
           fechado_em: dataEmissao.toISOString(),
-          observacao: `Importado de XML - NF-e ${parsedData.nfe?.numero || ''}${chaveNFe ? `\nChave: ${chaveNFe}` : ''}`
+          observacao: `Importado de XML - NF-e ${parsedData.nfe?.numero || ''}${chaveNFe ? `\nChave: ${chaveNFe}` : ''}`,
+          origem: 'xml',
+          xml_chave: chaveNFe || null
         })
         .select()
         .single();
@@ -154,7 +156,9 @@ export default function XMLSalesImportModal({ open, onOpenChange, codigoEmpresa,
             valor: pag.valor,
             status: 'Pago',
             recebido_em: dataEmissao.toISOString(),
-            codigo_empresa: codigoEmpresa
+            codigo_empresa: codigoEmpresa,
+            origem: 'xml',
+            xml_chave: chaveNFe || null
           };
         });
         
@@ -176,7 +180,9 @@ export default function XMLSalesImportModal({ open, onOpenChange, codigoEmpresa,
             valor: totalVenda,
             status: 'Pago',
             recebido_em: dataEmissao.toISOString(),
-            codigo_empresa: codigoEmpresa
+            codigo_empresa: codigoEmpresa,
+            origem: 'xml',
+            xml_chave: chaveNFe || null
           });
         
         if (pagamentoError) throw pagamentoError;

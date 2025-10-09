@@ -309,6 +309,13 @@ function mapUiToDb(data) {
     usa_imei: data.useImei != null ? !!data.useImei : false,
     controle_estoque_por_grade: data.stockByGrid != null ? !!data.stockByGrid : false,
     mostrar_no_app: data.showInApp != null ? !!data.showInApp : false,
+
+    // --- Origem XML (novos campos)
+    importado_via_xml: data.importedViaXML === true ? true : false,
+    xml_chave: data.xmlChave || null,
+    xml_numero: data.xmlNumero || null,
+    xml_serie: data.xmlSerie || null,
+    xml_emissao: data.xmlEmissao ? new Date(data.xmlEmissao).toISOString() : null,
   }
 }
 

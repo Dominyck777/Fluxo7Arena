@@ -6,7 +6,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { BarChart as ReBarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, CartesianGrid, LineChart, Line, PieChart, Pie, Cell } from 'recharts';
+import { BarChart as ReBarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, CartesianGrid, LineChart, Line, PieChart, Pie, Cell, Sector } from 'recharts';
 import { TrendingUp, Wallet, CreditCard, CalendarRange, Banknote, ArrowDownCircle, ArrowUpCircle, FileText, Download, Search, Filter, DollarSign, ShoppingCart, Users, Package, Calendar as CalendarIcon } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useSearchParams } from 'react-router-dom';
@@ -28,6 +28,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 const pageVariants = {
   hidden: { opacity: 0 },
@@ -44,7 +45,7 @@ const itemVariants = {
 
 function KpiCard({ icon: Icon, label, value, delta, positive = true, color = 'brand' }) {
   return (
-    <motion.div variants={itemVariants} className="fx-card">
+    <motion.div variants={itemVariants} className="fx-card border-0 ring-0 outline-none shadow-none">
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-2 text-text-secondary text-xs font-semibold uppercase tracking-wider">
           <Icon className={`w-4 h-4 text-${color}`} />
@@ -83,11 +84,15 @@ export default function FinanceiroPage() {
   
   // Estados da Visão Geral
   const [summary, setSummary] = useState(null);
+  const [receitaComandas, setReceitaComandas] = useState(0);
+  const [receitaAgendamentos, setReceitaAgendamentos] = useState(0);
   const [topProdutos, setTopProdutos] = useState([]);
   const [topClientes, setTopClientes] = useState([]);
   const [allProdutos, setAllProdutos] = useState([]);
   const [allClientes, setAllClientes] = useState([]);
   const [evolucaoDiaria, setEvolucaoDiaria] = useState([]);
+  const [receitaXml, setReceitaXml] = useState(0);
+  const [produtosXmlCount, setProdutosXmlCount] = useState(0);
   // Modais de listas completas
   const [openProdutosModal, setOpenProdutosModal] = useState(false);
   const [openClientesModal, setOpenClientesModal] = useState(false);
@@ -108,11 +113,26 @@ export default function FinanceiroPage() {
   const [caixaModalData, setCaixaModalData] = useState(null); // { resumo, movimentacoes, sessao }
   
   // Estados de Recebimentos
-  const [pagamentos, setPagamentos] = useState([]);
+  const [pagamentos, setPagamentos] = useState([]); // agora unificado (comandas + agendamentos)
   const [searchPagamento, setSearchPagamento] = useState('');
   const [filterFinalizadora, setFilterFinalizadora] = useState('all');
+  const [filterFonte, setFilterFonte] = useState('all'); // all | manual | xml
+
+  // Estados da aba Agendamentos
+  const [agAgendamentos, setAgAgendamentos] = useState([]);
+  const [agSearch, setAgSearch] = useState('');
+  const [agStatus, setAgStatus] = useState('all'); // all, Pago, Pendente, Cancelado
+  const [agFinalizadora, setAgFinalizadora] = useState('all');
+  // Modal de detalhes de recebimento
+  const [recModalOpen, setRecModalOpen] = useState(false);
+  const [recSelecionado, setRecSelecionado] = useState(null);
+  const [recItens, setRecItens] = useState([]);
+  const [recItensLoading, setRecItensLoading] = useState(false);
+  const [recPagamentos, setRecPagamentos] = useState([]);
+  const [recClienteNome, setRecClienteNome] = useState('');
   
   const fmtBRL = (v) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(v || 0));
+  const fmt2 = (n) => (Number(n || 0)).toFixed(2);
 
   const setPreset = (type) => {
     const now = new Date();
@@ -141,6 +161,68 @@ export default function FinanceiroPage() {
     setEndDate(end);
   };
 
+  // Label fixa da % (sempre branca e visível)
+  const renderPercentLabel = ({ cx, cy, midAngle, outerRadius, percent }) => {
+    const RAD = Math.PI / 180;
+    const r = (outerRadius || 0) + 12;
+    const x = cx + r * Math.cos(-midAngle * RAD);
+    const y = cy + r * Math.sin(-midAngle * RAD);
+    return (
+      <text x={x} y={y} fill="#fff" textAnchor={x > cx ? 'start' : 'end'} dominantBaseline="central" style={{ pointerEvents: 'none', fontSize: 15, fontWeight: 700 }}>
+        {`${Math.round((percent || 0) * 100)}%`}
+      </text>
+    );
+  };
+
+  // Estilo com transição suave para as fatias
+  const getCellStyle = (idx) => {
+    const isDim = selectedSlice != null && selectedSlice !== idx;
+    return {
+      transition: 'opacity 320ms ease-in-out, filter 320ms ease-in-out',
+      opacity: isDim ? 0.25 : 1,
+      filter: isDim ? 'grayscale(15%)' : 'none',
+      cursor: 'pointer',
+    };
+  };
+
+  // Carregar itens da comanda quando abrir o modal de recebimento
+  useEffect(() => {
+    const run = async () => {
+      if (!recModalOpen || !recSelecionado || recSelecionado.origem !== 'Comanda' || !recSelecionado.comanda_id) {
+        setRecItens([]);
+        setRecPagamentos([]);
+        return;
+      }
+      try {
+        setRecItensLoading(true);
+        const codigo = userProfile?.codigo_empresa;
+        let q = supabase
+          .from('comanda_itens')
+          .select('descricao, quantidade, preco_unitario')
+          .eq('comanda_id', recSelecionado.comanda_id);
+        if (codigo) q = q.eq('codigo_empresa', codigo);
+        const { data } = await q;
+        setRecItens(data || []);
+
+        // Carregar todos os pagamentos dessa comanda
+        let qp = supabase
+          .from('pagamentos')
+          .select('id, valor, metodo, status, finalizadoras!pagamentos_finalizadora_id_fkey(nome)')
+          .eq('comanda_id', recSelecionado.comanda_id);
+        if (codigo) qp = qp.eq('codigo_empresa', codigo);
+        const { data: pays } = await qp;
+        setRecPagamentos(pays || []);
+      } catch (e) {
+        console.warn('[Financeiro][RecebimentoModal] Falha ao carregar itens da comanda:', e?.message);
+        setRecItens([]);
+        setRecPagamentos([]);
+      } finally {
+        setRecItensLoading(false);
+      }
+    };
+    run();
+  }, [recModalOpen, recSelecionado, userProfile?.codigo_empresa]);
+
   // Carregar dados da Visão Geral
   const loadVisaoGeral = async () => {
     try {
@@ -154,6 +236,69 @@ export default function FinanceiroPage() {
       const sum = await listarResumoPeriodo({ from: fromISO, to: toISO }).catch(() => null);
       setSummary(sum || { totalPorFinalizadora: {}, totalEntradas: 0, totalVendasBrutas: 0, totalDescontos: 0, totalVendasLiquidas: 0 });
       console.debug('[Financeiro][VisaoGeral] Resumo calculado:', sum);
+
+      // KPIs por origem
+      try {
+        // Comandas: soma de pagamentos no período
+        let qc = supabase
+          .from('pagamentos')
+          .select('valor, status')
+          .eq('codigo_empresa', codigo);
+        if (fromISO) qc = qc.gte('recebido_em', fromISO);
+        if (toISO) qc = qc.lte('recebido_em', toISO);
+        const { data: payRows } = await qc;
+        const totalComandas = (payRows || []).reduce((acc, r) => {
+          const st = (r.status || 'Pago');
+          if (st === 'Cancelado' || st === 'Estornado') return acc;
+          return acc + Number(r.valor || 0);
+        }, 0);
+        setReceitaComandas(totalComandas);
+
+        // Agendamentos: soma de valor_pago na view, filtrando por período (inicio) e status_pagamento = 'Pago'
+        let qa = supabase
+          .from('v_agendamentos_detalhado')
+          .select('valor_pago')
+          .eq('codigo_empresa', codigo)
+          .eq('status_pagamento', 'Pago');
+        if (fromISO) qa = qa.gte('inicio', fromISO);
+        if (toISO) qa = qa.lte('inicio', toISO);
+        const { data: agRows } = await qa;
+        const totalAg = (agRows || []).reduce((acc, r) => acc + Number(r.valor_pago || 0), 0);
+        setReceitaAgendamentos(totalAg);
+        console.debug('[Financeiro][VisaoGeral] Receitas por origem:', { totalComandas, totalAg });
+      } catch (e) {
+        console.warn('[Financeiro][VisaoGeral] Falha ao calcular KPIs por origem:', e?.message);
+        setReceitaComandas(0); setReceitaAgendamentos(0);
+      }
+
+      // KPI: Recebimentos via XML e Produtos Importados (categoria/flag)
+      try {
+        // Recebimentos via XML
+        let qx = supabase
+          .from('pagamentos')
+          .select('valor, status, origem')
+          .eq('codigo_empresa', codigo)
+          .eq('origem', 'xml');
+        if (fromISO) qx = qx.gte('recebido_em', fromISO);
+        if (toISO) qx = qx.lte('recebido_em', toISO);
+        const { data: xmlPays } = await qx;
+        const totalXml = (xmlPays || []).reduce((acc, r) =>
+          (['Cancelado','Estornado'].includes(r.status)) ? acc : acc + Number(r.valor || 0), 0);
+        setReceitaXml(totalXml);
+
+        // Produtos importados no período (flag ou categoria)
+        const { count: cntXml } = await supabase
+          .from('produtos')
+          .select('id', { count: 'exact', head: true })
+          .eq('codigo_empresa', codigo)
+          .or('importado_via_xml.is.true,categoria.ilike.Importados')
+          .gte('criado_em', fromISO)
+          .lte('criado_em', toISO);
+        setProdutosXmlCount(cntXml || 0);
+      } catch (e) {
+        console.warn('[Financeiro][VisaoGeral] Falha KPIs XML:', e?.message);
+        setReceitaXml(0); setProdutosXmlCount(0);
+      }
       
       // Produtos (map completo + top 5)
       if (codigo) {
@@ -356,7 +501,7 @@ export default function FinanceiroPage() {
     }
   };
 
-  // Carregar Recebimentos
+  // Carregar Recebimentos (unificado: Comandas + Agendamentos)
   const loadRecebimentos = async () => {
     try {
       setLoading(true);
@@ -364,21 +509,143 @@ export default function FinanceiroPage() {
       const fromISO = mkStart(startDate) || undefined;
       const toISO = mkEnd(endDate) || undefined;
       
-      let q = supabase
+      // 1) Pagamentos de comandas
+      let q1 = supabase
         .from('pagamentos')
-        .select('*, finalizadoras!pagamentos_finalizadora_id_fkey(nome)')
+        .select('id, comanda_id, valor, status, metodo, recebido_em, origem, xml_chave, finalizadoras!pagamentos_finalizadora_id_fkey(nome)')
         .eq('codigo_empresa', codigo)
         .order('recebido_em', { ascending: false });
-      
-      if (fromISO) q = q.gte('recebido_em', fromISO);
-      if (toISO) q = q.lte('recebido_em', toISO);
-      
-      const { data, error } = await q;
-      if (error) throw error;
-      
-      setPagamentos(data || []);
+      if (fromISO) q1 = q1.gte('recebido_em', fromISO);
+      if (toISO) q1 = q1.lte('recebido_em', toISO);
+      const { data: paysComanda } = await q1;
+
+      // Buscar meta das comandas envolvidas (cliente e tipo)
+      let clienteByComanda = new Map();
+      let tipoByComanda = new Map();
+      try {
+        const comandaIds = Array.from(new Set((paysComanda || []).map(p => p.comanda_id).filter(Boolean)));
+        if (comandaIds.length > 0) {
+          const { data: cmdRows } = await supabase
+            .from('comandas')
+            .select('id, cliente_id, tipo')
+            .in('id', comandaIds)
+            .eq('codigo_empresa', codigo);
+          const clienteIds = Array.from(new Set((cmdRows || []).map(c => c.cliente_id).filter(Boolean)));
+          let nomeByCliente = new Map();
+          if (clienteIds.length > 0) {
+            const { data: cliRows } = await supabase
+              .from('clientes')
+              .select('id, nome')
+              .in('id', clienteIds)
+              .eq('codigo_empresa', codigo);
+            nomeByCliente = new Map((cliRows || []).map(c => [c.id, c.nome]));
+          }
+          for (const c of cmdRows || []) {
+            if (!c) continue;
+            const nome = nomeByCliente.get(c.cliente_id) || null;
+            clienteByComanda.set(c.id, nome);
+            tipoByComanda.set(c.id, c.tipo || null);
+          }
+
+          // Fallback: se não há cliente_id, tentar tabela de associação comanda_clientes
+          const semCliente = (cmdRows || []).filter(c => !c?.cliente_id).map(c => c.id);
+          if (semCliente.length > 0) {
+            try {
+              const { data: links } = await supabase
+                .from('comanda_clientes')
+                .select('comanda_id, cliente_id')
+                .in('comanda_id', semCliente)
+                .eq('codigo_empresa', codigo);
+              const extraIds = Array.from(new Set((links || []).map(l => l.cliente_id).filter(Boolean)));
+              if (extraIds.length > 0) {
+                const { data: extraClientes } = await supabase
+                  .from('clientes')
+                  .select('id, nome')
+                  .in('id', extraIds)
+                  .eq('codigo_empresa', codigo);
+                const byId = new Map((extraClientes || []).map(c => [c.id, c.nome]));
+                for (const l of links || []) {
+                  const nome = byId.get(l.cliente_id) || null;
+                  if (nome && !clienteByComanda.get(l.comanda_id)) clienteByComanda.set(l.comanda_id, nome);
+                }
+              }
+            } catch (e) {
+              console.debug('[Financeiro][Recebimentos] comanda_clientes indisponível (ok)');
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('[Financeiro][Recebimentos] Falha ao buscar clientes de comandas:', e?.message);
+      }
+
+      // 2) Pagamentos de agendamentos (via view detalhada) com status pago, usando inicio como data
+      let q2 = supabase
+        .from('v_agendamentos_detalhado')
+        .select('agendamento_id, agendamento_codigo, inicio, quadra_nome, participante_nome, valor_cota, status_pagamento, finalizadora_nome')
+        .eq('codigo_empresa', codigo)
+        .eq('status_pagamento', 'Pago')
+        .order('inicio', { ascending: false });
+      if (fromISO) q2 = q2.gte('inicio', fromISO);
+      if (toISO) q2 = q2.lte('inicio', toISO);
+      const { data: paysAg } = await q2;
+
+      // 3) Unificar
+      const normComandas = (paysComanda || []).map(p => ({
+        id: p.id,
+        origem: (tipoByComanda.get(p.comanda_id || '') === 'balcao') ? 'Balcão' : 'Comanda',
+        comanda_id: p.comanda_id || null,
+        recebido_em: p.recebido_em,
+        finalizadoras: p.finalizadoras,
+        metodo: p.metodo,
+        valor: p.valor,
+        status: p.status,
+        descricao: clienteByComanda.get(p.comanda_id || '') || null,
+        fonte: (p.origem || 'manual'),
+        xml_chave: p.xml_chave || null,
+      }));
+      const normAg = (paysAg || []).map((r, idx) => ({
+        id: `ag-${r.agendamento_id}-${idx}`,
+        origem: 'Agendamento',
+        recebido_em: r.inicio,
+        finalizadoras: r.finalizadora_nome ? { nome: r.finalizadora_nome } : null,
+        metodo: r.finalizadora_nome || null,
+        valor: r.valor_cota,
+        status: r.status_pagamento,
+        descricao: `#${r.agendamento_codigo} - ${r.participante_nome} (${r.quadra_nome || '—'})`,
+        agendamento_codigo: r.agendamento_codigo,
+        quadra_nome: r.quadra_nome,
+        participante_nome: r.participante_nome,
+        fonte: null,
+      }));
+      setPagamentos([...
+        normComandas,
+        ...normAg,
+      ]);
     } catch (e) {
       toast({ title: 'Falha ao carregar recebimentos', description: e?.message, variant: 'destructive' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Carregar Agendamentos (aba específica)
+  const loadAgendamentos = async () => {
+    try {
+      setLoading(true);
+      const codigo = userProfile?.codigo_empresa;
+      const fromISO = mkStart(startDate) || undefined;
+      const toISO = mkEnd(endDate) || undefined;
+      let q = supabase
+        .from('v_agendamentos_detalhado')
+        .select('agendamento_codigo, inicio, quadra_nome, participante_nome, valor_cota, finalizadora_nome, status_pagamento')
+        .eq('codigo_empresa', codigo)
+        .order('inicio', { ascending: false });
+      if (fromISO) q = q.gte('inicio', fromISO);
+      if (toISO) q = q.lte('inicio', toISO);
+      const { data } = await q;
+      setAgAgendamentos(data || []);
+    } catch (e) {
+      toast({ title: 'Falha ao carregar agendamentos', description: e?.message, variant: 'destructive' });
     } finally {
       setLoading(false);
     }
@@ -417,6 +684,8 @@ export default function FinanceiroPage() {
       loadCaixa();
     } else if (activeTab === 'recebimentos') {
       loadRecebimentos();
+    } else if (activeTab === 'agendamentos') {
+      loadAgendamentos();
     }
   }, [activeTab, startDate, endDate, userProfile?.codigo_empresa]);
 
@@ -428,31 +697,133 @@ export default function FinanceiroPage() {
     return arr;
   }, [summary]);
 
+  // Interação do gráfico de pizza
+  const [activeSlice, setActiveSlice] = useState(null); // 0 = Comandas, 1 = Agendamentos
+  const [selectedSlice, setSelectedSlice] = useState(null); // clique fixa destaque e escurece o restante
+  const pieAngles = { start: 90, end: -270 };
+  const lerp = (a, b, t) => a + (b - a) * t;
+  const easeInOutCubic = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+  const getSliceAngles = (idx) => {
+    const v0 = Number(receitaComandas || 0);
+    const v1 = Number(receitaAgendamentos || 0);
+    const total = Math.max(0.0001, v0 + v1);
+    const sweep0 = 360 * (v0 / total);
+    // Pie varre de start -> end no sentido horário (end menor). Fatia 0 começa em start.
+    if (idx === 0) {
+      return { a: pieAngles.start, b: pieAngles.start - sweep0 };
+    }
+    return { a: pieAngles.start - sweep0, b: pieAngles.end };
+  };
+
+  // Animação suave entre seleções usando um Sector sobreposto
+  const [anim, setAnim] = useState({ from: null, to: null, t: 1 });
+  const effectiveIndex = selectedSlice != null ? selectedSlice : activeSlice;
+  useEffect(() => {
+    if (effectiveIndex == null) return; // nada a animar sem foco
+    const to = getSliceAngles(effectiveIndex);
+    setAnim((prev) => ({ from: prev.to || to, to, t: 0 }));
+    let raf; const start = performance.now(); const dur = 380;
+    const loop = (now) => {
+      const lin = Math.min(1, (now - start) / dur);
+      const eased = easeInOutCubic(lin);
+      setAnim((p) => ({ ...p, t: eased }));
+      if (lin < 1) { raf = requestAnimationFrame(loop); }
+    };
+    raf = requestAnimationFrame(loop);
+    return () => raf && cancelAnimationFrame(raf);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [effectiveIndex, receitaComandas, receitaAgendamentos]);
+
+  // Animação suave de tamanho (raio) entre seleções
+  const baseR = 86, activeR = 94, dimR = 80;
+  const [sizeAnim, setSizeAnim] = useState({ from: [baseR, baseR], to: [baseR, baseR], t: 1 });
+  useEffect(() => {
+    const target = (effectiveIndex === 0)
+      ? [activeR, dimR]
+      : (effectiveIndex === 1)
+        ? [dimR, activeR]
+        : [baseR, baseR];
+    setSizeAnim((prev) => ({ from: prev.to || target, to: target, t: 0 }));
+    let raf; const start = performance.now(); const dur = 380;
+    const loop = (now) => {
+      const lin = Math.min(1, (now - start) / dur);
+      const eased = easeInOutCubic(lin);
+      setSizeAnim((p) => ({ ...p, t: eased }));
+      if (lin < 1) { raf = requestAnimationFrame(loop); }
+    };
+    raf = requestAnimationFrame(loop);
+    return () => raf && cancelAnimationFrame(raf);
+  }, [effectiveIndex]);
+
+  // Desenho do overlay animado (interpolação linear entre ângulos)
+  const renderOverlay = ({ cx, cy, outerRadius }) => {
+    if (!anim.from || !anim.to) return null;
+    const startAngle = lerp(anim.from.a, anim.to.a, anim.t);
+    const endAngle = lerp(anim.from.b, anim.to.b, anim.t);
+    const color = effectiveIndex === 0 ? '#3b82f6' : '#8b5cf6';
+    return (
+      <Sector
+        cx={cx}
+        cy={cy}
+        innerRadius={0}
+        outerRadius={(outerRadius || 0) + 4}
+        startAngle={startAngle}
+        endAngle={endAngle}
+        fill={color}
+        fillOpacity={0.18}
+        stroke="transparent"
+      />
+    );
+  };
+
   // Filtrar pagamentos
   const filteredPagamentos = useMemo(() => {
     let result = pagamentos;
-    
     if (searchPagamento) {
       const term = searchPagamento.toLowerCase();
-      result = result.filter(p => 
-        (p.clientes?.nome || '').toLowerCase().includes(term) ||
+      result = result.filter(p =>
+        (p.descricao || '').toLowerCase().includes(term) ||
         (p.finalizadoras?.nome || '').toLowerCase().includes(term) ||
-        String(p.valor || '').includes(term)
+        String(p.valor || '').includes(term) ||
+        (p.origem || '').toLowerCase().includes(term)
       );
     }
-    
     if (filterFinalizadora !== 'all') {
-      result = result.filter(p => p.finalizadora_id === filterFinalizadora);
+      result = result.filter(p => (p.finalizadoras?.nome || p.metodo) === filterFinalizadora);
     }
-    
+    if (filterFonte !== 'all') {
+      result = result.filter(p => (p.fonte || 'manual') === filterFonte);
+    }
     return result;
-  }, [pagamentos, searchPagamento, filterFinalizadora]);
+  }, [pagamentos, searchPagamento, filterFinalizadora, filterFonte]);
+
+  const filteredAg = useMemo(() => {
+    let arr = agAgendamentos || [];
+    if (agStatus !== 'all') arr = arr.filter(r => (r.status_pagamento || '').toLowerCase() === agStatus.toLowerCase());
+    if (agFinalizadora !== 'all') arr = arr.filter(r => (r.finalizadora_nome || '') === agFinalizadora);
+    if (agSearch) {
+      const term = agSearch.toLowerCase();
+      arr = arr.filter(r =>
+        String(r.agendamento_codigo || '').toLowerCase().includes(term) ||
+        (r.participante_nome || '').toLowerCase().includes(term) ||
+        (r.quadra_nome || '').toLowerCase().includes(term)
+      );
+    }
+    return arr;
+  }, [agAgendamentos, agStatus, agFinalizadora, agSearch]);
 
   return (
     <>
       <Helmet>
         <title>Financeiro - Fluxo7 Arena</title>
         <meta name="description" content="Gestão financeira completa: visão geral, caixa, recebimentos e relatórios." />
+        <style>{`
+          /* Remove outline feio ao focar no SVG do Recharts */
+          .recharts-wrapper:focus, .recharts-surface:focus { outline: none; }
+          .recharts-wrapper svg:focus, .recharts-wrapper svg *:focus { outline: none !important; }
+          .recharts-wrapper svg { -webkit-tap-highlight-color: transparent; }
+          .recharts-sector { outline: none !important; }
+        `}</style>
       </Helmet>
       
       <motion.div variants={pageVariants} initial="hidden" animate="visible" className="space-y-6">
@@ -527,25 +898,150 @@ export default function FinanceiroPage() {
 
         {/* Tabs */}
         <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="grid w-full grid-cols-4">
+          <TabsList className="grid w-full grid-cols-5">
             <TabsTrigger value="visao-geral">Visão Geral</TabsTrigger>
             <TabsTrigger value="caixa">Caixa</TabsTrigger>
             <TabsTrigger value="recebimentos">Recebimentos</TabsTrigger>
+            <TabsTrigger value="agendamentos">Agendamentos</TabsTrigger>
             <TabsTrigger value="relatorios">Relatórios</TabsTrigger>
           </TabsList>
 
           {/* ABA 1: VISÃO GERAL */}
           <TabsContent value="visao-geral" className="space-y-6 mt-6">
-            {/* KPIs */}
-            <motion.div variants={itemVariants} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              <KpiCard icon={TrendingUp} label="Vendas Brutas" value={fmtBRL(summary?.totalVendasBrutas)} color="success" />
-              <KpiCard icon={CreditCard} label="Descontos" value={fmtBRL(summary?.totalDescontos)} positive={false} color="warning" />
-              <KpiCard icon={TrendingUp} label="Vendas Líquidas" value={fmtBRL(summary?.totalVendasLiquidas)} color="brand" />
-              <KpiCard icon={Wallet} label="Entradas" value={fmtBRL(summary?.totalEntradas)} color="success" />
+            {/* KPIs por Origem */}
+            <motion.div variants={itemVariants} className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+              <KpiCard icon={Wallet} label="Total Geral" value={fmtBRL(Number(receitaComandas || 0) + Number(receitaAgendamentos || 0))} color="brand" />
+              <KpiCard icon={ShoppingCart} label="Comandas" value={fmtBRL(receitaComandas)} color="success" />
+              <KpiCard icon={CalendarIcon} label="Agendamentos" value={fmtBRL(receitaAgendamentos)} color="success" />
+              <KpiCard icon={CreditCard} label="XML (Recebimentos)" value={fmtBRL(receitaXml)} color="success" />
+            </motion.div>
+
+            {/* Indicadores XML adicionais removidos a pedido do usuário */}
+
+            {/* Pizza: Proporção Comandas vs Agendamentos */}
+            <motion.div variants={itemVariants} className="fx-card p-4 border-0 ring-0 outline-none shadow-none">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2 text-text-secondary text-xs font-semibold uppercase tracking-wider">
+                  <CreditCard className="w-4 h-4 text-brand" />
+                  <span>Proporção de Receita</span>
+                </div>
+              </div>
+              {Number(receitaComandas || 0) + Number(receitaAgendamentos || 0) === 0 ? (
+                <div className="text-sm text-text-muted">Sem receitas no período.</div>
+              ) : (
+                <div className="h-[280px] flex items-center gap-4">
+                  <div className="flex-1 h-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={(function(){
+                            const r0 = lerp(sizeAnim.from?.[0] ?? baseR, sizeAnim.to?.[0] ?? baseR, sizeAnim.t);
+                            const r1 = lerp(sizeAnim.from?.[1] ?? baseR, sizeAnim.to?.[1] ?? baseR, sizeAnim.t);
+                            return [
+                              { name: 'Comandas', value: Number(receitaComandas || 0), fill: '#3b82f6', outerRadius: r0 },
+                              { name: 'Agendamentos', value: Number(receitaAgendamentos || 0), fill: '#8b5cf6', outerRadius: r1 },
+                            ];
+                          })()}
+                          dataKey="value"
+                          nameKey="name"
+                          cx="38%"
+                          cy="50%"
+                          innerRadius={0}
+                          stroke="transparent"
+                          label={false}
+                          labelLine={false}
+                          isAnimationActive
+                          animationBegin={50}
+                          animationDuration={500}
+                          startAngle={pieAngles.start}
+                          endAngle={pieAngles.end}
+                          activeIndex={effectiveIndex}
+                          activeShape={undefined}
+                          onMouseEnter={(_, index) => setActiveSlice(index)}
+                          onMouseLeave={() => setActiveSlice(null)}
+                          onClick={(_, index) => {
+                            setSelectedSlice(prev => prev === index ? null : index);
+                            setActiveSlice(index);
+                          }}
+                        >
+                          <Cell 
+                            key="c" 
+                            fill="#3b82f6" 
+                            style={getCellStyle(0)}
+                          />
+                          <Cell 
+                            key="a" 
+                            fill="#8b5cf6" 
+                            style={getCellStyle(1)}
+                          />
+                        </Pie>
+                        {/* Overlay animado suave */}
+                        {renderOverlay({ cx: '38%', cy: '50%', outerRadius: 92 })}
+                        {/* Camada de labels por cima do overlay (não some no hover) */}
+                        <Pie
+                          data={(function(){
+                            const r0 = lerp(sizeAnim.from?.[0] ?? baseR, sizeAnim.to?.[0] ?? baseR, sizeAnim.t);
+                            const r1 = lerp(sizeAnim.from?.[1] ?? baseR, sizeAnim.to?.[1] ?? baseR, sizeAnim.t);
+                            return [
+                              { name: 'Comandas', value: Number(receitaComandas || 0), fill: 'transparent', outerRadius: r0 },
+                              { name: 'Agendamentos', value: Number(receitaAgendamentos || 0), fill: 'transparent', outerRadius: r1 },
+                            ];
+                          })()}
+                          dataKey="value"
+                          nameKey="name"
+                          cx="38%"
+                          cy="50%"
+                          innerRadius={0}
+                          stroke="transparent"
+                          label={renderPercentLabel}
+                          labelLine={false}
+                          isAnimationActive={false}
+                          startAngle={pieAngles.start}
+                          endAngle={pieAngles.end}
+                        />
+                        <Tooltip 
+                          formatter={(v) => fmtBRL(v)}
+                          contentStyle={{
+                            background: 'rgba(10, 10, 10, 0.95)',
+                            border: '1px solid #fbbf24',
+                            borderRadius: '8px',
+                            padding: '8px 10px',
+                            color: '#fff'
+                          }}
+                          labelStyle={{ color: '#fff' }}
+                          itemStyle={{ color: '#fff' }}
+                          cursor={{ fill: 'rgba(251, 191, 36, 0.06)' }}
+                        />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <div className="w-64 space-y-3 pr-2">
+                    {[
+                      { name: 'Comandas', value: Number(receitaComandas || 0), color: '#3b82f6' },
+                      { name: 'Agendamentos', value: Number(receitaAgendamentos || 0), color: '#8b5cf6' },
+                    ].map((it, idx) => (
+                      <div
+                        key={it.name}
+                        className={`flex items-center justify-between px-3 py-2 rounded-md transition-all duration-200 ${activeSlice === idx ? 'bg-white/5' : 'hover:bg-white/5'} cursor-pointer ${selectedSlice != null && selectedSlice !== idx ? 'opacity-60' : ''}`}
+                        onMouseEnter={() => setActiveSlice(idx)}
+                        onMouseLeave={() => setActiveSlice(null)}
+                        onClick={() => setSelectedSlice(prev => prev === idx ? null : idx)}
+                        role="button"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="inline-block w-3 h-3 rounded-sm" style={{ backgroundColor: it.color }} />
+                          <span className="text-sm text-text-secondary">{it.name}</span>
+                        </div>
+                        <div className={`text-sm font-semibold ${selectedSlice != null && selectedSlice !== idx ? 'opacity-70' : ''}`}>{fmtBRL(it.value)}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </motion.div>
 
             {/* Gráfico por Finalizadora */}
-            <motion.div variants={itemVariants} className="fx-card p-4">
+            <motion.div variants={itemVariants} className="fx-card p-4 border-0 ring-0 outline-none shadow-none">
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2 text-text-secondary text-xs font-semibold uppercase tracking-wider">
                   <CreditCard className="w-4 h-4 text-brand" />
@@ -628,6 +1124,116 @@ export default function FinanceiroPage() {
                 )}
               </motion.div>
             </div>
+          </TabsContent>
+
+          {/* ABA 4: AGENDAMENTOS */}
+          <TabsContent value="agendamentos" className="space-y-6 mt-6">
+            <motion.div variants={itemVariants} className="fx-card p-4 border-0 ring-0 outline-none shadow-none">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-lg font-bold">Agendamentos (Pagamentos por Participante)</h2>
+                <div className="flex gap-2 items-center">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-text-muted" />
+                    <Input placeholder="Buscar (#código, participante, quadra)" value={agSearch} onChange={(e)=>setAgSearch(e.target.value)} className="pl-10 w-[260px] bg-black border-warning/40 text-white placeholder:text-white/60" />
+                  </div>
+                  <Select value={agStatus} onValueChange={setAgStatus}>
+                    <SelectTrigger className="w-[170px] h-9 bg-black border-warning/40 text-white">
+                      <SelectValue placeholder="Todos os Status" />
+                    </SelectTrigger>
+                    <SelectContent className="bg-black text-white border-warning/40">
+                      <SelectItem value="all">Todos os Status</SelectItem>
+                      <SelectItem value="Pago">Pago</SelectItem>
+                      <SelectItem value="Pendente">Pendente</SelectItem>
+                      <SelectItem value="Cancelado">Cancelado</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Select value={agFinalizadora} onValueChange={setAgFinalizadora}>
+                    <SelectTrigger className="w-[220px] h-9 bg-black border-warning/40 text-white">
+                      <SelectValue placeholder="Todas as Finalizadoras" />
+                    </SelectTrigger>
+                    <SelectContent className="bg-black text-white border-warning/40">
+                      <SelectItem value="all">Todas as Finalizadoras</SelectItem>
+                      {[...new Set((agAgendamentos||[]).map(r=>r.finalizadora_nome).filter(Boolean))].map(fn => (
+                        <SelectItem key={fn} value={fn}>{fn}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Button variant="outline" size="sm" onClick={() => {
+                    try {
+                      const rows = filteredAg || [];
+                      const headers = ['Data/Hora','Código','Quadra','Participante','Finalizadora','Valor','Status'];
+                      const csvRows = [headers.join(';')];
+                      for (const r of rows) {
+                        const line = [
+                          r.inicio ? new Date(r.inicio).toLocaleString('pt-BR') : '',
+                          r.agendamento_codigo ?? '',
+                          (r.quadra_nome ?? '').replaceAll('"','""'),
+                          (r.participante_nome ?? '').replaceAll('"','""'),
+                          (r.finalizadora_nome ?? '').replaceAll('"','""'),
+                          String(fmt2(r.valor_cota)).replace('.', ','),
+                          r.status_pagamento ?? ''
+                        ].map(v => `"${String(v)}"`).join(';');
+                        csvRows.push(line);
+                      }
+                      const csvString = '\ufeff' + csvRows.join('\n');
+                      const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement('a');
+                      a.href = url;
+                      const de = startDate ? new Date(startDate + 'T00:00:00').toLocaleDateString('pt-BR') : '';
+                      const ate = endDate ? new Date(endDate + 'T00:00:00').toLocaleDateString('pt-BR') : '';
+                      a.download = `agendamentos_${de}_a_${ate}.csv`;
+                      document.body.appendChild(a);
+                      a.click();
+                      document.body.removeChild(a);
+                      URL.revokeObjectURL(url);
+                    } catch (e) {
+                      toast({ title: 'Falha ao exportar CSV', description: e?.message, variant: 'destructive' });
+                    }
+                  }}>
+                    <Download className="h-4 w-4 mr-2" /> Exportar CSV
+                  </Button>
+                </div>
+              </div>
+
+              {loading ? (
+                <div className="text-center py-8">
+                  <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-brand border-r-transparent"></div>
+                  <p className="mt-4 text-text-muted">Carregando...</p>
+                </div>
+              ) : filteredAg.length === 0 ? (
+                <div className="text-sm text-text-muted">Sem registros no período.</div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Data/Hora</TableHead>
+                        <TableHead>Código</TableHead>
+                        <TableHead>Quadra</TableHead>
+                        <TableHead>Participante</TableHead>
+                        <TableHead>Finalizadora</TableHead>
+                        <TableHead className="text-right">Valor</TableHead>
+                        <TableHead>Status</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {filteredAg.map((r, i) => (
+                        <TableRow key={`${r.agendamento_codigo}-${i}`}>
+                          <TableCell>{r.inicio ? new Date(r.inicio).toLocaleString('pt-BR') : '—'}</TableCell>
+                          <TableCell>#{r.agendamento_codigo || '—'}</TableCell>
+                          <TableCell>{r.quadra_nome || '—'}</TableCell>
+                          <TableCell>{r.participante_nome || '—'}</TableCell>
+                          <TableCell>{r.finalizadora_nome || '—'}</TableCell>
+                          <TableCell className="text-right font-semibold">{fmtBRL(r.valor_cota)}</TableCell>
+                          <TableCell>{r.status_pagamento || '—'}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </motion.div>
           </TabsContent>
 
           {/* ABA 2: CAIXA */}
@@ -762,7 +1368,7 @@ export default function FinanceiroPage() {
 
           {/* ABA 3: RECEBIMENTOS */}
           <TabsContent value="recebimentos" className="space-y-6 mt-6">
-            <motion.div variants={itemVariants} className="fx-card p-4">
+            <motion.div variants={itemVariants} className="fx-card p-4 border-0 ring-0 outline-none shadow-none">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-lg font-bold">Todos os Recebimentos</h2>
                 <div className="flex gap-2">
@@ -775,8 +1381,50 @@ export default function FinanceiroPage() {
                       className="pl-10 w-[200px]"
                     />
                   </div>
-                  <Button variant="outline" size="sm">
-                    <Download className="h-4 w-4 mr-2" /> Exportar
+                  <Select value={filterFonte} onValueChange={setFilterFonte}>
+                    <SelectTrigger className="w-[160px] h-9 bg-black border-warning/40 text-white">
+                      <SelectValue placeholder="Todas as Fontes" />
+                    </SelectTrigger>
+                    <SelectContent className="bg-black text-white border-warning/40">
+                      <SelectItem value="all">Todas as Fontes</SelectItem>
+                      <SelectItem value="manual">Manual</SelectItem>
+                      <SelectItem value="xml">XML</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Button variant="outline" size="sm" onClick={() => {
+                    try {
+                      const rows = filteredPagamentos || [];
+                      const headers = ['Data/Hora','Origem','Fonte','Descrição','Finalizadora','Valor','Status'];
+                      const csvRows = [headers.join(';')];
+                      for (const r of rows) {
+                        const line = [
+                          r.recebido_em ? new Date(r.recebido_em).toLocaleString('pt-BR') : '',
+                          r.origem ?? '',
+                          r.fonte ?? '',
+                          (r.descricao ?? '').replaceAll('"','""'),
+                          (r.finalizadoras?.nome || r.metodo || '').replaceAll('"','""'),
+                          String(fmt2(r.valor)).replace('.', ','),
+                          r.status ?? ''
+                        ].map(v => `"${String(v)}"`).join(';');
+                        csvRows.push(line);
+                      }
+                      const csvString = '\ufeff' + csvRows.join('\n');
+                      const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
+                      const url = URL.createObjectURL(blob);
+                      const de = startDate ? new Date(startDate + 'T00:00:00').toLocaleDateString('pt-BR') : '';
+                      const ate = endDate ? new Date(endDate + 'T00:00:00').toLocaleDateString('pt-BR') : '';
+                      const a = document.createElement('a');
+                      a.href = url;
+                      a.download = `recebimentos_${de}_a_${ate}.csv`;
+                      document.body.appendChild(a);
+                      a.click();
+                      document.body.removeChild(a);
+                      URL.revokeObjectURL(url);
+                    } catch (e) {
+                      toast({ title: 'Falha ao exportar CSV', description: e?.message, variant: 'destructive' });
+                    }
+                  }}>
+                    <Download className="h-4 w-4 mr-2" /> Exportar CSV
                   </Button>
                 </div>
               </div>
@@ -794,6 +1442,9 @@ export default function FinanceiroPage() {
                     <TableHeader>
                       <TableRow>
                         <TableHead>Data/Hora</TableHead>
+                        <TableHead>Origem</TableHead>
+                        <TableHead>Fonte</TableHead>
+                        <TableHead>Descrição</TableHead>
                         <TableHead>Finalizadora</TableHead>
                         <TableHead className="text-right">Valor</TableHead>
                         <TableHead>Status</TableHead>
@@ -801,8 +1452,11 @@ export default function FinanceiroPage() {
                     </TableHeader>
                     <TableBody>
                       {filteredPagamentos.map((pg) => (
-                        <TableRow key={pg.id}>
+                        <TableRow key={pg.id} className="cursor-pointer hover:bg-surface-2" onClick={() => { setRecSelecionado(pg); setRecModalOpen(true); }}>
                           <TableCell>{pg.recebido_em ? new Date(pg.recebido_em).toLocaleString('pt-BR') : '—'}</TableCell>
+                          <TableCell>{pg.origem || '—'}</TableCell>
+                          <TableCell>{pg.fonte ? pg.fonte.toUpperCase() : '—'}</TableCell>
+                          <TableCell className="truncate max-w-[260px]" title={pg.descricao || ''}>{pg.descricao || '—'}</TableCell>
                           <TableCell>{pg.finalizadoras?.nome || pg.metodo || '—'}</TableCell>
                           <TableCell className="text-right font-semibold">{fmtBRL(pg.valor)}</TableCell>
                           <TableCell>{pg.status || '—'}</TableCell>
@@ -827,6 +1481,129 @@ export default function FinanceiroPage() {
             </motion.div>
           </TabsContent>
         </Tabs>
+
+        {/* Modais auxiliares */}
+        {/* Modal: Detalhes do Recebimento */}
+        <Dialog open={recModalOpen} onOpenChange={setRecModalOpen}>
+          <DialogContent className="max-w-lg">
+            <DialogHeader>
+              <DialogTitle className="text-xl font-bold">Detalhes do Recebimento</DialogTitle>
+              <DialogDescription>
+                {recSelecionado?.origem === 'Comanda' ? 'Operação de comanda' : recSelecionado?.origem === 'Agendamento' ? 'Operação de agendamento' : 'Operação'}
+              </DialogDescription>
+            </DialogHeader>
+            {recSelecionado && (
+              <div className="space-y-3 text-sm">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <div className="text-text-muted">Data/Hora</div>
+                    <div className="font-medium">{recSelecionado.recebido_em ? new Date(recSelecionado.recebido_em).toLocaleString('pt-BR') : '—'}</div>
+                  </div>
+                  <div>
+                    <div className="text-text-muted">Valor</div>
+                    <div className="font-semibold">{fmtBRL(recSelecionado.valor)}</div>
+                  </div>
+                  <div>
+                    <div className="text-text-muted">Origem</div>
+                    <div>{recSelecionado.origem || '—'}</div>
+                  </div>
+                  <div>
+                    <div className="text-text-muted">Fonte</div>
+                    <div>{recSelecionado.fonte ? recSelecionado.fonte.toUpperCase() : '—'}</div>
+                  </div>
+                  <div>
+                    <div className="text-text-muted">Finalizadora</div>
+                    <div>{recSelecionado.finalizadoras?.nome || recSelecionado.metodo || '—'}</div>
+                  </div>
+                  <div>
+                    <div className="text-text-muted">Status</div>
+                    <div>{recSelecionado.status || '—'}</div>
+                  </div>
+                </div>
+
+                {/* Bloco específico por origem */}
+                {recSelecionado.origem === 'Comanda' && (
+                  <div className="mt-2 p-3 rounded border border-border">
+                    <div className="font-semibold mb-2">Comanda</div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <div className="text-text-muted">Cliente</div>
+                        <div>{recSelecionado.descricao || '—'}</div>
+                      </div>
+                    </div>
+
+                    {/* Itens da comanda */}
+                    <div className="mt-3">
+                      <div className="text-text-muted mb-1">Produtos</div>
+                      {recItensLoading ? (
+                        <div className="text-xs text-text-muted">Carregando itens...</div>
+                      ) : recItens.length === 0 ? (
+                        <div className="text-xs text-text-muted">Sem itens encontrados.</div>
+                      ) : (
+                        <div className="max-h-48 overflow-y-auto space-y-1">
+                          {recItens.map((it, idx) => (
+                            <div key={idx} className="text-xs flex justify-between gap-3">
+                              <div className="truncate">
+                                <span className="font-mono">{fmt2(it.quantidade)}</span>
+                                <span> x </span>
+                                <span className="font-medium">{it.descricao}</span>
+                              </div>
+                              <div className="whitespace-nowrap">
+                                {fmtBRL(Number(it.preco_unitario || 0) * Number(it.quantidade || 0))}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Pagamentos da comanda */}
+                    <div className="mt-4">
+                      <div className="text-text-muted mb-1">Pagamentos</div>
+                      {recPagamentos.length === 0 ? (
+                        <div className="text-xs text-text-muted">Sem pagamentos adicionais.</div>
+                      ) : (
+                        <div className="space-y-1">
+                          {recPagamentos.map((p, idx) => (
+                            <div key={p.id || idx} className="text-xs flex justify-between gap-3">
+                              <div className="truncate">
+                                <span className="font-medium">{p.finalizadoras?.nome || p.metodo || '—'}</span>
+                              </div>
+                              <div className="whitespace-nowrap">{fmtBRL(p.valor)}</div>
+                            </div>
+                          ))}
+                          <div className="text-xs flex justify-between gap-3 pt-2 border-t border-border">
+                            <div className="font-semibold">Total</div>
+                            <div className="font-semibold">{fmtBRL(recPagamentos.reduce((a, b) => a + Number(b.valor || 0), 0))}</div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+                {recSelecionado.origem === 'Agendamento' && (
+                  <div className="mt-2 p-3 rounded border border-border">
+                    <div className="font-semibold mb-2">Agendamento</div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <div className="text-text-muted">Código</div>
+                        <div className="font-mono">#{recSelecionado.agendamento_codigo}</div>
+                      </div>
+                      <div>
+                        <div className="text-text-muted">Participante</div>
+                        <div>{recSelecionado.participante_nome}</div>
+                      </div>
+                      <div className="col-span-2">
+                        <div className="text-text-muted">Quadra</div>
+                        <div>{recSelecionado.quadra_nome || '—'}</div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
 
         {/* Modal: Todos os Produtos */}
         <Dialog open={openProdutosModal} onOpenChange={setOpenProdutosModal}>

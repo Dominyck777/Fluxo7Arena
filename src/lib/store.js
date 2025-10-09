@@ -1222,10 +1222,7 @@ export async function registrarPagamento({ comandaId, finalizadoraId, metodo, va
     codigo_empresa: codigo // Sempre inclui o código da empresa
   }
   
-  // Adiciona cliente_id apenas se a coluna existir (evita erro de schema)
-  if (clienteId) {
-    payload.cliente_id = clienteId;
-  }
+  // Não enviar cliente_id (coluna não existe no seu schema atual). Evita 400/PGRST204.
   
   console.log('[registrarPagamento] Iniciando registro de pagamento:', {
     comandaId,
@@ -1246,12 +1243,14 @@ export async function registrarPagamento({ comandaId, finalizadoraId, metodo, va
       .single()
     
     if (error) {
-      console.error('[registrarPagamento] Erro na primeira tentativa:', error)
+      // Downgrade de log para evitar ruído quando coluna não existe
+      console.warn('[registrarPagamento] Primeira tentativa falhou:', { code: error.code, message: error.message })
       const msg = `${error?.message || ''} ${error?.details || ''}`.toLowerCase()
       const isUndefinedColumn = (error?.code === '42703') || msg.includes("column") && msg.includes("cliente_id")
       if (isUndefinedColumn) {
         // Retry sem cliente_id
         const { cliente_id, ...withoutCliente } = payload
+        try { localStorage.setItem('schema:pagamentos:cliente_id', 'no') } catch {}
         const { data: d2, error: e2 } = await supabase
           .from('pagamentos')
           .insert(withoutCliente)
@@ -1261,6 +1260,7 @@ export async function registrarPagamento({ comandaId, finalizadoraId, metodo, va
         console.log('[registrarPagamento] Pagamento registrado sem cliente_id:', d2)
         return d2
       }
+      
       // Se for erro de enum, tenta segunda abordagem simples sem casts complexos
       if (isEnumError(error)) {
         console.log('[registrarPagamento] Tentando abordagem alternativa sem status...')
