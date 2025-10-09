@@ -160,6 +160,8 @@ function AgendaPage() {
   useEffect(() => {
     // If you need debugging again, comment out this whole block or adjust allowlist
     const origLog = console.log;
+    const origInfo = console.info;
+    const origDebug = console.debug;
     const origWarn = console.warn;
     const origError = console.error;
     const shouldSuppress = (first) => {
@@ -171,12 +173,23 @@ function AgendaPage() {
         s.startsWith('[Clientes:load]') ||
         s.startsWith('[AgendaSettings]') ||
         s.startsWith('[Auto]') ||
+        // Hide PaymentModal debug noise
+        s.startsWith('[DEBUG-PaymentModal]') ||
+        s.startsWith('[PaymentModal]') ||
         s.startsWith('🛡️ EditGuard')
       );
     };
     console.log = (...args) => {
       try { if (shouldSuppress(args[0])) return; } catch {}
       return origLog(...args);
+    };
+    console.info = (...args) => {
+      try { if (shouldSuppress(args[0])) return; } catch {}
+      return origInfo(...args);
+    };
+    console.debug = (...args) => {
+      try { if (shouldSuppress(args[0])) return; } catch {}
+      return origDebug(...args);
     };
     console.warn = (...args) => {
       try { if (shouldSuppress(args[0])) return; } catch {}
@@ -188,6 +201,8 @@ function AgendaPage() {
     };
     return () => {
       console.log = origLog;
+      console.info = origInfo;
+      console.debug = origDebug;
       console.warn = origWarn;
       console.error = origError;
     };
@@ -256,6 +271,8 @@ function AgendaPage() {
   const uiBusyUntilRef = useRef(0);
   const setUiBusy = useCallback((ms = 800) => { uiBusyUntilRef.current = Date.now() + ms; dbg('UI:busy set', { ms }); }, [dbg]);
   const isUiBusy = useCallback(() => Date.now() < uiBusyUntilRef.current, []);
+  // Guard: janela curta após retornar da aba para amortecer automação/realtime
+  const returningFromHiddenUntilRef = useRef(0);
   // (moved) CustomerPicker state logging effect is added later, after isCustomerPickerOpen is declared
 
   // Evita duplo disparo de abertura em dev/StrictMode ou por eventos sobrepostos
@@ -582,13 +599,19 @@ function AgendaPage() {
 
   const scheduleNextAutomation = useCallback(() => {
     if (!authReady || !userProfile?.codigo_empresa) return;
-    // Evita re-renders e timers enquanto o modal estiver aberto (melhora UX de selects)
+    // Evita re-renders e timers durante janela crítica ou modal aberto
+    const now = Date.now();
+    if (now < (returningFromHiddenUntilRef.current || 0)) {
+      console.log('[AutoDiag] scheduleNextAutomation:deferred returning-from-hidden');
+      setTimeout(() => scheduleNextAutomation(), 600);
+      return;
+    }
     if (modalOpenRef.current) { dbg('scheduleNextAutomation:skipped (modal open)'); return; }
     pulseLog('auto:schedule');
     clearNextAutoTimer();
-    const now = getNowMs();
+    const nowMs = getNowMs();
     let nextTs = Infinity;
-    const consider = (ts) => { if (Number.isFinite(ts) && ts > now && ts < nextTs) nextTs = ts; };
+    const consider = (ts) => { if (Number.isFinite(ts) && ts > nowMs && ts < nextTs) nextTs = ts; };
     try {
       for (const b of (bookings || [])) {
         if (!b || b.auto_disabled) continue;
@@ -610,7 +633,7 @@ function AgendaPage() {
       }
     } catch {}
     if (nextTs !== Infinity) {
-      const delay = Math.max(0, Math.min(nextTs - now + 250, 10 * 60 * 1000)); // pequeno buffer de 250ms
+      const delay = Math.max(0, Math.min(nextTs - nowMs + 250, 10 * 60 * 1000)); // pequeno buffer de 250ms
       try { console.debug('[Auto] next schedule in ms', delay); } catch {}
       try { setNextAutoAtMs(nextTs); } catch {}
       nextAutoTimerRef.current = setTimeout(() => { try { runAutomationRef.current && runAutomationRef.current(); } catch {} }, delay);
@@ -829,32 +852,44 @@ function AgendaPage() {
     } catch {}
   }, [bookingsCacheKey, dbg]);
 
-  // Recuperação resiliente ao voltar foco/visibilidade da aba: reidrata cache e refaz fetch
+  // Visibilidade/foco: comportamento desativado para evitar pulsos ao retornar à aba
+  // (Antes: reidratava cache, executava automação e refetch em visibility/focus)
+  // useEffect(() => {}, []);
+
+  // Diagnóstico e guard: logs e janela curta ao retornar da aba (sem efeitos funcionais além do guard)
   useEffect(() => {
-    const onVisOrFocus = () => {
-      if (document.visibilityState === 'visible') {
-        try {
-          if (bookingsCacheKey) {
-            const cached = JSON.parse(localStorage.getItem(bookingsCacheKey) || '[]');
-            if (Array.isArray(cached) && cached.length > 0) {
-              const mapped = cached.map((b) => ({ ...b, start: new Date(b.start), end: new Date(b.end) }));
-              setBookings((prev) => (prev && prev.length > 0 ? prev : mapped));
-            }
-          }
-        } catch {}
-        // Ao voltar, roda automação e recarrega dados frescos do backend
-        try { runAutomationRef.current && runAutomationRef.current(); } catch {}
-        try { fetchBookings(); } catch {}
-        try { scheduleNextAutomation(); } catch {}
-      }
+    const onVis = () => {
+      try {
+        const ts = new Date().toISOString();
+        // [VisDebug] silenciado
+        if (document.visibilityState === 'visible') {
+          const now = Date.now();
+          returningFromHiddenUntilRef.current = now + 800;
+          // [GuardDiag] silenciado
+        }
+      } catch {}
     };
-    document.addEventListener('visibilitychange', onVisOrFocus);
-    window.addEventListener('focus', onVisOrFocus);
+    const onFocus = () => {
+      try {
+        const ts = new Date().toISOString();
+        // [VisDebug] silenciado
+      } catch {}
+    };
+    const onBlur = () => {
+      try {
+        const ts = new Date().toISOString();
+        // [VisDebug] silenciado
+      } catch {}
+    };
+    document.addEventListener('visibilitychange', onVis);
+    window.addEventListener('focus', onFocus);
+    window.addEventListener('blur', onBlur);
     return () => {
-      document.removeEventListener('visibilitychange', onVisOrFocus);
-      window.removeEventListener('focus', onVisOrFocus);
+      document.removeEventListener('visibilitychange', onVis);
+      window.removeEventListener('focus', onFocus);
+      window.removeEventListener('blur', onBlur);
     };
-  }, [bookingsCacheKey]);
+  }, [isModalOpen, bookings]);
 
   // Reagendar quando lista de bookings ou regras mudarem
   useEffect(() => {
@@ -877,6 +912,15 @@ function AgendaPage() {
   // Carrega agendamentos do dia atual a partir do banco (extraído para useCallback para reuso)
   const fetchBookings = useCallback(async () => {
     if (!authReady || !userProfile?.codigo_empresa) return;
+    // Evita fetch durante janela crítica pós-retorno de aba ou com modal aberto
+    if (Date.now() < (returningFromHiddenUntilRef.current || 0)) {
+      // [GuardDiag] silenciado
+      return;
+    }
+    if (isModalOpen) {
+      // [GuardDiag] silenciado
+      return;
+    }
     dbg('fetchBookings:start', { date: format(currentDate, 'yyyy-MM-dd'), empresa: userProfile?.codigo_empresa });
     pulseLog('fetch:start', { day: format(currentDate, 'yyyy-MM-dd') });
     const dayStart = startOfDay(currentDate);
@@ -1069,6 +1113,15 @@ function AgendaPage() {
     const id = setInterval(() => {
       try {
         const now = Date.now();
+        // Skip durante janela crítica ou modal aberto
+        if (now < (returningFromHiddenUntilRef.current || 0)) {
+          console.log('[AutoDiag] reconcile:skipped returning-from-hidden');
+          return;
+        }
+        if (isModalOpen) {
+          console.log('[AutoDiag] reconcile:skipped modal-open');
+          return;
+        }
         const rtOk = String(realtimeStatus || '').toUpperCase() === 'SUBSCRIBED';
         const lastEvtAge = typeof lastRealtimeEventAtMs === 'number' ? (now - lastRealtimeEventAtMs) : Infinity;
         const realtimeStale = !rtOk || lastEvtAge > (7 * 60 * 1000); // 7 min sem evento
@@ -1087,7 +1140,11 @@ function AgendaPage() {
   useEffect(() => {
     const loadParticipants = async () => {
       if (!authReady || !userProfile?.codigo_empresa) return;
-      // Evitar re-renders do modal enquanto o usuário está interagindo com selects
+      // Evita carregamento durante janela crítica pós-retorno ou com modal aberto
+      if (Date.now() < (returningFromHiddenUntilRef.current || 0)) {
+        // [GuardDiag] silenciado
+        return;
+      }
       if (modalOpenRef.current) { dbg('Participants:skipped (modal open)'); return; }
       dbg('Participants:load start'); pulseLog('parts:start');
       const ids = (bookings || []).map(b => b.id).filter(Boolean);
@@ -1581,16 +1638,64 @@ function AgendaPage() {
     // Guarda o primeiro cliente selecionado nesta abertura do modal (para compor o rótulo corretamente)
     const firstSelectedIdRef = useRef(null);
     useEffect(() => {
-      console.log('[DEBUG-PaymentModal] useEffect executando', { isPaymentModalOpen, payMethodsCount: payMethods?.length, participantsFormCount: participantsForm?.length });
+      // [DEBUG-PaymentModal] silenciado
       selectedClientsRef.current = Array.isArray(form.selectedClients) ? form.selectedClients : [];
       try { if ((selectedClientsRef.current || []).length > 0) userSelectedOnceRef.current = true; } catch {}
     }, [form.selectedClients]);
     const [isCustomerPickerOpen, setIsCustomerPickerOpen] = useState(false);
     const [customerQuery, setCustomerQuery] = useState('');
+    // Janela de bloqueio para ignorar fechamentos logo após retornar à aba
+    const pickerBlockUntilRef = useRef(0);
+    // Se o usuário saiu da aba com o picker aberto, reabrir uma vez ao voltar
+    const pickerWasOpenOnHideRef = useRef(false);
+    useEffect(() => {
+      const onVis = () => {
+        try {
+          if (document.visibilityState === 'hidden') {
+            pickerWasOpenOnHideRef.current = !!(effectiveCustomerPickerOpen || isCustomerPickerOpen);
+            const now = Date.now();
+            // Janela curta de proteção para evitar flapping logo ao retornar
+            try { selectionLockUntilRef.current = now + 1200; } catch {}
+            try { suppressPickerCloseRef.current = now + 1200; } catch {}
+            try { pickerBlockUntilRef.current = now + 800; } catch {}
+            // [PickerDiag] silenciado
+          } else if (document.visibilityState === 'visible') {
+            const wasOpen = pickerWasOpenOnHideRef.current;
+            pickerWasOpenOnHideRef.current = false;
+            const now = Date.now();
+            // Reforça janelas de proteção por mais alguns ms ao voltar
+            try { selectionLockUntilRef.current = Math.max(selectionLockUntilRef.current || 0, now + 600); } catch {}
+            try { suppressPickerCloseRef.current = Math.max(suppressPickerCloseRef.current || 0, now + 600); } catch {}
+            try { pickerBlockUntilRef.current = Math.max(pickerBlockUntilRef.current || 0, now + 400); } catch {}
+            // [PickerDiag] silenciado
+            if (wasOpen && !modalOpenRef.current) {
+              // Reabre uma única vez com pequeno atraso (só se modal não estiver aberto)
+              setTimeout(() => {
+                if (!modalOpenRef.current) {
+                  setIsCustomerPickerOpen(true);
+                  setEffectiveCustomerPickerOpen(true);
+                  // [PickerDiag] silenciado
+                } else {
+                  // [PickerDiag] silenciado
+                }
+              }, 60);
+            }
+          }
+        } catch {}
+      };
+      document.addEventListener('visibilitychange', onVis);
+      return () => document.removeEventListener('visibilitychange', onVis);
+    }, [effectiveCustomerPickerOpen, isCustomerPickerOpen, isModalOpen]);
+
+    // Log de qualquer mudança de estado do picker, com janelas de guarda ativas
+    useEffect(() => {
+      const now = Date.now();
+      // [PickerDiag] silenciado
+    }, [isCustomerPickerOpen, effectiveCustomerPickerOpen]);
     // Track transitions of selectedClients length (moved after picker state declarations to avoid TDZ)
     const prevSelLenRef = useRef(0);
     useEffect(() => {
-      console.log('[DEBUG-PaymentModal] useEffect executando', { isPaymentModalOpen, payMethodsCount: payMethods?.length, participantsFormCount: participantsForm?.length });
+      // [DEBUG-PaymentModal] silenciado
       const cur = Array.isArray(form.selectedClients) ? form.selectedClients.length : -1;
       const prev = prevSelLenRef.current;
       if (cur !== prev) {
@@ -1649,7 +1754,7 @@ function AgendaPage() {
 
     // Carrega finalizadoras quando o modal de pagamentos abre
     useEffect(() => {
-      console.log('[DEBUG-PaymentModal] useEffect executando', { isPaymentModalOpen, payMethodsCount: payMethods?.length, participantsFormCount: participantsForm?.length });
+      // [DEBUG-PaymentModal] silenciado
       if (!isPaymentModalOpen) return;
       let cancelled = false;
       (async () => {
@@ -1664,12 +1769,12 @@ function AgendaPage() {
 
     // Define uma finalizadora padrão para linhas sem seleção
     useEffect(() => {
-      console.log('[DEBUG-PaymentModal] useEffect executando', { isPaymentModalOpen, payMethodsCount: payMethods?.length, participantsFormCount: participantsForm?.length });
+      // [DEBUG-PaymentModal] silenciado
       if (!isPaymentModalOpen) return;
       if (!Array.isArray(payMethods) || payMethods.length === 0) return;
       const def = String(payMethods[0].id);
       setParticipantsForm(prev => {
-        console.log('[DEBUG-PaymentModal] setParticipantsForm prev:', prev.map(p => ({ id: p.cliente_id, fin: p.finalizadora_id })));
+        // [DEBUG-PaymentModal] silenciado
         // Se participantsForm está vazio, inicializar com os clientes selecionados
         if (prev.length === 0 && Array.isArray(form.selectedClients) && form.selectedClients.length > 0) {
           const initialized = form.selectedClients.map(c => ({
@@ -1688,8 +1793,7 @@ function AgendaPage() {
           ...p, 
           finalizadora_id: (p.finalizadora_id && p.finalizadora_id !== '') ? p.finalizadora_id : def 
         }));
-        // Removed verbose PaymentModal log
-        console.log('[DEBUG-PaymentModal] Resultado final:', updated.map(p => ({ id: p.cliente_id, fin: p.finalizadora_id })));
+        // [DEBUG-PaymentModal] silenciado
         return updated;
       });
     }, [isPaymentModalOpen, payMethods]); // ✅ CORREÇÃO: Removido form.selectedClients para evitar sobrescrever finalizadoras ao abrir modal principal
@@ -1705,7 +1809,7 @@ function AgendaPage() {
         if (finalArr.length === 0 && pickerClosed && guardActive && !cleared) {
           const fallback = Array.isArray(lastNonEmptySelectionRef.current) ? lastNonEmptySelectionRef.current : [];
           if (fallback.length > 0) {
-            console.warn('[CustomerPicker][BLOCK:empty-set]', { ts: new Date().toISOString(), reason, guardUntil: Math.max(restoreGuardUntilRef.current||0, suppressPickerCloseRef.current||0), fallbackLen: fallback.length });
+            // [CustomerPicker] silenciado
             finalArr = fallback;
           }
         }
@@ -1737,12 +1841,12 @@ function AgendaPage() {
     const paymentSearchRef = useRef(null);
     // (console cleaned) Removed general CustomerPicker state logging to reduce noise
     useEffect(() => {
-      console.log('[DEBUG-PaymentModal] useEffect executando', { isPaymentModalOpen, payMethodsCount: payMethods?.length, participantsFormCount: participantsForm?.length });
+      // [DEBUG-PaymentModal] silenciado
       try { customerPickerLastChangeAtRef.current = Date.now(); } catch {}
     }, [isCustomerPickerOpen, clientsLoading]);
     // Start/End pulse timeline around the Customer Picker lifecycle
     useEffect(() => {
-      console.log('[DEBUG-PaymentModal] useEffect executando', { isPaymentModalOpen, payMethodsCount: payMethods?.length, participantsFormCount: participantsForm?.length });
+      // [DEBUG-PaymentModal] silenciado
       if (!debugOn) return;
       customerPickerOpenRef.current = isCustomerPickerOpen;
       if (isCustomerPickerOpen) {
@@ -1776,7 +1880,7 @@ function AgendaPage() {
 
     // Log when internal open states change (post-render perspective)
     useEffect(() => {
-      console.log('[DEBUG-PaymentModal] useEffect executando', { isPaymentModalOpen, payMethodsCount: payMethods?.length, participantsFormCount: participantsForm?.length });
+      // [DEBUG-PaymentModal] silenciado
       if (!debugOn) return;
       pickerLog('state-change', { isCustomerPickerOpen, effectiveCustomerPickerOpen });
     }, [debugOn, isCustomerPickerOpen, effectiveCustomerPickerOpen]);
@@ -1791,7 +1895,7 @@ function AgendaPage() {
 
     // Global restoration when picker is closed and selection becomes empty unintentionally
     useEffect(() => {
-      console.log('[DEBUG-PaymentModal] useEffect executando', { isPaymentModalOpen, payMethodsCount: payMethods?.length, participantsFormCount: participantsForm?.length });
+      // [DEBUG-PaymentModal] silenciado
       if (!isModalOpen) return;
       if (effectiveCustomerPickerOpen) return; // only enforce when picker is closed
       const cur = Array.isArray(form.selectedClients) ? form.selectedClients : [];
@@ -1801,18 +1905,18 @@ function AgendaPage() {
       if (cur.length === 0 && last.length > 0 && !clearedByUserRef.current && lockActive) {
         lastSelActionRef.current = 'global:restore';
         setForm((f) => ({ ...f, selectedClients: last }));
-        try { console.warn('[CustomerPicker][GLOBAL:restore]', { id: mountIdRef.current, lastLen: last.length, lockActive }); } catch {}
+        // [CustomerPicker] silenciado
       } else if (cur.length === 0 && last.length > 0 && clearedByUserRef.current && !lockActive) {
         try { 
           lastNonEmptySelectionRef.current = [];
-          console.warn('[CustomerPicker][GLOBAL:ensure-cleared]', { id: mountIdRef.current });
+          // [CustomerPicker] silenciado
         } catch {}
       }
     }, [isModalOpen, effectiveCustomerPickerOpen, form.selectedClients]);
 
     // Watchdog: se o picker fechou sem intenção explícita e o usuário deseja mantê-lo aberto, reabre automaticamente
     useEffect(() => {
-      console.log('[DEBUG-PaymentModal] useEffect executando', { isPaymentModalOpen, payMethodsCount: payMethods?.length, participantsFormCount: participantsForm?.length });
+      // [DEBUG-PaymentModal] silenciado
       if (!isModalOpen) return;
       // Persisted desire in localStorage (survive remounts)
       let desired = customerPickerDesiredOpenRef.current;
@@ -1839,7 +1943,7 @@ function AgendaPage() {
 
     // Mantém a última seleção não vazia em memória
     useEffect(() => {
-      console.log('[DEBUG-PaymentModal] useEffect executando', { isPaymentModalOpen, payMethodsCount: payMethods?.length, participantsFormCount: participantsForm?.length });
+      // [DEBUG-PaymentModal] silenciado
       const arr = Array.isArray(form.selectedClients) ? form.selectedClients : [];
       if (arr.length > 0) {
         lastNonEmptySelectionRef.current = arr;
@@ -1850,7 +1954,7 @@ function AgendaPage() {
 
     // Ao fechar o picker, se a seleção ficou vazia de forma inesperada, restaura
     useEffect(() => {
-      console.log('[DEBUG-PaymentModal] useEffect executando', { isPaymentModalOpen, payMethodsCount: payMethods?.length, participantsFormCount: participantsForm?.length });
+      // [DEBUG-PaymentModal] silenciado
       if (!isModalOpen) return;
       // hydrate last non-empty selection from sessionStorage on open
       hydrateLastNonEmpty();
@@ -1878,7 +1982,7 @@ function AgendaPage() {
     // Diagnostics: log any change to selectedClients and attempt delayed restore if it becomes empty unexpectedly
     const lastLoggedAtRef = useRef(0);
     useEffect(() => {
-      console.log('[DEBUG-PaymentModal] useEffect executando', { isPaymentModalOpen, payMethodsCount: payMethods?.length, participantsFormCount: participantsForm?.length });
+      // [DEBUG-PaymentModal] silenciado
       try {
         const now = Date.now();
         const cur = Array.isArray(selectedClientsRef.current) ? selectedClientsRef.current : [];
@@ -1943,14 +2047,14 @@ function AgendaPage() {
 
     // Guarda forte: enquanto restoreGuardUntil estiver ativo, qualquer transição para array vazio é revertida de imediato
     useEffect(() => {
-      console.log('[DEBUG-PaymentModal] useEffect executando', { isPaymentModalOpen, payMethodsCount: payMethods?.length, participantsFormCount: participantsForm?.length });
+      // [DEBUG-PaymentModal] silenciado
       try {
         const guardActive = now < (restoreGuardUntilRef.current || 0);
         const cur = Array.isArray(selectedClientsRef.current) ? selectedClientsRef.current : [];
         const last = Array.isArray(lastNonEmptySelectionRef.current) ? lastNonEmptySelectionRef.current : [];
         const lockActive = now < (selectionLockUntilRef.current || 0);
         if (isModalOpen && !effectiveCustomerPickerOpen && (guardActive || lockActive) && cur.length === 0 && last.length > 0 && !clearedByUserRef.current) {
-          console.warn('[CustomerPicker][GUARD:restore]', { ts: new Date().toISOString(), guardUntil: restoreGuardUntilRef.current, lastLen: last.length });
+          // [CustomerPicker] silenciado
           setChipsSnapshot(last);
           try { sessionStorage.setItem(persistLastKey, JSON.stringify(last)); } catch {}
           setForm(f => ({ ...f, selectedClients: [...last] }));
@@ -1964,8 +2068,10 @@ function AgendaPage() {
 
     // Watchdog adicional: durante janela de trava (selectionLock), qualquer transição para [] é revertida agressivamente
     useEffect(() => {
-      console.log('[DEBUG-PaymentModal] useEffect executando', { isPaymentModalOpen, payMethodsCount: payMethods?.length, participantsFormCount: participantsForm?.length });
+      // [DEBUG-PaymentModal] silenciado
       const now = Date.now();
+      // Skip durante janela crítica pós-retorno
+      if (now < (returningFromHiddenUntilRef.current || 0)) return;
       if (!isModalOpen) return;
       if (effectiveCustomerPickerOpen) return;
       if (now >= (selectionLockUntilRef.current || 0)) return;
@@ -1980,14 +2086,14 @@ function AgendaPage() {
         setTimeout(() => setForm(f => ({ ...f, selectedClients: [...(lastNonEmptySelectionRef.current || [])] })), 24);
         setTimeout(() => setForm(f => ({ ...f, selectedClients: [...(lastNonEmptySelectionRef.current || [])] })), 80);
         setTimeout(() => setForm(f => ({ ...f, selectedClients: [...(lastNonEmptySelectionRef.current || [])] })), 240);
-        try { console.warn('[CustomerPicker][LOCK:restore]', { id: mountIdRef.current, lastLen: last.length }); } catch {}
+        // [CustomerPicker] silenciado
       }
     }, [form.selectedClients, isModalOpen, effectiveCustomerPickerOpen]);
     // (removed erroneous stray return block)
     // Ocultar participantes apenas na UI de Pagamentos (não altera o agendamento até salvar pagamentos)
     const [paymentHiddenIds, setPaymentHiddenIds] = useState([]);
     useEffect(() => {
-      console.log('[DEBUG-PaymentModal] useEffect executando', { isPaymentModalOpen, payMethodsCount: payMethods?.length, participantsFormCount: participantsForm?.length });
+      // [DEBUG-PaymentModal] silenciado
       if (isPaymentModalOpen) {
         // Ao abrir o modal de pagamentos, não manter remoções anteriores
         setPaymentHiddenIds([]);
@@ -2002,7 +2108,7 @@ function AgendaPage() {
 
     // Mantém o representante (paymentSelectedId) consistente com a seleção atual
     useEffect(() => {
-      console.log('[DEBUG-PaymentModal] useEffect executando', { isPaymentModalOpen, payMethodsCount: payMethods?.length, participantsFormCount: participantsForm?.length });
+      // [DEBUG-PaymentModal] silenciado
       const sel = Array.isArray(form.selectedClients) ? form.selectedClients : [];
       const current = paymentSelectedId;
       const valid = current && sel.some(c => c && c.id === current);
@@ -2023,7 +2129,10 @@ function AgendaPage() {
     // Watchdog: se ficar carregando sem itens locais por >2s, desliga o loading para mostrar 'Nenhum cliente encontrado'
     const clientsLoadingSinceRef = useRef(0);
     useEffect(() => {
-      console.log('[DEBUG-PaymentModal] useEffect executando', { isPaymentModalOpen, payMethodsCount: payMethods?.length, participantsFormCount: participantsForm?.length });
+      // [DEBUG-PaymentModal] silenciado
+      // Skip durante janela crítica pós-retorno
+      const now = Date.now();
+      if (now < (returningFromHiddenUntilRef.current || 0)) return;
       if (clientsLoading) {
         if (!clientsLoadingSinceRef.current) clientsLoadingSinceRef.current = Date.now();
         const t = setTimeout(() => {
@@ -2100,7 +2209,10 @@ function AgendaPage() {
 
     // Debug: loga quando a lista efetiva muda, para diagnosticar chips
     useEffect(() => {
-      console.log('[DEBUG-PaymentModal] useEffect executando', { isPaymentModalOpen, payMethodsCount: payMethods?.length, participantsFormCount: participantsForm?.length });
+      // [DEBUG-PaymentModal] silenciado
+      // Skip durante janela crítica pós-retorno
+      const now = Date.now();
+      if (now < (returningFromHiddenUntilRef.current || 0)) return;
       try {
         dbg('Chips:effective change', {
           effectiveLen: Array.isArray(effectiveSelectedClients) ? effectiveSelectedClients.length : 0,
@@ -2117,7 +2229,7 @@ function AgendaPage() {
     const clientsLoadedKeyRef = useRef(null);
     const clientsRetryRef = useRef(false);
     useEffect(() => {
-      console.log('[DEBUG-PaymentModal] useEffect executando', { isPaymentModalOpen, payMethodsCount: payMethods?.length, participantsFormCount: participantsForm?.length });
+      // [DEBUG-PaymentModal] silenciado
       // Sincroniza lista local com o snapshot atual do pai ao abrir
       if (!isModalOpen) return;
       // Apenas propaga para local se vier com conteúdo (>0) para evitar apagar cache/hidratação temporária
@@ -2140,36 +2252,20 @@ function AgendaPage() {
 
     // Ao fechar o modal, reseta a chave de carregamento para permitir novo fetch na próxima abertura
     useEffect(() => {
-      console.log('[DEBUG-PaymentModal] useEffect executando', { isPaymentModalOpen, payMethodsCount: payMethods?.length, participantsFormCount: participantsForm?.length });
+      // [DEBUG-PaymentModal] silenciado
       if (!isModalOpen) {
         clientsLoadedKeyRef.current = null;
         setClientsLoading(false);
       }
     }, [isModalOpen]);
 
-    // Reidrata quando o usuário volta a aba (tab visibility) para evitar lista vazia
-    useEffect(() => {
-      console.log('[DEBUG-PaymentModal] useEffect executando', { isPaymentModalOpen, payMethodsCount: payMethods?.length, participantsFormCount: participantsForm?.length });
-      if (!isModalOpen) return;
-      const onVis = () => {
-        if (document.visibilityState === 'visible') {
-          try {
-            const key = userProfile?.codigo_empresa ? `clientes:list:${userProfile.codigo_empresa}` : null;
-            if (!key) return;
-            const cached = JSON.parse(localStorage.getItem(key) || '[]');
-            if (Array.isArray(cached) && cached.length > 0) {
-              setLocalCustomers((prev) => (prev && prev.length > 0 ? prev : cached));
-            }
-          } catch {}
-        }
-      };
-      document.addEventListener('visibilitychange', onVis);
-      return () => document.removeEventListener('visibilitychange', onVis);
-    }, [isModalOpen, userProfile?.codigo_empresa]);
+    // Visibilidade: desativado para evitar pulsos ao retornar à aba
+    // (Antes: reidratava lista de clientes ao voltar a aba)
+    // useEffect(() => {}, [isModalOpen, userProfile?.codigo_empresa]);
 
     // Limpa flags de salvamento quando abrir/fechar modal
     useEffect(() => {
-      console.log('[DEBUG-PaymentModal] useEffect executando', { isPaymentModalOpen, payMethodsCount: payMethods?.length, participantsFormCount: participantsForm?.length });
+      // [DEBUG-PaymentModal] silenciado
       if (!isModalOpen) {
         pendingSaveRef.current = false;
         completedSaveRef.current = false;
@@ -2182,7 +2278,7 @@ function AgendaPage() {
     // Ao abrir o modal especificamente para NOVO agendamento (não edição), zera seleção de clientes mesmo com prefill
     const wasOpenRef = useRef(false);
     useEffect(() => {
-      console.log('[DEBUG-PaymentModal] useEffect executando', { isPaymentModalOpen, payMethodsCount: payMethods?.length, participantsFormCount: participantsForm?.length });
+      // [DEBUG-PaymentModal] silenciado
       if (isModalOpen && !wasOpenRef.current) {
         wasOpenRef.current = true;
         // Define/Reutiliza um sessionId para esta abertura do modal (sobrevive a remount)
@@ -2212,7 +2308,7 @@ function AgendaPage() {
             const rawSel = sessionStorage.getItem(persistLastKey);
             const persisted = rawSel ? JSON.parse(rawSel) : [];
             if (within && Array.isArray(persisted) && persisted.length > 0 && closingSessionId && modalSessionId && closingSessionId === modalSessionId) {
-              try { console.warn('[CustomerPicker][RESTORE:init-open]', { id: mountIdRef.current, withinMs: Date.now() - closingAt, idsMatch: true, closingSessionId, modalSessionId, persistedLen: persisted.length }); } catch {}
+              // [CustomerPicker] silenciado
               try { userSelectedOnceRef.current = true; } catch {}
               setForm(f => ({ ...f, selectedClients: persisted }));
               lastNonEmptySelectionRef.current = persisted;
@@ -2228,7 +2324,7 @@ function AgendaPage() {
             }
             // Fallback: se dentro da janela e há persisted, mas IDs não batem, ainda assim restaurar para evitar perda
             if (within && Array.isArray(persisted) && persisted.length > 0) {
-              try { console.warn('[CustomerPicker][RESTORE:init-open:FALLBACK]', { id: mountIdRef.current, withinMs: Date.now() - closingAt, idsMatch: false, closingSessionId, modalSessionId, persistedLen: persisted.length }); } catch {}
+              // [CustomerPicker] silenciado
               try { userSelectedOnceRef.current = true; } catch {}
               setForm(f => ({ ...f, selectedClients: persisted }));
               lastNonEmptySelectionRef.current = persisted;
@@ -2352,7 +2448,7 @@ function AgendaPage() {
     // garantir limpeza de clientes mesmo sem fechar/reabrir o modal.
     const newModeInitRef = useRef(false);
     useEffect(() => {
-      console.log('[DEBUG-PaymentModal] useEffect executando', { isPaymentModalOpen, payMethodsCount: payMethods?.length, participantsFormCount: participantsForm?.length });
+      // [DEBUG-PaymentModal] silenciado
       if (!isModalOpen) { 
         newModeInitRef.current = false; 
         // Ao fechar o modal, limpa quaisquer marcadores e sessionId
@@ -2614,6 +2710,7 @@ function AgendaPage() {
             codigo_empresa: userProfile.codigo_empresa,
             agendamento_id: data.id,
             cliente_id: c.id,
+            nome: c.nome, // ✅ CORREÇÃO: Inclui o nome do participante
             valor_cota: 0,
             status_pagamento: 'Pendente',
           }));
@@ -2657,17 +2754,8 @@ function AgendaPage() {
     }, [isSavingBooking, courtsMap, form, editingBooking, userProfile, isRangeFree, setBookings, toast, setIsModalOpen, updateBookingStatus]);
 
     // Ao voltar para a aba, se houver salvamento pendente e não concluído, reexecuta automaticamente
-    useEffect(() => {
-      console.log('[DEBUG-PaymentModal] useEffect executando', { isPaymentModalOpen, payMethodsCount: payMethods?.length, participantsFormCount: participantsForm?.length });
-      const onVis = () => {
-        if (document.visibilityState === 'visible' && isModalOpen && pendingSaveRef.current && !completedSaveRef.current && !isSavingBooking) {
-          // Reexecuta sem intervenção do usuário
-          saveBookingOnce();
-        }
-      };
-      document.addEventListener('visibilitychange', onVis);
-      return () => document.removeEventListener('visibilitychange', onVis);
-    }, [isModalOpen, isSavingBooking, saveBookingOnce]);
+    // Auto-retry ao voltar de outra aba: desativado para evitar pulsos
+    // useEffect(() => {}, [isModalOpen, isSavingBooking, saveBookingOnce]);
   useEffect(() => {
     const loadClients = async () => {
       if (!isModalOpen || !userProfile?.codigo_empresa) return;
@@ -2742,7 +2830,7 @@ function AgendaPage() {
 
     // Atualiza o total automaticamente conforme quadra/duração mudam
     useEffect(() => {
-      console.log('[DEBUG-PaymentModal] useEffect executando', { isPaymentModalOpen, payMethodsCount: payMethods?.length, participantsFormCount: participantsForm?.length });
+      // [DEBUG-PaymentModal] silenciado
       const court = courtsMap[form.court];
       if (!court) return;
       const perHalfHour = Number(court.valor || 0);
@@ -2757,7 +2845,7 @@ function AgendaPage() {
 
     // Preencher formulário ao abrir em modo edição ou reset para novo (apenas uma vez por abertura)
     useEffect(() => {
-      console.log('[DEBUG-PaymentModal] useEffect executando', { isPaymentModalOpen, payMethodsCount: payMethods?.length, participantsFormCount: participantsForm?.length });
+      // [DEBUG-PaymentModal] silenciado
       if (!isModalOpen) return;
       // Evita sobrescrever escolhas do usuário devido a efeitos tardios (ex.: quadras/clientes chegando)
       if (initializedRef.current) return;
@@ -2884,7 +2972,7 @@ function AgendaPage() {
 
     // Se trocar o agendamento em edição com o modal aberto, re-inicializa o formulário de edição
     useEffect(() => {
-      console.log('[DEBUG-PaymentModal] useEffect executando', { isPaymentModalOpen, payMethodsCount: payMethods?.length, participantsFormCount: participantsForm?.length });
+      // [DEBUG-PaymentModal] silenciado
       if (!isModalOpen) return;
       if (!editingBooking) return;
       // Permitir re-inicialização completa para o novo agendamento
@@ -2900,7 +2988,7 @@ function AgendaPage() {
 
     // Prefill tardio: quando os participantes chegam após abrir o modal
     useEffect(() => {
-      console.log('[DEBUG-PaymentModal] useEffect executando', { isPaymentModalOpen, payMethodsCount: payMethods?.length, participantsFormCount: participantsForm?.length });
+      // [DEBUG-PaymentModal] silenciado
       if (!isModalOpen || !editingBooking) return;
       if (participantsPrefillOnceRef.current) return;
       const loadedParts = participantsByAgendamento[editingBooking.id] || [];
@@ -2920,6 +3008,7 @@ function AgendaPage() {
               return maskBRL(String((Number.isFinite(num) ? num : 0).toFixed(2)));
             })(),
             status_pagamento: p.status_pagamento || 'Pendente',
+            finalizadora_id: p.finalizadora_id || null, // ✅ CORREÇÃO: Preserva a finalizadora salva
           }))
         );
         setPaymentSelectedId(selectedFromParts[0]?.id || null);
@@ -2995,7 +3084,7 @@ function AgendaPage() {
 
     // Valida/auto-corrige início/fim ao mudar quadra/data/início
     useEffect(() => {
-      console.log('[DEBUG-PaymentModal] useEffect executando', { isPaymentModalOpen, payMethodsCount: payMethods?.length, participantsFormCount: participantsForm?.length });
+      // [DEBUG-PaymentModal] silenciado
       if (suppressAutoAdjustRef.current) {
         // Não ajustar na primeira renderização após aplicar prefill manual
         suppressAutoAdjustRef.current = false;
@@ -3031,7 +3120,7 @@ function AgendaPage() {
 
     // Garante modalidade válida quando a quadra muda
     useEffect(() => {
-      console.log('[DEBUG-PaymentModal] useEffect executando', { isPaymentModalOpen, payMethodsCount: payMethods?.length, participantsFormCount: participantsForm?.length });
+      // [DEBUG-PaymentModal] silenciado
       const allowed = courtsMap[form.court]?.modalidades || modalities;
       if (!allowed.includes(form.modality)) {
         setForm(f => ({ ...f, modality: allowed[0] || '' }));
@@ -3105,7 +3194,7 @@ function AgendaPage() {
 
     // Regra global: se qualquer participante cobrir o total do agendamento, todos ficam 'Pago'
     useEffect(() => {
-      console.log('[DEBUG-PaymentModal] useEffect executando', { isPaymentModalOpen, payMethodsCount: payMethods?.length, participantsFormCount: participantsForm?.length });
+      // [DEBUG-PaymentModal] silenciado
       const totalTarget = parseBRL(paymentTotal);
       if (!Number.isFinite(totalTarget) || totalTarget <= 0) return;
       const anyCoversAll = (participantsForm || []).some(p => parseBRL(p?.valor_cota) >= totalTarget);
@@ -3124,7 +3213,7 @@ function AgendaPage() {
       const base = Math.floor(totalCents / count);
       let remainder = totalCents - base * count; // número de participantes que recebem +1 centavo
       setParticipantsForm(prev => {
-        console.log('[DEBUG-PaymentModal] setParticipantsForm prev:', prev.map(p => ({ id: p.cliente_id, fin: p.finalizadora_id })));
+        // [DEBUG-PaymentModal] silenciado
         const map = new Map(prev.map(p => [p.cliente_id, p]));
         const ordered = (form.selectedClients || []).slice();
         ordered.forEach((c, idx) => {
@@ -3368,9 +3457,26 @@ function AgendaPage() {
                     modal={false}
                     open={effectiveCustomerPickerOpen}
                     onOpenChange={(open) => {
-                      pickerLog('onOpenChange', { requestedOpen: open });
+                      const now = Date.now();
+                      const guardActive = (
+                        now < (selectionLockUntilRef.current || 0) ||
+                        now < (suppressPickerCloseRef.current || 0) ||
+                        now < (pickerBlockUntilRef.current || 0) ||
+                        isUiBusy()
+                      );
+                      console.log('[PickerEvt] onOpenChange', { ts: new Date().toISOString(), requestedOpen: open, guardActive, guards: {
+                        selectionLockUntil: selectionLockUntilRef.current,
+                        suppressCloseUntil: suppressPickerCloseRef.current,
+                        pickerBlockUntil: pickerBlockUntilRef.current,
+                        uiBusyUntil: uiBusyUntilRef.current,
+                      }});
                       // Não fechar automaticamente enquanto o modal de novo cliente estiver aberto ou enquanto a lista estiver recarregando
                       if ((isClientFormOpen || clientsLoading) && open === false) return;
+                      // Bloqueio de fechamento durante janelas de proteção / uiBusy
+                      if (!open && guardActive) {
+                        pickerLog('onOpenChange:blocked:guard-window');
+                        return;
+                      }
                       // Sticky: só permite fechar quando a intenção for explícita ('close')
                       if (!open && customerPickerIntentRef.current !== 'close') {
                         pickerLog('onOpenChange:blocked:sticky-close');
@@ -3460,7 +3566,15 @@ function AgendaPage() {
                       align="start"
                       className="w-[360px] p-2 z-[9999]"
                       onPointerDownOutside={(e) => {
-                        pickerLog('pointerDownOutside');
+                        const now = Date.now();
+                        const guardActive = (
+                          now < (selectionLockUntilRef.current || 0) ||
+                          now < (suppressPickerCloseRef.current || 0) ||
+                          now < (pickerBlockUntilRef.current || 0) ||
+                          isUiBusy()
+                        );
+                        console.log('[PickerEvt] onPointerDownOutside', { ts: new Date().toISOString(), guardActive });
+                        if (guardActive) { e.preventDefault(); return; }
                         // Permitir interação externa quando não estiver carregando e nem com o modal de cliente aberto
                         if (isClientFormOpen || clientsLoading) { e.preventDefault(); return; }
                         // Snapshot da seleção atual antes de fechar por clique fora
@@ -3952,7 +4066,7 @@ function AgendaPage() {
                       type="button"
                       variant="secondary"
                       className="bg-teal-600 hover:bg-teal-500 text-white border-teal-700 w-full sm:w-auto justify-center"
-                      onClick={() => { console.log('[DEBUG-PaymentModal] ABRINDO modal de pagamentos', { participantsForm, selectedClients: form.selectedClients }); setIsPaymentModalOpen(true); }}
+                      onClick={() => { /* [DEBUG-PaymentModal] silenciado */ setIsPaymentModalOpen(true); }}
                     >
                       <DollarSign className="w-4 h-4 mr-2 opacity-90" /> Pagamentos
                     </Button>
@@ -4243,7 +4357,7 @@ function AgendaPage() {
                                 value={String(pf.finalizadora_id || payMethods[0]?.id || '')}
                                 onValueChange={(val) => {
                                   setParticipantsForm(prev => {
-        console.log('[DEBUG-PaymentModal] setParticipantsForm prev:', prev.map(p => ({ id: p.cliente_id, fin: p.finalizadora_id })));
+                                    // [DEBUG-PaymentModal] silenciado
                                     const list = [...prev];
                                     const idx = list.findIndex(p => p.cliente_id === c.id);
                                     if (idx >= 0) list[idx] = { ...list[idx], finalizadora_id: val };
@@ -4278,7 +4392,7 @@ function AgendaPage() {
                                     const amount = parseBRL(masked);
                                     const autoStatus = (Number.isFinite(amount) && amount > 0) ? 'Pago' : 'Pendente';
                                     setParticipantsForm(prev => {
-        console.log('[DEBUG-PaymentModal] setParticipantsForm prev:', prev.map(p => ({ id: p.cliente_id, fin: p.finalizadora_id })));
+                                    // [DEBUG-PaymentModal] silenciado
                                       let list = [...prev];
                                       const idx = list.findIndex(p => p.cliente_id === c.id);
                                       if (idx >= 0) {
@@ -4334,7 +4448,7 @@ function AgendaPage() {
                                 value={String(pf.finalizadora_id || payMethods[0]?.id || '')}
                                 onValueChange={(val) => {
                                   setParticipantsForm(prev => {
-        console.log('[DEBUG-PaymentModal] setParticipantsForm prev:', prev.map(p => ({ id: p.cliente_id, fin: p.finalizadora_id })));
+                                    // [DEBUG-PaymentModal] silenciado
                                     const list = [...prev];
                                     const idx = list.findIndex(p => p.cliente_id === c.id);
                                     if (idx >= 0) list[idx] = { ...list[idx], finalizadora_id: val };
@@ -4366,7 +4480,7 @@ function AgendaPage() {
                                   const amount = parseBRL(masked);
                                   const autoStatus = (Number.isFinite(amount) && amount > 0) ? 'Pago' : 'Pendente';
                                   setParticipantsForm(prev => {
-        console.log('[DEBUG-PaymentModal] setParticipantsForm prev:', prev.map(p => ({ id: p.cliente_id, fin: p.finalizadora_id })));
+                                    // [DEBUG-PaymentModal] silenciado
                                     let list = [...prev];
                                     const idx = list.findIndex(p => p.cliente_id === c.id);
                                     if (idx >= 0) {
@@ -4505,6 +4619,7 @@ function AgendaPage() {
                           codigo_empresa: codigo,
                           agendamento_id: agendamentoId,
                           cliente_id: c.id,
+                          nome: c.nome, // ✅ CORREÇÃO: Preserva o nome do participante
                           valor_cota: Number.isFinite(valor) ? valor : 0,
                           status_pagamento: pf?.status_pagamento || 'Pendente',
                           finalizadora_id: finId,
