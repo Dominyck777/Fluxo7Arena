@@ -40,6 +40,9 @@ export const supabase = import.meta.env.PROD ? {
   // Storage usando client original
   storage: originalClient.storage,
   
+  // Functions usando client original (Edge Functions)
+  functions: originalClient.functions,
+  
   // Realtime usando client original
   realtime: originalClient.realtime,
   channel: originalClient.channel.bind(originalClient),
