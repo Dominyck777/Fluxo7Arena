@@ -277,32 +277,8 @@ async function getConfig() {
           '@babel/generator',
           '@babel/types',
         ],
-        output: {
-          // ✅ Code splitting simplificado - tudo que depende de React no vendor
-          manualChunks: (id) => {
-            if (id.includes('node_modules')) {
-              // TUDO que depende de React vai para o vendor
-              if (
-                id.includes('react') || 
-                id.includes('react-dom') || 
-                id.includes('react-router') ||
-                id.includes('scheduler') ||
-                id.includes('@radix-ui') ||
-                id.includes('framer-motion') ||
-                id.includes('@supabase/supabase-js')
-              ) {
-                return 'vendor';
-              }
-              // Apenas libs pesadas que NÃO dependem de React
-              if (id.includes('recharts') || id.includes('d3-')) {
-                return 'charts';
-              }
-              if (id.includes('jspdf')) {
-                return 'pdf';
-              }
-            }
-          },
-        },
+        // ✅ Sem code splitting manual - deixa Vite otimizar automaticamente
+        // Isso evita problemas de dependências circulares e ordem de carregamento
       },
     },
   });
