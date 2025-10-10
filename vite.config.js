@@ -278,34 +278,28 @@ async function getConfig() {
           '@babel/types',
         ],
         output: {
-          // ✅ Code splitting otimizado - React e Supabase juntos no vendor
+          // ✅ Code splitting simplificado - tudo que depende de React no vendor
           manualChunks: (id) => {
             if (id.includes('node_modules')) {
-              // React core SEMPRE no vendor (carrega primeiro)
-              if (id.includes('react') || id.includes('react-dom') || id.includes('scheduler')) {
+              // TUDO que depende de React vai para o vendor
+              if (
+                id.includes('react') || 
+                id.includes('react-dom') || 
+                id.includes('react-router') ||
+                id.includes('scheduler') ||
+                id.includes('@radix-ui') ||
+                id.includes('framer-motion') ||
+                id.includes('@supabase/supabase-js')
+              ) {
                 return 'vendor';
               }
-              // Supabase no vendor junto com React
-              if (id.includes('@supabase/supabase-js')) {
-                return 'vendor';
-              }
-              // React Router no vendor também
-              if (id.includes('react-router')) {
-                return 'vendor';
-              }
-              // Radix UI (depende de React, mas pode ser separado)
-              if (id.includes('@radix-ui')) {
-                return 'ui';
-              }
-              // Outras libs grandes
-              if (id.includes('framer-motion')) {
-                return 'motion';
-              }
+              // Apenas libs pesadas que NÃO dependem de React
               if (id.includes('recharts') || id.includes('d3-')) {
                 return 'charts';
               }
-              // Resto das libs
-              return 'libs';
+              if (id.includes('jspdf')) {
+                return 'pdf';
+              }
             }
           },
         },
