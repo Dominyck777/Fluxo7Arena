@@ -7,9 +7,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { BarChart as ReBarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, CartesianGrid, LineChart, Line, PieChart, Pie, Cell, Sector } from 'recharts';
-import { TrendingUp, Wallet, CreditCard, CalendarRange, Banknote, ArrowDownCircle, ArrowUpCircle, FileText, Download, Search, Filter, DollarSign, ShoppingCart, Users, Package, Calendar as CalendarIcon } from 'lucide-react';
+import { TrendingUp, Wallet, CreditCard, CalendarRange, Banknote, ArrowDownCircle, ArrowUpCircle, FileText, Download, Search, Filter, DollarSign, ShoppingCart, Users, Package, Calendar as CalendarIcon, FileDown } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useSearchParams } from 'react-router-dom';
+import jsPDF from 'jspdf';
+import 'jspdf-autotable';
 import { 
   listarResumoPeriodo, 
   listarFechamentosCaixa, 
@@ -100,6 +102,7 @@ export default function FinanceiroPage() {
   const [selectedCliente, setSelectedCliente] = useState(null);
   const [selectedClientePagamentos, setSelectedClientePagamentos] = useState([]);
   const [loadingClienteDetalhes, setLoadingClienteDetalhes] = useState(false);
+  const [clienteDetalhesModalOpen, setClienteDetalhesModalOpen] = useState(false);
   
   // Estados do Caixa
   const [isOpen, setIsOpen] = useState(false);
@@ -133,6 +136,104 @@ export default function FinanceiroPage() {
   
   const fmtBRL = (v) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(v || 0));
   const fmt2 = (n) => (Number(n || 0)).toFixed(2);
+
+  // Função para exportar tabela como PDF (download direto)
+  const exportToPDF = async (title, headers, data, filename) => {
+    try {
+      // Importar dinamicamente o autoTable
+      const { default: jsPDF } = await import('jspdf');
+      await import('jspdf-autotable');
+      
+      // Criar documento PDF
+      const doc = new jsPDF('p', 'mm', 'a4');
+      const pageWidth = doc.internal.pageSize.getWidth();
+      
+      // Adicionar título
+      doc.setFontSize(20);
+      doc.setTextColor(245, 158, 11); // Brand color
+      doc.text(title, 14, 20);
+      
+      // Linha decorativa
+      doc.setDrawColor(245, 158, 11);
+      doc.setLineWidth(0.5);
+      doc.line(14, 23, pageWidth - 14, 23);
+      
+      // Informações do período
+      doc.setFontSize(10);
+      doc.setTextColor(100, 100, 100);
+      doc.text(`Período: ${startDate || 'N/A'} até ${endDate || 'N/A'}`, 14, 30);
+      doc.text(`Gerado em: ${new Date().toLocaleString('pt-BR')}`, 14, 35);
+      
+      // Adicionar tabela usando autoTable (agora está disponível no prototype)
+      if (typeof doc.autoTable === 'function') {
+        doc.autoTable({
+          head: [headers],
+          body: data,
+          startY: 42,
+          theme: 'striped',
+          headStyles: {
+            fillColor: [245, 158, 11], // Brand color
+            textColor: [255, 255, 255],
+            fontStyle: 'bold',
+            fontSize: 11,
+          },
+          bodyStyles: {
+            fontSize: 10,
+            textColor: [50, 50, 50],
+          },
+          alternateRowStyles: {
+            fillColor: [249, 249, 249],
+          },
+          margin: { top: 42, left: 14, right: 14 },
+        });
+        
+        // Rodapé
+        const finalY = doc.lastAutoTable.finalY || 50;
+        doc.setFontSize(8);
+        doc.setTextColor(150, 150, 150);
+        doc.text(
+          'Relatório gerado por Fluxo7Arena - Sistema de Gestão de Quadras Esportivas',
+          pageWidth / 2,
+          finalY + 15,
+          { align: 'center' }
+        );
+      } else {
+        // Fallback: criar tabela manualmente se autoTable não funcionar
+        let y = 45;
+        doc.setFontSize(11);
+        doc.setTextColor(0, 0, 0);
+        
+        // Cabeçalho
+        headers.forEach((header, i) => {
+          const x = 14 + (i * 60);
+          doc.text(header, x, y);
+        });
+        
+        y += 7;
+        
+        // Dados
+        doc.setFontSize(10);
+        data.forEach((row) => {
+          row.forEach((cell, i) => {
+            const x = 14 + (i * 60);
+            doc.text(String(cell), x, y);
+          });
+          y += 6;
+        });
+      }
+      
+      // Salvar PDF
+      doc.save(`${filename}_${format(new Date(), 'yyyy-MM-dd')}.pdf`);
+      
+      toast({ 
+        title: 'PDF baixado com sucesso!', 
+        description: 'O arquivo foi salvo na sua pasta de downloads',
+      });
+    } catch (error) {
+      console.error('Erro ao gerar PDF:', error);
+      toast({ title: 'Erro ao gerar PDF', description: error.message, variant: 'destructive' });
+    }
+  };
 
   const setPreset = (type) => {
     const now = new Date();
@@ -466,6 +567,65 @@ export default function FinanceiroPage() {
           setAllClientes([]);
         }
       }
+
+      // Evolução Diária
+      if (codigo && fromISO && toISO) {
+        try {
+          // 1) Pagamentos de comandas agrupados por data
+          let qPag = supabase
+            .from('pagamentos')
+            .select('recebido_em, valor, status')
+            .eq('codigo_empresa', codigo)
+            .gte('recebido_em', fromISO)
+            .lte('recebido_em', toISO)
+            .order('recebido_em', { ascending: true });
+          const { data: pagamentos } = await qPag;
+
+          // 2) Agendamentos pagos agrupados por data de início
+          let qAg = supabase
+            .from('v_agendamentos_detalhado')
+            .select('inicio, valor_pago, status_pagamento')
+            .eq('codigo_empresa', codigo)
+            .eq('status_pagamento', 'Pago')
+            .gte('inicio', fromISO)
+            .lte('inicio', toISO)
+            .order('inicio', { ascending: true });
+          const { data: agendamentos } = await qAg;
+
+          // Agrupar por data
+          const receitaPorDia = {};
+
+          // Processar pagamentos
+          (pagamentos || []).forEach(p => {
+            if (['Cancelado', 'Estornado'].includes(p.status)) return;
+            const data = new Date(p.recebido_em).toLocaleDateString('pt-BR');
+            receitaPorDia[data] = (receitaPorDia[data] || 0) + Number(p.valor || 0);
+          });
+
+          // Processar agendamentos
+          (agendamentos || []).forEach(a => {
+            const data = new Date(a.inicio).toLocaleDateString('pt-BR');
+            receitaPorDia[data] = (receitaPorDia[data] || 0) + Number(a.valor_pago || 0);
+          });
+
+          // Criar array ordenado
+          const evolucao = Object.entries(receitaPorDia)
+            .map(([data, valor]) => ({ data, valor }))
+            .sort((a, b) => {
+              const [dA, mA, yA] = a.data.split('/').map(Number);
+              const [dB, mB, yB] = b.data.split('/').map(Number);
+              return new Date(yA, mA - 1, dA).getTime() - new Date(yB, mB - 1, dB).getTime();
+            });
+
+          setEvolucaoDiaria(evolucao);
+          console.debug('[Financeiro][VisaoGeral] Evolução diária:', evolucao.length, 'dias');
+        } catch (e) {
+          console.warn('[Financeiro][VisaoGeral] Falha ao calcular evolução diária:', e?.message);
+          setEvolucaoDiaria([]);
+        }
+      } else {
+        setEvolucaoDiaria([]);
+      }
       
     } catch (e) {
       toast({ title: 'Falha ao carregar visão geral', description: e?.message || 'Tente novamente', variant: 'destructive' });
@@ -678,7 +838,7 @@ export default function FinanceiroPage() {
   useEffect(() => {
     if (!userProfile?.codigo_empresa) return;
     
-    if (activeTab === 'visao-geral') {
+    if (activeTab === 'visao-geral' || activeTab === 'relatorios') {
       loadVisaoGeral();
     } else if (activeTab === 'caixa') {
       loadCaixa();
@@ -760,7 +920,7 @@ export default function FinanceiroPage() {
     if (!anim.from || !anim.to) return null;
     const startAngle = lerp(anim.from.a, anim.to.a, anim.t);
     const endAngle = lerp(anim.from.b, anim.to.b, anim.t);
-    const color = effectiveIndex === 0 ? '#3b82f6' : '#8b5cf6';
+    const color = effectiveIndex === 0 ? '#22C55E' : '#F59E0B';
     return (
       <Sector
         cx={cx}
@@ -834,12 +994,12 @@ export default function FinanceiroPage() {
               <h1 className="text-2xl font-bold text-text-primary">Financeiro</h1>
               <p className="text-sm text-text-secondary">Gestão completa das finanças da empresa</p>
             </div>
-            <div className="flex flex-wrap items-center gap-3">
-              <div className="flex flex-col justify-center">
+            <div className="flex flex-col sm:flex-row flex-wrap items-stretch sm:items-center gap-3 w-full sm:w-auto">
+              <div className="flex flex-col justify-center flex-1 sm:flex-initial">
                 <label className="text-xs text-text-secondary mb-1">Início</label>
                 <Popover>
                   <PopoverTrigger asChild>
-                    <Button variant="outline" className="h-9 w-[160px] pl-3 pr-3 flex items-center gap-2 justify-start text-left font-medium bg-black border-warning/40 text-white hover:bg-black/80 hover:border-warning">
+                    <Button variant="outline" className="h-9 w-full sm:w-[160px] pl-3 pr-3 flex items-center gap-2 justify-start text-left font-medium bg-black border-warning/40 text-white hover:bg-black/80 hover:border-warning">
                       <CalendarIcon className="h-5 w-5 text-warning flex-shrink-0" />
                       <span className="font-mono tracking-wide text-sm leading-none">{startDate ? format(new Date(startDate + 'T00:00:00'), 'dd/MM/yyyy', { locale: ptBR }) : 'Selecione'}</span>
                     </Button>
@@ -863,11 +1023,11 @@ export default function FinanceiroPage() {
                   </PopoverContent>
                 </Popover>
               </div>
-              <div className="flex flex-col justify-center">
+              <div className="flex flex-col justify-center flex-1 sm:flex-initial">
                 <label className="text-xs text-text-secondary mb-1">Fim</label>
                 <Popover>
                   <PopoverTrigger asChild>
-                    <Button variant="outline" className="h-9 w-[160px] pl-3 pr-3 flex items-center gap-2 justify-start text-left font-medium bg-black border-warning/40 text-white hover:bg-black/80 hover:border-warning">
+                    <Button variant="outline" className="h-9 w-full sm:w-[160px] pl-3 pr-3 flex items-center gap-2 justify-start text-left font-medium bg-black border-warning/40 text-white hover:bg-black/80 hover:border-warning">
                       <CalendarIcon className="h-5 w-5 text-warning flex-shrink-0" />
                       <span className="font-mono tracking-wide text-sm leading-none">{endDate ? format(new Date(endDate + 'T00:00:00'), 'dd/MM/yyyy', { locale: ptBR }) : 'Selecione'}</span>
                     </Button>
@@ -896,9 +1056,26 @@ export default function FinanceiroPage() {
           </div>
         </motion.div>
 
-        {/* Tabs */}
+        {/* Tabs - Select no mobile, Tabs no desktop */}
         <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="grid w-full grid-cols-5">
+          {/* Select para Mobile */}
+          <div className="md:hidden mb-4">
+            <Select value={activeTab} onValueChange={setActiveTab}>
+              <SelectTrigger className="w-full h-11 bg-black border-warning/40 text-white">
+                <SelectValue placeholder="Selecione uma aba" />
+              </SelectTrigger>
+              <SelectContent className="bg-black text-white border-warning/40">
+                <SelectItem value="visao-geral">Visão Geral</SelectItem>
+                <SelectItem value="caixa">Caixa</SelectItem>
+                <SelectItem value="recebimentos">Recebimentos</SelectItem>
+                <SelectItem value="agendamentos">Agendamentos</SelectItem>
+                <SelectItem value="relatorios">Relatórios</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          
+          {/* Tabs para Desktop */}
+          <TabsList className="hidden md:grid w-full grid-cols-5">
             <TabsTrigger value="visao-geral">Visão Geral</TabsTrigger>
             <TabsTrigger value="caixa">Caixa</TabsTrigger>
             <TabsTrigger value="recebimentos">Recebimentos</TabsTrigger>
@@ -929,8 +1106,9 @@ export default function FinanceiroPage() {
               {Number(receitaComandas || 0) + Number(receitaAgendamentos || 0) === 0 ? (
                 <div className="text-sm text-text-muted">Sem receitas no período.</div>
               ) : (
-                <div className="h-[280px] flex items-center gap-4">
-                  <div className="flex-1 h-full">
+                <div className="flex flex-col md:flex-row md:items-center gap-4">
+                  {/* Gráfico - altura adaptativa */}
+                  <div className="w-full md:flex-1 h-[280px]">
                     <ResponsiveContainer width="100%" height="100%">
                       <PieChart>
                         <Pie
@@ -938,13 +1116,13 @@ export default function FinanceiroPage() {
                             const r0 = lerp(sizeAnim.from?.[0] ?? baseR, sizeAnim.to?.[0] ?? baseR, sizeAnim.t);
                             const r1 = lerp(sizeAnim.from?.[1] ?? baseR, sizeAnim.to?.[1] ?? baseR, sizeAnim.t);
                             return [
-                              { name: 'Comandas', value: Number(receitaComandas || 0), fill: '#3b82f6', outerRadius: r0 },
-                              { name: 'Agendamentos', value: Number(receitaAgendamentos || 0), fill: '#8b5cf6', outerRadius: r1 },
+                              { name: 'Comandas', value: Number(receitaComandas || 0), fill: '#22C55E', outerRadius: r0 },
+                              { name: 'Agendamentos', value: Number(receitaAgendamentos || 0), fill: '#F59E0B', outerRadius: r1 },
                             ];
                           })()}
                           dataKey="value"
                           nameKey="name"
-                          cx="38%"
+                          cx="50%"
                           cy="50%"
                           innerRadius={0}
                           stroke="transparent"
@@ -966,17 +1144,17 @@ export default function FinanceiroPage() {
                         >
                           <Cell 
                             key="c" 
-                            fill="#3b82f6" 
+                            fill="#22C55E" 
                             style={getCellStyle(0)}
                           />
                           <Cell 
                             key="a" 
-                            fill="#8b5cf6" 
+                            fill="#F59E0B" 
                             style={getCellStyle(1)}
                           />
                         </Pie>
                         {/* Overlay animado suave */}
-                        {renderOverlay({ cx: '38%', cy: '50%', outerRadius: 92 })}
+                        {renderOverlay({ cx: '50%', cy: '50%', outerRadius: 92 })}
                         {/* Camada de labels por cima do overlay (não some no hover) */}
                         <Pie
                           data={(function(){
@@ -989,7 +1167,7 @@ export default function FinanceiroPage() {
                           })()}
                           dataKey="value"
                           nameKey="name"
-                          cx="38%"
+                          cx="50%"
                           cy="50%"
                           innerRadius={0}
                           stroke="transparent"
@@ -1015,10 +1193,12 @@ export default function FinanceiroPage() {
                       </PieChart>
                     </ResponsiveContainer>
                   </div>
-                  <div className="w-64 space-y-3 pr-2">
+                  
+                  {/* Legenda - embaixo no mobile, lado no desktop */}
+                  <div className="w-full md:w-64 space-y-3 md:pr-2">
                     {[
-                      { name: 'Comandas', value: Number(receitaComandas || 0), color: '#3b82f6' },
-                      { name: 'Agendamentos', value: Number(receitaAgendamentos || 0), color: '#8b5cf6' },
+                      { name: 'Comandas', value: Number(receitaComandas || 0), color: '#22C55E' },
+                      { name: 'Agendamentos', value: Number(receitaAgendamentos || 0), color: '#F59E0B' },
                     ].map((it, idx) => (
                       <div
                         key={it.name}
@@ -1471,14 +1651,454 @@ export default function FinanceiroPage() {
 
           {/* ABA 4: RELATÓRIOS */}
           <TabsContent value="relatorios" className="space-y-6 mt-6">
+            {/* Relatório 1: Faturamento Consolidado */}
             <motion.div variants={itemVariants} className="fx-card p-4">
-              <h2 className="text-lg font-bold mb-4">Relatórios Financeiros</h2>
-              <div className="text-center py-12 text-text-muted">
-                <FileText className="h-16 w-16 mx-auto mb-4 opacity-50" />
-                <p className="text-lg font-semibold mb-2">Em Desenvolvimento</p>
-                <p className="text-sm">Os relatórios detalhados estarão disponíveis em breve.</p>
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="text-lg font-bold flex items-center gap-2">
+                    <DollarSign className="w-5 h-5 text-success" />
+                    Faturamento Consolidado
+                  </h3>
+                  <p className="text-xs text-text-secondary mt-1">Resumo geral das receitas no período</p>
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="bg-success/10 border-success/40 text-success hover:bg-success/20"
+                    onClick={() => {
+                      const rows = [
+                        ['Métrica', 'Valor'],
+                        ['Receita de Comandas', fmtBRL(receitaComandas)],
+                        ['Receita de Agendamentos', fmtBRL(receitaAgendamentos)],
+                        ['Receita Total', fmtBRL(Number(receitaComandas || 0) + Number(receitaAgendamentos || 0))],
+                        ['Período', `${startDate || 'N/A'} até ${endDate || 'N/A'}`],
+                      ];
+                      const csv = rows.map(r => r.map(c => `"${c}"`).join(';')).join('\n');
+                      const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement('a');
+                      a.href = url;
+                      a.download = `faturamento_consolidado_${format(new Date(), 'yyyy-MM-dd')}.csv`;
+                      a.click();
+                      URL.revokeObjectURL(url);
+                      toast({ title: 'Relatório exportado', description: 'CSV salvo com sucesso' });
+                    }}
+                  >
+                    <Download className="w-4 h-4 mr-2" />
+                    CSV
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="bg-success/10 border-success/40 text-success hover:bg-success/20"
+                    onClick={() => {
+                      const data = [
+                        ['Receita de Comandas', fmtBRL(receitaComandas)],
+                        ['Receita de Agendamentos', fmtBRL(receitaAgendamentos)],
+                        ['Receita Total', fmtBRL(Number(receitaComandas || 0) + Number(receitaAgendamentos || 0))],
+                      ];
+                      exportToPDF('Faturamento Consolidado', ['Métrica', 'Valor'], data, 'faturamento_consolidado');
+                    }}
+                  >
+                    <FileDown className="w-4 h-4 mr-2" />
+                    PDF
+                  </Button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="p-4 bg-success/5 border border-success/20 rounded-lg">
+                  <div className="text-xs text-text-secondary mb-1">Receita Comandas</div>
+                  <div className="text-2xl font-bold text-success">{fmtBRL(receitaComandas)}</div>
+                  <div className="text-xs text-text-muted mt-1">Vendas no período</div>
+                </div>
+                <div className="p-4 bg-purple-500/5 border border-purple-500/20 rounded-lg">
+                  <div className="text-xs text-text-secondary mb-1">Receita Agendamentos</div>
+                  <div className="text-2xl font-bold text-purple-400">{fmtBRL(receitaAgendamentos)}</div>
+                  <div className="text-xs text-text-muted mt-1">Reservas pagas</div>
+                </div>
+                <div className="p-4 bg-brand/5 border border-brand/20 rounded-lg">
+                  <div className="text-xs text-text-secondary mb-1">Receita Total</div>
+                  <div className="text-2xl font-bold text-brand">{fmtBRL(Number(receitaComandas || 0) + Number(receitaAgendamentos || 0))}</div>
+                  <div className="text-xs text-text-muted mt-1">Período selecionado</div>
+                </div>
               </div>
             </motion.div>
+
+            {/* Relatório 2: Pagamentos por Método */}
+            <motion.div variants={itemVariants} className="fx-card p-4">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="text-lg font-bold flex items-center gap-2">
+                    <CreditCard className="w-5 h-5 text-info" />
+                    Pagamentos por Método
+                  </h3>
+                  <p className="text-xs text-text-secondary mt-1">Distribuição por finalizadora</p>
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="bg-info/10 border-info/40 text-info hover:bg-info/20"
+                    onClick={() => {
+                      const porFin = summary?.totalPorFinalizadora || {};
+                      const metodos = Object.entries(porFin)
+                        .map(([metodo, valor]) => [metodo, fmtBRL(valor)])
+                        .sort((a, b) => {
+                          const vA = Number(String(a[1]).replace(/[^\d,]/g, '').replace(',', '.'));
+                          const vB = Number(String(b[1]).replace(/[^\d,]/g, '').replace(',', '.'));
+                          return vB - vA;
+                        });
+                      const total = Object.values(porFin).reduce((a, b) => a + b, 0);
+                      const rows = [
+                        ['Método de Pagamento', 'Valor', '% do Total'],
+                        ...metodos.map(([m, v]) => {
+                          const val = Object.entries(porFin).find(([k]) => k === m)?.[1] || 0;
+                          const pct = ((val / total) * 100).toFixed(1) + '%';
+                          return [m, v, pct];
+                        }),
+                        ['TOTAL', fmtBRL(total), '100%'],
+                      ];
+                      const csv = rows.map(r => r.map(c => `"${c}"`).join(';')).join('\n');
+                      const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement('a');
+                      a.href = url;
+                      a.download = `pagamentos_por_metodo_${format(new Date(), 'yyyy-MM-dd')}.csv`;
+                      a.click();
+                      URL.revokeObjectURL(url);
+                      toast({ title: 'Relatório exportado', description: 'CSV salvo com sucesso' });
+                    }}
+                  >
+                    <Download className="w-4 h-4 mr-2" />
+                    CSV
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="bg-info/10 border-info/40 text-info hover:bg-info/20"
+                    onClick={() => {
+                      const porFin = summary?.totalPorFinalizadora || {};
+                      const total = Object.values(porFin).reduce((a, b) => a + b, 0);
+                      const data = Object.entries(porFin)
+                        .sort(([, a], [, b]) => b - a)
+                        .map(([metodo, valor]) => [
+                          metodo,
+                          fmtBRL(valor),
+                          ((valor / total) * 100).toFixed(1) + '%'
+                        ]);
+                      data.push(['TOTAL', fmtBRL(total), '100%']);
+                      exportToPDF('Pagamentos por Método', ['Método', 'Valor', '% do Total'], data, 'pagamentos_por_metodo');
+                    }}
+                  >
+                    <FileDown className="w-4 h-4 mr-2" />
+                    PDF
+                  </Button>
+                </div>
+              </div>
+
+              {Object.keys(summary?.totalPorFinalizadora || {}).length === 0 ? (
+                <div className="text-sm text-text-muted text-center py-8">Sem pagamentos no período.</div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Método de Pagamento</TableHead>
+                        <TableHead className="text-right">Valor</TableHead>
+                        <TableHead className="text-right">% do Total</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {Object.entries(summary?.totalPorFinalizadora || {})
+                        .sort(([, a], [, b]) => b - a)
+                        .map(([metodo, valor]) => {
+                          const total = Object.values(summary?.totalPorFinalizadora || {}).reduce((a, b) => a + b, 0);
+                          const pct = ((valor / total) * 100).toFixed(1);
+                          return (
+                            <TableRow key={metodo}>
+                              <TableCell className="font-medium">{metodo}</TableCell>
+                              <TableCell className="text-right font-semibold">{fmtBRL(valor)}</TableCell>
+                              <TableCell className="text-right text-text-secondary">{pct}%</TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      <TableRow className="bg-surface-2 font-bold">
+                        <TableCell>TOTAL</TableCell>
+                        <TableCell className="text-right">{fmtBRL(Object.values(summary?.totalPorFinalizadora || {}).reduce((a, b) => a + b, 0))}</TableCell>
+                        <TableCell className="text-right">100%</TableCell>
+                      </TableRow>
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </motion.div>
+
+            {/* Relatório 3: Produtos Vendidos */}
+            <motion.div variants={itemVariants} className="fx-card p-4">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="text-lg font-bold flex items-center gap-2">
+                    <Package className="w-5 h-5 text-purple-400" />
+                    Produtos Mais Vendidos
+                  </h3>
+                  <p className="text-xs text-text-secondary mt-1">Top produtos por faturamento</p>
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="bg-purple-500/10 border-purple-500/40 text-purple-400 hover:bg-purple-500/20"
+                    onClick={() => {
+                      const rows = [
+                        ['Posição', 'Produto', 'Faturamento'],
+                        ...allProdutos.slice(0, 50).map((p, i) => [i + 1, p.nome, fmtBRL(p.valor)]),
+                      ];
+                      const csv = rows.map(r => r.map(c => `"${c}"`).join(';')).join('\n');
+                      const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement('a');
+                      a.href = url;
+                      a.download = `produtos_vendidos_${format(new Date(), 'yyyy-MM-dd')}.csv`;
+                      a.click();
+                      URL.revokeObjectURL(url);
+                      toast({ title: 'Relatório exportado', description: 'CSV salvo com sucesso' });
+                    }}
+                  >
+                    <Download className="w-4 h-4 mr-2" />
+                    CSV
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="bg-purple-500/10 border-purple-500/40 text-purple-400 hover:bg-purple-500/20"
+                    onClick={() => {
+                      const data = allProdutos.slice(0, 50).map((p, i) => [i + 1, p.nome, fmtBRL(p.valor)]);
+                      exportToPDF('Produtos Mais Vendidos', ['#', 'Produto', 'Faturamento'], data, 'produtos_vendidos');
+                    }}
+                  >
+                    <FileDown className="w-4 h-4 mr-2" />
+                    PDF
+                  </Button>
+                </div>
+              </div>
+
+              {allProdutos.length === 0 ? (
+                <div className="text-sm text-text-muted text-center py-8">Sem produtos vendidos no período.</div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-16">#</TableHead>
+                        <TableHead>Produto</TableHead>
+                        <TableHead className="text-right">Faturamento</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {allProdutos.slice(0, 20).map((p, i) => (
+                        <TableRow key={`${p.nome}-${i}`}>
+                          <TableCell className="text-text-secondary font-mono">{i + 1}</TableCell>
+                          <TableCell className="font-medium">{p.nome}</TableCell>
+                          <TableCell className="text-right font-semibold">{fmtBRL(p.valor)}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                  {allProdutos.length > 20 && (
+                    <div className="text-center mt-4">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-brand hover:text-brand/80"
+                        onClick={() => setOpenProdutosModal(true)}
+                      >
+                        Ver todos os {allProdutos.length} produtos
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </motion.div>
+
+            {/* Relatório 4: Clientes Top */}
+            <motion.div variants={itemVariants} className="fx-card p-4">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="text-lg font-bold flex items-center gap-2">
+                    <Users className="w-5 h-5 text-warning" />
+                    Clientes que Mais Consomem
+                  </h3>
+                  <p className="text-xs text-text-secondary mt-1">Ranking por faturamento total</p>
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="bg-warning/10 border-warning/40 text-warning hover:bg-warning/20"
+                    onClick={() => {
+                      const rows = [
+                        ['Posição', 'Cliente', 'Faturamento'],
+                        ...allClientes.slice(0, 50).map((c, i) => [i + 1, c.nome, fmtBRL(c.valor)]),
+                      ];
+                      const csv = rows.map(r => r.map(c => `"${c}"`).join(';')).join('\n');
+                      const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement('a');
+                      a.href = url;
+                      a.download = `clientes_top_${format(new Date(), 'yyyy-MM-dd')}.csv`;
+                      a.click();
+                      URL.revokeObjectURL(url);
+                      toast({ title: 'Relatório exportado', description: 'CSV salvo com sucesso' });
+                    }}
+                  >
+                    <Download className="w-4 h-4 mr-2" />
+                    CSV
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="bg-warning/10 border-warning/40 text-warning hover:bg-warning/20"
+                    onClick={() => {
+                      const data = allClientes.slice(0, 50).map((c, i) => [i + 1, c.nome, fmtBRL(c.valor)]);
+                      exportToPDF('Clientes que Mais Consomem', ['#', 'Cliente', 'Total Gasto'], data, 'clientes_top');
+                    }}
+                  >
+                    <FileDown className="w-4 h-4 mr-2" />
+                    PDF
+                  </Button>
+                </div>
+              </div>
+
+              {allClientes.length === 0 ? (
+                <div className="text-sm text-text-muted text-center py-8">Sem dados de clientes no período.</div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-16">#</TableHead>
+                        <TableHead>Cliente</TableHead>
+                        <TableHead className="text-right">Total Gasto</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {allClientes.slice(0, 20).map((c, i) => (
+                        <TableRow key={`${c.nome}-${i}`}>
+                          <TableCell className="text-text-secondary font-mono">{i + 1}</TableCell>
+                          <TableCell className="font-medium">{c.nome}</TableCell>
+                          <TableCell className="text-right font-semibold">{fmtBRL(c.valor)}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                  {allClientes.length > 20 && (
+                    <div className="text-center mt-4">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-brand hover:text-brand/80"
+                        onClick={() => setOpenClientesModal(true)}
+                      >
+                        Ver todos os {allClientes.length} clientes
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </motion.div>
+
+            {/* Relatório 5: Evolução Diária */}
+            <motion.div variants={itemVariants} className="fx-card p-4">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="text-lg font-bold flex items-center gap-2">
+                    <TrendingUp className="w-5 h-5 text-success" />
+                    Evolução Diária de Receitas
+                  </h3>
+                  <p className="text-xs text-text-secondary mt-1">Faturamento dia a dia no período</p>
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="bg-success/10 border-success/40 text-success hover:bg-success/20"
+                    onClick={() => {
+                      const rows = [
+                        ['Data', 'Receita'],
+                        ...evolucaoDiaria.map(d => [d.data, fmtBRL(d.valor)]),
+                      ];
+                      const csv = rows.map(r => r.map(c => `"${c}"`).join(';')).join('\n');
+                      const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement('a');
+                      a.href = url;
+                      a.download = `evolucao_diaria_${format(new Date(), 'yyyy-MM-dd')}.csv`;
+                      a.click();
+                      URL.revokeObjectURL(url);
+                      toast({ title: 'Relatório exportado', description: 'CSV salvo com sucesso' });
+                    }}
+                  >
+                    <Download className="w-4 h-4 mr-2" />
+                    CSV
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="bg-success/10 border-success/40 text-success hover:bg-success/20"
+                    onClick={() => {
+                      const data = evolucaoDiaria.map(d => [d.data, fmtBRL(d.valor)]);
+                      exportToPDF('Evolução Diária de Receitas', ['Data', 'Receita'], data, 'evolucao_diaria');
+                    }}
+                  >
+                    <FileDown className="w-4 h-4 mr-2" />
+                    PDF
+                  </Button>
+                </div>
+              </div>
+
+              {evolucaoDiaria.length === 0 ? (
+                <div className="text-sm text-text-muted text-center py-8">Sem dados de evolução no período.</div>
+              ) : (
+                <div className="h-80">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={evolucaoDiaria} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#2a2a2a" />
+                      <XAxis 
+                        dataKey="data" 
+                        stroke="#888" 
+                        tick={{ fill: '#888', fontSize: 11 }}
+                        tickFormatter={(v) => {
+                          const parts = v.split('/');
+                          return `${parts[0]}/${parts[1]}`;
+                        }}
+                      />
+                      <YAxis 
+                        stroke="#888" 
+                        tick={{ fill: '#888', fontSize: 11 }}
+                        tickFormatter={(v) => `R$ ${(v / 1000).toFixed(0)}k`}
+                      />
+                      <Tooltip
+                        contentStyle={{ backgroundColor: '#1a1a1a', border: '1px solid #333', borderRadius: '8px' }}
+                        labelStyle={{ color: '#fff' }}
+                        itemStyle={{ color: '#22C55E' }}
+                        formatter={(value) => [fmtBRL(value), 'Receita']}
+                      />
+                      <Line 
+                        type="monotone" 
+                        dataKey="valor" 
+                        stroke="#22C55E" 
+                        strokeWidth={2}
+                        dot={{ fill: '#22C55E', r: 4 }}
+                        activeDot={{ r: 6 }}
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+            </motion.div>
+
           </TabsContent>
         </Tabs>
 
@@ -1787,6 +2407,11 @@ export default function FinanceiroPage() {
                   <TableBody>
                     {allClientes.map((c, idx) => (
                       <TableRow key={`${c.nome}-${idx}`} className={`cursor-pointer ${selectedCliente?.nome === c.nome ? 'bg-brand/10' : ''}`} onClick={async () => {
+                        // Mobile: abrir modal de detalhes
+                        const isMobile = window.innerWidth < 768;
+                        if (isMobile) {
+                          setClienteDetalhesModalOpen(true);
+                        }
                         setSelectedCliente(c);
                         setLoadingClienteDetalhes(true);
                         try {
@@ -1937,7 +2562,8 @@ export default function FinanceiroPage() {
                   </TableBody>
                 </Table>
               </div>
-              <div className="max-h-[60vh] overflow-y-auto overflow-x-auto pr-1">
+              {/* Detalhes - apenas desktop */}
+              <div className="hidden md:block max-h-[60vh] overflow-y-auto overflow-x-auto pr-1">
                 {!selectedCliente ? (
                   <div className="text-sm text-text-muted p-4">Selecione um cliente para ver detalhes</div>
                 ) : (
@@ -1973,6 +2599,56 @@ export default function FinanceiroPage() {
                 )}
               </div>
             </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Modal: Detalhes do Cliente (apenas mobile) */}
+        <Dialog open={clienteDetalhesModalOpen} onOpenChange={setClienteDetalhesModalOpen}>
+          <DialogContent className="max-w-lg bg-surface text-text-primary border-0">
+            <DialogHeader>
+              <DialogTitle>Detalhes do Cliente</DialogTitle>
+              <DialogDescription>
+                {selectedCliente?.nome}
+              </DialogDescription>
+            </DialogHeader>
+            {!selectedCliente ? (
+              <div className="text-sm text-text-muted">Nenhum cliente selecionado</div>
+            ) : (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between p-3 bg-surface-2 rounded-lg">
+                  <span className="text-sm text-text-secondary">Total Pago</span>
+                  <span className="text-lg font-bold text-success">{fmtBRL(selectedCliente.valor)}</span>
+                </div>
+                {loadingClienteDetalhes ? (
+                  <div className="text-sm text-text-muted text-center py-8">Carregando...</div>
+                ) : selectedClientePagamentos.length === 0 ? (
+                  <div className="text-sm text-text-muted text-center py-8">Sem pagamentos no período.</div>
+                ) : (
+                  <div className="max-h-[50vh] overflow-y-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Data</TableHead>
+                          <TableHead>Finalizadora</TableHead>
+                          <TableHead>Origem</TableHead>
+                          <TableHead className="text-right">Valor</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {selectedClientePagamentos.map((pg) => (
+                          <TableRow key={pg.id}>
+                            <TableCell className="text-xs">{pg.recebido_em ? new Date(pg.recebido_em).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }) : '—'}</TableCell>
+                            <TableCell className="text-xs">{pg.finalizadoras?.nome || pg.metodo || '—'}</TableCell>
+                            <TableCell className="text-xs">{pg.origem || '—'}</TableCell>
+                            <TableCell className="text-right font-semibold text-xs">{fmtBRL(pg.valor)}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </div>
+            )}
           </DialogContent>
         </Dialog>
       </motion.div>
