@@ -28,6 +28,8 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     headers: {
       'X-Client-Info': 'fluxo7arena-web',
     },
+    // ✅ Forçar fetch nativo do navegador
+    fetch: typeof window !== 'undefined' ? window.fetch.bind(window) : undefined,
   },
   db: {
     schema: 'public',
@@ -48,10 +50,17 @@ if (typeof window !== 'undefined') {
   window.__supabase = supabase;
   console.log('[Supabase Init] ✅ Exposto em window.__supabase')
   
-  // 🔍 Teste automático em produção
+  // 🔍 Teste automático em produção com TIMEOUT
   if (import.meta.env.PROD) {
     console.log('[Supabase Test] Executando teste automático...')
-    supabase.from('empresas').select('id').limit(1)
+    
+    // Teste com timeout de 10s
+    const testPromise = supabase.from('empresas').select('id').limit(1)
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('TIMEOUT: 10 segundos')), 10000)
+    )
+    
+    Promise.race([testPromise, timeoutPromise])
       .then(({ data, error }) => {
         if (error) {
           console.error('[Supabase Test] ❌ ERRO:', error)
@@ -60,7 +69,22 @@ if (typeof window !== 'undefined') {
         }
       })
       .catch(err => {
-        console.error('[Supabase Test] ❌ EXCEPTION:', err)
+        console.error('[Supabase Test] ❌ TIMEOUT/EXCEPTION:', err.message)
+        
+        // Teste direto com fetch para comparar
+        console.log('[Supabase Test] Tentando fetch direto...')
+        fetch(`${supabaseUrl}/rest/v1/empresas?select=id&limit=1`, {
+          headers: {
+            'apikey': supabaseAnonKey,
+            'Content-Type': 'application/json',
+          }
+        })
+        .then(r => {
+          console.log('[Supabase Test] Fetch status:', r.status)
+          return r.json()
+        })
+        .then(d => console.log('[Supabase Test] Fetch data:', d))
+        .catch(e => console.error('[Supabase Test] Fetch error:', e))
       })
   }
 }
