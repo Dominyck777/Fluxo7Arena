@@ -1309,35 +1309,37 @@ export default function FinanceiroPage() {
           {/* ABA 4: AGENDAMENTOS */}
           <TabsContent value="agendamentos" className="space-y-6 mt-6">
             <motion.div variants={itemVariants} className="fx-card p-4 border-0 ring-0 outline-none shadow-none">
-              <div className="flex items-center justify-between mb-4">
+              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-4">
                 <h2 className="text-lg font-bold">Agendamentos (Pagamentos por Participante)</h2>
-                <div className="flex gap-2 items-center">
+                <div className="flex flex-col md:flex-row gap-2 md:items-center">
                   <div className="relative">
                     <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-text-muted" />
-                    <Input placeholder="Buscar (#código, participante, quadra)" value={agSearch} onChange={(e)=>setAgSearch(e.target.value)} className="pl-10 w-[260px] bg-black border-warning/40 text-white placeholder:text-white/60" />
+                    <Input placeholder="Buscar (#código, participante, quadra)" value={agSearch} onChange={(e)=>setAgSearch(e.target.value)} className="pl-10 w-full md:w-[260px] bg-black border-warning/40 text-white placeholder:text-white/60" />
                   </div>
-                  <Select value={agStatus} onValueChange={setAgStatus}>
-                    <SelectTrigger className="w-[170px] h-9 bg-black border-warning/40 text-white">
-                      <SelectValue placeholder="Todos os Status" />
-                    </SelectTrigger>
-                    <SelectContent className="bg-black text-white border-warning/40">
-                      <SelectItem value="all">Todos os Status</SelectItem>
-                      <SelectItem value="Pago">Pago</SelectItem>
-                      <SelectItem value="Pendente">Pendente</SelectItem>
-                      <SelectItem value="Cancelado">Cancelado</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <Select value={agFinalizadora} onValueChange={setAgFinalizadora}>
-                    <SelectTrigger className="w-[220px] h-9 bg-black border-warning/40 text-white">
-                      <SelectValue placeholder="Todas as Finalizadoras" />
-                    </SelectTrigger>
-                    <SelectContent className="bg-black text-white border-warning/40">
-                      <SelectItem value="all">Todas as Finalizadoras</SelectItem>
-                      {[...new Set((agAgendamentos||[]).map(r=>r.finalizadora_nome).filter(Boolean))].map(fn => (
-                        <SelectItem key={fn} value={fn}>{fn}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <div className="flex flex-col md:flex-row gap-2">
+                    <Select value={agStatus} onValueChange={setAgStatus}>
+                      <SelectTrigger className="w-full md:w-[170px] h-9 bg-black border-warning/40 text-white">
+                        <SelectValue placeholder="Todos os Status" />
+                      </SelectTrigger>
+                      <SelectContent className="bg-black text-white border-warning/40">
+                        <SelectItem value="all">Todos os Status</SelectItem>
+                        <SelectItem value="Pago">Pago</SelectItem>
+                        <SelectItem value="Pendente">Pendente</SelectItem>
+                        <SelectItem value="Cancelado">Cancelado</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Select value={agFinalizadora} onValueChange={setAgFinalizadora}>
+                      <SelectTrigger className="w-full md:w-[220px] h-9 bg-black border-warning/40 text-white">
+                        <SelectValue placeholder="Todas as Finalizadoras" />
+                      </SelectTrigger>
+                      <SelectContent className="bg-black text-white border-warning/40">
+                        <SelectItem value="all">Todas as Finalizadoras</SelectItem>
+                        {[...new Set((agAgendamentos||[]).map(r=>r.finalizadora_nome).filter(Boolean))].map(fn => (
+                          <SelectItem key={fn} value={fn}>{fn}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
                   <Button variant="outline" size="sm" onClick={() => {
                     try {
                       const rows = filteredAg || [];
@@ -1384,34 +1386,90 @@ export default function FinanceiroPage() {
               ) : filteredAg.length === 0 ? (
                 <div className="text-sm text-text-muted">Sem registros no período.</div>
               ) : (
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Data/Hora</TableHead>
-                        <TableHead>Código</TableHead>
-                        <TableHead>Quadra</TableHead>
-                        <TableHead>Participante</TableHead>
-                        <TableHead>Finalizadora</TableHead>
-                        <TableHead className="text-right">Valor</TableHead>
-                        <TableHead>Status</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {filteredAg.map((r, i) => (
-                        <TableRow key={`${r.agendamento_codigo}-${i}`}>
-                          <TableCell>{r.inicio ? new Date(r.inicio).toLocaleString('pt-BR') : '—'}</TableCell>
-                          <TableCell>#{r.agendamento_codigo || '—'}</TableCell>
-                          <TableCell>{r.quadra_nome || '—'}</TableCell>
-                          <TableCell>{r.participante_nome || '—'}</TableCell>
-                          <TableCell>{r.finalizadora_nome || '—'}</TableCell>
-                          <TableCell className="text-right font-semibold">{fmtBRL(r.valor_cota)}</TableCell>
-                          <TableCell>{r.status_pagamento || '—'}</TableCell>
+                <>
+                  {/* Desktop: Tabela */}
+                  <div className="hidden md:block overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Data/Hora</TableHead>
+                          <TableHead>Código</TableHead>
+                          <TableHead>Quadra</TableHead>
+                          <TableHead>Participante</TableHead>
+                          <TableHead>Finalizadora</TableHead>
+                          <TableHead className="text-right">Valor</TableHead>
+                          <TableHead>Status</TableHead>
                         </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
+                      </TableHeader>
+                      <TableBody>
+                        {filteredAg.map((r, i) => (
+                          <TableRow key={`${r.agendamento_codigo}-${i}`}>
+                            <TableCell>{r.inicio ? new Date(r.inicio).toLocaleString('pt-BR') : '—'}</TableCell>
+                            <TableCell>#{r.agendamento_codigo || '—'}</TableCell>
+                            <TableCell>{r.quadra_nome || '—'}</TableCell>
+                            <TableCell>{r.participante_nome || '—'}</TableCell>
+                            <TableCell>{r.finalizadora_nome || '—'}</TableCell>
+                            <TableCell className="text-right font-semibold">{fmtBRL(r.valor_cota)}</TableCell>
+                            <TableCell>{r.status_pagamento || '—'}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                  
+                  {/* Mobile: Cards */}
+                  <div className="md:hidden space-y-3">
+                    {filteredAg.map((r, i) => (
+                      <div key={`${r.agendamento_codigo}-${i}`} className="bg-surface-2 rounded-lg p-4">
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="text-sm font-semibold text-text-primary">
+                            #{r.agendamento_codigo || '—'}
+                          </div>
+                          <div className={`text-xs px-2 py-1 rounded-full ${
+                            r.status_pagamento === 'Pago' ? 'bg-success/20 text-success' : 
+                            r.status_pagamento === 'Cancelado' ? 'bg-danger/20 text-danger' : 
+                            'bg-warning/20 text-warning'
+                          }`}>
+                            {r.status_pagamento || 'Pendente'}
+                          </div>
+                        </div>
+                        <div className="space-y-2 text-sm">
+                          <div className="flex justify-between">
+                            <span className="text-text-secondary">Data/Hora:</span>
+                            <span className="text-text-primary">
+                              {r.inicio ? new Date(r.inicio).toLocaleString('pt-BR', { 
+                                day: '2-digit', month: '2-digit', year: '2-digit',
+                                hour: '2-digit', minute: '2-digit'
+                              }) : '—'}
+                            </span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-text-secondary">Quadra:</span>
+                            <span className="text-text-primary font-medium">
+                              {r.quadra_nome || '—'}
+                            </span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-text-secondary">Participante:</span>
+                            <span className="text-text-primary">
+                              {r.participante_nome || '—'}
+                            </span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-text-secondary">Finalizadora:</span>
+                            <span className="text-text-primary">
+                              {r.finalizadora_nome || '—'}
+                            </span>
+                          </div>
+                          <div className="flex justify-between items-center pt-2 border-t border-border/50">
+                            <span className="text-text-secondary">Valor da Cota:</span>
+                            <span className="font-bold text-lg text-success">{fmtBRL(r.valor_cota)}</span>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
               )}
             </motion.div>
           </TabsContent>
@@ -1424,20 +1482,22 @@ export default function FinanceiroPage() {
               {history.length === 0 ? (
                 <div className="text-sm text-text-secondary">Nenhum fechamento encontrado.</div>
               ) : (
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Aberto em</TableHead>
-                        <TableHead>Fechado em</TableHead>
-                        <TableHead className="text-right">Saldo Inicial</TableHead>
-                        <TableHead className="text-right">Saldo Final</TableHead>
-                        <TableHead>Status</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {history.map((h) => (
-                        <TableRow key={h.id} className="cursor-pointer hover:bg-surface-2" onClick={async () => {
+                <>
+                  {/* Desktop: Tabela */}
+                  <div className="hidden md:block overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Aberto em</TableHead>
+                          <TableHead>Fechado em</TableHead>
+                          <TableHead className="text-right">Saldo Inicial</TableHead>
+                          <TableHead className="text-right">Saldo Final</TableHead>
+                          <TableHead>Status</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {history.map((h) => (
+                          <TableRow key={h.id} className="cursor-pointer hover:bg-surface-2" onClick={async () => {
                           setCaixaModalOpen(true);
                           setCaixaModalLoading(true);
                           setCaixaModalData(null);
@@ -1541,7 +1601,95 @@ export default function FinanceiroPage() {
                       ))}
                     </TableBody>
                   </Table>
-                </div>
+                  </div>
+                  
+                  {/* Mobile: Cards */}
+                  <div className="md:hidden space-y-3">
+                    {history.map((h) => (
+                      <div key={h.id} className="bg-surface-2 rounded-lg p-4 cursor-pointer hover:bg-surface-2/80 transition-colors" onClick={async () => {
+                        setCaixaModalOpen(true);
+                        setCaixaModalLoading(true);
+                        setCaixaModalData(null);
+                        try {
+                          const codigo = userProfile?.codigo_empresa;
+                          let resumoSnap = await getCaixaResumo({ caixaSessaoId: h.id, codigoEmpresa: codigo });
+                          const normalizeResumo = (r) => {
+                            if (!r) return null;
+                            if (r.total_bruto != null || r.por_finalizadora != null) {
+                              let porFin = r.por_finalizadora;
+                              if (porFin && typeof porFin === 'string') {
+                                try { porFin = JSON.parse(porFin); } catch { porFin = {}; }
+                              }
+                              return {
+                                from: r.periodo_de || null,
+                                to: r.periodo_ate || null,
+                                totalPorFinalizadora: porFin || {},
+                                totalEntradas: Number(r.total_entradas || 0),
+                                totalVendasBrutas: Number(r.total_bruto || 0),
+                                totalDescontos: Number(r.total_descontos || 0),
+                                totalVendasLiquidas: Number(r.total_liquido || 0),
+                              };
+                            }
+                            return r;
+                          };
+                          let resumo = normalizeResumo(resumoSnap);
+                          if (!resumo) {
+                            resumo = await listarResumoPeriodo({ from: h.aberto_em, to: h.fechado_em || new Date().toISOString(), codigoEmpresa: codigo });
+                          }
+                          const movimentacoes = await listarMovimentacoesCaixa({ caixaSessaoId: h.id, codigoEmpresa: codigo });
+                          setCaixaModalData({ resumo, movimentacoes, sessao: h, pagamentos: [] });
+                        } catch (e) {
+                          console.error('[Caixa][Fechamento][Error]', e);
+                          toast({ title: 'Erro ao carregar detalhes', description: e?.message, variant: 'destructive' });
+                        } finally {
+                          setCaixaModalLoading(false);
+                        }
+                      }}>
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="text-sm font-semibold text-text-primary">
+                            Sessão #{h.id}
+                          </div>
+                          <div className={`text-xs px-2 py-1 rounded-full ${
+                            h.status === 'fechado' ? 'bg-success/20 text-success' : 'bg-warning/20 text-warning'
+                          }`}>
+                            {String(h.status || '').toLowerCase() === 'open' ? 'Aberto' : 'Fechado'}
+                          </div>
+                        </div>
+                        <div className="space-y-2 text-sm">
+                          <div className="flex justify-between">
+                            <span className="text-text-secondary">Aberto em:</span>
+                            <span className="text-text-primary">
+                              {h.aberto_em ? new Date(h.aberto_em).toLocaleString('pt-BR', { 
+                                day: '2-digit', month: '2-digit', year: '2-digit',
+                                hour: '2-digit', minute: '2-digit'
+                              }) : '—'}
+                            </span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-text-secondary">Fechado em:</span>
+                            <span className="text-text-primary">
+                              {h.fechado_em ? new Date(h.fechado_em).toLocaleString('pt-BR', { 
+                                day: '2-digit', month: '2-digit', year: '2-digit',
+                                hour: '2-digit', minute: '2-digit'
+                              }) : '—'}
+                            </span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-text-secondary">Saldo Inicial:</span>
+                            <span className="font-semibold text-info">{fmtBRL(h.saldo_inicial)}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-text-secondary">Saldo Final:</span>
+                            <span className="font-semibold text-success">{fmtBRL(h.saldo_final)}</span>
+                          </div>
+                        </div>
+                        <div className="mt-3 text-xs text-text-muted text-center">
+                          Toque para ver detalhes
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
               )}
             </motion.div>
           </TabsContent>
@@ -1549,20 +1697,20 @@ export default function FinanceiroPage() {
           {/* ABA 3: RECEBIMENTOS */}
           <TabsContent value="recebimentos" className="space-y-6 mt-6">
             <motion.div variants={itemVariants} className="fx-card p-4 border-0 ring-0 outline-none shadow-none">
-              <div className="flex items-center justify-between mb-4">
+              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-4">
                 <h2 className="text-lg font-bold">Todos os Recebimentos</h2>
-                <div className="flex gap-2">
+                <div className="flex flex-col md:flex-row gap-2">
                   <div className="relative">
                     <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-text-muted" />
                     <Input
                       placeholder="Buscar..."
                       value={searchPagamento}
                       onChange={(e) => setSearchPagamento(e.target.value)}
-                      className="pl-10 w-[200px]"
+                      className="pl-10 w-full md:w-[200px]"
                     />
                   </div>
                   <Select value={filterFonte} onValueChange={setFilterFonte}>
-                    <SelectTrigger className="w-[160px] h-9 bg-black border-warning/40 text-white">
+                    <SelectTrigger className="w-full md:w-[160px] h-9 bg-black border-warning/40 text-white">
                       <SelectValue placeholder="Todas as Fontes" />
                     </SelectTrigger>
                     <SelectContent className="bg-black text-white border-warning/40">
@@ -1617,34 +1765,95 @@ export default function FinanceiroPage() {
               ) : filteredPagamentos.length === 0 ? (
                 <div className="text-sm text-text-muted">Sem registros no período.</div>
               ) : (
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Data/Hora</TableHead>
-                        <TableHead>Origem</TableHead>
-                        <TableHead>Fonte</TableHead>
-                        <TableHead>Descrição</TableHead>
-                        <TableHead>Finalizadora</TableHead>
-                        <TableHead className="text-right">Valor</TableHead>
-                        <TableHead>Status</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {filteredPagamentos.map((pg) => (
-                        <TableRow key={pg.id} className="cursor-pointer hover:bg-surface-2" onClick={() => { setRecSelecionado(pg); setRecModalOpen(true); }}>
-                          <TableCell>{pg.recebido_em ? new Date(pg.recebido_em).toLocaleString('pt-BR') : '—'}</TableCell>
-                          <TableCell>{pg.origem || '—'}</TableCell>
-                          <TableCell>{pg.fonte ? pg.fonte.toUpperCase() : '—'}</TableCell>
-                          <TableCell className="truncate max-w-[260px]" title={pg.descricao || ''}>{pg.descricao || '—'}</TableCell>
-                          <TableCell>{pg.finalizadoras?.nome || pg.metodo || '—'}</TableCell>
-                          <TableCell className="text-right font-semibold">{fmtBRL(pg.valor)}</TableCell>
-                          <TableCell>{pg.status || '—'}</TableCell>
+                <>
+                  {/* Desktop: Tabela */}
+                  <div className="hidden md:block overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Data/Hora</TableHead>
+                          <TableHead>Origem</TableHead>
+                          <TableHead>Fonte</TableHead>
+                          <TableHead>Descrição</TableHead>
+                          <TableHead>Finalizadora</TableHead>
+                          <TableHead className="text-right">Valor</TableHead>
+                          <TableHead>Status</TableHead>
                         </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
+                      </TableHeader>
+                      <TableBody>
+                        {filteredPagamentos.map((pg) => (
+                          <TableRow key={pg.id} className="cursor-pointer hover:bg-surface-2" onClick={() => { setRecSelecionado(pg); setRecModalOpen(true); }}>
+                            <TableCell>{pg.recebido_em ? new Date(pg.recebido_em).toLocaleString('pt-BR') : '—'}</TableCell>
+                            <TableCell>{pg.origem || '—'}</TableCell>
+                            <TableCell>{pg.fonte ? pg.fonte.toUpperCase() : '—'}</TableCell>
+                            <TableCell className="truncate max-w-[260px]" title={pg.descricao || ''}>{pg.descricao || '—'}</TableCell>
+                            <TableCell>{pg.finalizadoras?.nome || pg.metodo || '—'}</TableCell>
+                            <TableCell className="text-right font-semibold">{fmtBRL(pg.valor)}</TableCell>
+                            <TableCell>{pg.status || '—'}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                  
+                  {/* Mobile: Cards */}
+                  <div className="md:hidden space-y-3">
+                    {filteredPagamentos.map((pg) => (
+                      <div key={pg.id} className="bg-surface-2 rounded-lg p-4 cursor-pointer hover:bg-surface-2/80 transition-colors" onClick={() => { setRecSelecionado(pg); setRecModalOpen(true); }}>
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="text-sm font-semibold text-text-primary">
+                            {pg.origem || 'Recebimento'}
+                          </div>
+                          <div className={`text-xs px-2 py-1 rounded-full ${
+                            pg.status === 'Pago' ? 'bg-success/20 text-success' : 
+                            pg.status === 'Cancelado' ? 'bg-danger/20 text-danger' : 
+                            'bg-warning/20 text-warning'
+                          }`}>
+                            {pg.status || 'Pendente'}
+                          </div>
+                        </div>
+                        <div className="space-y-2 text-sm">
+                          <div className="flex justify-between">
+                            <span className="text-text-secondary">Data/Hora:</span>
+                            <span className="text-text-primary">
+                              {pg.recebido_em ? new Date(pg.recebido_em).toLocaleString('pt-BR', { 
+                                day: '2-digit', month: '2-digit', year: '2-digit',
+                                hour: '2-digit', minute: '2-digit'
+                              }) : '—'}
+                            </span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-text-secondary">Fonte:</span>
+                            <span className="text-text-primary font-medium">
+                              {pg.fonte ? pg.fonte.toUpperCase() : '—'}
+                            </span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-text-secondary">Finalizadora:</span>
+                            <span className="text-text-primary">
+                              {pg.finalizadoras?.nome || pg.metodo || '—'}
+                            </span>
+                          </div>
+                          {pg.descricao && (
+                            <div className="flex flex-col gap-1">
+                              <span className="text-text-secondary">Descrição:</span>
+                              <span className="text-text-primary text-xs bg-surface/50 p-2 rounded">
+                                {pg.descricao}
+                              </span>
+                            </div>
+                          )}
+                          <div className="flex justify-between items-center pt-2 border-t border-border/50">
+                            <span className="text-text-secondary">Valor:</span>
+                            <span className="font-bold text-lg text-success">{fmtBRL(pg.valor)}</span>
+                          </div>
+                        </div>
+                        <div className="mt-3 text-xs text-text-muted text-center">
+                          Toque para ver detalhes
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
               )}
             </motion.div>
           </TabsContent>
@@ -2604,18 +2813,18 @@ export default function FinanceiroPage() {
 
         {/* Modal: Detalhes do Cliente (apenas mobile) */}
         <Dialog open={clienteDetalhesModalOpen} onOpenChange={setClienteDetalhesModalOpen}>
-          <DialogContent className="max-w-lg bg-surface text-text-primary border-0">
-            <DialogHeader>
-              <DialogTitle>Detalhes do Cliente</DialogTitle>
-              <DialogDescription>
+          <DialogContent className="max-w-full w-[95vw] h-[90vh] bg-surface text-text-primary border-0 p-4">
+            <DialogHeader className="pb-4">
+              <DialogTitle className="text-lg">Detalhes do Cliente</DialogTitle>
+              <DialogDescription className="text-sm">
                 {selectedCliente?.nome}
               </DialogDescription>
             </DialogHeader>
             {!selectedCliente ? (
               <div className="text-sm text-text-muted">Nenhum cliente selecionado</div>
             ) : (
-              <div className="space-y-3">
-                <div className="flex items-center justify-between p-3 bg-surface-2 rounded-lg">
+              <div className="space-y-4 h-full flex flex-col">
+                <div className="flex items-center justify-between p-3 bg-surface-2 rounded-lg flex-shrink-0">
                   <span className="text-sm text-text-secondary">Total Pago</span>
                   <span className="text-lg font-bold text-success">{fmtBRL(selectedCliente.valor)}</span>
                 </div>
@@ -2624,27 +2833,51 @@ export default function FinanceiroPage() {
                 ) : selectedClientePagamentos.length === 0 ? (
                   <div className="text-sm text-text-muted text-center py-8">Sem pagamentos no período.</div>
                 ) : (
-                  <div className="max-h-[50vh] overflow-y-auto">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Data</TableHead>
-                          <TableHead>Finalizadora</TableHead>
-                          <TableHead>Origem</TableHead>
-                          <TableHead className="text-right">Valor</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {selectedClientePagamentos.map((pg) => (
-                          <TableRow key={pg.id}>
-                            <TableCell className="text-xs">{pg.recebido_em ? new Date(pg.recebido_em).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }) : '—'}</TableCell>
-                            <TableCell className="text-xs">{pg.finalizadoras?.nome || pg.metodo || '—'}</TableCell>
-                            <TableCell className="text-xs">{pg.origem || '—'}</TableCell>
-                            <TableCell className="text-right font-semibold text-xs">{fmtBRL(pg.valor)}</TableCell>
+                  <div className="flex-1 overflow-y-auto -mx-4 px-4">
+                    <div className="min-w-full overflow-x-auto">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead className="text-sm min-w-[100px]">Data</TableHead>
+                            <TableHead className="text-sm min-w-[120px]">Finalizadora</TableHead>
+                            <TableHead className="text-sm min-w-[100px]">Origem</TableHead>
+                            <TableHead className="text-right text-sm min-w-[80px]">Valor</TableHead>
                           </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
+                        </TableHeader>
+                        <TableBody>
+                          {selectedClientePagamentos.map((pg) => (
+                            <TableRow key={pg.id}>
+                              <TableCell className="text-sm py-3 min-w-[100px]">
+                                <div className="whitespace-nowrap">
+                                  {pg.recebido_em ? new Date(pg.recebido_em).toLocaleString('pt-BR', { 
+                                    day: '2-digit', 
+                                    month: '2-digit', 
+                                    year: '2-digit',
+                                    hour: '2-digit', 
+                                    minute: '2-digit' 
+                                  }) : '—'}
+                                </div>
+                              </TableCell>
+                              <TableCell className="text-sm py-3 min-w-[120px]">
+                                <div className="truncate max-w-[120px]" title={pg.finalizadoras?.nome || pg.metodo || '—'}>
+                                  {pg.finalizadoras?.nome || pg.metodo || '—'}
+                                </div>
+                              </TableCell>
+                              <TableCell className="text-sm py-3 min-w-[100px]">
+                                <div className="truncate max-w-[100px]" title={pg.origem || '—'}>
+                                  {pg.origem || '—'}
+                                </div>
+                              </TableCell>
+                              <TableCell className="text-right font-semibold text-sm py-3 min-w-[80px]">
+                                <div className="whitespace-nowrap">
+                                  {fmtBRL(pg.valor)}
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
                   </div>
                 )}
               </div>
