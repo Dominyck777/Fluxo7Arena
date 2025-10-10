@@ -265,6 +265,8 @@ async function getConfig() {
       sourcemap: isDev ? true : false,
       // ✅ Minificação mais suave - não quebra Supabase
       minify: isDev ? false : 'esbuild',
+      // ✅ Limite de tamanho de chunk aumentado
+      chunkSizeWarningLimit: 1000,
       // ✅ CommonJS options - garante compatibilidade com Supabase
       commonjsOptions: {
         include: [/@supabase/, /node_modules/],
@@ -277,8 +279,17 @@ async function getConfig() {
           '@babel/generator',
           '@babel/types',
         ],
-        // ✅ Sem code splitting manual - deixa Vite otimizar automaticamente
-        // Isso evita problemas de dependências circulares e ordem de carregamento
+        // ✅ Configurações Rollup para Supabase
+        output: {
+          // Preservar módulos dinâmicos do Supabase
+          preserveModules: false,
+          // Formato de saída
+          format: 'es',
+          // Garantir exports nomeados
+          exports: 'named',
+        },
+        // ✅ Preservar dynamic imports do Supabase
+        preserveEntrySignatures: 'allow-extension',
       },
     },
   });

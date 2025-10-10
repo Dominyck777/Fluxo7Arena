@@ -16,6 +16,18 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     detectSessionInUrl: true,
     storage: typeof window !== 'undefined' ? window.localStorage : undefined,
   },
+  global: {
+    headers: {
+      'X-Client-Info': 'fluxo7arena-web',
+    },
+  },
+  db: {
+    schema: 'public',
+  },
+  // ✅ Timeout e retry para produção
+  realtime: {
+    timeout: 30000,
+  },
 })
 
 // Expor para depuração no navegador (somente client-side)
