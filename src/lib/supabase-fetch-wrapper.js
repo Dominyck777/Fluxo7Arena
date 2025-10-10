@@ -131,6 +131,31 @@ class SupabaseQueryBuilder {
     return this
   }
   
+  not(column, operator, value) {
+    this.params[column] = `not.${operator}.${value}`
+    return this
+  }
+  
+  or(filters) {
+    this.params.or = `(${filters})`
+    return this
+  }
+  
+  contains(column, value) {
+    this.params[column] = `cs.{${value}}`
+    return this
+  }
+  
+  containedBy(column, value) {
+    this.params[column] = `cd.{${value}}`
+    return this
+  }
+  
+  filter(column, operator, value) {
+    this.params[column] = `${operator}.${value}`
+    return this
+  }
+  
   order(column, options = {}) {
     const { ascending = true } = options
     this.params.order = `${column}.${ascending ? 'asc' : 'desc'}`
@@ -167,42 +192,46 @@ class SupabaseQueryBuilder {
   }
 }
 
+// Query Builder com INSERT/UPDATE/DELETE
+class SupabaseModifyBuilder extends SupabaseQueryBuilder {
+  insert(data) {
+    this.method = 'POST'
+    this.body = Array.isArray(data) ? data : [data]
+    return this
+  }
+  
+  update(data) {
+    this.method = 'PATCH'
+    this.body = data
+    return this
+  }
+  
+  delete() {
+    this.method = 'DELETE'
+    return this
+  }
+  
+  async then(resolve, reject) {
+    try {
+      const result = await supabaseFetch(this.table, { 
+        method: this.method || 'GET',
+        body: this.body,
+        params: this.params 
+      })
+      if (this.isSingle && result.data) {
+        result.data = result.data[0] || null
+      }
+      resolve(result)
+    } catch (error) {
+      reject(error)
+    }
+  }
+}
+
 // Client principal
 export const supabaseWrapper = {
   from(table) {
-    return new SupabaseQueryBuilder(table)
-  },
-  
-  async insert(table, data) {
-    return supabaseFetch(table, {
-      method: 'POST',
-      body: Array.isArray(data) ? data : [data],
-    })
-  },
-  
-  async update(table, data, match) {
-    const params = {}
-    Object.entries(match).forEach(([key, value]) => {
-      params[key] = `eq.${value}`
-    })
-    
-    return supabaseFetch(table, {
-      method: 'PATCH',
-      body: data,
-      params,
-    })
-  },
-  
-  async delete(table, match) {
-    const params = {}
-    Object.entries(match).forEach(([key, value]) => {
-      params[key] = `eq.${value}`
-    })
-    
-    return supabaseFetch(table, {
-      method: 'DELETE',
-      params,
-    })
+    return new SupabaseModifyBuilder(table)
   },
   
   // Auth methods - delegados para o client original em supabase.js
