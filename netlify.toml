@@ -1,0 +1,63 @@
+# Netlify Configuration for Fluxo7Arena
+# https://docs.netlify.com/configure-builds/file-based-configuration/
+
+[build]
+  # Comando de build
+  command = "npm run build"
+  
+  # Diretório de output (onde o Vite gera os arquivos)
+  publish = "dist"
+  
+  # Variáveis de ambiente para o build
+  # IMPORTANTE: Adicionar no painel do Netlify:
+  # - VITE_SUPABASE_URL
+  # - VITE_SUPABASE_ANON_KEY
+
+[build.environment]
+  # Node version
+  NODE_VERSION = "18"
+  # NPM version (opcional)
+  NPM_VERSION = "9"
+
+# Redirects para SPA (Single Page Application)
+# Garante que todas as rotas sejam redirecionadas para index.html
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+  force = false
+
+# Headers de segurança e performance
+[[headers]]
+  for = "/*"
+  [headers.values]
+    # Security headers
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    X-XSS-Protection = "1; mode=block"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    
+    # Cache control para HTML (não cachear)
+    Cache-Control = "public, max-age=0, must-revalidate"
+
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    # Cache agressivo para assets (JS, CSS, imagens com hash)
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/*.js"
+  [headers.values]
+    # Cache para JS no root
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/*.css"
+  [headers.values]
+    # Cache para CSS no root
+    Cache-Control = "public, max-age=31536000, immutable"
+
+# Plugin para otimização automática
+[[plugins]]
+  package = "@netlify/plugin-lighthouse"

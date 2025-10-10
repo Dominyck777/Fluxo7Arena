@@ -234,6 +234,13 @@ async function getConfig() {
       react(),
       addTransformIndexHtml
     ],
+    // ✅ Otimização de dependências - força pré-bundling do Supabase
+    optimizeDeps: {
+      include: ['@supabase/supabase-js'],
+      esbuildOptions: {
+        target: 'es2020',
+      },
+    },
     server: {
       cors: true,
       headers: {
@@ -252,6 +259,17 @@ async function getConfig() {
       },
     },
     build: {
+      target: 'es2020',
+      outDir: 'dist',
+      // ✅ Sourcemaps para debug em produção (pode remover depois de resolver)
+      sourcemap: isDev ? true : false,
+      // ✅ Minificação mais suave - não quebra Supabase
+      minify: isDev ? false : 'esbuild',
+      // ✅ CommonJS options - garante compatibilidade com Supabase
+      commonjsOptions: {
+        include: [/@supabase/, /node_modules/],
+        transformMixedEsModules: true,
+      },
       rollupOptions: {
         external: [
           '@babel/parser',
@@ -259,6 +277,27 @@ async function getConfig() {
           '@babel/generator',
           '@babel/types',
         ],
+        output: {
+          // ✅ Não fazer code splitting agressivo do Supabase
+          manualChunks: (id) => {
+            // Manter Supabase no bundle principal para evitar problemas de inicialização
+            if (id.includes('@supabase/supabase-js')) {
+              return 'vendor';
+            }
+            // React e dependências principais
+            if (id.includes('node_modules')) {
+              if (id.includes('react') || id.includes('react-dom') || id.includes('react-router')) {
+                return 'vendor';
+              }
+              // Radix UI em chunk separado
+              if (id.includes('@radix-ui')) {
+                return 'ui';
+              }
+              // Outras libs em chunk separado
+              return 'libs';
+            }
+          },
+        },
       },
     },
   });
