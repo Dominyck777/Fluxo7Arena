@@ -232,7 +232,8 @@ async function getConfig() {
     customLogger: logger,
     plugins: [
       react(),
-      addTransformIndexHtml
+      // Só adiciona plugins de desenvolvimento em dev
+      ...(isDev ? [addTransformIndexHtml] : [])
     ],
     server: {
       cors: true,
@@ -252,14 +253,26 @@ async function getConfig() {
       },
     },
     build: {
+      // Otimizações para produção
+      target: 'es2015',
+      minify: 'terser',
+      sourcemap: false,
       rollupOptions: {
-        external: [
-          '@babel/parser',
-          '@babel/traverse',
-          '@babel/generator',
-          '@babel/types',
-        ],
+        output: {
+          // Code splitting otimizado
+          manualChunks: {
+            vendor: ['react', 'react-dom', 'react-router-dom'],
+            ui: ['@radix-ui/react-dialog', '@radix-ui/react-select', '@radix-ui/react-popover'],
+            supabase: ['@supabase/supabase-js'],
+            charts: ['recharts'],
+            motion: ['framer-motion'],
+            dnd: ['react-beautiful-dnd'],
+            utils: ['date-fns', 'clsx', 'tailwind-merge']
+          }
+        }
       },
+      // Aumentar limite de chunk para evitar warnings
+      chunkSizeWarningLimit: 1000,
     },
   });
 }
