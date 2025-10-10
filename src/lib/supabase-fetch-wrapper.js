@@ -96,11 +96,13 @@ class SupabaseQueryBuilder {
     return this
   }
   
+  // Greater than or equal
   gte(column, value) {
     this.params[column] = `gte.${value}`
     return this
   }
   
+  // Less than
   lt(column, value) {
     this.params[column] = `lt.${value}`
     return this
