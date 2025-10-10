@@ -258,6 +258,12 @@ async function getConfig() {
       minify: 'terser',
       sourcemap: false,
       rollupOptions: {
+        external: [
+          '@babel/parser',
+          '@babel/traverse',
+          '@babel/generator',
+          '@babel/types',
+        ],
         output: {
           // Code splitting otimizado
           manualChunks: {
