@@ -1,0 +1,230 @@
+/**
+ * 🚀 Supabase Fetch Wrapper
+ * 
+ * Wrapper que usa fetch direto ao invés do @supabase/supabase-js
+ * para contornar bugs de minificação no Netlify/Vercel
+ */
+
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY
+
+// Helper para construir query string
+const buildQueryString = (params) => {
+  const searchParams = new URLSearchParams()
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null) {
+      searchParams.append(key, String(value))
+    }
+  })
+  return searchParams.toString()
+}
+
+// Helper para fazer request
+const supabaseFetch = async (endpoint, options = {}) => {
+  const { method = 'GET', body, headers: customHeaders = {}, params = {} } = options
+  
+  const queryString = buildQueryString(params)
+  const url = `${SUPABASE_URL}/rest/v1/${endpoint}${queryString ? `?${queryString}` : ''}`
+  
+  const headers = {
+    'apikey': SUPABASE_ANON_KEY,
+    'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+    'Content-Type': 'application/json',
+    'Prefer': 'return=representation',
+    ...customHeaders,
+  }
+  
+  // Adicionar auth token se existir
+  const authData = localStorage.getItem('sb-dlfryxtyxqoacuunswuc-auth-token')
+  if (authData) {
+    try {
+      const { access_token } = JSON.parse(authData)
+      if (access_token) {
+        headers['Authorization'] = `Bearer ${access_token}`
+      }
+    } catch (e) {
+      console.warn('[Supabase Wrapper] Erro ao ler auth token:', e)
+    }
+  }
+  
+  const config = {
+    method,
+    headers,
+  }
+  
+  if (body) {
+    config.body = JSON.stringify(body)
+  }
+  
+  const response = await fetch(url, config)
+  
+  if (!response.ok) {
+    const error = await response.text()
+    throw new Error(`Supabase error: ${response.status} - ${error}`)
+  }
+  
+  const data = await response.json()
+  return { data, error: null }
+}
+
+// Query Builder (API similar ao Supabase)
+class SupabaseQueryBuilder {
+  constructor(table) {
+    this.table = table
+    this.params = {}
+    this.selectColumns = '*'
+  }
+  
+  select(columns = '*') {
+    this.selectColumns = columns
+    this.params.select = columns
+    return this
+  }
+  
+  eq(column, value) {
+    this.params[column] = `eq.${value}`
+    return this
+  }
+  
+  neq(column, value) {
+    this.params[column] = `neq.${value}`
+    return this
+  }
+  
+  gt(column, value) {
+    this.params[column] = `gt.${value}`
+    return this
+  }
+  
+  gte(column, value) {
+    this.params[column] = `gte.${value}`
+    return this
+  }
+  
+  lt(column, value) {
+    this.params[column] = `lt.${value}`
+    return this
+  }
+  
+  lte(column, value) {
+    this.params[column] = `lte.${value}`
+    return this
+  }
+  
+  like(column, pattern) {
+    this.params[column] = `like.${pattern}`
+    return this
+  }
+  
+  ilike(column, pattern) {
+    this.params[column] = `ilike.${pattern}`
+    return this
+  }
+  
+  is(column, value) {
+    this.params[column] = `is.${value}`
+    return this
+  }
+  
+  in(column, values) {
+    this.params[column] = `in.(${values.join(',')})`
+    return this
+  }
+  
+  order(column, options = {}) {
+    const { ascending = true } = options
+    this.params.order = `${column}.${ascending ? 'asc' : 'desc'}`
+    return this
+  }
+  
+  limit(count) {
+    this.params.limit = count
+    return this
+  }
+  
+  range(from, to) {
+    this.params.offset = from
+    this.params.limit = to - from + 1
+    return this
+  }
+  
+  single() {
+    this.params.limit = 1
+    this.isSingle = true
+    return this
+  }
+  
+  async then(resolve, reject) {
+    try {
+      const result = await supabaseFetch(this.table, { params: this.params })
+      if (this.isSingle && result.data) {
+        result.data = result.data[0] || null
+      }
+      resolve(result)
+    } catch (error) {
+      reject(error)
+    }
+  }
+}
+
+// Client principal
+export const supabaseWrapper = {
+  from(table) {
+    return new SupabaseQueryBuilder(table)
+  },
+  
+  async insert(table, data) {
+    return supabaseFetch(table, {
+      method: 'POST',
+      body: Array.isArray(data) ? data : [data],
+    })
+  },
+  
+  async update(table, data, match) {
+    const params = {}
+    Object.entries(match).forEach(([key, value]) => {
+      params[key] = `eq.${value}`
+    })
+    
+    return supabaseFetch(table, {
+      method: 'PATCH',
+      body: data,
+      params,
+    })
+  },
+  
+  async delete(table, match) {
+    const params = {}
+    Object.entries(match).forEach(([key, value]) => {
+      params[key] = `eq.${value}`
+    })
+    
+    return supabaseFetch(table, {
+      method: 'DELETE',
+      params,
+    })
+  },
+  
+  // Auth methods - delegados para o client original em supabase.js
+  auth: null, // Será preenchido pelo client original
+  
+  // Para compatibilidade
+  supabaseUrl: SUPABASE_URL,
+  supabaseKey: SUPABASE_ANON_KEY,
+}
+
+// Teste automático
+if (typeof window !== 'undefined' && import.meta.env.PROD) {
+  console.log('[Supabase Wrapper] Testando wrapper...')
+  supabaseWrapper.from('empresas').select('id').limit(1)
+    .then(({ data, error }) => {
+      if (error) {
+        console.error('[Supabase Wrapper] ❌ ERRO:', error)
+      } else {
+        console.log('[Supabase Wrapper] ✅ SUCESSO com WRAPPER:', data)
+      }
+    })
+    .catch(err => {
+      console.error('[Supabase Wrapper] ❌ EXCEPTION:', err)
+    })
+}
