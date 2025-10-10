@@ -4010,7 +4010,7 @@ function AgendaPage() {
                 <div className="flex items-center gap-2 mt-1">
                   <Select value={String(form.startMinutes)} onValueChange={(v) => setForm((f) => ({ ...f, startMinutes: Number(v) }))}>
                     <SelectTrigger className="w-32" aria-label="Hora início" onMouseDown={() => { if (effectiveCustomerPickerOpen) setTimeout(closeCustomerPicker, 0); }}><SelectValue /></SelectTrigger>
-                    <SelectContent className="max-h-[300px] z-[60]">
+                    <SelectContent className="max-h-[300px] z-[60] [&>div]:scrollbar-thin [&>div]:scrollbar-track-surface [&>div]:scrollbar-thumb-brand/40 [&>div]:hover:scrollbar-thumb-brand/60">
                       {timeOptions.map((opt) => (
                         <SelectItem
                           key={opt.value}
@@ -4032,7 +4032,7 @@ function AgendaPage() {
                   </Select>
                   <Select value={String(form.endMinutes)} onValueChange={(v) => setForm((f) => ({ ...f, endMinutes: Number(v) }))}>
                     <SelectTrigger className="w-32" aria-label="Hora fim" onMouseDown={() => { if (effectiveCustomerPickerOpen) setTimeout(closeCustomerPicker, 0); }}><SelectValue /></SelectTrigger>
-                    <SelectContent className="max-h-[300px] z-[60]">
+                    <SelectContent className="max-h-[300px] z-[60] [&>div]:scrollbar-thin [&>div]:scrollbar-track-surface [&>div]:scrollbar-thumb-brand/40 [&>div]:hover:scrollbar-thumb-brand/60">
                       {endTimeOptions.map((opt) => (
                         <SelectItem
                           key={opt.value}

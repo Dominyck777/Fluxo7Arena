@@ -205,6 +205,8 @@ function DashboardPage() {
         const fimHoje = endOfDay(hoje).toISOString();
 
         // 1. Faturamento de Hoje
+        
+        // 1.1. Pagamentos de comandas/vendas
         const { data: pagamentos } = await supabase
           .from('pagamentos')
           .select('valor, status')
@@ -212,9 +214,33 @@ function DashboardPage() {
           .gte('recebido_em', inicioHoje)
           .lte('recebido_em', fimHoje);
         
-        const totalHoje = (pagamentos || [])
+        const totalComandas = (pagamentos || [])
           .filter(p => !['Cancelado', 'Estornado'].includes(p.status))
           .reduce((sum, p) => sum + Number(p.valor || 0), 0);
+        
+        // 1.2. Pagamentos de agendamentos
+        const { data: agendamentosHoje } = await supabase
+          .from('agendamentos')
+          .select('id')
+          .eq('codigo_empresa', codigo)
+          .gte('inicio', inicioHoje)
+          .lte('inicio', fimHoje);
+        
+        let totalAgendamentos = 0;
+        if (agendamentosHoje && agendamentosHoje.length > 0) {
+          const agendamentoIds = agendamentosHoje.map(a => a.id);
+          const { data: participantesPagos } = await supabase
+            .from('agendamento_participantes')
+            .select('valor_cota, status_pagamento')
+            .eq('codigo_empresa', codigo)
+            .in('agendamento_id', agendamentoIds)
+            .eq('status_pagamento', 'Pago');
+          
+          totalAgendamentos = (participantesPagos || [])
+            .reduce((sum, p) => sum + Number(p.valor_cota || 0), 0);
+        }
+        
+        const totalHoje = totalComandas + totalAgendamentos;
         setFaturamentoHoje(totalHoje);
 
         // 2. Agendamentos de Hoje
@@ -281,6 +307,7 @@ function DashboardPage() {
           const inicioDia = startOfDay(dia).toISOString();
           const fimDia = endOfDay(dia).toISOString();
 
+          // Pagamentos de comandas
           const { data: pagsDia } = await supabase
             .from('pagamentos')
             .select('valor, status')
@@ -288,9 +315,33 @@ function DashboardPage() {
             .gte('recebido_em', inicioDia)
             .lte('recebido_em', fimDia);
 
-          const receita = (pagsDia || [])
+          const receitaComandas = (pagsDia || [])
             .filter(p => !['Cancelado', 'Estornado'].includes(p.status))
             .reduce((sum, p) => sum + Number(p.valor || 0), 0);
+
+          // Pagamentos de agendamentos
+          const { data: agendsDia } = await supabase
+            .from('agendamentos')
+            .select('id')
+            .eq('codigo_empresa', codigo)
+            .gte('inicio', inicioDia)
+            .lte('inicio', fimDia);
+          
+          let receitaAgendamentos = 0;
+          if (agendsDia && agendsDia.length > 0) {
+            const idsAgendsDia = agendsDia.map(a => a.id);
+            const { data: partsPagosDia } = await supabase
+              .from('agendamento_participantes')
+              .select('valor_cota')
+              .eq('codigo_empresa', codigo)
+              .in('agendamento_id', idsAgendsDia)
+              .eq('status_pagamento', 'Pago');
+            
+            receitaAgendamentos = (partsPagosDia || [])
+              .reduce((sum, p) => sum + Number(p.valor_cota || 0), 0);
+          }
+
+          const receita = receitaComandas + receitaAgendamentos;
 
           dados14Dias.push({
             name: i === 0 ? 'Hoje' : `${i}d`,
