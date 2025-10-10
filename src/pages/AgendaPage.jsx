@@ -19,7 +19,7 @@ import { cn, getCourtColor } from '@/lib/utils';
 import { listarFinalizadoras } from '@/lib/store';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import ClientFormModal from '@/components/clients/ClientFormModal';
 
 // Grade fixa de 30 em 30 minutos (constantes usadas por toda a página)
@@ -151,6 +151,7 @@ const itemVariants = {
 
 function AgendaPage() {
   const { toast } = useToast();
+  const location = useLocation();
   // Debug toggle via localStorage: set localStorage.setItem('debug:agenda','1') to enable
   const debugOn = useMemo(() => {
     try { return typeof window !== 'undefined' && localStorage.getItem('debug:agenda') === '1'; } catch { return false; }
@@ -286,6 +287,18 @@ function AgendaPage() {
     setIsModalOpen(true);
     hasOpenedRef.current = true;
   }, [isModalOpen]); // ✅ CORREÇÃO: Adiciona isModalOpen nas dependências
+  
+  // Abrir modal automaticamente quando vindo do Dashboard (apenas uma vez)
+  const autoOpenedRef = useRef(false);
+  useEffect(() => {
+    if (location.state?.openModal && !isModalOpen && !autoOpenedRef.current) {
+      autoOpenedRef.current = true;
+      openBookingModal();
+      // Limpar o state para não reabrir ao navegar de volta
+      window.history.replaceState({}, document.title);
+    }
+  }, [location.state?.openModal, isModalOpen, openBookingModal]);
+  
   const [viewFilter, setViewFilter] = useState({ scheduled: true, available: true, canceledOnly: false });
 
   // Lista de quadras vinda do banco (objetos com nome, modalidades, horario)

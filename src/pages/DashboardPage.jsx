@@ -1,10 +1,14 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Helmet } from 'react-helmet';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
-import { DollarSign, CalendarPlus, Users, ArrowUpRight, ArrowDownRight, Clock, Bell, ShieldCheck, Star, ThumbsUp, Wallet, Banknote, CalendarCheck, BarChart3, TrendingUp, MoonStar as StarIcon } from 'lucide-react';
+import { DollarSign, CalendarPlus, Users, ArrowUpRight, ArrowDownRight, Clock, Bell, ShieldCheck, CalendarCheck, TrendingUp, ShoppingCart, Store, Package } from 'lucide-react';
 import { useToast } from "@/components/ui/use-toast";
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, AreaChart, Area } from 'recharts';
+import { AreaChart, Area, ResponsiveContainer, Tooltip } from 'recharts';
+import { useAuth } from '@/contexts/AuthContext';
+import { supabase } from '@/lib/supabase';
+import { format, startOfDay, endOfDay } from 'date-fns';
+import { useNavigate } from 'react-router-dom';
 
 const StatCard = ({ icon: Icon, title, value, trend, trendValue, color, className }) => {
   const TrendIcon = trend === 'up' ? ArrowUpRight : ArrowDownRight;
@@ -39,7 +43,7 @@ const StatCard = ({ icon: Icon, title, value, trend, trendValue, color, classNam
   );
 };
 
-const AlertsCard = ({ className }) => {
+const AlertsCard = ({ className, alerts }) => {
   return (
     <motion.div
       variants={{
@@ -49,51 +53,20 @@ const AlertsCard = ({ className }) => {
       className={`fx-card ${className || ''}`}
     >
       <h2 className="text-lg font-bold text-text-primary mb-2 flex items-center">
-        <Bell className="mr-2 h-5 w-5 text-brand" /> Alertas e Lembretes
+        <Bell className="mr-2 h-5 w-5 text-brand" /> Alertas do Dia
       </h2>
-      <ul className="space-y-1.5 text-sm">
-        <li className="flex items-center">
-          <ShieldCheck className="w-4 h-4 mr-2 text-danger" />
-          <span className="text-text-secondary">Pagamento pendente: Cliente X</span>
-        </li>
-        <li className="flex items-center">
-          <ThumbsUp className="w-4 h-4 mr-2 text-info" />
-          <span className="text-text-secondary">Plano mensal a vencer: Cliente Y</span>
-        </li>
-      </ul>
-    </motion.div>
-  );
-};
-
-const CourtUtilizationCard = ({ className }) => {
-  // Valores mockados para hoje
-  const nowUtil = 62; // ocupação neste momento
-  const dayUtil = 71; // ocupação média do dia
-  const nextFree = '18:30 - Quadra 2';
-
-  return (
-    <motion.div
-      variants={{
-        hidden: { opacity: 0, y: 30, scale: 0.98 },
-        visible: { opacity: 1, y: 0, scale: 1, transition: { duration: 0.5, ease: [0.22, 1, 0.36, 1] } }
-      }}
-      className={`fx-card ${className || ''}`}
-    >
-      <h3 className="text-base font-bold text-text-primary mb-3">Utilização das Quadras (Hoje)</h3>
-      <div className="space-y-3 text-sm">
-        <div className="flex items-center justify-between">
-          <span className="text-text-secondary">Ocupação agora</span>
-          <span className="font-bold tabular-nums text-text-primary">{nowUtil}%</span>
-        </div>
-        <div className="flex items-center justify-between">
-          <span className="text-text-secondary">Ocupação do dia</span>
-          <span className="font-bold tabular-nums text-text-primary">{dayUtil}%</span>
-        </div>
-        <div className="flex items-center justify-between">
-          <span className="text-text-secondary">Próxima janela livre</span>
-          <span className="font-bold tabular-nums text-success">{nextFree}</span>
-        </div>
-      </div>
+      {alerts.length === 0 ? (
+        <p className="text-sm text-text-muted">Nenhum alerta no momento! 🎉</p>
+      ) : (
+        <ul className="space-y-1.5 text-sm">
+          {alerts.map((alert, idx) => (
+            <li key={idx} className="flex items-center">
+              <ShieldCheck className="w-4 h-4 mr-2 text-warning" />
+              <span className="text-text-secondary">{alert}</span>
+            </li>
+          ))}
+        </ul>
+      )}
     </motion.div>
   );
 };
@@ -133,7 +106,7 @@ const MinimalFinanceCard = ({ title, icon: Icon, data, color, className }) => {
                 if (name === 'saldo') return [`R$ ${value.toLocaleString('pt-BR')}`, 'Saldo'];
                 return value;
               }}
-              labelFormatter={(label) => `Dia ${label}`}
+              labelFormatter={(label) => label}
             />
             <Area type="monotone" dataKey="saldo" stroke="var(--brand)" strokeWidth={2} fill="var(--brand)" fillOpacity={0.15} />
           </AreaChart>
@@ -157,7 +130,7 @@ const MinimalFinanceCard = ({ title, icon: Icon, data, color, className }) => {
   );
 };
 
-const ModalityBreakdownCard = ({ title, icon: Icon, data, color, className }) => {
+const StoreInfoCard = ({ title, icon: Icon, data, color, className }) => {
   return (
      <motion.div
       variants={{
@@ -184,46 +157,6 @@ const ModalityBreakdownCard = ({ title, icon: Icon, data, color, className }) =>
   );
 };
 
-const FinancialSummaryCard = ({ title, icon: Icon, data, color }) => {
-  return (
-    <motion.div
-      variants={{
-        hidden: { opacity: 0, y: 30, scale: 0.98 },
-        visible: { opacity: 1, y: 0, scale: 1, transition: { duration: 0.5, ease: [0.22, 1, 0.36, 1] } }
-      }}
-      className="fx-card group flex flex-col"
-    >
-      <div className="flex items-center mb-4">
-        <div className={`flex items-center justify-center h-10 w-10 rounded-md border border-white/10 bg-white/5 transition-colors duration-300 group-hover:border-brand/50 group-hover:bg-brand/10 mr-3`} style={{ color: `var(--${color})` }}>
-          <Icon className="h-5 w-5" />
-        </div>
-        <h3 className="text-base font-bold text-text-primary">{title}</h3>
-      </div>
-      <div className="flex-grow">
-        <ResponsiveContainer width="100%" height={140}>
-          <BarChart data={data} margin={{ top: 12, right: 10, left: 0, bottom: 0 }}>
-            <XAxis dataKey="name" stroke="var(--text-muted)" fontSize={12} tickLine={false} axisLine={false} />
-            <YAxis stroke="var(--text-muted)" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(value) => `R$${value/1000}k`} />
-            <Tooltip
-              cursor={{ fill: 'rgba(255, 255, 255, 0.05)' }}
-              contentStyle={{
-                background: 'rgba(10, 10, 10, 0.8)',
-                borderColor: 'var(--border)',
-                color: 'var(--text-primary)',
-                borderRadius: 'var(--radius-sm)',
-                backdropFilter: 'blur(4px)',
-              }}
-            />
-            <Bar dataKey="receita" name="Receita" stackId="a" fill="var(--success)" radius={[4, 4, 0, 0]} />
-            <Bar dataKey="despesa" name="Despesa" stackId="a" fill="var(--danger)" radius={[4, 4, 0, 0]} />
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
-    </motion.div>
-  );
-};
-
-
 const pageVariants = {
   hidden: { opacity: 0 },
   visible: { 
@@ -243,53 +176,165 @@ const itemVariants = {
 
 function DashboardPage() {
   const { toast } = useToast();
-
-  const handleNotImplemented = () => {
-    toast({
-      title: "Funcionalidade em desenvolvimento! 🚧",
-      description: "Este recurso ainda não foi implementado, mas você pode solicitá-lo no próximo prompt! 🚀",
-      variant: "default",
-    });
-  };
-
-  const renderStars = (rating) => {
-    return Array(5).fill(0).map((_, i) => (
-      <Star key={i} className={`h-4 w-4 ${i < rating ? 'text-brand fill-brand' : 'text-text-muted/50'}`} />
-    ));
-  };
+  const { userProfile } = useAuth();
+  const navigate = useNavigate();
   
-  const modalityData = [
-    { name: "Futebol Society", value: 18 },
-    { name: "Futevôlei", value: 9 },
-    { name: "Beach Tennis", value: 6 },
+  // Estados para dados reais
+  const [loading, setLoading] = useState(true);
+  const [faturamentoHoje, setFaturamentoHoje] = useState(0);
+  const [agendamentosHoje, setAgendamentosHoje] = useState({ finalizados: 0, total: 0 });
+  const [proximasReservas, setProximasReservas] = useState(0);
+  const [quadrasEmUso, setQuadrasEmUso] = useState(0);
+  const [horariosDisponiveis, setHorariosDisponiveis] = useState(0);
+  const [comandasAbertas, setComandasAbertas] = useState(0);
+  const [mesasOcupadas, setMesasOcupadas] = useState(0);
+  const [vendasLoja, setVendasLoja] = useState(0);
+  const [financeMiniData, setFinanceMiniData] = useState([]);
+  const [alerts, setAlerts] = useState([]);
+
+  // Carregar dados do dia
+  useEffect(() => {
+    const loadDashboardData = async () => {
+      if (!userProfile?.codigo_empresa) return;
+      
+      try {
+        setLoading(true);
+        const codigo = userProfile.codigo_empresa;
+        const hoje = new Date();
+        const inicioHoje = startOfDay(hoje).toISOString();
+        const fimHoje = endOfDay(hoje).toISOString();
+
+        // 1. Faturamento de Hoje
+        const { data: pagamentos } = await supabase
+          .from('pagamentos')
+          .select('valor, status')
+          .eq('codigo_empresa', codigo)
+          .gte('recebido_em', inicioHoje)
+          .lte('recebido_em', fimHoje);
+        
+        const totalHoje = (pagamentos || [])
+          .filter(p => !['Cancelado', 'Estornado'].includes(p.status))
+          .reduce((sum, p) => sum + Number(p.valor || 0), 0);
+        setFaturamentoHoje(totalHoje);
+
+        // 2. Agendamentos de Hoje
+        const { data: agendamentos } = await supabase
+          .from('agendamentos')
+          .select('id, status, inicio')
+          .eq('codigo_empresa', codigo)
+          .gte('inicio', inicioHoje)
+          .lte('inicio', fimHoje);
+        
+        const finalizados = (agendamentos || []).filter(a => a.status === 'finished').length;
+        setAgendamentosHoje({ finalizados, total: agendamentos?.length || 0 });
+
+        // 3. Próximas Reservas
+        const agora = new Date().toISOString();
+        const proximas = (agendamentos || []).filter(a => 
+          a.inicio > agora && !['canceled', 'finished'].includes(a.status)
+        ).length;
+        setProximasReservas(proximas);
+
+        // 4. Quadras em Uso
+        const emUso = (agendamentos || []).filter(a => a.status === 'in_progress').length;
+        setQuadrasEmUso(emUso);
+
+        // 5. Horários Disponíveis
+        const { data: quadras } = await supabase
+          .from('quadras')
+          .select('id')
+          .eq('codigo_empresa', codigo);
+        const totalQuadras = quadras?.length || 0;
+        setHorariosDisponiveis(totalQuadras * 3);
+
+        // 6. Comandas Abertas
+        const { data: comandas } = await supabase
+          .from('comandas')
+          .select('id')
+          .eq('codigo_empresa', codigo)
+          .eq('status', 'open');
+        setComandasAbertas(comandas?.length || 0);
+
+        // 7. Mesas Ocupadas
+        const { data: mesas } = await supabase
+          .from('mesas')
+          .select('id, status')
+          .eq('codigo_empresa', codigo);
+        const ocupadas = (mesas || []).filter(m => ['in-use', 'awaiting-payment'].includes(m.status)).length;
+        setMesasOcupadas(ocupadas);
+
+        // 8. Vendas da Loja
+        const { data: comandasFechadas } = await supabase
+          .from('comandas')
+          .select('id')
+          .eq('codigo_empresa', codigo)
+          .eq('status', 'closed')
+          .gte('fechado_em', inicioHoje)
+          .lte('fechado_em', fimHoje);
+        setVendasLoja(comandasFechadas?.length || 0);
+
+        // 9. Dados financeiros dos últimos 14 dias
+        const dados14Dias = [];
+        for (let i = 13; i >= 0; i--) {
+          const dia = new Date();
+          dia.setDate(dia.getDate() - i);
+          const inicioDia = startOfDay(dia).toISOString();
+          const fimDia = endOfDay(dia).toISOString();
+
+          const { data: pagsDia } = await supabase
+            .from('pagamentos')
+            .select('valor, status')
+            .eq('codigo_empresa', codigo)
+            .gte('recebido_em', inicioDia)
+            .lte('recebido_em', fimDia);
+
+          const receita = (pagsDia || [])
+            .filter(p => !['Cancelado', 'Estornado'].includes(p.status))
+            .reduce((sum, p) => sum + Number(p.valor || 0), 0);
+
+          dados14Dias.push({
+            name: i === 0 ? 'Hoje' : `${i}d`,
+            saldo: Math.round(receita),
+            receita: Math.round(receita),
+            despesa: 0
+          });
+        }
+        setFinanceMiniData(dados14Dias);
+
+        // 10. Alertas
+        const alertasList = [];
+        if (comandasAbertas > 5) alertasList.push(`${comandasAbertas} comandas abertas`);
+        if (agendamentosHoje.total - agendamentosHoje.finalizados > 10) alertasList.push('Muitos agendamentos pendentes');
+        setAlerts(alertasList);
+
+      } catch (error) {
+        console.error('Erro ao carregar dashboard:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadDashboardData();
+  }, [userProfile?.codigo_empresa]);
+
+  const fmtBRL = (v) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(v || 0));
+
+  const storeData = [
+    { name: "Comandas Abertas", value: comandasAbertas },
+    { name: "Mesas Ocupadas", value: mesasOcupadas },
+    { name: "Vendas Hoje", value: vendasLoja },
   ];
 
-  const financialData = [
-    { name: 'Jan', receita: 4000, despesa: 2400 },
-    { name: 'Fev', receita: 3000, despesa: 1398 },
-    { name: 'Mar', receita: 5000, despesa: 2800 },
-    { name: 'Abr', receita: 4780, despesa: 3908 },
-    { name: 'Mai', receita: 5890, despesa: 4800 },
-    { name: 'Jun', receita: 4390, despesa: 3800 },
-  ];
-
-  // Dados mínimos para 14 dias: saldo diário (receita - despesa)
-  const financeMiniData = [
-    { name: 1, saldo: 320 },
-    { name: 2, saldo: 180 },
-    { name: 3, saldo: 260 },
-    { name: 4, saldo: 90 },
-    { name: 5, saldo: 410 },
-    { name: 6, saldo: 220 },
-    { name: 7, saldo: 300 },
-    { name: 8, saldo: 140 },
-    { name: 9, saldo: 370 },
-    { name: 10, saldo: 280 },
-    { name: 11, saldo: 330 },
-    { name: 12, saldo: 200 },
-    { name: 13, saldo: 420 },
-    { name: 14, saldo: 260 },
-  ];
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-96">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-brand mx-auto mb-4"></div>
+          <p className="text-text-secondary">Carregando dashboard...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <>
@@ -311,17 +356,17 @@ function DashboardPage() {
               <div className="absolute inset-0 bg-court-pattern opacity-[0.03] mix-blend-overlay"></div>
               <div className="relative z-10 max-w-[720px]">
                 <h1 className="text-3xl font-black mb-2 text-text-primary tracking-tighter">
-                  Bem-vindo de volta, <span className="text-brand">Admin!</span>
+                  Bem-vindo de volta, <span className="text-brand">{userProfile?.nome_exibicao || userProfile?.nome || userProfile?.email?.split('@')[0] || 'Admin'}!</span>
                 </h1>
                 <p className="text-text-secondary mb-3 max-w-[60ch] text-sm md:text-base font-normal">
                   Sua central de comando para uma gestão de sucesso. Monitore agendamentos, faturamento e clientes em um só lugar.
                 </p>
                 <div className="flex flex-wrap gap-2.5">
-                  <Button onClick={handleNotImplemented} size="default">
+                  <Button onClick={() => navigate('/agenda', { state: { openModal: true } })} size="default">
                     <CalendarPlus className="mr-2 h-4 w-4" />
-                    Nova Reserva
+                    + Agendamento
                   </Button>
-                  <Button onClick={handleNotImplemented} variant="outline" size="default">
+                  <Button onClick={() => navigate('/clientes', { state: { openModal: true } })} variant="outline" size="default">
                     <Users className="mr-2 h-4 w-4" />
                     Adicionar Cliente
                   </Button>
@@ -330,76 +375,72 @@ function DashboardPage() {
             </div>
           </div>
 
-          {/* Resumo do Dia (lado direito do hero) */}
+          {/* Resumo do Dia */}
           <div className="xl:col-span-4">
             <div className="fx-card">
-              <h2 className="text-lg font-bold text-text-primary mb-3 flex items-center"><Clock className="mr-2 h-5 w-5 text-brand" /> Resumo do Dia</h2>
+              <h2 className="text-lg font-bold text-text-primary mb-3 flex items-center">
+                <Clock className="mr-2 h-5 w-5 text-brand" /> Resumo do Dia
+              </h2>
               <ul className="space-y-2 text-sm">
-                <li className="flex justify-between items-center"><span className="text-text-secondary">Próximas Reservas</span> <span className="font-bold text-text-primary tabular-nums">5</span></li>
-                <li className="flex justify-between items-center"><span className="text-text-secondary">Quadras em Uso</span> <span className="font-bold text-success tabular-nums">2</span></li>
-                <li className="flex justify-between items-center"><span className="text-text-secondary">Horários Disponíveis</span> <span className="font-bold text-info tabular-nums">8</span></li>
+                <li className="flex justify-between items-center">
+                  <span className="text-text-secondary">Próximas Reservas</span> 
+                  <span className="font-bold text-text-primary tabular-nums">{proximasReservas}</span>
+                </li>
+                <li className="flex justify-between items-center">
+                  <span className="text-text-secondary">Quadras em Uso</span> 
+                  <span className="font-bold text-success tabular-nums">{quadrasEmUso}</span>
+                </li>
+                <li className="flex justify-between items-center">
+                  <span className="text-text-secondary">Horários Disponíveis</span> 
+                  <span className="font-bold text-info tabular-nums">{horariosDisponiveis}</span>
+                </li>
               </ul>
             </div>
           </div>
         </motion.div>
 
-        {/* Middle: 4 cards em colunas iguais */}
+        {/* Middle: 4 cards */}
         <motion.div variants={itemVariants} className="relative grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-12 gap-4 items-stretch">
           <div className="xl:col-span-3">
-            <StatCard icon={DollarSign} title="Faturamento do Dia" value="R$ 1.250" trend="up" trendValue="+15%" color="success" className="h-full" />
+            <StatCard 
+              icon={DollarSign} 
+              title="Faturamento do Dia" 
+              value={fmtBRL(faturamentoHoje)} 
+              color="success" 
+              className="h-full" 
+            />
           </div>
           <div className="xl:col-span-3">
-            <StatCard icon={CalendarCheck} title="Agend. Finalizados" value="12 de 15" trend="down" trendValue="-3" color="info" className="h-full" />
+            <StatCard 
+              icon={CalendarCheck} 
+              title="Agend. Finalizados" 
+              value={`${agendamentosHoje.finalizados} de ${agendamentosHoje.total}`} 
+              color="info" 
+              className="h-full" 
+            />
           </div>
           <div className="xl:col-span-3">
-            <AlertsCard className="h-full" />
+            <AlertsCard className="h-full" alerts={alerts} />
           </div>
           <div className="xl:col-span-3">
-            <ModalityBreakdownCard 
-              icon={BarChart3}
-              title="Agend. por Modalidade"
-              data={modalityData}
+            <StoreInfoCard 
+              icon={Store}
+              title="Informações da Loja"
+              data={storeData}
               color="purple"
               className="h-full"
             />
           </div>
         </motion.div>
 
-        {/* Bottom: Resumo financeiro minimalista + KPIs + Feedbacks */}
-        <motion.div variants={itemVariants} className="grid grid-cols-1 xl:grid-cols-12 gap-4 items-stretch">
-          <div className="xl:col-span-6">
-            <MinimalFinanceCard 
-              icon={TrendingUp}
-              title="Resumo Financeiro"
-              data={financeMiniData}
-              color="brand"
-              className="h-full"
-            />
-          </div>
-          <div className="xl:col-span-2">
-            <CourtUtilizationCard className="h-full" />
-          </div>
-          <div className="xl:col-span-4">
-            <div className="fx-card h-full">
-              <h2 className="text-lg font-bold text-text-primary mb-3 flex items-center"><Star className="mr-2 h-5 w-5 text-brand" /> Feedbacks Recentes</h2>
-              <div className="space-y-3">
-                <div>
-                  <div className="flex justify-between items-center mb-1">
-                    <p className="font-bold text-sm">Maria Oliveira</p>
-                    <div className="flex">{renderStars(5)}</div>
-                  </div>
-                  <p className="text-xs text-text-secondary">"Atendimento excelente, adorei a quadra!"</p>
-                </div>
-                <div>
-                  <div className="flex justify-between items-center mb-1">
-                    <p className="font-bold text-sm">Lucas Almeida</p>
-                    <div className="flex">{renderStars(4)}</div>
-                  </div>
-                  <p className="text-xs text-text-secondary">"Bar da quadra top, recomendo!"</p>
-                </div>
-              </div>
-            </div>
-          </div>
+        {/* Bottom: Resumo financeiro */}
+        <motion.div variants={itemVariants} className="grid grid-cols-1 gap-4">
+          <MinimalFinanceCard 
+            icon={TrendingUp}
+            title="Resumo Financeiro"
+            data={financeMiniData}
+            color="brand"
+          />
         </motion.div>
       </motion.div>
     </>

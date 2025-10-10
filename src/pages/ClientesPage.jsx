@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Helmet } from 'react-helmet';
 import { motion } from 'framer-motion';
+import { useLocation } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useToast } from "@/components/ui/use-toast";
@@ -752,6 +753,7 @@ function ClientDetailsModal({ open, onOpenChange, client, onEdit, onInactivate, 
 function ClientesPage() {
     const { toast } = useToast();
     const { userProfile, authReady } = useAuth();
+    const location = useLocation();
     const [clients, setClients] = useState(() => {
       try {
         const cachedProfile = localStorage.getItem('auth:userProfile');
@@ -774,6 +776,17 @@ function ClientesPage() {
     const clientsRetryRef = useRef(false);
     const lastLoadTsRef = useRef(0);
     const lastSizeRef = useRef(0);
+
+    // Abrir modal automaticamente quando vindo do Dashboard (apenas uma vez)
+    const autoOpenedRef = useRef(false);
+    useEffect(() => {
+        if (location.state?.openModal && !isFormOpen && !autoOpenedRef.current) {
+            autoOpenedRef.current = true;
+            setIsFormOpen(true);
+            // Limpar o state para não reabrir ao navegar de volta
+            window.history.replaceState({}, document.title);
+        }
+    }, [location.state?.openModal, isFormOpen]);
 
     const loadClients = async () => {
       try {
