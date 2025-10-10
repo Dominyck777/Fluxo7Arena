@@ -18,6 +18,12 @@
   NODE_VERSION = "18"
   # NPM version (opcional)
   NPM_VERSION = "9"
+  
+# ⚠️ IMPORTANTE: Adicionar estas variáveis no painel do Netlify:
+# Site Settings → Environment Variables → Add a variable
+# 
+# VITE_SUPABASE_URL = https://dlfryxtyxqoacuunswuc.supabase.co
+# VITE_SUPABASE_ANON_KEY = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 
 # Redirects para SPA (Single Page Application)
 # Garante que todas as rotas sejam redirecionadas para index.html
