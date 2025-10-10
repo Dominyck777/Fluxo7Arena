@@ -1,15 +1,19 @@
-import React from 'react';
-import { useLocation } from 'react-router-dom';
-
-import { Calendar, Bell, LogOut, Building, Menu, X, PanelLeftClose, PanelLeft, Lock, Unlock } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { Bell, LogOut, Menu, X, Eye, EyeOff, PanelLeft, PanelLeftClose, Lock, Unlock, Building, ArrowUpRight, Package, DollarSign, CalendarCheck, Clock, ShoppingCart, Store, Users, CalendarPlus, AlertTriangle, Info } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useToast } from "@/components/ui/use-toast";
 import { useAuth } from '@/contexts/AuthContext';
+import { useAlerts } from '@/contexts/AlertsContext';
 
 function Header({ onToggleSidebar, sidebarVisible, sidebarPinned }) {
   const { toast } = useToast();
   const { signOut, userProfile, company, user } = useAuth();
+  const { alerts, showModal, setShowModal, showBalloon, setShowBalloon } = useAlerts();
+  const navigate = useNavigate();
+  const [showNotification, setShowNotification] = useState(false);
   // Extrair apenas nome e sobrenome (primeiras duas palavras)
   const fullName = userProfile?.nome || 'Usuário';
   const userName = React.useMemo(() => {
@@ -39,12 +43,59 @@ function Header({ onToggleSidebar, sidebarVisible, sidebarPinned }) {
     return companyLogo || '';
   }, [company?.logo_url]);
 
-  const handleNotImplemented = () => {
-    toast({
-      title: "Funcionalidade em desenvolvimento! 🚧",
-      description: "Este recurso ainda não foi implementado, mas você pode solicitá-lo no próximo prompt! 🚀",
-      variant: "default",
-    });
+  // Balão de alertas removido - funcionalidade desabilitada
+
+  // Mostrar notificação quando há alertas (apenas uma vez por sessão)
+  useEffect(() => {
+    if (alerts.length > 0 && !sessionStorage.getItem('alerts-shown')) {
+      setShowNotification(true);
+      sessionStorage.setItem('alerts-shown', 'true');
+      
+      // Auto-hide após 5 segundos
+      const timer = setTimeout(() => {
+        setShowNotification(false);
+      }, 5000);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [alerts]);
+
+  const getIcon = (iconName) => {
+    const icons = {
+      Package, DollarSign, CalendarCheck, Clock, ShoppingCart, Store, Users, CalendarPlus, AlertTriangle, Info
+    };
+    return icons[iconName] || AlertTriangle;
+  };
+  
+  const getColorClass = (cor) => {
+    const colors = {
+      danger: 'text-danger',
+      warning: 'text-warning',
+      info: 'text-info',
+      success: 'text-success',
+      purple: 'text-purple'
+    };
+    return colors[cor] || 'text-warning';
+  };
+
+  const AlertItem = ({ alert, onClick }) => {
+    const Icon = getIcon(alert.icone);
+    const colorClass = getColorClass(alert.cor);
+    
+    return (
+      <li 
+        className="flex items-center gap-2 p-2 rounded-md hover:bg-white/5 transition-colors cursor-pointer group"
+        onClick={onClick}
+      >
+        <Icon className={`w-4 h-4 flex-shrink-0 ${colorClass}`} />
+        <span className="text-text-secondary group-hover:text-text-primary transition-colors flex-1">
+          {alert.mensagem}
+        </span>
+        {alert.link && (
+          <ArrowUpRight className="w-3 h-3 text-text-muted opacity-0 group-hover:opacity-100 transition-opacity" />
+        )}
+      </li>
+    );
   };
 
   const handleLogout = async () => {
@@ -163,8 +214,18 @@ function Header({ onToggleSidebar, sidebarVisible, sidebarPinned }) {
       ) : null}
 
       <div className="flex items-center gap-2">
-        <Button variant="ghost" size="icon" onClick={handleNotImplemented} className="text-text-secondary hover:text-text-primary transition-colors duration-200">
+        <Button 
+          variant="ghost" 
+          size="icon" 
+          onClick={() => setShowModal(true)} 
+          className="relative text-text-secondary hover:text-text-primary transition-colors duration-200"
+        >
           <Bell className="h-5 w-5" />
+          {alerts.length > 0 && (
+            <span className="absolute -top-1 -right-1 bg-danger text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center animate-pulse">
+              {alerts.length}
+            </span>
+          )}
         </Button>
         <Button variant="ghost" size="icon" onClick={handleLogout} className="text-text-secondary hover:text-brand hover:bg-brand/10 transition-colors duration-200">
           <LogOut className="h-5 w-5" />
@@ -178,6 +239,92 @@ function Header({ onToggleSidebar, sidebarVisible, sidebarPinned }) {
           <span className="text-[11px] px-2 py-0.5 rounded-full bg-brand/15 text-brand font-medium tracking-wide">{userRole}</span>
         </div>
       </div>
+
+      {/* Notificação de Alertas */}
+      {showNotification && alerts.length > 0 && (
+        <motion.div
+          initial={{ opacity: 0, y: -20, scale: 0.95 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0, y: -20, scale: 0.95 }}
+          className="absolute top-20 right-8 bg-surface border border-border rounded-lg shadow-2xl p-4 max-w-sm z-50"
+        >
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-sm font-semibold text-text-primary flex items-center gap-2">
+              <Bell className="h-4 w-4 text-brand" />
+              Novos Alertas ({alerts.length})
+            </h3>
+            <Button 
+              variant="ghost" 
+              size="sm"
+              onClick={() => setShowNotification(false)}
+              className="h-6 w-6 p-0 text-text-muted hover:text-text-primary"
+            >
+              <X className="h-3 w-3" />
+            </Button>
+          </div>
+          <div className="space-y-1 text-xs">
+            {alerts.slice(0, 3).map((alert, idx) => {
+              const Icon = getIcon(alert.icone);
+              const colorClass = getColorClass(alert.cor);
+              return (
+                <div key={idx} className="flex items-center gap-2 p-1">
+                  <Icon className={`w-3 h-3 ${colorClass}`} />
+                  <span className="text-text-secondary truncate">{alert.mensagem}</span>
+                </div>
+              );
+            })}
+            {alerts.length > 3 && (
+              <div className="text-center pt-1">
+                <Button 
+                  variant="ghost" 
+                  size="sm"
+                  onClick={() => {
+                    setShowModal(true);
+                    setShowNotification(false);
+                  }}
+                  className="text-xs text-brand hover:text-brand/80"
+                >
+                  Ver todos ({alerts.length})
+                </Button>
+              </div>
+            )}
+          </div>
+        </motion.div>
+      )}
+
+      {/* Balão de alertas removido */}
+
+      {/* Modal de Alertas */}
+      <Dialog open={showModal} onOpenChange={setShowModal}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Bell className="h-5 w-5 text-brand" />
+              Todos os Alertas ({alerts.length})
+            </DialogTitle>
+          </DialogHeader>
+          <div className="mt-4">
+            {alerts.length === 0 ? (
+              <p className="text-sm text-text-muted text-center py-8">Nenhum alerta no momento! 🎉</p>
+            ) : (
+              <ul className="space-y-2 text-sm">
+                {alerts.map((alert, idx) => (
+                  <AlertItem 
+                    key={idx} 
+                    alert={alert}
+                    onClick={() => {
+                      if (alert.link) {
+                        navigate(alert.link);
+                        setShowModal(false);
+                      }
+                    }}
+                  />
+                ))}
+              </ul>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </motion.header>
   );
 }

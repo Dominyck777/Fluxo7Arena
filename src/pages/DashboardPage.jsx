@@ -2,10 +2,12 @@ import React, { useEffect, useState } from 'react';
 import { Helmet } from 'react-helmet';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
-import { DollarSign, CalendarPlus, Users, ArrowUpRight, ArrowDownRight, Clock, Bell, ShieldCheck, CalendarCheck, TrendingUp, ShoppingCart, Store, Package } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { DollarSign, CalendarPlus, Users, ArrowUpRight, ArrowDownRight, Clock, Bell, ShieldCheck, CalendarCheck, TrendingUp, ShoppingCart, Store, Package, AlertTriangle, Info } from 'lucide-react';
 import { useToast } from "@/components/ui/use-toast";
 import { AreaChart, Area, ResponsiveContainer, Tooltip } from 'recharts';
 import { useAuth } from '@/contexts/AuthContext';
+import { useAlerts } from '@/contexts/AlertsContext';
 import { supabase } from '@/lib/supabase';
 import { format, startOfDay, endOfDay } from 'date-fns';
 import { useNavigate } from 'react-router-dom';
@@ -43,31 +45,122 @@ const StatCard = ({ icon: Icon, title, value, trend, trendValue, color, classNam
   );
 };
 
-const AlertsCard = ({ className, alerts }) => {
+const AlertCard = ({ alerts, className }) => {
+  const navigate = useNavigate();
+  const [showAllModal, setShowAllModal] = useState(false);
+  
+  const getIcon = (iconName) => {
+    const icons = {
+      Package, DollarSign, CalendarCheck, Clock, ShoppingCart, Store, Users, CalendarPlus, AlertTriangle, Info
+    };
+    return icons[iconName] || AlertTriangle;
+  };
+  
+  const getColorClass = (cor) => {
+    const colors = {
+      danger: 'text-danger',
+      warning: 'text-warning',
+      info: 'text-info',
+      success: 'text-success',
+      purple: 'text-purple'
+    };
+    return colors[cor] || 'text-warning';
+  };
+  
+  const displayedAlerts = alerts.length > 2 ? alerts.slice(0, 2) : alerts;
+  const hasMore = alerts.length > 2;
+  
+  const AlertItem = ({ alert, onClick }) => {
+    const Icon = getIcon(alert.icone);
+    const colorClass = getColorClass(alert.cor);
+    
+    return (
+      <li 
+        className="flex items-center gap-2 p-2 rounded-md hover:bg-white/5 transition-colors cursor-pointer group"
+        onClick={onClick}
+      >
+        <Icon className={`w-4 h-4 flex-shrink-0 ${colorClass}`} />
+        <span className="text-text-secondary group-hover:text-text-primary transition-colors flex-1">
+          {alert.mensagem}
+        </span>
+        {alert.link && (
+          <ArrowUpRight className="w-3 h-3 text-text-muted opacity-0 group-hover:opacity-100 transition-opacity" />
+        )}
+      </li>
+    );
+  };
+  
   return (
-    <motion.div
-      variants={{
-        hidden: { opacity: 0, y: 30, scale: 0.98 },
-        visible: { opacity: 1, y: 0, scale: 1, transition: { duration: 0.5, ease: [0.22, 1, 0.36, 1] } }
-      }}
-      className={`fx-card ${className || ''}`}
-    >
-      <h2 className="text-lg font-bold text-text-primary mb-2 flex items-center">
-        <Bell className="mr-2 h-5 w-5 text-brand" /> Alertas do Dia
-      </h2>
-      {alerts.length === 0 ? (
-        <p className="text-sm text-text-muted">Nenhum alerta no momento! 🎉</p>
-      ) : (
-        <ul className="space-y-1.5 text-sm">
-          {alerts.map((alert, idx) => (
-            <li key={idx} className="flex items-center">
-              <ShieldCheck className="w-4 h-4 mr-2 text-warning" />
-              <span className="text-text-secondary">{alert}</span>
-            </li>
-          ))}
-        </ul>
-      )}
-    </motion.div>
+    <>
+      <motion.div
+        variants={{
+          hidden: { opacity: 0, y: 30, scale: 0.98 },
+          visible: { opacity: 1, y: 0, scale: 1, transition: { duration: 0.5, ease: [0.22, 1, 0.36, 1] } }
+        }}
+        className={`fx-card ${className || ''}`}
+      >
+        <div className="flex items-center justify-between mb-2">
+          <h2 className="text-lg font-bold text-text-primary flex items-center">
+            <Bell className="mr-2 h-5 w-5 text-brand" /> Alertas do Dia
+          </h2>
+          {hasMore && (
+            <Button 
+              variant="ghost" 
+              size="sm"
+              className="text-xs text-brand hover:text-brand/80"
+              onClick={() => setShowAllModal(true)}
+            >
+              Ver todos
+            </Button>
+          )}
+        </div>
+        {alerts.length === 0 ? (
+          <p className="text-sm text-text-muted">Nenhum alerta no momento! 🎉</p>
+        ) : (
+          <ul className="space-y-2 text-sm">
+            {displayedAlerts.map((alert, idx) => (
+              <AlertItem 
+                key={idx} 
+                alert={alert}
+                onClick={() => alert.link && navigate(alert.link)}
+              />
+            ))}
+          </ul>
+        )}
+      </motion.div>
+
+      {/* Modal Ver Todos */}
+      <Dialog open={showAllModal} onOpenChange={setShowAllModal}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Bell className="h-5 w-5 text-brand" />
+              Todos os Alertas ({alerts.length})
+            </DialogTitle>
+          </DialogHeader>
+          <div className="mt-4">
+            {alerts.length === 0 ? (
+              <p className="text-sm text-text-muted text-center py-8">Nenhum alerta no momento! 🎉</p>
+            ) : (
+              <ul className="space-y-2 text-sm">
+                {alerts.map((alert, idx) => (
+                  <AlertItem 
+                    key={idx} 
+                    alert={alert}
+                    onClick={() => {
+                      if (alert.link) {
+                        navigate(alert.link);
+                        setShowAllModal(false);
+                      }
+                    }}
+                  />
+                ))}
+              </ul>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 };
 
@@ -177,6 +270,7 @@ const itemVariants = {
 function DashboardPage() {
   const { toast } = useToast();
   const { userProfile } = useAuth();
+  const { setAlerts: setGlobalAlerts } = useAlerts();
   const navigate = useNavigate();
   
   // Estados para dados reais
@@ -352,11 +446,214 @@ function DashboardPage() {
         }
         setFinanceMiniData(dados14Dias);
 
-        // 10. Alertas
+        // 10. Alertas Inteligentes
         const alertasList = [];
-        if (comandasAbertas > 5) alertasList.push(`${comandasAbertas} comandas abertas`);
-        if (agendamentosHoje.total - agendamentosHoje.finalizados > 10) alertasList.push('Muitos agendamentos pendentes');
+        
+        // 10.1. Produtos com estoque baixo
+        const { data: produtosBaixoEstoque } = await supabase
+          .from('produtos')
+          .select('nome, estoque, estoque_minimo, status')
+          .eq('codigo_empresa', codigo)
+          .not('estoque_minimo', 'is', null);
+        
+        const produtosCriticos = (produtosBaixoEstoque || []).filter(p => {
+          const qtd = Number(p.estoque || 0);
+          const min = Number(p.estoque_minimo || 0);
+          return qtd <= min && min > 0;
+        });
+        
+        if (produtosCriticos.length > 0) {
+          alertasList.push({
+            tipo: 'estoque',
+            icone: 'Package',
+            cor: 'danger',
+            mensagem: `${produtosCriticos.length} produto${produtosCriticos.length > 1 ? 's' : ''} com estoque baixo`,
+            link: '/produtos'
+          });
+        }
+        
+        // 10.2. Agendamentos próximos sem confirmação (próximas 2 horas)
+        const daquiA2h = new Date();
+        daquiA2h.setHours(daquiA2h.getHours() + 2);
+        const { data: agendamentosNaoConfirmados } = await supabase
+          .from('agendamentos')
+          .select('id, inicio')
+          .eq('codigo_empresa', codigo)
+          .eq('status', 'scheduled')
+          .gte('inicio', new Date().toISOString())
+          .lte('inicio', daquiA2h.toISOString());
+        
+        if (agendamentosNaoConfirmados && agendamentosNaoConfirmados.length > 0) {
+          alertasList.push({
+            tipo: 'agendamento',
+            icone: 'CalendarCheck',
+            cor: 'warning',
+            mensagem: `${agendamentosNaoConfirmados.length} agendamento${agendamentosNaoConfirmados.length > 1 ? 's' : ''} próximo${agendamentosNaoConfirmados.length > 1 ? 's' : ''} sem confirmação`,
+            link: '/agenda'
+          });
+        }
+        
+        // 10.3. Pagamentos pendentes em agendamentos de hoje
+        if (agendamentosHoje && agendamentosHoje.length > 0) {
+          const idsAgendHoje = agendamentosHoje.map(a => a.id);
+          const { data: participantesPendentes } = await supabase
+            .from('agendamento_participantes')
+            .select('id')
+            .eq('codigo_empresa', codigo)
+            .in('agendamento_id', idsAgendHoje)
+            .eq('status_pagamento', 'Pendente');
+          
+          if (participantesPendentes && participantesPendentes.length > 0) {
+            alertasList.push({
+              tipo: 'pagamento',
+              icone: 'DollarSign',
+              cor: 'warning',
+              mensagem: `${participantesPendentes.length} pagamento${participantesPendentes.length > 1 ? 's' : ''} pendente${participantesPendentes.length > 1 ? 's' : ''} em agendamentos de hoje`,
+              link: '/agenda'
+            });
+          }
+        }
+        
+        // 10.4. Comandas abertas há muito tempo (> 3 horas)
+        const tres_horas_atras = new Date();
+        tres_horas_atras.setHours(tres_horas_atras.getHours() - 3);
+        const { data: comandasAntigas } = await supabase
+          .from('comandas')
+          .select('id, aberto_em')
+          .eq('codigo_empresa', codigo)
+          .eq('status', 'open')
+          .lte('aberto_em', tres_horas_atras.toISOString());
+        
+        if (comandasAntigas && comandasAntigas.length > 0) {
+          alertasList.push({
+            tipo: 'comanda',
+            icone: 'Clock',
+            cor: 'warning',
+            mensagem: `${comandasAntigas.length} comanda${comandasAntigas.length > 1 ? 's' : ''} aberta${comandasAntigas.length > 1 ? 's' : ''} há mais de 3 horas`,
+            link: '/vendas'
+          });
+        }
+        
+        // 10.5. Caixa aberto há muito tempo (> 12 horas)
+        const doze_horas_atras = new Date();
+        doze_horas_atras.setHours(doze_horas_atras.getHours() - 12);
+        const { data: caixaAberto } = await supabase
+          .from('caixa_sessoes')
+          .select('id, aberto_em')
+          .eq('codigo_empresa', codigo)
+          .eq('status', 'open')
+          .lte('aberto_em', doze_horas_atras.toISOString())
+          .limit(1);
+        
+        if (caixaAberto && caixaAberto.length > 0) {
+          alertasList.push({
+            tipo: 'caixa',
+            icone: 'ShoppingCart',
+            cor: 'danger',
+            mensagem: 'Caixa aberto há mais de 12 horas',
+            link: '/vendas'
+          });
+        }
+        
+        // 10.6. Mesas com saldo alto aguardando pagamento (> R$ 100)
+        const { data: mesasAguardando } = await supabase
+          .from('mesas')
+          .select('id, nome, numero')
+          .eq('codigo_empresa', codigo)
+          .eq('status', 'awaiting-payment');
+        
+        if (mesasAguardando && mesasAguardando.length > 0) {
+          // Buscar comandas dessas mesas
+          const mesaIds = mesasAguardando.map(m => m.id);
+          const { data: comandasMesas } = await supabase
+            .from('comandas')
+            .select('id, mesa_id')
+            .eq('codigo_empresa', codigo)
+            .in('mesa_id', mesaIds)
+            .eq('status', 'open');
+          
+          if (comandasMesas && comandasMesas.length > 0) {
+            const comandaIds = comandasMesas.map(c => c.id);
+            const { data: itensComandas } = await supabase
+              .from('comanda_itens')
+              .select('comanda_id, quantidade, preco_unitario, desconto')
+              .in('comanda_id', comandaIds);
+            
+            // Calcular total por comanda
+            const totaisPorComanda = {};
+            (itensComandas || []).forEach(item => {
+              const subtotal = (Number(item.quantidade) || 0) * (Number(item.preco_unitario) || 0);
+              const desconto = Number(item.desconto) || 0;
+              const total = subtotal - desconto;
+              totaisPorComanda[item.comanda_id] = (totaisPorComanda[item.comanda_id] || 0) + total;
+            });
+            
+            const mesasComSaldoAlto = Object.values(totaisPorComanda).filter(t => t > 100).length;
+            
+            if (mesasComSaldoAlto > 0) {
+              alertasList.push({
+                tipo: 'mesa',
+                icone: 'Store',
+                cor: 'info',
+                mensagem: `${mesasComSaldoAlto} mesa${mesasComSaldoAlto > 1 ? 's' : ''} com saldo alto aguardando pagamento`,
+                link: '/vendas'
+              });
+            }
+          }
+        }
+        
+        // 10.7. Aniversariantes do dia
+        const { data: clientes } = await supabase
+          .from('clientes')
+          .select('id, nome, aniversario')
+          .eq('codigo_empresa', codigo)
+          .eq('status', 'Ativo')
+          .not('aniversario', 'is', null);
+        
+        const hojeDiaMes = format(hoje, 'MM-dd');
+        const aniversariantesHoje = (clientes || []).filter(c => {
+          if (!c.aniversario) return false;
+          const nascDiaMes = format(new Date(c.aniversario), 'MM-dd');
+          return nascDiaMes === hojeDiaMes;
+        });
+        
+        if (aniversariantesHoje.length > 0) {
+          alertasList.push({
+            tipo: 'aniversario',
+            icone: 'Users',
+            cor: 'success',
+            mensagem: `🎂 ${aniversariantesHoje.length} aniversariante${aniversariantesHoje.length > 1 ? 's' : ''} hoje!`,
+            link: '/clientes'
+          });
+        }
+        
+        // 10.8. Aniversariantes da semana
+        const proximos7Dias = [];
+        for (let i = 1; i <= 7; i++) {
+          const dia = new Date(hoje);
+          dia.setDate(dia.getDate() + i);
+          proximos7Dias.push(format(dia, 'MM-dd'));
+        }
+        
+        const aniversariantesSemana = (clientes || []).filter(c => {
+          if (!c.aniversario) return false;
+          const nascDiaMes = format(new Date(c.aniversario), 'MM-dd');
+          return proximos7Dias.includes(nascDiaMes);
+        });
+        
+        if (aniversariantesSemana.length > 0) {
+          alertasList.push({
+            tipo: 'aniversario-semana',
+            icone: 'CalendarPlus',
+            cor: 'purple',
+            mensagem: `🎉 ${aniversariantesSemana.length} aniversariante${aniversariantesSemana.length > 1 ? 's' : ''} esta semana`,
+            link: '/clientes'
+          });
+        }
+        
+        console.log('📊 [DASHBOARD] Alertas carregados:', alertasList.length, alertasList);
         setAlerts(alertasList);
+        setGlobalAlerts(alertasList);
 
       } catch (error) {
         console.error('Erro ao carregar dashboard:', error);
@@ -471,7 +768,7 @@ function DashboardPage() {
             />
           </div>
           <div className="xl:col-span-3">
-            <AlertsCard className="h-full" alerts={alerts} />
+            <AlertCard className="h-full" alerts={alerts} />
           </div>
           <div className="xl:col-span-3">
             <StoreInfoCard 
