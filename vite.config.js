@@ -278,22 +278,33 @@ async function getConfig() {
           '@babel/types',
         ],
         output: {
-          // ✅ Não fazer code splitting agressivo do Supabase
+          // ✅ Code splitting otimizado - React e Supabase juntos no vendor
           manualChunks: (id) => {
-            // Manter Supabase no bundle principal para evitar problemas de inicialização
-            if (id.includes('@supabase/supabase-js')) {
-              return 'vendor';
-            }
-            // React e dependências principais
             if (id.includes('node_modules')) {
-              if (id.includes('react') || id.includes('react-dom') || id.includes('react-router')) {
+              // React core SEMPRE no vendor (carrega primeiro)
+              if (id.includes('react') || id.includes('react-dom') || id.includes('scheduler')) {
                 return 'vendor';
               }
-              // Radix UI em chunk separado
+              // Supabase no vendor junto com React
+              if (id.includes('@supabase/supabase-js')) {
+                return 'vendor';
+              }
+              // React Router no vendor também
+              if (id.includes('react-router')) {
+                return 'vendor';
+              }
+              // Radix UI (depende de React, mas pode ser separado)
               if (id.includes('@radix-ui')) {
                 return 'ui';
               }
-              // Outras libs em chunk separado
+              // Outras libs grandes
+              if (id.includes('framer-motion')) {
+                return 'motion';
+              }
+              if (id.includes('recharts') || id.includes('d3-')) {
+                return 'charts';
+              }
+              // Resto das libs
               return 'libs';
             }
           },
