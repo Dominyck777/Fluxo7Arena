@@ -376,6 +376,7 @@ function AgendaPage() {
     autoFinishEnabled: true,
   }), []);
   const [automation, setAutomation] = useState(defaultAutomation);
+  const [savedAutomation, setSavedAutomation] = useState(defaultAutomation); // Último estado salvo no banco
   const [savingSettings, setSavingSettings] = useState(false);
   // Offset de horário do servidor (Brasília) em relação ao relógio local do dispositivo, em ms
   const [serverOffsetMs, setServerOffsetMs] = useState(0);
@@ -412,6 +413,7 @@ function AgendaPage() {
           autoFinishEnabled: !!data.auto_finish_enabled,
         };
         setAutomation((prev) => ({ ...prev, ...next }));
+        setSavedAutomation(next); // Guardar como último estado salvo
       } catch (e) {
         console.warn('[AgendaSettings] unexpected load error', e);
       }
@@ -501,6 +503,7 @@ function AgendaPage() {
         .from('agenda_settings')
         .upsert(payload, { onConflict: 'empresa_id' });
       if (error) throw error;
+      setSavedAutomation(automation); // Atualizar último estado salvo
       toast({ title: 'Configurações salvas', description: 'As automações da agenda foram atualizadas com sucesso.' });
       setIsSettingsOpen(false);
     } catch (e) {
@@ -5059,7 +5062,13 @@ function AgendaPage() {
         </motion.div>
 
         {/* Modal de Configurações da Agenda */}
-        <Dialog open={isSettingsOpen} onOpenChange={setIsSettingsOpen}>
+        <Dialog open={isSettingsOpen} onOpenChange={(open) => {
+          if (!open) {
+            // Ao fechar o modal, resetar para o último estado salvo
+            setAutomation(savedAutomation);
+          }
+          setIsSettingsOpen(open);
+        }}>
           <DialogContent className="sm:max-w-[680px]" onOpenAutoFocus={(e) => e.preventDefault()}>
             <DialogHeader className="pb-3 border-b border-border bg-surface-2/40 rounded-t-lg px-2 -mx-2 -mt-2">
               <DialogTitle className="text-base font-semibold tracking-tight">Configurações da Agenda</DialogTitle>
@@ -5143,28 +5152,9 @@ function AgendaPage() {
               </div>
             </div>
             <DialogFooter className="mt-2 gap-2">
-              <Button type="button" variant="ghost" className="border border-white/10" onClick={() => {
-                // Recarregar do banco ao cancelar para descartar mudanças não salvas
-                const loadSettings = async () => {
-                  if (!company?.id) return;
-                  try {
-                    const { data } = await supabase.from('agenda_settings').select('*').eq('empresa_id', company.id).maybeSingle();
-                    if (data) {
-                      const next = {
-                        autoConfirmEnabled: !!data.auto_confirm_enabled,
-                        autoConfirmMinutesBefore: data.auto_confirm_enabled && Number.isFinite(Number(data.auto_confirm_hours)) ? Number(data.auto_confirm_hours) * 60 : defaultAutomation.autoConfirmMinutesBefore,
-                        autoStartEnabled: !!data.auto_start_enabled,
-                        autoFinishEnabled: !!data.auto_finish_enabled,
-                      };
-                      setAutomation(next);
-                    } else {
-                      setAutomation(defaultAutomation);
-                    }
-                  } catch {}
-                };
-                loadSettings();
-                setIsSettingsOpen(false);
-              }}>Cancelar</Button>
+              <Button type="button" variant="ghost" className="border border-white/10" onClick={() => setIsSettingsOpen(false)}>
+                Cancelar
+              </Button>
               <Button type="button" variant="default" onClick={handleSaveSettings} disabled={savingSettings}>
                 {savingSettings ? 'Salvando…' : 'Salvar'}
               </Button>
