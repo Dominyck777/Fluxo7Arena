@@ -218,6 +218,24 @@ class SupabaseModifyBuilder extends SupabaseQueryBuilder {
     return this
   }
   
+  // Upsert (PostgREST): usa POST com Prefer: resolution=...
+  // options: { onConflict?: string, ignoreDuplicates?: boolean, returning?: 'minimal' | 'representation' }
+  upsert(data, options = {}) {
+    this.method = 'POST'
+    this.body = Array.isArray(data) ? data : [data]
+    // Headers específicos para upsert
+    const preferResolution = options.ignoreDuplicates ? 'resolution=ignore-duplicates' : 'resolution=merge-duplicates'
+    const preferReturning = options.returning === 'minimal' ? 'return=minimal' : 'return=representation'
+    this.headers = {
+      ...(this.headers || {}),
+      Prefer: `${preferResolution},${preferReturning}`,
+    }
+    if (options.onConflict) {
+      this.params.on_conflict = options.onConflict
+    }
+    return this
+  }
+  
   delete() {
     this.method = 'DELETE'
     return this
@@ -229,7 +247,8 @@ class SupabaseModifyBuilder extends SupabaseQueryBuilder {
         method: this.method || 'GET',
         body: this.body,
         params: this.params,
-        signal: this.signal
+        signal: this.signal,
+        headers: this.headers || {}
       })
       if (this.isSingle && result.data) {
         result.data = result.data[0] || null
