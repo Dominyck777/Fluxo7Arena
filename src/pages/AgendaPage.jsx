@@ -383,27 +383,8 @@ function AgendaPage() {
   const getNowMs = useCallback(() => Date.now() + (Number.isFinite(serverOffsetMs) ? serverOffsetMs : 0), [serverOffsetMs]);
   // Debug/status: última sincronização bem-sucedida de horário
   const [lastTimeSyncAtMs, setLastTimeSyncAtMs] = useState(null);
-  // Carrega regras salvas quando empresa está disponível
-  useEffect(() => {
-    if (!userProfile?.codigo_empresa) return;
-    try {
-      const raw = localStorage.getItem(`agenda:automation:${userProfile.codigo_empresa}`);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        setAutomation((prev) => ({ ...defaultAutomation, ...parsed }));
-      } else {
-        setAutomation(defaultAutomation);
-      }
-    } catch {
-      setAutomation(defaultAutomation);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userProfile?.codigo_empresa]);
-  // Persiste quando alterar
-  useEffect(() => {
-    if (!userProfile?.codigo_empresa) return;
-    try { localStorage.setItem(`agenda:automation:${userProfile.codigo_empresa}`, JSON.stringify(automation)); } catch {}
-  }, [automation, userProfile?.codigo_empresa]);
+  // Carrega regras salvas do banco quando empresa está disponível
+  // Removido: localStorage auto-save para evitar persistência sem clicar em Salvar
 
   // Carregar do banco (agenda_settings) quando empresa estiver disponível
   useEffect(() => {
@@ -5162,7 +5143,28 @@ function AgendaPage() {
               </div>
             </div>
             <DialogFooter className="mt-2 gap-2">
-              <Button type="button" variant="ghost" className="border border-white/10" onClick={() => setIsSettingsOpen(false)}>Cancelar</Button>
+              <Button type="button" variant="ghost" className="border border-white/10" onClick={() => {
+                // Recarregar do banco ao cancelar para descartar mudanças não salvas
+                const loadSettings = async () => {
+                  if (!company?.id) return;
+                  try {
+                    const { data } = await supabase.from('agenda_settings').select('*').eq('empresa_id', company.id).maybeSingle();
+                    if (data) {
+                      const next = {
+                        autoConfirmEnabled: !!data.auto_confirm_enabled,
+                        autoConfirmMinutesBefore: data.auto_confirm_enabled && Number.isFinite(Number(data.auto_confirm_hours)) ? Number(data.auto_confirm_hours) * 60 : defaultAutomation.autoConfirmMinutesBefore,
+                        autoStartEnabled: !!data.auto_start_enabled,
+                        autoFinishEnabled: !!data.auto_finish_enabled,
+                      };
+                      setAutomation(next);
+                    } else {
+                      setAutomation(defaultAutomation);
+                    }
+                  } catch {}
+                };
+                loadSettings();
+                setIsSettingsOpen(false);
+              }}>Cancelar</Button>
               <Button type="button" variant="default" onClick={handleSaveSettings} disabled={savingSettings}>
                 {savingSettings ? 'Salvando…' : 'Salvar'}
               </Button>
