@@ -43,9 +43,12 @@ export const supabase = import.meta.env.PROD ? {
   // Functions usando client original (Edge Functions)
   functions: originalClient.functions,
   
-  // Realtime usando client original
+  // Realtime usando client original (precisa de todas as funcionalidades)
   realtime: originalClient.realtime,
-  channel: originalClient.channel.bind(originalClient),
+  channel: (...args) => originalClient.channel(...args),
+  removeChannel: (...args) => originalClient.removeChannel(...args),
+  removeAllChannels: () => originalClient.removeAllChannels(),
+  getChannels: () => originalClient.getChannels(),
   
   // Metadata
   supabaseUrl,
