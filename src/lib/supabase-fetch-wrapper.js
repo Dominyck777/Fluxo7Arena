@@ -21,7 +21,7 @@ const buildQueryString = (params) => {
 
 // Helper para fazer request
 const supabaseFetch = async (endpoint, options = {}) => {
-  const { method = 'GET', body, headers: customHeaders = {}, params = {} } = options
+  const { method = 'GET', body, headers: customHeaders = {}, params = {}, signal } = options
   
   const queryString = buildQueryString(params)
   const url = `${SUPABASE_URL}/rest/v1/${endpoint}${queryString ? `?${queryString}` : ''}`
@@ -56,6 +56,10 @@ const supabaseFetch = async (endpoint, options = {}) => {
     config.body = JSON.stringify(body)
   }
   
+  if (signal) {
+    config.signal = signal
+  }
+  
   const response = await fetch(url, config)
   
   if (!response.ok) {
@@ -73,6 +77,7 @@ class SupabaseQueryBuilder {
     this.table = table
     this.params = {}
     this.selectColumns = '*'
+    this.signal = null
   }
   
   select(columns = '*') {
@@ -181,9 +186,14 @@ class SupabaseQueryBuilder {
     return this
   }
   
+  abortSignal(signal) {
+    this.signal = signal
+    return this
+  }
+  
   async then(resolve, reject) {
     try {
-      const result = await supabaseFetch(this.table, { params: this.params })
+      const result = await supabaseFetch(this.table, { params: this.params, signal: this.signal })
       if (this.isSingle && result.data) {
         result.data = result.data[0] || null
       }
@@ -218,7 +228,8 @@ class SupabaseModifyBuilder extends SupabaseQueryBuilder {
       const result = await supabaseFetch(this.table, { 
         method: this.method || 'GET',
         body: this.body,
-        params: this.params 
+        params: this.params,
+        signal: this.signal
       })
       if (this.isSingle && result.data) {
         result.data = result.data[0] || null

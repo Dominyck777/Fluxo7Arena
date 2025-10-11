@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<link rel="icon" type="image/x-icon" href="/logof7.ico" />
+		<meta name="generator" content="Fluxo7 Arena" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>Fluxo7 Arena - Gestão de Quadras</title>
+		<script type="module" crossorigin src="/assets/index-e819e961.js"></script>
+		<link rel="stylesheet" href="/assets/index-9d1330a1.css">
+		<script type="module">
+  window.onerror = (message, source, lineno, colno, errorObj) => {
+    const errorDetails = errorObj ? JSON.stringify({
+      name: errorObj.name,
+      message: errorObj.message,
+      stack: errorObj.stack,
+      source,
+      lineno,
+      colno,
+    }) : null;
+  
+    window.parent.postMessage({
+      type: 'horizons-runtime-error',
+      message,
+      error: errorDetails
+    }, '*');
+  };
+  </script>
+		<script type="module">
+  const observer = new MutationObserver((mutations) => {
+    for (const mutation of mutations) {
+      for (const addedNode of mutation.addedNodes) {
+        if (
+          addedNode.nodeType === Node.ELEMENT_NODE &&
+          (
+            addedNode.tagName?.toLowerCase() === 'vite-error-overlay' ||
+            addedNode.classList?.contains('backdrop')
+          )
+        ) {
+          handleViteOverlay(addedNode);
+        }
+      }
+    }
+  });
+  
+  observer.observe(document.documentElement, {
+    childList: true,
+    subtree: true
+  });
+  
+  function handleViteOverlay(node) {
+    if (!node.shadowRoot) {
+      return;
+    }
+  
+    const backdrop = node.shadowRoot.querySelector('.backdrop');
+  
+    if (backdrop) {
+      const overlayHtml = backdrop.outerHTML;
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(overlayHtml, 'text/html');
+      const messageBodyElement = doc.querySelector('.message-body');
+      const fileElement = doc.querySelector('.file');
+      const messageText = messageBodyElement ? messageBodyElement.textContent.trim() : '';
+      const fileText = fileElement ? fileElement.textContent.trim() : '';
+      const error = messageText + (fileText ? ' File:' + fileText : '');
+  
+      window.parent.postMessage({
+        type: 'horizons-vite-error',
+        error,
+      }, '*');
+    }
+  }
+  </script>
+		<script type="module">
+  const originalConsoleError = console.error;
+  console.error = function(...args) {
+    originalConsoleError.apply(console, args);
+  
+    let errorString = '';
+  
+    for (let i = 0; i < args.length; i++) {
+      const arg = args[i];
+      if (arg instanceof Error) {
+        errorString = arg.stack || (String(arg && arg.name) + ': ' + String(arg && arg.message));
+        break;
+      }
+    }
+  
+    if (!errorString) {
+      errorString = args.map(arg => typeof arg === 'object' ? JSON.stringify(arg) : String(arg)).join(' ');
+    }
+  
+    window.parent.postMessage({
+      type: 'horizons-console-error',
+      error: errorString
+    }, '*');
+  };
+  </script>
+		<script type="module">
+  const originalFetch = window.fetch;
+  
+  window.fetch = function(...args) {
+    const url = args[0] instanceof Request ? args[0].url : args[0];
+  
+    // Skip WebSocket URLs
+    if (url.startsWith('ws:') || url.startsWith('wss:')) {
+      return originalFetch.apply(this, args);
+    }
+  
+    return originalFetch.apply(this, args)
+      .then(async response => {
+        const contentType = response.headers.get('Content-Type') || '';
+  
+        // Exclude HTML document responses
+        const isDocumentResponse =
+          contentType.includes('text/html') ||
+          contentType.includes('application/xhtml+xml');
+  
+        if (!response.ok && !isDocumentResponse) {
+            const responseClone = response.clone();
+            const errorFromRes = await responseClone.text();
+            const requestUrl = response.url;
+            console.error('Fetch error from ' + requestUrl + ': ' + errorFromRes);
+        }
+  
+        return response;
+      })
+      .catch(error => {
+        if (!url.match(/\.html?$/i)) {
+          console.error(error);
+        }
+  
+        throw error;
+      });
+  };
+  </script>
+		<script type="module">
+  (function(){
+    const patterns = [
+      'Download the React DevTools',
+      'React Router Future Flag Warning',
+      'Using UNSAFE_componentWillMount in strict mode is not recommended',
+      'Each child in a list should have a unique "key" prop',
+      '[AuthDebug]',
+      '[AuthContext]',
+      // Suppress known noisy third-party warning from react-beautiful-dnd
+      'Connect(Droppable): Support for defaultProps will be removed from memo components',
+      // Suppress verbose products api logs
+      '[products.api]'
+    ];
+
+    function shouldSuppress(args) {
+      try {
+        const text = args.map(a => {
+          if (typeof a === 'string') return a;
+          if (a && typeof a.message === 'string') return a.message;
+          try { return JSON.stringify(a); } catch { return String(a); }
+        }).join(' ');
+        return patterns.some(p => text.includes(p));
+      } catch { return false; }
+    }
+
+    const _log = console.log.bind(console);
+    const _info = console.info.bind(console);
+    const _warn = console.warn.bind(console);
+    const _error = console.error.bind(console);
+
+    console.log = (...args) => { if (!shouldSuppress(args)) _log(...args); };
+    console.info = (...args) => { if (!shouldSuppress(args)) _info(...args); };
+    console.warn = (...args) => { if (!shouldSuppress(args)) _warn(...args); };
+    console.error = (...args) => { if (!shouldSuppress(args)) _error(...args); };
+  })();
+  </script>
+	</head>
+	<body>
+		<div id="root"></div>
+		
+	</body>
+</html>
