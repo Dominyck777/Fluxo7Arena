@@ -629,6 +629,10 @@ function AgendaPage() {
         }
       }
     } catch {}
+    // Debug: log se não encontrou próximo evento
+    if (nextTs === Infinity && bookings && bookings.length > 0) {
+      try { console.debug('[Auto] scheduleNext: sem eventos futuros elegíveis', { bookings: bookings.length, autoStart: savedAutomation.autoStartEnabled, autoFinish: savedAutomation.autoFinishEnabled }); } catch {}
+    }
     if (nextTs !== Infinity) {
       const delay = Math.max(0, Math.min(nextTs - nowMs + 250, 10 * 60 * 1000)); // pequeno buffer de 250ms
       try { console.debug('[Auto] next schedule in ms', delay); } catch {}
@@ -769,9 +773,11 @@ function AgendaPage() {
       } catch {}
 
       let anyChange = false;
+      let checkedCount = 0;
       for (const b of candidates) {
-        if (b.auto_disabled) continue; // desligado
-        if (isOverriddenRecently(b.id)) continue; // override manual
+        if (b.auto_disabled) { try { console.debug('[Auto] skip auto_disabled', { id: b.id }); } catch {}; continue; }
+        if (isOverriddenRecently(b.id)) { try { console.debug('[Auto] skip override', { id: b.id }); } catch {}; continue; }
+        checkedCount++;
         const startTs = b.start instanceof Date ? b.start.getTime() : new Date(b.start).getTime();
         const endTs = b.end instanceof Date ? b.end.getTime() : new Date(b.end).getTime();
 
@@ -780,7 +786,8 @@ function AgendaPage() {
           if (nowTs >= endTs) { try { console.debug('[Auto] finish', { id: b.id }); } catch {}; await updateBookingStatus(b.id, 'finished', 'automation'); anyChange = true; continue; }
         }
         if (b.status === 'confirmed' && savedAutomation.autoStartEnabled) {
-          if (nowTs >= startTs) { try { console.debug('[Auto] start', { id: b.id }); } catch {}; await updateBookingStatus(b.id, 'in_progress', 'automation'); anyChange = true; continue; }
+          if (nowTs >= startTs) { try { console.log('[Auto] 🚀 INICIANDO', { id: b.id, start: new Date(startTs), now: new Date(nowTs) }); } catch {}; await updateBookingStatus(b.id, 'in_progress', 'automation'); anyChange = true; continue; }
+          else { try { console.debug('[Auto] confirmed mas ainda não chegou hora', { id: b.id, start: new Date(startTs), now: new Date(nowTs), diff: Math.round((startTs - nowTs) / 1000) + 's' }); } catch {}; }
         }
         if (b.status === 'scheduled' && savedAutomation.autoConfirmEnabled) {
           const msBefore = Number(savedAutomation.autoConfirmMinutesBefore || 0) * 60000;
@@ -791,6 +798,7 @@ function AgendaPage() {
           if (nowTs >= endTs) { try { console.debug('[Auto] catchup-finish', { id: b.id }); } catch {}; await updateBookingStatus(b.id, 'finished', 'automation'); anyChange = true; continue; }
         }
       }
+      try { console.debug('[Auto] runAutomation concluído', { candidates: candidates.length, checked: checkedCount, anyChange }); } catch {}
       // Se houve mudanças por automação, sincroniza lista com backend para refletir imediatamente
       if (anyChange) {
         // pequeno atraso para dar tempo de propagação no banco antes do re-carregamento
