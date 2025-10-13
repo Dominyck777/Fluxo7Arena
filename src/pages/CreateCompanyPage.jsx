@@ -351,13 +351,17 @@ WHERE codigo_empresa = '${codigoEmpresa}' AND id = '${tempId}';
         }
       }
       
-      // 6. Criar agenda_settings
-      await supabase.from('agenda_settings').insert({
-        empresa_id: empresa.id,
-        auto_confirm_enabled: false,
-        auto_start_enabled: true,
-        auto_finish_enabled: true,
-      });
+      // 6. Criar agenda_settings (tentar, mas não falhar se a RLS bloquear)
+      try {
+        await supabase.from('agenda_settings').insert({
+          empresa_id: empresa.id,
+          auto_confirm_enabled: false,
+          auto_start_enabled: true,
+          auto_finish_enabled: true,
+        });
+      } catch (e) {
+        console.warn('Aviso: não foi possível criar agenda_settings agora (provável RLS). Será configurado após o primeiro login.', e?.message || e);
+      }
       
       // 7. Finalizadoras removidas - usuário cria após login
       
