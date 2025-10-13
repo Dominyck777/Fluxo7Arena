@@ -987,8 +987,27 @@ function AgendaPage() {
       const end = new Date(row.fim);
       // Nome da quadra
       const courtName = row.quadra?.[0]?.nome || row.quadra?.nome || Object.values(courtsMap).find(c => c.id === row.quadra_id)?.nome || '';
-      // Nome do cliente: usar apenas o cliente relacionado real; não usar fallback do array "clientes"
-      const customerName = (row.cliente?.[0]?.nome || row.cliente?.nome || '');
+      // Nome do cliente: tentar relacionamento primeiro, depois array clientes, depois participantes
+      let customerName = row.cliente?.[0]?.nome || row.cliente?.nome || '';
+      
+      // Fallback 1: se não tem cliente_id, buscar do array clientes (legado)
+      if (!customerName && row.clientes) {
+        try {
+          const clientesArray = typeof row.clientes === 'string' ? JSON.parse(row.clientes) : row.clientes;
+          if (Array.isArray(clientesArray) && clientesArray.length > 0) {
+            customerName = clientesArray[0]?.nome || clientesArray[0] || '';
+          }
+        } catch {}
+      }
+      
+      // Fallback 2: buscar dos participantes já carregados
+      if (!customerName && participantsByAgendamento[row.id]) {
+        const participants = participantsByAgendamento[row.id];
+        if (Array.isArray(participants) && participants.length > 0) {
+          customerName = participants[0]?.nome || participants[0]?.cliente?.nome || '';
+        }
+      }
+      
       // Proteção: se mudamos localmente há pouco, preferir o status local por alguns segundos para evitar regressão visual
       const recent = recentStatusUpdatesRef.current.get(row.id);
       const preferLocal = recent && (nowTs - recent.ts) < 4000; // 4s de janela
@@ -1022,7 +1041,7 @@ function AgendaPage() {
         localStorage.setItem(bookingsCacheKey, JSON.stringify(serializable));
       }
     } catch {}
-  }, [authReady, userProfile?.codigo_empresa, currentDate, courtsMap, bookingsCacheKey, toast, dbg, debugOn]);
+  }, [authReady, userProfile?.codigo_empresa, currentDate, courtsMap, bookingsCacheKey, toast, dbg, debugOn, participantsByAgendamento]);
 
   // Log watcher: whenever bookings changes (after set), log a compact summary
   useEffect(() => {
