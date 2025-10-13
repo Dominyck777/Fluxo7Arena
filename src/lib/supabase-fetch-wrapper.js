@@ -1,0 +1,291 @@
+/**
+ * 🚀 Supabase Fetch Wrapper
+ * 
+ * Wrapper que usa fetch direto ao invés do @supabase/supabase-js
+ * para contornar bugs de minificação no Netlify/Vercel
+ */
+
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY
+
+// Helper para construir query string
+const buildQueryString = (params) => {
+  const searchParams = new URLSearchParams()
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null) {
+      searchParams.append(key, String(value))
+    }
+  })
+  return searchParams.toString()
+}
+
+// Helper para fazer request
+const supabaseFetch = async (endpoint, options = {}) => {
+  const { method = 'GET', body, headers: customHeaders = {}, params = {}, signal } = options
+  
+  const queryString = buildQueryString(params)
+  const url = `${SUPABASE_URL}/rest/v1/${endpoint}${queryString ? `?${queryString}` : ''}`
+  
+  const headers = {
+    'apikey': SUPABASE_ANON_KEY,
+    'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+    'Content-Type': 'application/json',
+    'Prefer': 'return=representation',
+    ...customHeaders,
+  }
+  
+  // Adicionar auth token se existir
+  const authData = localStorage.getItem('sb-dlfryxtyxqoacuunswuc-auth-token')
+  if (authData) {
+    try {
+      const { access_token } = JSON.parse(authData)
+      if (access_token) {
+        headers['Authorization'] = `Bearer ${access_token}`
+      }
+    } catch (e) {
+      console.warn('[Supabase Wrapper] Erro ao ler auth token:', e)
+    }
+  }
+  
+  const config = {
+    method,
+    headers,
+  }
+  
+  if (body) {
+    config.body = JSON.stringify(body)
+  }
+  
+  if (signal) {
+    config.signal = signal
+  }
+  
+  const response = await fetch(url, config)
+  
+  if (!response.ok) {
+    const error = await response.text()
+    throw new Error(`Supabase error: ${response.status} - ${error}`)
+  }
+  
+  const data = await response.json()
+  return { data, error: null }
+}
+
+// Query Builder (API similar ao Supabase)
+class SupabaseQueryBuilder {
+  constructor(table) {
+    this.table = table
+    this.params = {}
+    this.selectColumns = '*'
+    this.signal = null
+  }
+  
+  select(columns = '*') {
+    this.selectColumns = columns
+    this.params.select = columns
+    return this
+  }
+  
+  eq(column, value) {
+    this.params[column] = `eq.${value}`
+    return this
+  }
+  
+  neq(column, value) {
+    this.params[column] = `neq.${value}`
+    return this
+  }
+  
+  gt(column, value) {
+    this.params[column] = `gt.${value}`
+    return this
+  }
+  
+  // Greater than or equal
+  gte(column, value) {
+    this.params[column] = `gte.${value}`
+    return this
+  }
+  
+  // Less than
+  lt(column, value) {
+    this.params[column] = `lt.${value}`
+    return this
+  }
+  
+  lte(column, value) {
+    this.params[column] = `lte.${value}`
+    return this
+  }
+  
+  like(column, pattern) {
+    this.params[column] = `like.${pattern}`
+    return this
+  }
+  
+  ilike(column, pattern) {
+    this.params[column] = `ilike.${pattern}`
+    return this
+  }
+  
+  is(column, value) {
+    this.params[column] = `is.${value}`
+    return this
+  }
+  
+  in(column, values) {
+    this.params[column] = `in.(${values.join(',')})`
+    return this
+  }
+  
+  not(column, operator, value) {
+    this.params[column] = `not.${operator}.${value}`
+    return this
+  }
+  
+  or(filters) {
+    this.params.or = `(${filters})`
+    return this
+  }
+  
+  contains(column, value) {
+    this.params[column] = `cs.{${value}}`
+    return this
+  }
+  
+  containedBy(column, value) {
+    this.params[column] = `cd.{${value}}`
+    return this
+  }
+  
+  filter(column, operator, value) {
+    this.params[column] = `${operator}.${value}`
+    return this
+  }
+  
+  order(column, options = {}) {
+    const { ascending = true } = options
+    this.params.order = `${column}.${ascending ? 'asc' : 'desc'}`
+    return this
+  }
+  
+  limit(count) {
+    this.params.limit = count
+    return this
+  }
+  
+  range(from, to) {
+    this.params.offset = from
+    this.params.limit = to - from + 1
+    return this
+  }
+  
+  single() {
+    this.params.limit = 1
+    this.isSingle = true
+    return this
+  }
+  
+  abortSignal(signal) {
+    this.signal = signal
+    return this
+  }
+  
+  async then(resolve, reject) {
+    try {
+      const result = await supabaseFetch(this.table, { params: this.params, signal: this.signal })
+      if (this.isSingle && result.data) {
+        result.data = result.data[0] || null
+      }
+      resolve(result)
+    } catch (error) {
+      reject(error)
+    }
+  }
+}
+
+// Query Builder com INSERT/UPDATE/DELETE
+class SupabaseModifyBuilder extends SupabaseQueryBuilder {
+  insert(data) {
+    this.method = 'POST'
+    this.body = Array.isArray(data) ? data : [data]
+    return this
+  }
+  
+  update(data) {
+    this.method = 'PATCH'
+    this.body = data
+    return this
+  }
+  
+  // Upsert (PostgREST): usa POST com Prefer: resolution=...
+  // options: { onConflict?: string, ignoreDuplicates?: boolean, returning?: 'minimal' | 'representation' }
+  upsert(data, options = {}) {
+    this.method = 'POST'
+    this.body = Array.isArray(data) ? data : [data]
+    // Headers específicos para upsert
+    const preferResolution = options.ignoreDuplicates ? 'resolution=ignore-duplicates' : 'resolution=merge-duplicates'
+    const preferReturning = options.returning === 'minimal' ? 'return=minimal' : 'return=representation'
+    this.headers = {
+      ...(this.headers || {}),
+      Prefer: `${preferResolution},${preferReturning}`,
+    }
+    if (options.onConflict) {
+      this.params.on_conflict = options.onConflict
+    }
+    return this
+  }
+  
+  delete() {
+    this.method = 'DELETE'
+    return this
+  }
+  
+  async then(resolve, reject) {
+    try {
+      const result = await supabaseFetch(this.table, { 
+        method: this.method || 'GET',
+        body: this.body,
+        params: this.params,
+        signal: this.signal,
+        headers: this.headers || {}
+      })
+      if (this.isSingle && result.data) {
+        result.data = result.data[0] || null
+      }
+      resolve(result)
+    } catch (error) {
+      reject(error)
+    }
+  }
+}
+
+// Client principal
+export const supabaseWrapper = {
+  from(table) {
+    return new SupabaseModifyBuilder(table)
+  },
+  
+  // Auth methods - delegados para o client original em supabase.js
+  auth: null, // Será preenchido pelo client original
+  
+  // Para compatibilidade
+  supabaseUrl: SUPABASE_URL,
+  supabaseKey: SUPABASE_ANON_KEY,
+}
+
+// Teste automático
+if (typeof window !== 'undefined' && import.meta.env.PROD) {
+  console.log('[Supabase Wrapper] Testando wrapper...')
+  supabaseWrapper.from('empresas').select('id').limit(1)
+    .then(({ data, error }) => {
+      if (error) {
+        console.error('[Supabase Wrapper] ❌ ERRO:', error)
+      } else {
+        console.log('[Supabase Wrapper] ✅ SUCESSO com WRAPPER:', data)
+      }
+    })
+    .catch(err => {
+      console.error('[Supabase Wrapper] ❌ EXCEPTION:', err)
+    })
+}

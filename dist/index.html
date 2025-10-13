@@ -1,12 +1,32 @@
-import path from 'node:path';
-import react from '@vitejs/plugin-react';
-import { createLogger, defineConfig } from 'vite';
-
-const isDev = process.env.NODE_ENV !== 'production';
-
-async function getConfig() {
-
-  const configHorizonsViteErrorHandler = `
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<link rel="icon" type="image/x-icon" href="/logof7.ico" />
+		<meta name="generator" content="Fluxo7 Arena" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>Fluxo7 Arena - Gestão de Quadras</title>
+		<script type="module" crossorigin src="/assets/index-e819e961.js"></script>
+		<link rel="stylesheet" href="/assets/index-9d1330a1.css">
+		<script type="module">
+  window.onerror = (message, source, lineno, colno, errorObj) => {
+    const errorDetails = errorObj ? JSON.stringify({
+      name: errorObj.name,
+      message: errorObj.message,
+      stack: errorObj.stack,
+      source,
+      lineno,
+      colno,
+    }) : null;
+  
+    window.parent.postMessage({
+      type: 'horizons-runtime-error',
+      message,
+      error: errorDetails
+    }, '*');
+  };
+  </script>
+		<script type="module">
   const observer = new MutationObserver((mutations) => {
     for (const mutation of mutations) {
       for (const addedNode of mutation.addedNodes) {
@@ -51,28 +71,8 @@ async function getConfig() {
       }, '*');
     }
   }
-  `;
-
-  const configHorizonsRuntimeErrorHandler = `
-  window.onerror = (message, source, lineno, colno, errorObj) => {
-    const errorDetails = errorObj ? JSON.stringify({
-      name: errorObj.name,
-      message: errorObj.message,
-      stack: errorObj.stack,
-      source,
-      lineno,
-      colno,
-    }) : null;
-  
-    window.parent.postMessage({
-      type: 'horizons-runtime-error',
-      message,
-      error: errorDetails
-    }, '*');
-  };
-  `;
-
-  const configHorizonsConsoleErrroHandler = `
+  </script>
+		<script type="module">
   const originalConsoleError = console.error;
   console.error = function(...args) {
     originalConsoleError.apply(console, args);
@@ -96,9 +96,8 @@ async function getConfig() {
       error: errorString
     }, '*');
   };
-  `;
-
-  const configWindowFetchMonkeyPatch = `
+  </script>
+		<script type="module">
   const originalFetch = window.fetch;
   
   window.fetch = function(...args) {
@@ -128,16 +127,15 @@ async function getConfig() {
         return response;
       })
       .catch(error => {
-        if (!url.match(/\\.html?$/i)) {
+        if (!url.match(/\.html?$/i)) {
           console.error(error);
         }
   
         throw error;
       });
   };
-  `;
-
-  const configConsoleFilter = `
+  </script>
+		<script type="module">
   (function(){
     const patterns = [
       'Download the React DevTools',
@@ -173,126 +171,10 @@ async function getConfig() {
     console.warn = (...args) => { if (!shouldSuppress(args)) _warn(...args); };
     console.error = (...args) => { if (!shouldSuppress(args)) _error(...args); };
   })();
-  `;
-
-  const addTransformIndexHtml = {
-    name: 'add-transform-index-html',
-    transformIndexHtml(html) {
-      return {
-        html,
-        tags: [
-          {
-            tag: 'script',
-            attrs: { type: 'module' },
-            children: configHorizonsRuntimeErrorHandler,
-            injectTo: 'head',
-          },
-          {
-            tag: 'script',
-            attrs: { type: 'module' },
-            children: configHorizonsViteErrorHandler,
-            injectTo: 'head',
-          },
-          {
-            tag: 'script',
-            attrs: { type: 'module' },
-            children: configHorizonsConsoleErrroHandler,
-            injectTo: 'head',
-          },
-          {
-            tag: 'script',
-            attrs: { type: 'module' },
-            children: configWindowFetchMonkeyPatch,
-            injectTo: 'head',
-          },
-          {
-            tag: 'script',
-            attrs: { type: 'module' },
-            children: configConsoleFilter,
-            injectTo: 'head',
-          },
-        ],
-      };
-    },
-  };
-
-  console.warn = () => {};
-
-  const logger = createLogger();
-  const loggerError = logger.error;
-
-  logger.error = (msg, options) => {
-    if (options?.error?.toString().includes('CssSyntaxError: [postcss]')) {
-      return;
-    }
-    loggerError(msg, options);
-  };
-
-  return defineConfig({
-    customLogger: logger,
-    plugins: [
-      react(),
-      addTransformIndexHtml
-    ],
-    // ✅ Otimização de dependências - força pré-bundling do Supabase
-    optimizeDeps: {
-      include: ['@supabase/supabase-js'],
-      esbuildOptions: {
-        target: 'es2020',
-      },
-    },
-    server: {
-      cors: true,
-      headers: {
-        'Cross-Origin-Embedder-Policy': 'credentialless',
-      },
-      allowedHosts: true,
-      watch: {
-        usePolling: true,
-        interval: 1000,
-      },
-    },
-    resolve: {
-      extensions: ['.jsx', '.js', '.tsx', '.ts', '.json'],
-      alias: {
-        '@': path.resolve(__dirname, './src'),
-      },
-    },
-    build: {
-      target: 'es2020',
-      outDir: 'dist',
-      // ✅ Sourcemaps para debug em produção (pode remover depois de resolver)
-      sourcemap: isDev ? true : false,
-      // ✅ Minificação mais suave - não quebra Supabase
-      minify: isDev ? false : 'esbuild',
-      // ✅ Limite de tamanho de chunk aumentado
-      chunkSizeWarningLimit: 1000,
-      // ✅ CommonJS options - garante compatibilidade com Supabase
-      commonjsOptions: {
-        include: [/@supabase/, /node_modules/],
-        transformMixedEsModules: true,
-      },
-      rollupOptions: {
-        external: [
-          '@babel/parser',
-          '@babel/traverse',
-          '@babel/generator',
-          '@babel/types',
-        ],
-        // ✅ Configurações Rollup para Supabase
-        output: {
-          // Preservar módulos dinâmicos do Supabase
-          preserveModules: false,
-          // Formato de saída
-          format: 'es',
-          // Garantir exports nomeados
-          exports: 'named',
-        },
-        // ✅ Preservar dynamic imports do Supabase
-        preserveEntrySignatures: 'allow-extension',
-      },
-    },
-  });
-}
-
-export default getConfig();
+  </script>
+	</head>
+	<body>
+		<div id="root"></div>
+		
+	</body>
+</html>

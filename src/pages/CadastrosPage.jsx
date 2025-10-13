@@ -1,5 +1,4 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Helmet } from 'react-helmet';
 import { motion } from 'framer-motion';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
@@ -141,10 +140,6 @@ export default function CadastrosPage() {
 
   return (
     <>
-      <Helmet>
-        <title>Cadastros - Fluxo7 Arena</title>
-      </Helmet>
-
       <motion.div variants={pageVariants} initial="hidden" animate="visible" className="space-y-6">
         <SectionCard>
           <div className="flex items-center justify-between">

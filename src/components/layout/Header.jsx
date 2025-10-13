@@ -11,9 +11,8 @@ import { useAlerts } from '@/contexts/AlertsContext';
 function Header({ onToggleSidebar, sidebarVisible, sidebarPinned }) {
   const { toast } = useToast();
   const { signOut, userProfile, company, user } = useAuth();
-  const { alerts, showModal, setShowModal, showBalloon, setShowBalloon } = useAlerts();
+  const { alerts, showModal, setShowModal } = useAlerts();
   const navigate = useNavigate();
-  const [showNotification, setShowNotification] = useState(false);
   // Extrair apenas nome e sobrenome (primeiras duas palavras)
   const fullName = userProfile?.nome || 'Usuário';
   const userName = React.useMemo(() => {
@@ -44,21 +43,6 @@ function Header({ onToggleSidebar, sidebarVisible, sidebarPinned }) {
   }, [company?.logo_url]);
 
   // Balão de alertas removido - funcionalidade desabilitada
-
-  // Mostrar notificação quando há alertas (apenas uma vez por sessão)
-  useEffect(() => {
-    if (alerts.length > 0 && !sessionStorage.getItem('alerts-shown')) {
-      setShowNotification(true);
-      sessionStorage.setItem('alerts-shown', 'true');
-      
-      // Auto-hide após 5 segundos
-      const timer = setTimeout(() => {
-        setShowNotification(false);
-      }, 5000);
-      
-      return () => clearTimeout(timer);
-    }
-  }, [alerts]);
 
   const getIcon = (iconName) => {
     const icons = {
@@ -158,7 +142,6 @@ function Header({ onToggleSidebar, sidebarVisible, sidebarPinned }) {
 
   return (
     <motion.header
-      initial={{ opacity: 0, y: -80 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
       className="relative bg-surface/80 backdrop-blur-sm text-text-primary h-[72px] flex-shrink-0 flex items-center justify-between px-8 border-b border-border shadow-[0_1px_0_RGBA(255,255,255,0.04)]"
@@ -171,22 +154,8 @@ function Header({ onToggleSidebar, sidebarVisible, sidebarPinned }) {
           aria-label={sidebarVisible ? 'Ocultar barra lateral' : 'Mostrar barra lateral'}
           className="h-12 w-12 hover:bg-surface-2/60 transition-colors"
         >
-          {/* Mobile: Menu (3 traços) */}
-          <Menu className={`w-7 h-7 md:hidden transition-colors ${sidebarVisible ? 'text-brand' : 'text-text-primary'}`} />
-          {/* Desktop: PanelLeft (ícone de painel) */}
-          {sidebarVisible ? (
-            <PanelLeftClose className="w-7 h-7 hidden md:block text-brand transition-colors" />
-          ) : (
-            <PanelLeft className="w-7 h-7 hidden md:block text-text-primary transition-colors" />
-          )}
-          {/* Indicador de fixação (desktop) */}
-          <span className="hidden md:inline-flex items-center justify-center ml-1">
-            {sidebarPinned ? (
-              <Lock className="w-3.5 h-3.5 text-brand/80" />
-            ) : (
-              <Unlock className="w-3.5 h-3.5 text-text-secondary" />
-            )}
-          </span>
+          {/* Menu (3 traços) em todas as versões - amarelo quando aberto */}
+          <Menu className={`w-7 h-7 transition-colors ${sidebarVisible ? 'text-brand' : 'text-text-primary'}`} />
         </Button>
         <div
           className="group pl-3 pr-5 py-1.5 rounded-full border border-white/10 bg-gradient-to-b from-surface-2/60 to-surface/60 text-text-primary flex items-center gap-4 shadow-sm hover:border-white/20 transition-colors"
@@ -239,58 +208,6 @@ function Header({ onToggleSidebar, sidebarVisible, sidebarPinned }) {
           <span className="text-[11px] px-2 py-0.5 rounded-full bg-brand/15 text-brand font-medium tracking-wide">{userRole}</span>
         </div>
       </div>
-
-      {/* Notificação de Alertas */}
-      {showNotification && alerts.length > 0 && (
-        <motion.div
-          initial={{ opacity: 0, y: -20, scale: 0.95 }}
-          animate={{ opacity: 1, y: 0, scale: 1 }}
-          exit={{ opacity: 0, y: -20, scale: 0.95 }}
-          className="absolute top-20 right-8 bg-surface border border-border rounded-lg shadow-2xl p-4 max-w-sm z-50"
-        >
-          <div className="flex items-center justify-between mb-2">
-            <h3 className="text-sm font-semibold text-text-primary flex items-center gap-2">
-              <Bell className="h-4 w-4 text-brand" />
-              Novos Alertas ({alerts.length})
-            </h3>
-            <Button 
-              variant="ghost" 
-              size="sm"
-              onClick={() => setShowNotification(false)}
-              className="h-6 w-6 p-0 text-text-muted hover:text-text-primary"
-            >
-              <X className="h-3 w-3" />
-            </Button>
-          </div>
-          <div className="space-y-1 text-xs">
-            {alerts.slice(0, 3).map((alert, idx) => {
-              const Icon = getIcon(alert.icone);
-              const colorClass = getColorClass(alert.cor);
-              return (
-                <div key={idx} className="flex items-center gap-2 p-1">
-                  <Icon className={`w-3 h-3 ${colorClass}`} />
-                  <span className="text-text-secondary truncate">{alert.mensagem}</span>
-                </div>
-              );
-            })}
-            {alerts.length > 3 && (
-              <div className="text-center pt-1">
-                <Button 
-                  variant="ghost" 
-                  size="sm"
-                  onClick={() => {
-                    setShowModal(true);
-                    setShowNotification(false);
-                  }}
-                  className="text-xs text-brand hover:text-brand/80"
-                >
-                  Ver todos ({alerts.length})
-                </Button>
-              </div>
-            )}
-          </div>
-        </motion.div>
-      )}
 
       {/* Balão de alertas removido */}
 

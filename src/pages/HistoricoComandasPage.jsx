@@ -1,5 +1,4 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Helmet } from 'react-helmet';
 import { motion } from 'framer-motion';
 import { Input } from '@/components/ui/input';
 import { Calendar } from '@/components/ui/calendar';
@@ -669,11 +668,6 @@ export default function HistoricoComandasPage() {
 
   return (
     <motion.div variants={pageVariants} initial="hidden" animate="visible" className="min-h-screen flex flex-col">
-      <Helmet>
-        <title>Histórico - Fluxo7 Arena</title>
-        <meta name="description" content="Histórico de vendas, comandas e fechamentos de caixa." />
-      </Helmet>
-
       <motion.div variants={itemVariants} className="mb-6 gap-3 flex flex-col sm:flex-row sm:items-center sm:justify-between">
         <Tabs value="historico" onValueChange={(v) => {
           if (v === 'mesas') navigate('/vendas');

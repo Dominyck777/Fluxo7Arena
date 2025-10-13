@@ -1,6 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { getCourtColor } from '@/lib/utils';
-import { Helmet } from 'react-helmet';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
@@ -512,10 +511,6 @@ export default function QuadrasPage() {
 
   return (
     <>
-      <Helmet>
-        <title>Cadastros • Quadras - Fluxo7 Arena</title>
-      </Helmet>
-
       <motion.div variants={pageVariants} initial="hidden" animate="visible" className="space-y-6">
         <motion.div variants={itemVariants} className="flex items-center justify-between mb-6">
           <div>

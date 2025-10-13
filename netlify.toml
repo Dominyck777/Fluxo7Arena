@@ -1,84 +1,69 @@
+# Netlify Configuration for Fluxo7Arena
+# https://docs.netlify.com/configure-builds/file-based-configuration/
+
 [build]
-  # Comando de build do Vite
+  # Comando de build
   command = "npm run build"
   
-  # Diretório de saída do build
+  # Diretório de output (onde o Vite gera os arquivos)
   publish = "dist"
   
   # Variáveis de ambiente para o build
-  environment = { NODE_ENV = "production" }
+  # IMPORTANTE: Adicionar no painel do Netlify:
+  # - VITE_SUPABASE_URL
+  # - VITE_SUPABASE_ANON_KEY
 
-[build.processing]
-  # Otimizações automáticas do Netlify
-  skip_processing = false
+[build.environment]
+  # Node version
+  NODE_VERSION = "18"
+  # NPM version (opcional)
+  NPM_VERSION = "9"
+  
+# ⚠️ IMPORTANTE: Adicionar estas variáveis no painel do Netlify:
+# Site Settings → Environment Variables → Add a variable
+# 
+# VITE_SUPABASE_URL = https://dlfryxtyxqoacuunswuc.supabase.co
+# VITE_SUPABASE_ANON_KEY = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 
-[build.processing.css]
-  bundle = true
-  minify = true
-
-[build.processing.js]
-  bundle = true
-  minify = true
-
-[build.processing.html]
-  pretty_urls = true
-
-# Configuração para SPA (Single Page Application)
+# Redirects para SPA (Single Page Application)
+# Garante que todas as rotas sejam redirecionadas para index.html
 [[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200
+  force = false
 
 # Headers de segurança e performance
 [[headers]]
   for = "/*"
   [headers.values]
-    # Segurança
+    # Security headers
     X-Frame-Options = "DENY"
     X-Content-Type-Options = "nosniff"
     X-XSS-Protection = "1; mode=block"
     Referrer-Policy = "strict-origin-when-cross-origin"
     
-    # Performance
+    # Cache control para HTML (não cachear)
+    Cache-Control = "public, max-age=0, must-revalidate"
+
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    # Cache agressivo para assets (JS, CSS, imagens com hash)
     Cache-Control = "public, max-age=31536000, immutable"
 
 [[headers]]
-  for = "/index.html"
+  for = "/*.js"
   [headers.values]
-    # Não cachear o HTML principal
-    Cache-Control = "no-cache, no-store, must-revalidate"
-    Pragma = "no-cache"
-    Expires = "0"
-
-[[headers]]
-  for = "*.js"
-  [headers.values]
+    # Cache para JS no root
     Cache-Control = "public, max-age=31536000, immutable"
 
 [[headers]]
-  for = "*.css"
+  for = "/*.css"
   [headers.values]
+    # Cache para CSS no root
     Cache-Control = "public, max-age=31536000, immutable"
 
-[[headers]]
-  for = "*.png"
-  [headers.values]
-    Cache-Control = "public, max-age=31536000, immutable"
-
-[[headers]]
-  for = "*.jpg"
-  [headers.values]
-    Cache-Control = "public, max-age=31536000, immutable"
-
-[[headers]]
-  for = "*.ico"
-  [headers.values]
-    Cache-Control = "public, max-age=31536000, immutable"
-
-# Configurações específicas para APIs externas
-[[headers]]
-  for = "/api/*"
-  [headers.values]
-    Access-Control-Allow-Origin = "*"
-    Access-Control-Allow-Methods = "GET, POST, PUT, DELETE, OPTIONS"
-    Access-Control-Allow-Headers = "Content-Type, Authorization"
+# Plugin para otimização automática
+[[plugins]]
+  package = "@netlify/plugin-lighthouse"

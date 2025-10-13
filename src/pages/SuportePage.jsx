@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
-import { LifeBuoy, MessageCircle, Mail, Bug, ClipboardCopy, CheckCircle2, Phone, Trophy } from 'lucide-react';
+import { LifeBuoy, MessageCircle, Mail, Bug, ClipboardCopy, CheckCircle2, Phone, Trophy, Download, Smartphone, Share } from 'lucide-react';
 
 const APP_VERSION = 'v0.0.4'; // ajuste aqui se tiver uma fonte de versão global
 
@@ -54,6 +54,11 @@ export default function SuportePage() {
   const [assunto, setAssunto] = useState('');
   const [descricao, setDescricao] = useState('');
   const [isDesktop, setIsDesktop] = useState(true);
+  
+  // PWA Install
+  const [deferredPrompt, setDeferredPrompt] = useState(null);
+  const [isInstalled, setIsInstalled] = useState(false);
+  const [isIOS, setIsIOS] = useState(false);
 
   const appName = 'Fluxo7 Arena';
   const supportEmail = 'fluxo7team@gmail.com';
@@ -72,6 +77,67 @@ export default function SuportePage() {
       setIsDesktop(true);
     }
   }, []);
+
+  // PWA Install Detection
+  useEffect(() => {
+    // Detectar iOS
+    const isIOSDevice = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+    setIsIOS(isIOSDevice);
+
+    // Detectar se já está instalado
+    if (window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone) {
+      setIsInstalled(true);
+    }
+
+    // Capturar evento de instalação (não funciona no iOS)
+    const handleBeforeInstallPrompt = (e) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    };
+
+    const handleAppInstalled = () => {
+      setIsInstalled(true);
+      setDeferredPrompt(null);
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    window.addEventListener('appinstalled', handleAppInstalled);
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+      window.removeEventListener('appinstalled', handleAppInstalled);
+    };
+  }, []);
+
+  const handleInstallClick = async () => {
+    if (!deferredPrompt) return;
+
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    
+    if (outcome === 'accepted') {
+      setIsInstalled(true);
+    }
+    
+    setDeferredPrompt(null);
+  };
+
+  const handleIOSInstall = () => {
+    // Tentar abrir o menu de compartilhar do iOS
+    if (navigator.share) {
+      navigator.share({
+        title: 'F7 Arena',
+        text: 'Adicione F7 Arena à sua tela inicial',
+        url: window.location.href,
+      }).catch(() => {
+        // Se falhar, mostrar alerta com instruções
+        alert('Para adicionar à tela inicial:\n\n1. Toque no botão de Compartilhar (ícone de quadrado com seta)\n2. Role para baixo\n3. Toque em "Adicionar à Tela de Início"');
+      });
+    } else {
+      // Fallback: mostrar alerta com instruções
+      alert('Para adicionar à tela inicial:\n\n1. Toque no botão de Compartilhar (ícone de quadrado com seta)\n2. Role para baixo\n3. Toque em "Adicionar à Tela de Início"');
+    }
+  };
 
   const diagnostico = useMemo(() => {
     try {
@@ -165,6 +231,56 @@ export default function SuportePage() {
               </a>
             </div>
           </SectionCard>
+          
+          {/* PWA Install Card */}
+          {!isInstalled && isIOS && (
+            <SectionCard title="Adicionar à Tela Inicial" icon={Smartphone}>
+              <div className="space-y-3">
+                <p className="text-sm text-text-secondary">
+                  Crie um atalho do F7 Arena na sua tela inicial para acesso rápido.
+                </p>
+                <button
+                  onClick={handleIOSInstall}
+                  className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-md bg-brand text-black font-medium hover:opacity-90 transition"
+                >
+                  <Share className="w-4 h-4" /> Criar Atalho
+                </button>
+                <details className="text-xs text-text-muted">
+                  <summary className="cursor-pointer hover:text-text-secondary">Como fazer manualmente?</summary>
+                  <div className="mt-2 space-y-1 pl-2">
+                    <p>1. Toque no botão <Share className="inline w-3 h-3" /> (Compartilhar)</p>
+                    <p>2. Role para baixo e toque em "Adicionar à Tela de Início"</p>
+                    <p>3. Toque em "Adicionar"</p>
+                  </div>
+                </details>
+              </div>
+            </SectionCard>
+          )}
+          
+          {!isInstalled && !isIOS && deferredPrompt && (
+            <SectionCard title="Instalar Aplicativo" icon={Smartphone}>
+              <div className="space-y-2">
+                <p className="text-sm text-text-secondary">
+                  Instale o F7 Arena no seu dispositivo para acesso rápido e experiência completa de aplicativo.
+                </p>
+                <button
+                  onClick={handleInstallClick}
+                  className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-md bg-brand text-black font-medium hover:opacity-90 transition"
+                >
+                  <Download className="w-4 h-4" /> Instalar Agora
+                </button>
+              </div>
+            </SectionCard>
+          )}
+          
+          {isInstalled && (
+            <SectionCard title="Aplicativo Instalado" icon={CheckCircle2}>
+              <div className="flex items-center gap-2 text-sm text-success">
+                <CheckCircle2 className="w-4 h-4" />
+                <span>F7 Arena está instalado no seu dispositivo!</span>
+              </div>
+            </SectionCard>
+          )}
         </div>
       </div>
 

@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { Helmet } from 'react-helmet';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Plus, Lock, Search, SlidersHorizontal, Clock, CheckCircle, XCircle, CalendarPlus, Users, DollarSign, Repeat, Trash2, GripVertical, Sparkles, Ban, AlertTriangle, ChevronDown, Play, PlayCircle, Flag, UserX, X, Settings } from 'lucide-react';
@@ -299,7 +298,7 @@ function AgendaPage() {
     }
   }, [location.state?.openModal, isModalOpen, openBookingModal]);
   
-  const [viewFilter, setViewFilter] = useState({ scheduled: true, available: true, canceledOnly: false });
+  const [viewFilter, setViewFilter] = useState({ scheduled: true, available: true, canceledOnly: false, pendingPayments: false });
 
   // Lista de quadras vinda do banco (objetos com nome, modalidades, horario)
   const [dbCourts, setDbCourts] = useState(null);
@@ -376,6 +375,7 @@ function AgendaPage() {
     autoFinishEnabled: true,
   }), []);
   const [automation, setAutomation] = useState(defaultAutomation);
+  const [savedAutomation, setSavedAutomation] = useState(defaultAutomation); // Último estado salvo no banco
   const [savingSettings, setSavingSettings] = useState(false);
   // Offset de horário do servidor (Brasília) em relação ao relógio local do dispositivo, em ms
   const [serverOffsetMs, setServerOffsetMs] = useState(0);
@@ -383,27 +383,8 @@ function AgendaPage() {
   const getNowMs = useCallback(() => Date.now() + (Number.isFinite(serverOffsetMs) ? serverOffsetMs : 0), [serverOffsetMs]);
   // Debug/status: última sincronização bem-sucedida de horário
   const [lastTimeSyncAtMs, setLastTimeSyncAtMs] = useState(null);
-  // Carrega regras salvas quando empresa está disponível
-  useEffect(() => {
-    if (!userProfile?.codigo_empresa) return;
-    try {
-      const raw = localStorage.getItem(`agenda:automation:${userProfile.codigo_empresa}`);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        setAutomation((prev) => ({ ...defaultAutomation, ...parsed }));
-      } else {
-        setAutomation(defaultAutomation);
-      }
-    } catch {
-      setAutomation(defaultAutomation);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userProfile?.codigo_empresa]);
-  // Persiste quando alterar
-  useEffect(() => {
-    if (!userProfile?.codigo_empresa) return;
-    try { localStorage.setItem(`agenda:automation:${userProfile.codigo_empresa}`, JSON.stringify(automation)); } catch {}
-  }, [automation, userProfile?.codigo_empresa]);
+  // Carrega regras salvas do banco quando empresa está disponível
+  // Removido: localStorage auto-save para evitar persistência sem clicar em Salvar
 
   // Carregar do banco (agenda_settings) quando empresa estiver disponível
   useEffect(() => {
@@ -431,6 +412,7 @@ function AgendaPage() {
           autoFinishEnabled: !!data.auto_finish_enabled,
         };
         setAutomation((prev) => ({ ...prev, ...next }));
+        setSavedAutomation(next); // Guardar como último estado salvo
       } catch (e) {
         console.warn('[AgendaSettings] unexpected load error', e);
       }
@@ -520,6 +502,7 @@ function AgendaPage() {
         .from('agenda_settings')
         .upsert(payload, { onConflict: 'empresa_id' });
       if (error) throw error;
+      setSavedAutomation(automation); // Atualizar último estado salvo
       toast({ title: 'Configurações salvas', description: 'As automações da agenda foram atualizadas com sucesso.' });
       setIsSettingsOpen(false);
     } catch (e) {
@@ -563,7 +546,7 @@ function AgendaPage() {
       if (error) throw error;
       setBookings(prev => prev.map(b => {
         if (b.id !== bookingId) return b;
-        const next = { ...b, status: newStatus };
+        const next = { ...b, status: newStatus, customer: b.customer || '' }; // Preservar customer
         if (shouldDisable) next.auto_disabled = true;
         else if (reactivate) next.auto_disabled = false;
         return next;
@@ -576,7 +559,7 @@ function AgendaPage() {
           const updated = Array.isArray(cached)
             ? cached.map(b => {
                 if (b.id !== bookingId) return b;
-                const next = { ...b, status: newStatus };
+                const next = { ...b, status: newStatus, customer: b.customer || '' }; // Preservar customer
                 if (shouldDisable) next.auto_disabled = true;
                 else if (reactivate) next.auto_disabled = false;
                 return next;
@@ -631,16 +614,16 @@ function AgendaPage() {
         if (isOverriddenRecently(b.id)) continue;
         const startTs = b.start instanceof Date ? b.start.getTime() : new Date(b.start).getTime();
         const endTs = b.end instanceof Date ? b.end.getTime() : new Date(b.end).getTime();
-        if (b.status === 'scheduled' && automation.autoConfirmEnabled) {
-          const msBefore = Number(automation.autoConfirmMinutesBefore || 0) * 60000;
+        if (b.status === 'scheduled' && savedAutomation.autoConfirmEnabled) {
+          const msBefore = Number(savedAutomation.autoConfirmMinutesBefore || 0) * 60000;
           consider(startTs - msBefore);
-          if (automation.autoFinishEnabled) consider(endTs); // catch-up finish
+          if (savedAutomation.autoFinishEnabled) consider(endTs); // catch-up finish
         }
         if (b.status === 'confirmed') {
-          if (automation.autoStartEnabled) consider(startTs);
-          if (automation.autoFinishEnabled) consider(endTs);
+          if (savedAutomation.autoStartEnabled) consider(startTs);
+          if (savedAutomation.autoFinishEnabled) consider(endTs);
         }
-        if (b.status === 'in_progress' && automation.autoFinishEnabled) {
+        if (b.status === 'in_progress' && savedAutomation.autoFinishEnabled) {
           consider(endTs);
         }
       }
@@ -651,7 +634,7 @@ function AgendaPage() {
       try { setNextAutoAtMs(nextTs); } catch {}
       nextAutoTimerRef.current = setTimeout(() => { try { runAutomationRef.current && runAutomationRef.current(); } catch {} }, delay);
     }
-  }, [authReady, userProfile?.codigo_empresa, bookings, automation, isOverriddenRecently, clearNextAutoTimer, getNowMs]);
+  }, [authReady, userProfile?.codigo_empresa, bookings, savedAutomation, isOverriddenRecently, clearNextAutoTimer, getNowMs]);
   
   // Vigia ao clicar em editar: garante dados frescos antes de abrir o modal
   const ensureFreshOnEdit = useCallback(async (booking) => {
@@ -687,6 +670,7 @@ function AgendaPage() {
             status: row.status || booking.status,
             modality: row.modalidade || booking.modality,
             auto_disabled: !!row.auto_disabled,
+            customer: booking.customer || '', // Preservar customer
           };
           updatedForReturn = mapped;
           setBookings(prev => prev.map(b => b.id === booking.id ? mapped : b));
@@ -701,17 +685,20 @@ function AgendaPage() {
           const endTs = cand.end instanceof Date ? cand.end.getTime() : new Date(cand.end).getTime();
           const canAuto = !cand.auto_disabled && !isOverriddenRecently(cand.id);
           if (canAuto) {
-            // Ordem: finalizar > iniciar > confirmar > catch-up finish
-            if (cand.status === 'in_progress' && automation.autoFinishEnabled && Number.isFinite(endTs) && nowTs >= endTs) {
+            // Ordem: finalizar > iniciar direto (skip confirm se aplicável) > iniciar > confirmar > catch-up finish (usar savedAutomation)
+            if (cand.status === 'in_progress' && savedAutomation.autoFinishEnabled && Number.isFinite(endTs) && nowTs >= endTs) {
               await updateBookingStatus(cand.id, 'finished', 'automation');
-            } else if (cand.status === 'confirmed' && automation.autoStartEnabled && Number.isFinite(startTs) && nowTs >= startTs) {
+            } else if (cand.status === 'scheduled' && savedAutomation.autoStartEnabled && Number.isFinite(startTs) && nowTs >= startTs) {
+              // Pular direto para in_progress se autoStart estiver ativo
               await updateBookingStatus(cand.id, 'in_progress', 'automation');
-            } else if (cand.status === 'scheduled' && automation.autoConfirmEnabled && Number.isFinite(startTs)) {
-              const msBefore = Number(automation.autoConfirmMinutesBefore || 0) * 60000;
+            } else if (cand.status === 'confirmed' && savedAutomation.autoStartEnabled && Number.isFinite(startTs) && nowTs >= startTs) {
+              await updateBookingStatus(cand.id, 'in_progress', 'automation');
+            } else if (cand.status === 'scheduled' && savedAutomation.autoConfirmEnabled && Number.isFinite(startTs)) {
+              const msBefore = Number(savedAutomation.autoConfirmMinutesBefore || 0) * 60000;
               if (nowTs >= (startTs - msBefore)) {
                 await updateBookingStatus(cand.id, 'confirmed', 'automation');
               }
-            } else if ((cand.status === 'scheduled' || cand.status === 'confirmed') && automation.autoFinishEnabled && Number.isFinite(endTs) && nowTs >= endTs) {
+            } else if ((cand.status === 'scheduled' || cand.status === 'confirmed') && savedAutomation.autoFinishEnabled && Number.isFinite(endTs) && nowTs >= endTs) {
               await updateBookingStatus(cand.id, 'finished', 'automation');
             }
           }
@@ -791,19 +778,28 @@ function AgendaPage() {
         const startTs = b.start instanceof Date ? b.start.getTime() : new Date(b.start).getTime();
         const endTs = b.end instanceof Date ? b.end.getTime() : new Date(b.end).getTime();
 
-        // Ordem: finalizar > iniciar > confirmar
-        if (b.status === 'in_progress' && automation.autoFinishEnabled) {
+        // Ordem: finalizar > iniciar > confirmar (usar savedAutomation ao invés de automation)
+        if (b.status === 'in_progress' && savedAutomation.autoFinishEnabled) {
           if (nowTs >= endTs) { try { console.debug('[Auto] finish', { id: b.id }); } catch {}; await updateBookingStatus(b.id, 'finished', 'automation'); anyChange = true; continue; }
         }
-        if (b.status === 'confirmed' && automation.autoStartEnabled) {
+        
+        // Permitir pular de scheduled direto para in_progress se autoStart estiver ativo e já passou do horário
+        if (b.status === 'scheduled' && savedAutomation.autoStartEnabled && nowTs >= startTs) {
+          try { console.debug('[Auto] start-direct (skip confirm)', { id: b.id }); } catch {};
+          await updateBookingStatus(b.id, 'in_progress', 'automation');
+          anyChange = true;
+          continue;
+        }
+        
+        if (b.status === 'confirmed' && savedAutomation.autoStartEnabled) {
           if (nowTs >= startTs) { try { console.debug('[Auto] start', { id: b.id }); } catch {}; await updateBookingStatus(b.id, 'in_progress', 'automation'); anyChange = true; continue; }
         }
-        if (b.status === 'scheduled' && automation.autoConfirmEnabled) {
-          const msBefore = Number(automation.autoConfirmMinutesBefore || 0) * 60000;
+        if (b.status === 'scheduled' && savedAutomation.autoConfirmEnabled) {
+          const msBefore = Number(savedAutomation.autoConfirmMinutesBefore || 0) * 60000;
           if (nowTs >= (startTs - msBefore)) { try { console.debug('[Auto] confirm', { id: b.id }); } catch {}; await updateBookingStatus(b.id, 'confirmed', 'automation'); anyChange = true; continue; }
         }
         // Catch-up: se ficou agendado/confirmado e já passou do fim, finalize direto
-        if ((b.status === 'scheduled' || b.status === 'confirmed') && automation.autoFinishEnabled) {
+        if ((b.status === 'scheduled' || b.status === 'confirmed') && savedAutomation.autoFinishEnabled) {
           if (nowTs >= endTs) { try { console.debug('[Auto] catchup-finish', { id: b.id }); } catch {}; await updateBookingStatus(b.id, 'finished', 'automation'); anyChange = true; continue; }
         }
       }
@@ -819,7 +815,7 @@ function AgendaPage() {
     } finally {
       automationRunningRef.current = false;
     }
-  }, [authReady, userProfile?.codigo_empresa, bookings, automation, updateBookingStatus, isOverriddenRecently, scheduleNextAutomation, getNowMs]);
+  }, [authReady, userProfile?.codigo_empresa, bookings, savedAutomation, updateBookingStatus, isOverriddenRecently, scheduleNextAutomation, getNowMs]);
 
   // Keep a callable reference to avoid TDZ issues when scheduling before runAutomation is initialized
   useEffect(() => {
@@ -836,7 +832,7 @@ function AgendaPage() {
   useEffect(() => {
     const watchdog = setInterval(() => {
       try {
-        const enabled = !!(automation?.autoConfirmEnabled || automation?.autoStartEnabled || automation?.autoFinishEnabled);
+        const enabled = !!(savedAutomation?.autoConfirmEnabled || savedAutomation?.autoStartEnabled || savedAutomation?.autoFinishEnabled);
         if (!enabled) return;
         if (runAutomationRef.current) {
           console.debug('[Auto][Watchdog] forcing periodic automation run');
@@ -845,7 +841,7 @@ function AgendaPage() {
       } catch {}
     }, 30 * 60 * 1000);
     return () => clearInterval(watchdog);
-  }, [automation]);
+  }, [savedAutomation]);
 
   
 
@@ -856,8 +852,13 @@ function AgendaPage() {
     try {
       const cached = JSON.parse(localStorage.getItem(bookingsCacheKey) || '[]');
       if (Array.isArray(cached) && cached.length > 0) {
-        const mapped = cached.map((b) => ({ ...b, start: new Date(b.start), end: new Date(b.end) }));
-        dbg('cache:bookings:hydrate', { count: mapped.length });
+        const mapped = cached.map((b) => ({ 
+          ...b, 
+          start: new Date(b.start), 
+          end: new Date(b.end),
+          customer: b.customer || '', // Garantir que customer existe
+        }));
+        dbg('cache:bookings:hydrate', { count: mapped.length, sample: mapped[0] });
         pulseLog('cache:hydrate', { count: mapped.length });
         setBookings((prev) => (prev && prev.length > 0 ? prev : mapped));
         setUiBusy(1200);
@@ -985,8 +986,27 @@ function AgendaPage() {
       const end = new Date(row.fim);
       // Nome da quadra
       const courtName = row.quadra?.[0]?.nome || row.quadra?.nome || Object.values(courtsMap).find(c => c.id === row.quadra_id)?.nome || '';
-      // Nome do cliente: usar apenas o cliente relacionado real; não usar fallback do array "clientes"
-      const customerName = (row.cliente?.[0]?.nome || row.cliente?.nome || '');
+      // Nome do cliente: tentar relacionamento primeiro, depois array clientes, depois participantes
+      let customerName = row.cliente?.[0]?.nome || row.cliente?.nome || '';
+      
+      // Fallback 1: se não tem cliente_id, buscar do array clientes (legado)
+      if (!customerName && row.clientes) {
+        try {
+          const clientesArray = typeof row.clientes === 'string' ? JSON.parse(row.clientes) : row.clientes;
+          if (Array.isArray(clientesArray) && clientesArray.length > 0) {
+            customerName = clientesArray[0]?.nome || clientesArray[0] || '';
+          }
+        } catch {}
+      }
+      
+      // Fallback 2: buscar dos participantes já carregados
+      if (!customerName && participantsByAgendamento[row.id]) {
+        const participants = participantsByAgendamento[row.id];
+        if (Array.isArray(participants) && participants.length > 0) {
+          customerName = participants[0]?.nome || participants[0]?.cliente?.nome || '';
+        }
+      }
+      
       // Proteção: se mudamos localmente há pouco, preferir o status local por alguns segundos para evitar regressão visual
       const recent = recentStatusUpdatesRef.current.get(row.id);
       const preferLocal = recent && (nowTs - recent.ts) < 4000; // 4s de janela
@@ -1003,14 +1023,24 @@ function AgendaPage() {
       };
     });
     setBookings(mapped);
-    // Persistir no cache (serializando datas)
+    // Persistir no cache (serializando datas e garantindo customer)
     try {
       if (bookingsCacheKey) {
-        const serializable = mapped.map(b => ({ ...b, start: b.start.toISOString(), end: b.end.toISOString() }));
+        const serializable = mapped.map(b => ({
+          id: b.id,
+          code: b.code,
+          court: b.court,
+          customer: b.customer, // Garantir que customer está sendo salvo
+          start: b.start.toISOString(),
+          end: b.end.toISOString(),
+          status: b.status,
+          modality: b.modality,
+          auto_disabled: b.auto_disabled,
+        }));
         localStorage.setItem(bookingsCacheKey, JSON.stringify(serializable));
       }
     } catch {}
-  }, [authReady, userProfile?.codigo_empresa, currentDate, courtsMap, bookingsCacheKey, toast, dbg, debugOn]);
+  }, [authReady, userProfile?.codigo_empresa, currentDate, courtsMap, bookingsCacheKey, toast, dbg, debugOn, participantsByAgendamento]);
 
   // Log watcher: whenever bookings changes (after set), log a compact summary
   useEffect(() => {
@@ -3260,10 +3290,6 @@ function AgendaPage() {
     // ... (rest of the code remains the same)
   return (
     <>
-      <Helmet>
-        <title>Agenda - Fluxo7 Arena</title>
-        <meta name="description" content="Gerencie seus agendamentos, horários e quadras." />
-      </Helmet>
       {/* Dialogo de reativação de automação (top-level) */}
       <Dialog
         open={!!reactivateAsk}
@@ -4837,6 +4863,16 @@ function AgendaPage() {
       dayBookings = viewFilter.canceledOnly
         ? dayBookings.filter(b => b.status === 'canceled')
         : dayBookings.filter(b => b.status !== 'canceled');
+      
+      // Filtro de pagamentos pendentes
+      if (viewFilter.pendingPayments) {
+        dayBookings = dayBookings.filter(b => {
+          const participants = participantsByAgendamento[b.id] || [];
+          const hasPending = participants.some(p => String(p.status_pagamento || '').toLowerCase() !== 'pago');
+          return hasPending && participants.length > 0;
+        });
+      }
+      
       if (searchQuery.trim()) {
         const q = searchQuery.trim().toLowerCase();
         dayBookings = dayBookings.filter(b =>
@@ -4845,13 +4881,13 @@ function AgendaPage() {
           || (statusConfig[b.status]?.label || '').toLowerCase().includes(q)
         );
       }
-      return (viewFilter.scheduled || viewFilter.canceledOnly) ? dayBookings : [];
-    }, [bookings, currentDate, viewFilter.scheduled, viewFilter.canceledOnly, searchQuery]);
+      return (viewFilter.scheduled || viewFilter.canceledOnly || viewFilter.pendingPayments) ? dayBookings : [];
+    }, [bookings, currentDate, viewFilter.scheduled, viewFilter.canceledOnly, viewFilter.pendingPayments, searchQuery, participantsByAgendamento]);
 
   // Após computar os resultados, rola até o primeiro match quando houver busca
   useEffect(() => {
     if (!searchQuery.trim()) return;
-    if (!(viewFilter.scheduled || viewFilter.canceledOnly)) return; // só quando agendados ou cancelados visíveis
+    if (!(viewFilter.scheduled || viewFilter.canceledOnly || viewFilter.pendingPayments)) return; // só quando algum filtro visível
     if (!filteredBookings || filteredBookings.length === 0) return;
     const first = [...filteredBookings].sort((a, b) => a.start - b.start)[0];
     if (!first?.id) return;
@@ -4859,23 +4895,24 @@ function AgendaPage() {
     if (el?.scrollIntoView) {
       el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
     }
-  }, [searchQuery, filteredBookings, viewFilter.scheduled, viewFilter.canceledOnly]);
+  }, [searchQuery, filteredBookings, viewFilter.scheduled, viewFilter.canceledOnly, viewFilter.pendingPayments]);
 
-  // Inteligência nos checkboxes: ao ativar Agendados ou Cancelados, rola até o primeiro visível daquele tipo
+  // Inteligência nos checkboxes: ao ativar Agendados, Cancelados ou Pagamentos Pendentes, rola até o primeiro visível daquele tipo
   useEffect(() => {
     const container = scrollRef.current;
     const prev = prevFiltersRef.current || {};
     // Detecta habilitação dos filtros
     const justEnabledCanceled = viewFilter.canceledOnly && !prev.canceledOnly;
     const justEnabledScheduled = viewFilter.scheduled && !prev.scheduled && !viewFilter.canceledOnly; // scheduled ativo e não em modo cancelados
-    if (!container || (!justEnabledCanceled && !justEnabledScheduled)) {
-      prevFiltersRef.current = { scheduled: viewFilter.scheduled, canceledOnly: viewFilter.canceledOnly };
+    const justEnabledPending = viewFilter.pendingPayments && !prev.pendingPayments;
+    if (!container || (!justEnabledCanceled && !justEnabledScheduled && !justEnabledPending)) {
+      prevFiltersRef.current = { scheduled: viewFilter.scheduled, canceledOnly: viewFilter.canceledOnly, pendingPayments: viewFilter.pendingPayments };
       return;
     }
     // Lista já está filtrada para o modo atual (canceledOnly restringe para cancelados)
     const list = filteredBookings || [];
     if (list.length === 0) {
-      prevFiltersRef.current = { scheduled: viewFilter.scheduled, canceledOnly: viewFilter.canceledOnly };
+      prevFiltersRef.current = { scheduled: viewFilter.scheduled, canceledOnly: viewFilter.canceledOnly, pendingPayments: viewFilter.pendingPayments };
       return;
     }
     // Verifica se algum desses itens já está visível no viewport do container
@@ -4893,8 +4930,8 @@ function AgendaPage() {
         el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
       }
     }
-    prevFiltersRef.current = { scheduled: viewFilter.scheduled, canceledOnly: viewFilter.canceledOnly };
-  }, [viewFilter.scheduled, viewFilter.canceledOnly, filteredBookings]);
+    prevFiltersRef.current = { scheduled: viewFilter.scheduled, canceledOnly: viewFilter.canceledOnly, pendingPayments: viewFilter.pendingPayments };
+  }, [viewFilter.scheduled, viewFilter.canceledOnly, viewFilter.pendingPayments, filteredBookings]);
 
   // Cores por quadra agora são geradas de forma determinística via getCourtColor(name)
 
@@ -4934,11 +4971,6 @@ function AgendaPage() {
 
   return (
     <>
-      <Helmet>
-        <title>Agenda - Fluxo7 Arena</title>
-        <meta name="description" content="Gerencie seus agendamentos, horários e quadras." />
-      </Helmet>
-
       {/* Payment Modal movido para AddBookingModal para manter escopo correto */}
 
       {/* ClientFormModal já é renderizado dentro do AddBookingModal */}
@@ -5013,7 +5045,17 @@ function AgendaPage() {
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-64">
-                  <DropdownMenuLabel>Exibição</DropdownMenuLabel>
+                  <div className="flex items-center justify-between px-2 py-1.5">
+                    <DropdownMenuLabel className="p-0">Exibição</DropdownMenuLabel>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 text-xs text-text-muted hover:text-text-primary"
+                      onClick={() => setViewFilter({ scheduled: true, available: true, canceledOnly: false, pendingPayments: false })}
+                    >
+                      Limpar
+                    </Button>
+                  </div>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={(e) => e.preventDefault()}>
                     <div className="flex items-center justify-between gap-3 w-full">
@@ -5060,6 +5102,18 @@ function AgendaPage() {
                       />
                     </div>
                   </DropdownMenuItem>
+                  <DropdownMenuItem onClick={(e) => e.preventDefault()}>
+                    <div className="flex items-center justify-between gap-3 w-full">
+                      <div className="flex items-center gap-2">
+                        <DollarSign className="h-4 w-4 text-warning" />
+                        <span>Pagamentos Pendentes</span>
+                      </div>
+                      <Checkbox
+                        checked={viewFilter.pendingPayments}
+                        onCheckedChange={(checked) => setViewFilter(prev => ({ ...prev, pendingPayments: !!checked }))}
+                      />
+                    </div>
+                  </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
               <Button
@@ -5078,7 +5132,13 @@ function AgendaPage() {
         </motion.div>
 
         {/* Modal de Configurações da Agenda */}
-        <Dialog open={isSettingsOpen} onOpenChange={setIsSettingsOpen}>
+        <Dialog open={isSettingsOpen} onOpenChange={(open) => {
+          if (!open) {
+            // Ao fechar o modal, resetar para o último estado salvo
+            setAutomation(savedAutomation);
+          }
+          setIsSettingsOpen(open);
+        }}>
           <DialogContent className="sm:max-w-[680px]" onOpenAutoFocus={(e) => e.preventDefault()}>
             <DialogHeader className="pb-3 border-b border-border bg-surface-2/40 rounded-t-lg px-2 -mx-2 -mt-2">
               <DialogTitle className="text-base font-semibold tracking-tight">Configurações da Agenda</DialogTitle>
@@ -5162,7 +5222,9 @@ function AgendaPage() {
               </div>
             </div>
             <DialogFooter className="mt-2 gap-2">
-              <Button type="button" variant="ghost" className="border border-white/10" onClick={() => setIsSettingsOpen(false)}>Cancelar</Button>
+              <Button type="button" variant="ghost" className="border border-white/10" onClick={() => setIsSettingsOpen(false)}>
+                Cancelar
+              </Button>
               <Button type="button" variant="default" onClick={handleSaveSettings} disabled={savingSettings}>
                 {savingSettings ? 'Salvando…' : 'Salvar'}
               </Button>
@@ -5389,7 +5451,7 @@ function AgendaPage() {
               {/* Container relativo para posicionar reservas */}
               <div className="relative" style={{ height: displayTotalGridHeight }}>
                 {/* Linhas base por quadra: exibe apenas durante o horário de funcionamento dessa quadra */}
-                {(viewFilter.scheduled || viewFilter.canceledOnly) && (() => {
+                {(viewFilter.scheduled || viewFilter.canceledOnly || viewFilter.pendingPayments) && (() => {
                   // Usar horários do grid atual (já calculados no escopo externo)
                   const dayStartM = gridHours.start * 60;
                   const dayEndM = gridHours.end * 60;
@@ -5430,7 +5492,7 @@ function AgendaPage() {
                   );
                 })()}
                 {/* Agendados ou Cancelados (filtrados) */}
-                {(viewFilter.scheduled || viewFilter.canceledOnly) && filteredBookings
+                {(viewFilter.scheduled || viewFilter.canceledOnly || viewFilter.pendingPayments) && filteredBookings
                   .filter(b => b.court === court)
                   .map(b => <BookingCard key={b.id} booking={b} courtGridStart={gridHours.start * 60} courtGridEnd={gridHours.end * 60} />)
                 }

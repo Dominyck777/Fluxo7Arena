@@ -1,5 +1,4 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Helmet } from 'react-helmet';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
@@ -974,18 +973,6 @@ export default function FinanceiroPage() {
 
   return (
     <>
-      <Helmet>
-        <title>Financeiro - Fluxo7 Arena</title>
-        <meta name="description" content="Gestão financeira completa: visão geral, caixa, recebimentos e relatórios." />
-        <style>{`
-          /* Remove outline feio ao focar no SVG do Recharts */
-          .recharts-wrapper:focus, .recharts-surface:focus { outline: none; }
-          .recharts-wrapper svg:focus, .recharts-wrapper svg *:focus { outline: none !important; }
-          .recharts-wrapper svg { -webkit-tap-highlight-color: transparent; }
-          .recharts-sector { outline: none !important; }
-        `}</style>
-      </Helmet>
-      
       <motion.div variants={pageVariants} initial="hidden" animate="visible" className="space-y-6">
         {/* Header com filtros de período */}
         <motion.div variants={itemVariants} className="fx-card p-4">
@@ -2597,31 +2584,27 @@ export default function FinanceiroPage() {
           </DialogContent>
         </Dialog>
 
-        {/* Modal: Clientes (lista + detalhes) */}
+        {/* Modal: Clientes (lista) */}
         <Dialog open={openClientesModal} onOpenChange={(v) => { setOpenClientesModal(v); if (!v) { setSelectedCliente(null); setSelectedClientePagamentos([]); } }}>
-          <DialogContent className="max-w-3xl bg-surface text-text-primary border-0">
+          <DialogContent className="max-w-2xl bg-surface text-text-primary border-0">
             <DialogHeader>
               <DialogTitle>Clientes</DialogTitle>
               <DialogDescription>Ordenados por valor pago no período selecionado</DialogDescription>
             </DialogHeader>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="max-h-[60vh] overflow-y-auto border border-border rounded-md">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Cliente</TableHead>
-                      <TableHead className="text-right">Pago</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {allClientes.map((c, idx) => (
-                      <TableRow key={`${c.nome}-${idx}`} className={`cursor-pointer ${selectedCliente?.nome === c.nome ? 'bg-brand/10' : ''}`} onClick={async () => {
-                        // Mobile: abrir modal de detalhes
-                        const isMobile = window.innerWidth < 768;
-                        if (isMobile) {
-                          setClienteDetalhesModalOpen(true);
-                        }
-                        setSelectedCliente(c);
+            <div className="max-h-[60vh] overflow-y-auto border border-border rounded-md">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Cliente</TableHead>
+                    <TableHead className="text-right">Pago</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {allClientes.map((c, idx) => (
+                    <TableRow key={`${c.nome}-${idx}`} className="cursor-pointer hover:bg-brand/10" onClick={async () => {
+                      // Sempre abrir modal de detalhes
+                      setClienteDetalhesModalOpen(true);
+                      setSelectedCliente(c);
                         setLoadingClienteDetalhes(true);
                         try {
                           const fromISO = mkStart(startDate);
@@ -2771,113 +2754,73 @@ export default function FinanceiroPage() {
                   </TableBody>
                 </Table>
               </div>
-              {/* Detalhes - apenas desktop */}
-              <div className="hidden md:block max-h-[60vh] overflow-y-auto overflow-x-auto pr-1">
-                {!selectedCliente ? (
-                  <div className="text-sm text-text-muted p-4">Selecione um cliente para ver detalhes</div>
-                ) : (
-                  <div className="space-y-3">
-                    <h4 className="text-sm font-semibold">Detalhes de {selectedCliente.nome}</h4>
-                    {loadingClienteDetalhes ? (
-                      <div className="text-sm text-text-muted">Carregando...</div>
-                    ) : selectedClientePagamentos.length === 0 ? (
-                      <div className="text-sm text-text-muted">Sem pagamentos no período.</div>
-                    ) : (
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead>Data</TableHead>
-                            <TableHead>Finalizadora</TableHead>
-                            <TableHead>Origem</TableHead>
-                            <TableHead className="text-right">Valor</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {selectedClientePagamentos.map((pg) => (
-                            <TableRow key={pg.id}>
-                              <TableCell>{pg.recebido_em ? new Date(pg.recebido_em).toLocaleString('pt-BR') : '—'}</TableCell>
-                              <TableCell>{pg.finalizadoras?.nome || pg.metodo || '—'}</TableCell>
-                              <TableCell>{pg.origem || '—'}</TableCell>
-                              <TableCell className="text-right font-semibold">{fmtBRL(pg.valor)}</TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
           </DialogContent>
         </Dialog>
 
-        {/* Modal: Detalhes do Cliente (apenas mobile) */}
+        {/* Modal: Detalhes do Cliente */}
         <Dialog open={clienteDetalhesModalOpen} onOpenChange={setClienteDetalhesModalOpen}>
-          <DialogContent className="max-w-full w-[95vw] h-[90vh] bg-surface text-text-primary border-0 p-4">
-            <DialogHeader className="pb-4">
-              <DialogTitle className="text-lg">Detalhes do Cliente</DialogTitle>
-              <DialogDescription className="text-sm">
+          <DialogContent className="max-w-5xl w-[95vw] md:w-[90vw] max-h-[85vh] bg-surface text-text-primary border-0 overflow-hidden flex flex-col">
+            <DialogHeader className="flex-shrink-0">
+              <DialogTitle className="text-lg md:text-xl">Detalhes do Cliente</DialogTitle>
+              <DialogDescription className="text-sm md:text-base">
                 {selectedCliente?.nome}
               </DialogDescription>
             </DialogHeader>
             {!selectedCliente ? (
-              <div className="text-sm text-text-muted">Nenhum cliente selecionado</div>
+              <div className="text-sm text-text-muted py-8 text-center">Nenhum cliente selecionado</div>
             ) : (
-              <div className="space-y-4 h-full flex flex-col">
-                <div className="flex items-center justify-between p-3 bg-surface-2 rounded-lg flex-shrink-0">
-                  <span className="text-sm text-text-secondary">Total Pago</span>
-                  <span className="text-lg font-bold text-success">{fmtBRL(selectedCliente.valor)}</span>
+              <div className="space-y-4 flex-1 overflow-hidden flex flex-col">
+                <div className="flex items-center justify-between p-3 md:p-4 bg-surface-2 rounded-lg flex-shrink-0">
+                  <span className="text-sm md:text-base text-text-secondary">Total Pago no Período</span>
+                  <span className="text-lg md:text-2xl font-bold text-success">{fmtBRL(selectedCliente.valor)}</span>
                 </div>
                 {loadingClienteDetalhes ? (
-                  <div className="text-sm text-text-muted text-center py-8">Carregando...</div>
+                  <div className="text-sm text-text-muted text-center py-8">Carregando detalhes...</div>
                 ) : selectedClientePagamentos.length === 0 ? (
-                  <div className="text-sm text-text-muted text-center py-8">Sem pagamentos no período.</div>
+                  <div className="text-sm text-text-muted text-center py-8">Sem pagamentos no período selecionado.</div>
                 ) : (
-                  <div className="flex-1 overflow-y-auto -mx-4 px-4">
-                    <div className="min-w-full overflow-x-auto">
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead className="text-sm min-w-[100px]">Data</TableHead>
-                            <TableHead className="text-sm min-w-[120px]">Finalizadora</TableHead>
-                            <TableHead className="text-sm min-w-[100px]">Origem</TableHead>
-                            <TableHead className="text-right text-sm min-w-[80px]">Valor</TableHead>
+                  <div className="flex-1 overflow-auto border border-border rounded-md">
+                    <Table>
+                      <TableHeader className="sticky top-0 bg-surface z-10">
+                        <TableRow>
+                          <TableHead className="text-xs md:text-sm w-[70px] md:w-auto">Data</TableHead>
+                          <TableHead className="text-xs md:text-sm w-[80px] md:w-auto">Finaliz.</TableHead>
+                          <TableHead className="text-xs md:text-sm w-[60px] md:w-auto">Origem</TableHead>
+                          <TableHead className="text-right text-xs md:text-sm w-[70px] md:w-auto">Valor</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {selectedClientePagamentos.map((pg) => (
+                          <TableRow key={pg.id}>
+                            <TableCell className="text-xs md:text-sm w-[70px] md:w-auto">
+                              <div className="text-[10px] md:text-xs leading-tight">
+                                {pg.recebido_em ? new Date(pg.recebido_em).toLocaleString('pt-BR', { 
+                                  day: '2-digit', 
+                                  month: '2-digit', 
+                                  hour: '2-digit', 
+                                  minute: '2-digit' 
+                                }) : '—'}
+                              </div>
+                            </TableCell>
+                            <TableCell className="text-xs md:text-sm w-[80px] md:w-auto">
+                              <div className="truncate max-w-[80px] md:max-w-[200px] text-[10px] md:text-xs" title={pg.finalizadoras?.nome || pg.metodo || '—'}>
+                                {pg.finalizadoras?.nome || pg.metodo || '—'}
+                              </div>
+                            </TableCell>
+                            <TableCell className="text-xs md:text-sm w-[60px] md:w-auto">
+                              <div className="truncate max-w-[60px] md:max-w-[150px] text-[10px] md:text-xs" title={pg.origem || '—'}>
+                                {pg.origem || '—'}
+                              </div>
+                            </TableCell>
+                            <TableCell className="text-right font-semibold text-xs md:text-sm w-[70px] md:w-auto">
+                              <div className="text-[10px] md:text-xs whitespace-nowrap">
+                                {fmtBRL(pg.valor)}
+                              </div>
+                            </TableCell>
                           </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {selectedClientePagamentos.map((pg) => (
-                            <TableRow key={pg.id}>
-                              <TableCell className="text-sm py-3 min-w-[100px]">
-                                <div className="whitespace-nowrap">
-                                  {pg.recebido_em ? new Date(pg.recebido_em).toLocaleString('pt-BR', { 
-                                    day: '2-digit', 
-                                    month: '2-digit', 
-                                    year: '2-digit',
-                                    hour: '2-digit', 
-                                    minute: '2-digit' 
-                                  }) : '—'}
-                                </div>
-                              </TableCell>
-                              <TableCell className="text-sm py-3 min-w-[120px]">
-                                <div className="truncate max-w-[120px]" title={pg.finalizadoras?.nome || pg.metodo || '—'}>
-                                  {pg.finalizadoras?.nome || pg.metodo || '—'}
-                                </div>
-                              </TableCell>
-                              <TableCell className="text-sm py-3 min-w-[100px]">
-                                <div className="truncate max-w-[100px]" title={pg.origem || '—'}>
-                                  {pg.origem || '—'}
-                                </div>
-                              </TableCell>
-                              <TableCell className="text-right font-semibold text-sm py-3 min-w-[80px]">
-                                <div className="whitespace-nowrap">
-                                  {fmtBRL(pg.valor)}
-                                </div>
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </div>
+                        ))}
+                      </TableBody>
+                    </Table>
                   </div>
                 )}
               </div>

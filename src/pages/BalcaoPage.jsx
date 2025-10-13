@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 
-import { Helmet } from 'react-helmet';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -1097,11 +1096,6 @@ export default function BalcaoPage() {
 
   return (
     <div className="h-full flex flex-col">
-      <Helmet>
-        <title>Modo Balcão - Fluxo7 Arena</title>
-        <meta name="description" content="Venda rápida no balcão." />
-      </Helmet>
-
       <div className="mb-3 space-y-2">
         <div className="w-full">
           <Tabs value="balcao" onValueChange={(v) => {

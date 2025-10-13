@@ -55,54 +55,35 @@ function Sidebar({ onNavigate, isVisible, setIsVisible, sidebarPinned }) {
   const groupActive = useMemo(() => groupPaths.includes(location.pathname), [location.pathname]);
   const [openCadastros, setOpenCadastros] = useState(groupActive);
   
-  // Refs para controle
   const sidebarRef = useRef(null);
   const triggerZoneRef = useRef(null);
   const touchStartX = useRef(0);
   const touchStartY = useRef(0);
 
-  // Função para fechar sidebar em mobile ao clicar em um link
+  // Função para fechar sidebar ao clicar em um link
   const handleNavClick = () => {
-    if (window.innerWidth < 768 && onNavigate) {
-      onNavigate();
+    // Mobile: sempre fecha ao clicar
+    if (window.innerWidth < 768) {
+      setIsVisible(false);
     }
+    // Desktop: não faz nada (mantém estado atual)
   };
 
-  // Detecta hover no canto esquerdo (desktop)
-  useEffect(() => {
-    const handleMouseMove = (e) => {
-      // Apenas em desktop (> 768px)
-      if (window.innerWidth < 768) return;
-      // Se estiver fixada (pinned), não auto-abre/fecha por hover
-      if (sidebarPinned) return;
-      
-      // Zona de trigger: 30px da borda esquerda
-      if (e.clientX <= 30 && !isVisible) {
-        setIsVisible(true);
-      }
-      // Fecha se mouse está longe da sidebar (> 300px)
-      if (e.clientX > 300 && isVisible) {
-        setIsVisible(false);
-      }
-    };
-
-    window.addEventListener('mousemove', handleMouseMove);
-    return () => window.removeEventListener('mousemove', handleMouseMove);
-  }, [isVisible, sidebarPinned]);
+  // Removido: hover no canto esquerdo (desktop)
+  // Agora apenas o botão do Header controla a sidebar
 
   // Touch events para mobile (swipe da esquerda)
   useEffect(() => {
     const handleTouchStart = (e) => {
       // Apenas em mobile (< 768px)
       if (window.innerWidth >= 768) return;
-      
+
       touchStartX.current = e.touches[0].clientX;
       touchStartY.current = e.touches[0].clientY;
     };
 
     const handleTouchMove = (e) => {
       if (window.innerWidth >= 768) return;
-      if (!touchStartX.current) return;
 
       const touchCurrentX = e.touches[0].clientX;
       const touchCurrentY = e.touches[0].clientY;
@@ -129,43 +110,15 @@ function Sidebar({ onNavigate, isVisible, setIsVisible, sidebarPinned }) {
       window.removeEventListener('touchmove', handleTouchMove);
       window.removeEventListener('touchend', handleTouchEnd);
     };
-  }, []);
-
-  // Fecha sidebar ao clicar fora (mobile)
-  useEffect(() => {
-    if (window.innerWidth >= 768) return;
-
-    const handleClickOutside = (e) => {
-      if (sidebarRef.current && !sidebarRef.current.contains(e.target) && isVisible) {
-        setIsVisible(false);
-      }
-    };
-
-    document.addEventListener('mousedown', handleClickOutside);
-    document.addEventListener('touchstart', handleClickOutside, { passive: true });
-
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-      document.removeEventListener('touchstart', handleClickOutside);
-    };
   }, [isVisible]);
 
   return (
     <>
-      {/* Zona de trigger invisível (desktop) */}
-      <div 
-        ref={triggerZoneRef}
-        className="hidden md:block fixed left-0 top-0 w-8 h-full z-30 pointer-events-auto"
-        onMouseEnter={() => { if (!sidebarPinned) setIsVisible(true); }}
-      />
-
-
       {/* Sidebar - empurra conteúdo */}
       <motion.aside
         ref={sidebarRef}
         initial={false}
         animate={{ width: (sidebarPinned || isVisible) ? 280 : 0 }}
-        transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
         className="h-screen flex-shrink-0 bg-surface flex flex-col border-r border-border shadow-xl shadow-black/20 overflow-hidden"
       >
       <motion.div 

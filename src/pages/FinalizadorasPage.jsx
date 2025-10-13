@@ -1,6 +1,5 @@
 // Página de Finalizadoras - Versão Nova e Limpa - Updated 2025-10-01 12:06
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { Helmet } from 'react-helmet';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -469,10 +468,6 @@ export default function FinalizadorasPage() {
 
   return (
     <>
-      <Helmet>
-        <title>Finalizadoras - Fluxo7 Arena</title>
-      </Helmet>
-
       <motion.div variants={pageVariants} initial="hidden" animate="visible" className="flex-1 space-y-6 p-4 md:p-6">
         {/* Header */}
         <motion.div variants={itemVariants} className="flex items-center justify-between gap-2">
