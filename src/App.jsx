@@ -28,22 +28,8 @@ function PrivateApp() {
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const [sidebarPinned, setSidebarPinned] = useState(false);
   const handleSidebarButton = () => {
-    try {
-      if (typeof window !== 'undefined' && window.innerWidth >= 768) {
-        // Desktop: toggle pin. When pinning, ensure visible
-        setSidebarPinned((p) => {
-          const next = !p;
-          if (next) setSidebarVisible(true);
-          return next;
-        });
-      } else {
-        // Mobile: just toggle visibility
-        setSidebarVisible((v) => !v);
-      }
-    } catch {
-      // Fallback safe toggle
-      setSidebarVisible((v) => !v);
-    }
+    // Simplesmente alterna visibilidade em qualquer dispositivo
+    setSidebarVisible((v) => !v);
   };
   const location = useLocation();
   const isAgendaPage = location.pathname === '/agenda';
