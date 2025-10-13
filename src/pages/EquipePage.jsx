@@ -268,9 +268,9 @@ export default function EquipePage() {
     }, [authReady, company?.codigo_empresa, company?.id]);
 
     const stats = useMemo(() => ({
-        total: team.filter(m => m.status === 'active').length,
-        online: team.filter(m => m.online && m.status === 'active').length,
-        admins: team.filter(m => m.permissions?.admin && m.status === 'active').length,
+        total: team.length,
+        active: team.filter(m => m.status === 'active').length,
+        inactive: team.filter(m => m.status === 'inactive').length,
     }), [team]);
 
     const filteredTeam = useMemo(() => {
@@ -406,9 +406,9 @@ export default function EquipePage() {
                     </motion.div>
 
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
-                        <StatCard icon={Users} title="Funcionários Ativos" value={stats.total} color="text-brand" />
-                        <StatCard icon={UserCheck} title="Online Agora" value={stats.online} color="text-success" />
-                        <StatCard icon={ShieldCheck} title="Administradores" value={stats.admins} color="text-info" />
+                        <StatCard icon={Users} title="Total" value={stats.total} color="text-brand" />
+                        <StatCard icon={UserCheck} title="Ativos" value={stats.active} color="text-success" />
+                        <StatCard icon={ShieldCheck} title="Desativados" value={stats.inactive} color="text-danger" />
                     </div>
 
                     <motion.div initial={{opacity: 0, y: 20}} animate={{opacity: 1, y: 0}} transition={{delay: 0.2}}>
