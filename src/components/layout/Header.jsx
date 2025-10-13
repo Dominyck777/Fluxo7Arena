@@ -170,14 +170,8 @@ function Header({ onToggleSidebar, sidebarVisible, sidebarPinned }) {
           aria-label={sidebarVisible ? 'Ocultar barra lateral' : 'Mostrar barra lateral'}
           className="h-12 w-12 hover:bg-surface-2/60 transition-colors"
         >
-          {/* Mobile: Menu (3 traços) */}
-          <Menu className={`w-7 h-7 md:hidden transition-colors ${sidebarVisible ? 'text-brand' : 'text-text-primary'}`} />
-          {/* Desktop: PanelLeft (ícone de painel) */}
-          {sidebarVisible ? (
-            <PanelLeftClose className="w-7 h-7 hidden md:block text-brand transition-colors" />
-          ) : (
-            <PanelLeft className="w-7 h-7 hidden md:block text-text-primary transition-colors" />
-          )}
+          {/* Menu (3 traços) em todas as versões - amarelo quando aberto */}
+          <Menu className={`w-7 h-7 transition-colors ${sidebarVisible ? 'text-brand' : 'text-text-primary'}`} />
         </Button>
         <div
           className="group pl-3 pr-5 py-1.5 rounded-full border border-white/10 bg-gradient-to-b from-surface-2/60 to-surface/60 text-text-primary flex items-center gap-4 shadow-sm hover:border-white/20 transition-colors"
