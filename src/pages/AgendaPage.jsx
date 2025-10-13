@@ -999,10 +999,20 @@ function AgendaPage() {
       };
     });
     setBookings(mapped);
-    // Persistir no cache (serializando datas)
+    // Persistir no cache (serializando datas e garantindo customer)
     try {
       if (bookingsCacheKey) {
-        const serializable = mapped.map(b => ({ ...b, start: b.start.toISOString(), end: b.end.toISOString() }));
+        const serializable = mapped.map(b => ({
+          id: b.id,
+          code: b.code,
+          court: b.court,
+          customer: b.customer, // Garantir que customer está sendo salvo
+          start: b.start.toISOString(),
+          end: b.end.toISOString(),
+          status: b.status,
+          modality: b.modality,
+          auto_disabled: b.auto_disabled,
+        }));
         localStorage.setItem(bookingsCacheKey, JSON.stringify(serializable));
       }
     } catch {}
