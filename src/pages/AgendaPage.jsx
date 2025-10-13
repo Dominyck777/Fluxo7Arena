@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { Helmet } from 'react-helmet';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Plus, Lock, Search, SlidersHorizontal, Clock, CheckCircle, XCircle, CalendarPlus, Users, DollarSign, Repeat, Trash2, GripVertical, Sparkles, Ban, AlertTriangle, ChevronDown, Play, PlayCircle, Flag, UserX, X, Settings } from 'lucide-react';
@@ -3291,10 +3290,6 @@ function AgendaPage() {
     // ... (rest of the code remains the same)
   return (
     <>
-      <Helmet>
-        <title>Agenda - Fluxo7 Arena</title>
-        <meta name="description" content="Gerencie seus agendamentos, horários e quadras." />
-      </Helmet>
       {/* Dialogo de reativação de automação (top-level) */}
       <Dialog
         open={!!reactivateAsk}
@@ -4976,11 +4971,6 @@ function AgendaPage() {
 
   return (
     <>
-      <Helmet>
-        <title>Agenda - Fluxo7 Arena</title>
-        <meta name="description" content="Gerencie seus agendamentos, horários e quadras." />
-      </Helmet>
-
       {/* Payment Modal movido para AddBookingModal para manter escopo correto */}
 
       {/* ClientFormModal já é renderizado dentro do AddBookingModal */}

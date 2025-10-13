@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from 'react';
-import { Helmet } from 'react-helmet';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -476,10 +475,6 @@ function DashboardPage() {
 
   return (
     <>
-      <Helmet>
-        <title>Dashboard - Fluxo7 Arena</title>
-        <meta name="description" content="Visão geral e resumo do seu negócio." />
-      </Helmet>
       <motion.div
         variants={pageVariants}
         initial="hidden"
