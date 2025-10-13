@@ -158,7 +158,6 @@ function Header({ onToggleSidebar, sidebarVisible, sidebarPinned }) {
 
   return (
     <motion.header
-      initial={{ opacity: 0, y: -80 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
       className="relative bg-surface/80 backdrop-blur-sm text-text-primary h-[72px] flex-shrink-0 flex items-center justify-between px-8 border-b border-border shadow-[0_1px_0_RGBA(255,255,255,0.04)]"
@@ -179,14 +178,6 @@ function Header({ onToggleSidebar, sidebarVisible, sidebarPinned }) {
           ) : (
             <PanelLeft className="w-7 h-7 hidden md:block text-text-primary transition-colors" />
           )}
-          {/* Indicador de fixação (desktop) */}
-          <span className="hidden md:inline-flex items-center justify-center ml-1">
-            {sidebarPinned ? (
-              <Lock className="w-3.5 h-3.5 text-brand/80" />
-            ) : (
-              <Unlock className="w-3.5 h-3.5 text-text-secondary" />
-            )}
-          </span>
         </Button>
         <div
           className="group pl-3 pr-5 py-1.5 rounded-full border border-white/10 bg-gradient-to-b from-surface-2/60 to-surface/60 text-text-primary flex items-center gap-4 shadow-sm hover:border-white/20 transition-colors"
