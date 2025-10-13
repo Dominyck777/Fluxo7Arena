@@ -108,7 +108,7 @@ export default function SuportePage() {
       '— Dados —',
       `Empresa: ${diagnostico.empresa}`,
       `Usuário: ${diagnostico.usuario}`,
-      `Data/Hora: ${diagnostico.dataHora}`,
+      `Data e Hora: ${diagnostico.dataHora}`,
     ].join('\n');
   }, [assunto, categoria, severidade, descricao, diagnostico]);
 
