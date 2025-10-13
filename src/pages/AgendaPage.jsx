@@ -615,16 +615,16 @@ function AgendaPage() {
         if (isOverriddenRecently(b.id)) continue;
         const startTs = b.start instanceof Date ? b.start.getTime() : new Date(b.start).getTime();
         const endTs = b.end instanceof Date ? b.end.getTime() : new Date(b.end).getTime();
-        if (b.status === 'scheduled' && automation.autoConfirmEnabled) {
-          const msBefore = Number(automation.autoConfirmMinutesBefore || 0) * 60000;
+        if (b.status === 'scheduled' && savedAutomation.autoConfirmEnabled) {
+          const msBefore = Number(savedAutomation.autoConfirmMinutesBefore || 0) * 60000;
           consider(startTs - msBefore);
-          if (automation.autoFinishEnabled) consider(endTs); // catch-up finish
+          if (savedAutomation.autoFinishEnabled) consider(endTs); // catch-up finish
         }
         if (b.status === 'confirmed') {
-          if (automation.autoStartEnabled) consider(startTs);
-          if (automation.autoFinishEnabled) consider(endTs);
+          if (savedAutomation.autoStartEnabled) consider(startTs);
+          if (savedAutomation.autoFinishEnabled) consider(endTs);
         }
-        if (b.status === 'in_progress' && automation.autoFinishEnabled) {
+        if (b.status === 'in_progress' && savedAutomation.autoFinishEnabled) {
           consider(endTs);
         }
       }
@@ -635,7 +635,7 @@ function AgendaPage() {
       try { setNextAutoAtMs(nextTs); } catch {}
       nextAutoTimerRef.current = setTimeout(() => { try { runAutomationRef.current && runAutomationRef.current(); } catch {} }, delay);
     }
-  }, [authReady, userProfile?.codigo_empresa, bookings, automation, isOverriddenRecently, clearNextAutoTimer, getNowMs]);
+  }, [authReady, userProfile?.codigo_empresa, bookings, savedAutomation, isOverriddenRecently, clearNextAutoTimer, getNowMs]);
   
   // Vigia ao clicar em editar: garante dados frescos antes de abrir o modal
   const ensureFreshOnEdit = useCallback(async (booking) => {
@@ -685,17 +685,17 @@ function AgendaPage() {
           const endTs = cand.end instanceof Date ? cand.end.getTime() : new Date(cand.end).getTime();
           const canAuto = !cand.auto_disabled && !isOverriddenRecently(cand.id);
           if (canAuto) {
-            // Ordem: finalizar > iniciar > confirmar > catch-up finish
-            if (cand.status === 'in_progress' && automation.autoFinishEnabled && Number.isFinite(endTs) && nowTs >= endTs) {
+            // Ordem: finalizar > iniciar > confirmar > catch-up finish (usar savedAutomation)
+            if (cand.status === 'in_progress' && savedAutomation.autoFinishEnabled && Number.isFinite(endTs) && nowTs >= endTs) {
               await updateBookingStatus(cand.id, 'finished', 'automation');
-            } else if (cand.status === 'confirmed' && automation.autoStartEnabled && Number.isFinite(startTs) && nowTs >= startTs) {
+            } else if (cand.status === 'confirmed' && savedAutomation.autoStartEnabled && Number.isFinite(startTs) && nowTs >= startTs) {
               await updateBookingStatus(cand.id, 'in_progress', 'automation');
-            } else if (cand.status === 'scheduled' && automation.autoConfirmEnabled && Number.isFinite(startTs)) {
-              const msBefore = Number(automation.autoConfirmMinutesBefore || 0) * 60000;
+            } else if (cand.status === 'scheduled' && savedAutomation.autoConfirmEnabled && Number.isFinite(startTs)) {
+              const msBefore = Number(savedAutomation.autoConfirmMinutesBefore || 0) * 60000;
               if (nowTs >= (startTs - msBefore)) {
                 await updateBookingStatus(cand.id, 'confirmed', 'automation');
               }
-            } else if ((cand.status === 'scheduled' || cand.status === 'confirmed') && automation.autoFinishEnabled && Number.isFinite(endTs) && nowTs >= endTs) {
+            } else if ((cand.status === 'scheduled' || cand.status === 'confirmed') && savedAutomation.autoFinishEnabled && Number.isFinite(endTs) && nowTs >= endTs) {
               await updateBookingStatus(cand.id, 'finished', 'automation');
             }
           }
@@ -775,19 +775,19 @@ function AgendaPage() {
         const startTs = b.start instanceof Date ? b.start.getTime() : new Date(b.start).getTime();
         const endTs = b.end instanceof Date ? b.end.getTime() : new Date(b.end).getTime();
 
-        // Ordem: finalizar > iniciar > confirmar
-        if (b.status === 'in_progress' && automation.autoFinishEnabled) {
+        // Ordem: finalizar > iniciar > confirmar (usar savedAutomation ao invés de automation)
+        if (b.status === 'in_progress' && savedAutomation.autoFinishEnabled) {
           if (nowTs >= endTs) { try { console.debug('[Auto] finish', { id: b.id }); } catch {}; await updateBookingStatus(b.id, 'finished', 'automation'); anyChange = true; continue; }
         }
-        if (b.status === 'confirmed' && automation.autoStartEnabled) {
+        if (b.status === 'confirmed' && savedAutomation.autoStartEnabled) {
           if (nowTs >= startTs) { try { console.debug('[Auto] start', { id: b.id }); } catch {}; await updateBookingStatus(b.id, 'in_progress', 'automation'); anyChange = true; continue; }
         }
-        if (b.status === 'scheduled' && automation.autoConfirmEnabled) {
-          const msBefore = Number(automation.autoConfirmMinutesBefore || 0) * 60000;
+        if (b.status === 'scheduled' && savedAutomation.autoConfirmEnabled) {
+          const msBefore = Number(savedAutomation.autoConfirmMinutesBefore || 0) * 60000;
           if (nowTs >= (startTs - msBefore)) { try { console.debug('[Auto] confirm', { id: b.id }); } catch {}; await updateBookingStatus(b.id, 'confirmed', 'automation'); anyChange = true; continue; }
         }
         // Catch-up: se ficou agendado/confirmado e já passou do fim, finalize direto
-        if ((b.status === 'scheduled' || b.status === 'confirmed') && automation.autoFinishEnabled) {
+        if ((b.status === 'scheduled' || b.status === 'confirmed') && savedAutomation.autoFinishEnabled) {
           if (nowTs >= endTs) { try { console.debug('[Auto] catchup-finish', { id: b.id }); } catch {}; await updateBookingStatus(b.id, 'finished', 'automation'); anyChange = true; continue; }
         }
       }
@@ -803,7 +803,7 @@ function AgendaPage() {
     } finally {
       automationRunningRef.current = false;
     }
-  }, [authReady, userProfile?.codigo_empresa, bookings, automation, updateBookingStatus, isOverriddenRecently, scheduleNextAutomation, getNowMs]);
+  }, [authReady, userProfile?.codigo_empresa, bookings, savedAutomation, updateBookingStatus, isOverriddenRecently, scheduleNextAutomation, getNowMs]);
 
   // Keep a callable reference to avoid TDZ issues when scheduling before runAutomation is initialized
   useEffect(() => {
@@ -820,7 +820,7 @@ function AgendaPage() {
   useEffect(() => {
     const watchdog = setInterval(() => {
       try {
-        const enabled = !!(automation?.autoConfirmEnabled || automation?.autoStartEnabled || automation?.autoFinishEnabled);
+        const enabled = !!(savedAutomation?.autoConfirmEnabled || savedAutomation?.autoStartEnabled || savedAutomation?.autoFinishEnabled);
         if (!enabled) return;
         if (runAutomationRef.current) {
           console.debug('[Auto][Watchdog] forcing periodic automation run');
@@ -829,7 +829,7 @@ function AgendaPage() {
       } catch {}
     }, 30 * 60 * 1000);
     return () => clearInterval(watchdog);
-  }, [automation]);
+  }, [savedAutomation]);
 
   
 
@@ -5008,7 +5008,17 @@ function AgendaPage() {
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-64">
-                  <DropdownMenuLabel>Exibição</DropdownMenuLabel>
+                  <div className="flex items-center justify-between px-2 py-1.5">
+                    <DropdownMenuLabel className="p-0">Exibição</DropdownMenuLabel>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 text-xs text-text-muted hover:text-text-primary"
+                      onClick={() => setViewFilter({ scheduled: true, available: true, canceledOnly: false, pendingPayments: false })}
+                    >
+                      Limpar
+                    </Button>
+                  </div>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={(e) => e.preventDefault()}>
                     <div className="flex items-center justify-between gap-3 w-full">
