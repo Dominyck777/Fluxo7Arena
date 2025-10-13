@@ -47,28 +47,7 @@ export const AlertsProvider = ({ children }) => {
         });
       }
       
-      // 2. Agendamentos próximos sem confirmação (próximas 2 horas)
-      const daquiA2h = new Date();
-      daquiA2h.setHours(daquiA2h.getHours() + 2);
-      const { data: agendamentosNaoConfirmados } = await supabase
-        .from('agendamentos')
-        .select('id, inicio')
-        .eq('codigo_empresa', codigo)
-        .eq('status', 'scheduled')
-        .gte('inicio', new Date().toISOString())
-        .lte('inicio', daquiA2h.toISOString());
-      
-      if (agendamentosNaoConfirmados && agendamentosNaoConfirmados.length > 0) {
-        alertasList.push({
-          tipo: 'agendamento',
-          icone: 'CalendarCheck',
-          cor: 'warning',
-          mensagem: `${agendamentosNaoConfirmados.length} agendamento${agendamentosNaoConfirmados.length > 1 ? 's' : ''} próximo${agendamentosNaoConfirmados.length > 1 ? 's' : ''} sem confirmação`,
-          link: '/agenda'
-        });
-      }
-      
-      // 3. Pagamentos pendentes em agendamentos de hoje
+      // 2. Pagamentos pendentes em agendamentos de hoje
       const { data: agendamentosHoje } = await supabase
         .from('agendamentos')
         .select('id')
@@ -96,7 +75,7 @@ export const AlertsProvider = ({ children }) => {
         }
       }
       
-      // 4. Comandas abertas há muito tempo (> 3 horas)
+      // 3. Comandas abertas há muito tempo (> 3 horas)
       const tres_horas_atras = new Date();
       tres_horas_atras.setHours(tres_horas_atras.getHours() - 3);
       const { data: comandasAntigas } = await supabase
@@ -116,7 +95,7 @@ export const AlertsProvider = ({ children }) => {
         });
       }
       
-      // 5. Caixa aberto há muito tempo (> 12 horas)
+      // 4. Caixa aberto há muito tempo (> 12 horas)
       const doze_horas_atras = new Date();
       doze_horas_atras.setHours(doze_horas_atras.getHours() - 12);
       const { data: caixaAberto } = await supabase
@@ -137,7 +116,7 @@ export const AlertsProvider = ({ children }) => {
         });
       }
       
-      // 6. Mesas com saldo alto aguardando pagamento (> R$ 100)
+      // 5. Mesas com saldo alto aguardando pagamento (> R$ 100)
       const { data: mesasAguardando } = await supabase
         .from('mesas')
         .select('id, nome, numero')
@@ -182,7 +161,7 @@ export const AlertsProvider = ({ children }) => {
         }
       }
       
-      // 7. Aniversariantes do dia
+      // 6. Aniversariantes do dia
       const { data: clientes } = await supabase
         .from('clientes')
         .select('id, nome, aniversario')
@@ -207,7 +186,7 @@ export const AlertsProvider = ({ children }) => {
         });
       }
       
-      // 8. Aniversariantes da semana
+      // 7. Aniversariantes da semana
       const proximos7Dias = [];
       for (let i = 1; i <= 7; i++) {
         const dia = new Date(hoje);
