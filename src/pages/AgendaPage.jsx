@@ -4839,13 +4839,13 @@ function AgendaPage() {
           || (statusConfig[b.status]?.label || '').toLowerCase().includes(q)
         );
       }
-      return (viewFilter.scheduled || viewFilter.canceledOnly) ? dayBookings : [];
+      return (viewFilter.scheduled || viewFilter.canceledOnly || viewFilter.pendingPayments) ? dayBookings : [];
     }, [bookings, currentDate, viewFilter.scheduled, viewFilter.canceledOnly, viewFilter.pendingPayments, searchQuery, participantsByAgendamento]);
 
   // Após computar os resultados, rola até o primeiro match quando houver busca
   useEffect(() => {
     if (!searchQuery.trim()) return;
-    if (!(viewFilter.scheduled || viewFilter.canceledOnly)) return; // só quando agendados ou cancelados visíveis
+    if (!(viewFilter.scheduled || viewFilter.canceledOnly || viewFilter.pendingPayments)) return; // só quando algum filtro visível
     if (!filteredBookings || filteredBookings.length === 0) return;
     const first = [...filteredBookings].sort((a, b) => a.start - b.start)[0];
     if (!first?.id) return;
@@ -4853,23 +4853,24 @@ function AgendaPage() {
     if (el?.scrollIntoView) {
       el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
     }
-  }, [searchQuery, filteredBookings, viewFilter.scheduled, viewFilter.canceledOnly]);
+  }, [searchQuery, filteredBookings, viewFilter.scheduled, viewFilter.canceledOnly, viewFilter.pendingPayments]);
 
-  // Inteligência nos checkboxes: ao ativar Agendados ou Cancelados, rola até o primeiro visível daquele tipo
+  // Inteligência nos checkboxes: ao ativar Agendados, Cancelados ou Pagamentos Pendentes, rola até o primeiro visível daquele tipo
   useEffect(() => {
     const container = scrollRef.current;
     const prev = prevFiltersRef.current || {};
     // Detecta habilitação dos filtros
     const justEnabledCanceled = viewFilter.canceledOnly && !prev.canceledOnly;
     const justEnabledScheduled = viewFilter.scheduled && !prev.scheduled && !viewFilter.canceledOnly; // scheduled ativo e não em modo cancelados
-    if (!container || (!justEnabledCanceled && !justEnabledScheduled)) {
-      prevFiltersRef.current = { scheduled: viewFilter.scheduled, canceledOnly: viewFilter.canceledOnly };
+    const justEnabledPending = viewFilter.pendingPayments && !prev.pendingPayments;
+    if (!container || (!justEnabledCanceled && !justEnabledScheduled && !justEnabledPending)) {
+      prevFiltersRef.current = { scheduled: viewFilter.scheduled, canceledOnly: viewFilter.canceledOnly, pendingPayments: viewFilter.pendingPayments };
       return;
     }
     // Lista já está filtrada para o modo atual (canceledOnly restringe para cancelados)
     const list = filteredBookings || [];
     if (list.length === 0) {
-      prevFiltersRef.current = { scheduled: viewFilter.scheduled, canceledOnly: viewFilter.canceledOnly };
+      prevFiltersRef.current = { scheduled: viewFilter.scheduled, canceledOnly: viewFilter.canceledOnly, pendingPayments: viewFilter.pendingPayments };
       return;
     }
     // Verifica se algum desses itens já está visível no viewport do container
@@ -4887,8 +4888,8 @@ function AgendaPage() {
         el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
       }
     }
-    prevFiltersRef.current = { scheduled: viewFilter.scheduled, canceledOnly: viewFilter.canceledOnly };
-  }, [viewFilter.scheduled, viewFilter.canceledOnly, filteredBookings]);
+    prevFiltersRef.current = { scheduled: viewFilter.scheduled, canceledOnly: viewFilter.canceledOnly, pendingPayments: viewFilter.pendingPayments };
+  }, [viewFilter.scheduled, viewFilter.canceledOnly, viewFilter.pendingPayments, filteredBookings]);
 
   // Cores por quadra agora são geradas de forma determinística via getCourtColor(name)
 
@@ -5403,7 +5404,7 @@ function AgendaPage() {
               {/* Container relativo para posicionar reservas */}
               <div className="relative" style={{ height: displayTotalGridHeight }}>
                 {/* Linhas base por quadra: exibe apenas durante o horário de funcionamento dessa quadra */}
-                {(viewFilter.scheduled || viewFilter.canceledOnly) && (() => {
+                {(viewFilter.scheduled || viewFilter.canceledOnly || viewFilter.pendingPayments) && (() => {
                   // Usar horários do grid atual (já calculados no escopo externo)
                   const dayStartM = gridHours.start * 60;
                   const dayEndM = gridHours.end * 60;
@@ -5444,7 +5445,7 @@ function AgendaPage() {
                   );
                 })()}
                 {/* Agendados ou Cancelados (filtrados) */}
-                {(viewFilter.scheduled || viewFilter.canceledOnly) && filteredBookings
+                {(viewFilter.scheduled || viewFilter.canceledOnly || viewFilter.pendingPayments) && filteredBookings
                   .filter(b => b.court === court)
                   .map(b => <BookingCard key={b.id} booking={b} courtGridStart={gridHours.start * 60} courtGridEnd={gridHours.end * 60} />)
                 }
