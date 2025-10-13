@@ -3,7 +3,7 @@ import { useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { LifeBuoy, MessageCircle, Mail, Bug, ClipboardCopy, CheckCircle2, Phone, Trophy, Download, Smartphone, Share } from 'lucide-react';
 
-const APP_VERSION = 'v0.0.4'; // ajuste aqui se tiver uma fonte de versão global
+const APP_VERSION = 'v1.0.0'; // ajuste aqui se tiver uma fonte de versão global
 
 function SectionCard({ title, icon: Icon, children, className = '', collapsible = false, defaultOpen = true }) {
   if (collapsible) {
