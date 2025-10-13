@@ -340,8 +340,6 @@ function AgendaPage() {
   // Re-tentativas controladas para Vercel (evita sobrescrever cache com vazio em delays de token)
   const bookingsRetryRef = useRef(false);
   const courtsRetryRef = useRef(false);
-  // ✅ CORREÇÃO: Controla última execução para evitar chamadas duplicadas
-  const lastFetchParamsRef = useRef('');
 
   // Aviso inteligente sobre cancelados
   const [showCanceledInfo, setShowCanceledInfo] = useState(false);
@@ -862,13 +860,8 @@ function AgendaPage() {
         }));
         dbg('cache:bookings:hydrate', { count: mapped.length, sample: mapped[0] });
         pulseLog('cache:hydrate', { count: mapped.length });
-        // ✅ CORREÇÃO: Sempre hidrata do cache, não apenas se prev vazio
-        setBookings(mapped);
-        // ✅ CORREÇÃO: Reduz UI busy de 1200ms para 400ms
-        setUiBusy(400);
-      } else {
-        // ✅ Sem cache: apenas log, deixa fetchBookings popular o estado
-        dbg('cache:bookings:no-cache (will wait for fetch)');
+        setBookings((prev) => (prev && prev.length > 0 ? prev : mapped));
+        setUiBusy(1200);
       }
     } catch {}
   }, [bookingsCacheKey, dbg]);
@@ -885,9 +878,8 @@ function AgendaPage() {
         // [VisDebug] silenciado
         if (document.visibilityState === 'visible') {
           const now = Date.now();
-          // ✅ CORREÇÃO: Reduz guard de 800ms para 300ms
-          returningFromHiddenUntilRef.current = now + 300;
-          dbg('visibilitychange:visible (guard set for 300ms)');
+          returningFromHiddenUntilRef.current = now + 800;
+          // [GuardDiag] silenciado
         }
       } catch {}
     };
@@ -933,26 +925,14 @@ function AgendaPage() {
 
   // Carrega agendamentos do dia atual a partir do banco (extraído para useCallback para reuso)
   const fetchBookings = useCallback(async () => {
-    if (!authReady || !userProfile?.codigo_empresa) {
-      dbg('fetchBookings:skip (not ready)', { authReady, hasProfile: !!userProfile?.codigo_empresa });
-      return;
-    }
-    
-    // ✅ CORREÇÃO: Evita chamadas duplicadas com mesmos parâmetros
-    const fetchParams = `${format(currentDate, 'yyyy-MM-dd')}-${userProfile?.codigo_empresa}`;
-    if (lastFetchParamsRef.current === fetchParams && bookingsRetryRef.current === false) {
-      dbg('fetchBookings:skip (duplicate call)', { params: fetchParams });
-      return;
-    }
-    lastFetchParamsRef.current = fetchParams;
-    
-    // ✅ CORREÇÃO: Reduz janela de guard de 800ms para 300ms
+    if (!authReady || !userProfile?.codigo_empresa) return;
+    // Evita fetch durante janela crítica pós-retorno de aba ou com modal aberto
     if (Date.now() < (returningFromHiddenUntilRef.current || 0)) {
-      dbg('fetchBookings:skip (returning guard)', { remaining: (returningFromHiddenUntilRef.current || 0) - Date.now() });
+      // [GuardDiag] silenciado
       return;
     }
     if (isModalOpen) {
-      dbg('fetchBookings:skip (modal open)');
+      // [GuardDiag] silenciado
       return;
     }
     dbg('fetchBookings:start', { date: format(currentDate, 'yyyy-MM-dd'), empresa: userProfile?.codigo_empresa });
@@ -984,16 +964,20 @@ function AgendaPage() {
     // Em alguns casos no Vercel o retorno vem 200 mas vazio na primeira batida (RLS/propagação)
     if (!data || data.length === 0) {
       dbg('fetchBookings:empty-first-hit');
-      pulseLog('fetch:empty-first');
-      // ✅ CORREÇÃO: SEMPRE tenta retry se primeira tentativa, independente de cache
+       pulseLog('fetch:empty-first');
+      // Só tentar novamente se temos cache para manter UI preenchida
+      let hasCache = false;
+      try {
+        const cached = bookingsCacheKey ? JSON.parse(localStorage.getItem(bookingsCacheKey) || '[]') : [];
+        hasCache = Array.isArray(cached) && cached.length > 0;
+      } catch {}
       if (!bookingsRetryRef.current) {
         bookingsRetryRef.current = true;
-        dbg('fetchBookings:scheduling retry (empty response)');
-        setTimeout(fetchBookings, 700);
-        return; // ✅ SEMPRE retorna sem sobrescrever, preservando cache hidratado
+        if (hasCache) {
+          setTimeout(fetchBookings, 700);
+          return; // não sobrescrever UI com vazio na primeira tentativa
+        }
       }
-      // ✅ Segunda tentativa também vazia: log mas permite continuar
-      dbg('fetchBookings:empty-second-hit (will update state)');
     }
     bookingsRetryRef.current = false; // sucesso (ou segunda tentativa), libera novos retries futuros
     const nowTs = Date.now();
@@ -1038,21 +1022,7 @@ function AgendaPage() {
         auto_disabled: !!row.auto_disabled,
       };
     });
-    
-    // ✅ CORREÇÃO: Só atualiza se os dados realmente mudaram (evita re-renders desnecessários)
-    setBookings(prev => {
-      // Se não há dados anteriores, sempre atualiza
-      if (!prev || prev.length === 0) return mapped;
-      // Se tamanhos diferentes, atualiza
-      if (prev.length !== mapped.length) return mapped;
-      // Verifica se algum ID mudou (comparação rápida)
-      const prevIds = prev.map(b => b.id).sort().join(',');
-      const mappedIds = mapped.map(b => b.id).sort().join(',');
-      if (prevIds !== mappedIds) return mapped;
-      // IDs iguais: mantém prev para evitar re-render
-      return prev;
-    });
-    
+    setBookings(mapped);
     // Persistir no cache (serializando datas e garantindo customer)
     try {
       if (bookingsCacheKey) {
@@ -1093,8 +1063,8 @@ function AgendaPage() {
     if (authReady && userProfile?.codigo_empresa) {
       fetchBookings();
     }
-    // ✅ CORREÇÃO: Adiciona fetchBookings nas dependências (era ignorado pelo eslint-disable)
-  }, [authReady, userProfile?.codigo_empresa, currentDate, courtsMap, bookingsCacheKey, fetchBookings]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authReady, userProfile?.codigo_empresa, currentDate, courtsMap, bookingsCacheKey]);
 
   // Realtime: escuta mudanças em 'agendamentos' para a empresa atual e atualiza a lista sem reload
   const realtimeDebounceRef = useRef(null);
