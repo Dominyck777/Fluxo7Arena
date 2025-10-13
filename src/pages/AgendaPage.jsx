@@ -547,7 +547,7 @@ function AgendaPage() {
       if (error) throw error;
       setBookings(prev => prev.map(b => {
         if (b.id !== bookingId) return b;
-        const next = { ...b, status: newStatus };
+        const next = { ...b, status: newStatus, customer: b.customer || '' }; // Preservar customer
         if (shouldDisable) next.auto_disabled = true;
         else if (reactivate) next.auto_disabled = false;
         return next;
@@ -560,7 +560,7 @@ function AgendaPage() {
           const updated = Array.isArray(cached)
             ? cached.map(b => {
                 if (b.id !== bookingId) return b;
-                const next = { ...b, status: newStatus };
+                const next = { ...b, status: newStatus, customer: b.customer || '' }; // Preservar customer
                 if (shouldDisable) next.auto_disabled = true;
                 else if (reactivate) next.auto_disabled = false;
                 return next;
@@ -671,6 +671,7 @@ function AgendaPage() {
             status: row.status || booking.status,
             modality: row.modalidade || booking.modality,
             auto_disabled: !!row.auto_disabled,
+            customer: booking.customer || '', // Preservar customer
           };
           updatedForReturn = mapped;
           setBookings(prev => prev.map(b => b.id === booking.id ? mapped : b));
@@ -852,8 +853,13 @@ function AgendaPage() {
     try {
       const cached = JSON.parse(localStorage.getItem(bookingsCacheKey) || '[]');
       if (Array.isArray(cached) && cached.length > 0) {
-        const mapped = cached.map((b) => ({ ...b, start: new Date(b.start), end: new Date(b.end) }));
-        dbg('cache:bookings:hydrate', { count: mapped.length });
+        const mapped = cached.map((b) => ({ 
+          ...b, 
+          start: new Date(b.start), 
+          end: new Date(b.end),
+          customer: b.customer || '', // Garantir que customer existe
+        }));
+        dbg('cache:bookings:hydrate', { count: mapped.length, sample: mapped[0] });
         pulseLog('cache:hydrate', { count: mapped.length });
         setBookings((prev) => (prev && prev.length > 0 ? prev : mapped));
         setUiBusy(1200);
