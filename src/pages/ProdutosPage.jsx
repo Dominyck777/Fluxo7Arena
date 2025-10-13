@@ -1,7 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
 
-import { Helmet } from 'react-helmet';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -1487,10 +1486,6 @@ function ProdutosPage() {
 
     return (
       <>
-        <Helmet>
-          <title>Produtos - Fluxo7 Arena</title>
-          <meta name="description" content="Gerenciamento completo de produtos e estoque." />
-        </Helmet>
         <motion.div variants={pageVariants} initial="hidden" animate="visible" className="flex flex-col">
             <motion.div variants={itemVariants} className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
                 <div>

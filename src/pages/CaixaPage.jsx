@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from 'react';
-import { Helmet } from 'react-helmet';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -79,11 +78,6 @@ function CaixaPage() {
 
   return (
     <>
-      <Helmet>
-        <title>Caixa - Fluxo7 Arena</title>
-        <meta name="description" content="Gestão do caixa: abertura, fechamento e movimentações." />
-      </Helmet>
-
       <motion.div variants={pageVariants} initial="hidden" animate="visible" className="space-y-4">
         <motion.div variants={itemVariants} className="grid grid-cols-1 md:grid-cols-12 gap-4">
           <div className="md:col-span-8">

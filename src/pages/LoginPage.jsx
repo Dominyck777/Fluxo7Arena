@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from 'react';
-import { Helmet } from 'react-helmet';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -116,11 +115,6 @@ const LoginPage = () => {
 
   return (
     <>
-      <Helmet>
-        <title>Login - Fluxo7 Arena</title>
-        <meta name="description" content="Acesse sua conta do Fluxo7 Arena" />
-      </Helmet>
-
       <div className="min-h-screen bg-background flex items-center justify-center p-4 sm:p-6">
         <div className="absolute inset-0 bg-court-pattern opacity-[0.02] mix-blend-overlay"></div>
         

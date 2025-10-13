@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import { Helmet } from 'react-helmet';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -1045,10 +1044,6 @@ WHERE codigo_empresa = '${codigoEmpresa}' AND id = '${tempId}';
 
   return (
     <>
-      <Helmet>
-        <title>Criar Empresa - Fluxo7 Arena</title>
-      </Helmet>
-      
       <div className="min-h-screen bg-background text-text-primary p-8">
         <div className="max-w-4xl mx-auto">
           {renderProgressBar()}

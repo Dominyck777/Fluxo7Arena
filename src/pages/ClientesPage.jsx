@@ -1,5 +1,4 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { Helmet } from 'react-helmet';
 import { motion } from 'framer-motion';
 import { useLocation } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
@@ -1127,10 +1126,6 @@ function ClientesPage() {
 
     return (
       <>
-        <Helmet>
-          <title>Clientes & Fornecedores - Fluxo7 Arena</title>
-          <meta name="description" content="Gerenciamento completo de clientes e fornecedores (CRM)." />
-        </Helmet>
         <div className="h-full flex flex-col">
             <motion.div variants={pageVariants} initial="hidden" animate="visible">
                 <motion.div variants={itemVariants} className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">

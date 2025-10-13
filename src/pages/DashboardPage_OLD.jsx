@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from 'react';
-import { Helmet } from 'react-helmet';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { DollarSign, CalendarPlus, Users, ArrowUpRight, ArrowDownRight, Clock, Bell, ShieldCheck, Star, ThumbsUp, Wallet, Banknote, CalendarCheck, BarChart3, TrendingUp, MoonStar as StarIcon, ShoppingCart, Store, Package } from 'lucide-react';
@@ -296,10 +295,6 @@ function DashboardPage() {
 
   return (
     <>
-      <Helmet>
-        <title>Dashboard - Fluxo7 Arena</title>
-        <meta name="description" content="Visão geral e resumo do seu negócio." />
-      </Helmet>
       <motion.div
         variants={pageVariants}
         initial="hidden"

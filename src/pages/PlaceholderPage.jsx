@@ -1,15 +1,10 @@
 import React from 'react';
-import { Helmet } from 'react-helmet';
 import { motion } from 'framer-motion';
 import { Construction, Trophy } from 'lucide-react';
 
 function PlaceholderPage({ title }) {
   return (
     <>
-      <Helmet>
-        <title>{title} - Fluxo7 Arena</title>
-        <meta name="description" content={`Página de ${title} do sistema Fluxo7 Arena.`} />
-      </Helmet>
       <motion.div 
         className="flex flex-col items-center justify-center h-full text-center"
         initial={{ opacity: 0, y: 20 }}

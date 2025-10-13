@@ -1,5 +1,4 @@
 import React from 'react';
-import { Helmet } from 'react-helmet';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
@@ -29,11 +28,6 @@ function ConfiguracoesPage() {
 
   return (
     <>
-      <Helmet>
-        <title>Configurações - Fluxo7 Arena</title>
-        <meta name="description" content="Parâmetros do sistema, horários de funcionamento e preferências." />
-      </Helmet>
-
       <motion.div variants={pageVariants} initial="hidden" animate="visible" className="space-y-4">
         <motion.div variants={itemVariants} className="fx-card">
           <div className="flex items-center mb-3">

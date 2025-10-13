@@ -1,5 +1,4 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Helmet } from 'react-helmet';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
@@ -974,18 +973,6 @@ export default function FinanceiroPage() {
 
   return (
     <>
-      <Helmet>
-        <title>Financeiro - Fluxo7 Arena</title>
-        <meta name="description" content="Gestão financeira completa: visão geral, caixa, recebimentos e relatórios." />
-        <style>{`
-          /* Remove outline feio ao focar no SVG do Recharts */
-          .recharts-wrapper:focus, .recharts-surface:focus { outline: none; }
-          .recharts-wrapper svg:focus, .recharts-wrapper svg *:focus { outline: none !important; }
-          .recharts-wrapper svg { -webkit-tap-highlight-color: transparent; }
-          .recharts-sector { outline: none !important; }
-        `}</style>
-      </Helmet>
-      
       <motion.div variants={pageVariants} initial="hidden" animate="visible" className="space-y-6">
         {/* Header com filtros de período */}
         <motion.div variants={itemVariants} className="fx-card p-4">

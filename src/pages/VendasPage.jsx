@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 
-import { Helmet } from 'react-helmet';
 import { motion } from 'framer-motion';
 import { DragDropContext, Droppable, Draggable } from 'react-beautiful-dnd';
 import { Button } from '@/components/ui/button';
@@ -2958,20 +2957,6 @@ function VendasPage() {
 
   return (
     <>
-      <Helmet>
-        <title>Loja - Fluxo7 Arena</title>
-        <meta name="description" content="Loja (PDV): controle de mesas, produtos e vendas." />
-        {/* Desabilita quaisquer animações baseadas em data-state do Radix enquanto houver modal aberto */}
-        {anyDialogOpen && (
-          <style>{`
-            :root.no-dialog-anim [data-state='open'],
-            :root.no-dialog-anim [data-state='closed']{
-              animation: none !important;
-              transition: none !important;
-            }
-          `}</style>
-        )}
-      </Helmet>
       <ProductDetailsDialog />
       <CounterProductDetailsDialog />
       <motion.div variants={pageVariantsActive} initial={false} animate={anyDialogOpen ? false : "visible"} layout={false} className="h-full flex flex-col">

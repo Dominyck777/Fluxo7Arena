@@ -1,6 +1,5 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Helmet } from 'react-helmet';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -385,10 +384,6 @@ export default function EquipePage() {
 
     return (
         <>
-            <Helmet>
-                <title>Equipe - Fluxo7 Arena</title>
-                <meta name="description" content="Gerencie sua equipe, permissões e atividades." />
-            </Helmet>
             <div className="h-full flex flex-col">
                 <motion.div variants={pageVariants} initial="hidden" animate="visible">
                     <motion.div variants={itemVariants} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
