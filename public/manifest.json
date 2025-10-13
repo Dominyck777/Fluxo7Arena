@@ -1,7 +1,7 @@
 {
   "name": "F7 Arena",
   "short_name": "F7 Arena",
-  "description": "Sistema de gestão de quadras esportivas",
+  "description": "F7 Arena",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0a0a0a",
