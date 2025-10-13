@@ -62,6 +62,54 @@ export async function criarFinalizadora(payload, codigoEmpresa) {
   return data
 }
 
+// Resumo consolidado de uma sessão específica de caixa (evita mistura entre sessões no mesmo dia)
+// Retorna: { from, to, totalPorFinalizadora, totalEntradas, totalVendasBrutas, totalDescontos, totalVendasLiquidas,
+//            saldoInicial, saldoFinal, movimentos: { suprimentos, sangrias, ajustes, troco, totalMovimentos } }
+export async function listarResumoDaSessao({ caixaSessaoId, codigoEmpresa } = {}) {
+  if (!caixaSessaoId) throw new Error('caixaSessaoId é obrigatório')
+  const codigo = codigoEmpresa || getCachedCompanyCode()
+  // Buscar janela da sessão e saldos
+  let q = supabase
+    .from('caixa_sessoes')
+    .select('id, aberto_em, fechado_em, saldo_inicial, saldo_final')
+    .eq('id', caixaSessaoId)
+    .limit(1)
+  if (codigo) q = q.eq('codigo_empresa', codigo)
+  const { data: sessRows, error: sErr } = await q
+  if (sErr) throw sErr
+  const sess = Array.isArray(sessRows) ? sessRows[0] : sessRows
+  if (!sess) throw new Error('Sessão não encontrada')
+  const from = sess.aberto_em
+  const to = sess.fechado_em || new Date().toISOString()
+  // Resumo por período, limitado ao intervalo da sessão
+  const base = await listarResumoPeriodo({ from, to, codigoEmpresa: codigo })
+  // Movimentações dessa sessão
+  let suprimentos = 0, sangrias = 0, ajustes = 0, troco = 0
+  try {
+    let qm = supabase
+      .from('caixa_movimentacoes')
+      .select('tipo, valor')
+      .eq('caixa_sessao_id', caixaSessaoId)
+    if (codigo) qm = qm.eq('codigo_empresa', codigo)
+    const { data: movs } = await qm
+    for (const m of (movs || [])) {
+      const v = Number(m?.valor || 0)
+      const t = String(m?.tipo || '').toLowerCase()
+      if (t === 'suprimento') suprimentos += v
+      else if (t === 'sangria') sangrias += v
+      else if (t === 'ajuste') ajustes += v
+      else if (t === 'troco') troco += v
+    }
+  } catch {}
+  const totalMovimentos = suprimentos + ajustes - sangrias - troco
+  return {
+    ...base,
+    saldoInicial: Number(sess.saldo_inicial || 0),
+    saldoFinal: sess.saldo_final != null ? Number(sess.saldo_final) : null,
+    movimentos: { suprimentos, sangrias, ajustes, troco, totalMovimentos },
+  }
+}
+
 export async function atualizarFinalizadora(id, payload, codigoEmpresa) {
   if (!id) throw new Error('ID inválido')
   const codigo = codigoEmpresa || getCachedCompanyCode()
@@ -735,11 +783,30 @@ export async function fecharCaixa({ saldoFinal = null, codigoEmpresa } = {}) {
   // Calcular resumo do período para estimar saldo final quando não informado
   const fechadoEmIso = new Date().toISOString()
   let totalEntradas = 0
+  let totalMovimentos = 0 // suprimentos/sangrias/ajustes da sessão
   try {
     const resumoTmp = await listarResumoPeriodo({ from: abertoEm, to: fechadoEmIso, codigoEmpresa: codigo })
     totalEntradas = Number(resumoTmp?.totalEntradas || 0)
   } catch {}
-  const efetivoSaldoFinal = (saldoFinal !== null && saldoFinal !== undefined) ? Number(saldoFinal) : (saldoInicialSessao + totalEntradas)
+  // Somar movimentações de caixa da sessão atual (suprimento adiciona, sangria subtrai, ajuste adiciona)
+  try {
+    let qmov = supabase
+      .from('caixa_movimentacoes')
+      .select('tipo, valor')
+      .eq('caixa_sessao_id', caixaId)
+    if (codigo) qmov = qmov.eq('codigo_empresa', codigo)
+    const { data: movRows } = await qmov
+    for (const m of (movRows || [])) {
+      const v = Number(m?.valor || 0)
+      const t = String(m?.tipo || '').toLowerCase()
+      if (t === 'suprimento' || t === 'ajuste') totalMovimentos += v
+      else if (t === 'sangria') totalMovimentos -= v
+      else if (t === 'troco') totalMovimentos -= v // regra: troco sai do caixa
+    }
+  } catch {}
+  const efetivoSaldoFinal = (saldoFinal !== null && saldoFinal !== undefined)
+    ? Number(saldoFinal)
+    : (saldoInicialSessao + totalEntradas + totalMovimentos)
 
   // Fechar sessão agora com saldo_final definido
   const { data, error } = await supabase

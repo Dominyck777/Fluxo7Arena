@@ -46,9 +46,9 @@ export default function XMLImportModal({ open, onOpenChange, products, codigoEmp
       // Buscar TODOS os produtos do banco para validação precisa
       let allProducts = products;
       try {
+        // listProducts aceita 'search' (não 'searchTerm') e não usa 'limit'
         const fullList = await listProducts({ 
-          searchTerm: '', 
-          limit: 10000, 
+          search: '', 
           codigoEmpresa 
         });
         allProducts = fullList || products;
@@ -109,8 +109,7 @@ export default function XMLImportModal({ open, onOpenChange, products, codigoEmp
               
               // Buscar produto existente novamente (pode ter sido criado entre a validação e agora)
               const existingProducts = await listProducts({ 
-                searchTerm: item.xml.nome, 
-                limit: 100, 
+                search: item.xml.nome, 
                 codigoEmpresa 
               });
               
@@ -120,11 +119,10 @@ export default function XMLImportModal({ open, onOpenChange, products, codigoEmp
                 p.code === item.xml.codigo
               );
               
-              if (found && item.xml.quantidade > 0) {
+              if (found && Number(item.xml.quantidade) > 0) {
                 await adjustProductStock({
                   productId: found.id,
-                  adjustment: item.xml.quantidade,
-                  reason: `Entrada via XML - NF-e ${parsedData.nfe?.numero || ''}`,
+                  delta: Number(item.xml.quantidade) || 0,
                   codigoEmpresa
                 });
                 results.updated++;
@@ -139,11 +137,10 @@ export default function XMLImportModal({ open, onOpenChange, products, codigoEmp
           }
         } else {
           // Atualizar estoque do produto existente
-          if (item.xml.quantidade > 0) {
+          if (Number(item.xml.quantidade) > 0) {
             await adjustProductStock({
               productId: item.existing.id,
-              adjustment: item.xml.quantidade,
-              reason: `Entrada via XML - NF-e ${parsedData.nfe?.numero || ''}`,
+              delta: Number(item.xml.quantidade) || 0,
               codigoEmpresa
             });
           }
