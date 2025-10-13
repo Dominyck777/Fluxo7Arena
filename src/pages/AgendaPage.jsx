@@ -299,7 +299,7 @@ function AgendaPage() {
     }
   }, [location.state?.openModal, isModalOpen, openBookingModal]);
   
-  const [viewFilter, setViewFilter] = useState({ scheduled: true, available: true, canceledOnly: false });
+  const [viewFilter, setViewFilter] = useState({ scheduled: true, available: true, canceledOnly: false, pendingPayments: false });
 
   // Lista de quadras vinda do banco (objetos com nome, modalidades, horario)
   const [dbCourts, setDbCourts] = useState(null);
@@ -4821,6 +4821,16 @@ function AgendaPage() {
       dayBookings = viewFilter.canceledOnly
         ? dayBookings.filter(b => b.status === 'canceled')
         : dayBookings.filter(b => b.status !== 'canceled');
+      
+      // Filtro de pagamentos pendentes
+      if (viewFilter.pendingPayments) {
+        dayBookings = dayBookings.filter(b => {
+          const participants = participantsByAgendamento[b.id] || [];
+          const hasPending = participants.some(p => String(p.status_pagamento || '').toLowerCase() !== 'pago');
+          return hasPending && participants.length > 0;
+        });
+      }
+      
       if (searchQuery.trim()) {
         const q = searchQuery.trim().toLowerCase();
         dayBookings = dayBookings.filter(b =>
@@ -4830,7 +4840,7 @@ function AgendaPage() {
         );
       }
       return (viewFilter.scheduled || viewFilter.canceledOnly) ? dayBookings : [];
-    }, [bookings, currentDate, viewFilter.scheduled, viewFilter.canceledOnly, searchQuery]);
+    }, [bookings, currentDate, viewFilter.scheduled, viewFilter.canceledOnly, viewFilter.pendingPayments, searchQuery, participantsByAgendamento]);
 
   // Após computar os resultados, rola até o primeiro match quando houver busca
   useEffect(() => {
@@ -5041,6 +5051,18 @@ function AgendaPage() {
                           }));
                           if (isOn && !hideCanceledInfo) setShowCanceledInfo(true);
                         }}
+                      />
+                    </div>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={(e) => e.preventDefault()}>
+                    <div className="flex items-center justify-between gap-3 w-full">
+                      <div className="flex items-center gap-2">
+                        <DollarSign className="h-4 w-4 text-warning" />
+                        <span>Pagamentos Pendentes</span>
+                      </div>
+                      <Checkbox
+                        checked={viewFilter.pendingPayments}
+                        onCheckedChange={(checked) => setViewFilter(prev => ({ ...prev, pendingPayments: !!checked }))}
                       />
                     </div>
                   </DropdownMenuItem>
