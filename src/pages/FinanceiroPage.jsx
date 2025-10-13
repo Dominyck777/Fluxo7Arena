@@ -2796,36 +2796,39 @@ export default function FinanceiroPage() {
                     <Table>
                       <TableHeader className="sticky top-0 bg-surface z-10">
                         <TableRow>
-                          <TableHead className="text-xs md:text-sm">Data</TableHead>
-                          <TableHead className="text-xs md:text-sm">Finalizadora</TableHead>
-                          <TableHead className="text-xs md:text-sm">Origem</TableHead>
-                          <TableHead className="text-right text-xs md:text-sm">Valor</TableHead>
+                          <TableHead className="text-xs md:text-sm w-[70px] md:w-auto">Data</TableHead>
+                          <TableHead className="text-xs md:text-sm w-[80px] md:w-auto">Finaliz.</TableHead>
+                          <TableHead className="text-xs md:text-sm w-[60px] md:w-auto">Origem</TableHead>
+                          <TableHead className="text-right text-xs md:text-sm w-[70px] md:w-auto">Valor</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
                         {selectedClientePagamentos.map((pg) => (
                           <TableRow key={pg.id}>
-                            <TableCell className="text-xs md:text-sm">
-                              {pg.recebido_em ? new Date(pg.recebido_em).toLocaleString('pt-BR', { 
-                                day: '2-digit', 
-                                month: '2-digit', 
-                                year: '2-digit',
-                                hour: '2-digit', 
-                                minute: '2-digit' 
-                              }) : '—'}
+                            <TableCell className="text-xs md:text-sm w-[70px] md:w-auto">
+                              <div className="text-[10px] md:text-xs leading-tight">
+                                {pg.recebido_em ? new Date(pg.recebido_em).toLocaleString('pt-BR', { 
+                                  day: '2-digit', 
+                                  month: '2-digit', 
+                                  hour: '2-digit', 
+                                  minute: '2-digit' 
+                                }) : '—'}
+                              </div>
                             </TableCell>
-                            <TableCell className="text-xs md:text-sm">
-                              <div className="truncate max-w-[120px] md:max-w-[200px]" title={pg.finalizadoras?.nome || pg.metodo || '—'}>
+                            <TableCell className="text-xs md:text-sm w-[80px] md:w-auto">
+                              <div className="truncate max-w-[80px] md:max-w-[200px] text-[10px] md:text-xs" title={pg.finalizadoras?.nome || pg.metodo || '—'}>
                                 {pg.finalizadoras?.nome || pg.metodo || '—'}
                               </div>
                             </TableCell>
-                            <TableCell className="text-xs md:text-sm">
-                              <div className="truncate max-w-[100px] md:max-w-[150px]" title={pg.origem || '—'}>
+                            <TableCell className="text-xs md:text-sm w-[60px] md:w-auto">
+                              <div className="truncate max-w-[60px] md:max-w-[150px] text-[10px] md:text-xs" title={pg.origem || '—'}>
                                 {pg.origem || '—'}
                               </div>
                             </TableCell>
-                            <TableCell className="text-right font-semibold text-xs md:text-sm">
-                              {fmtBRL(pg.valor)}
+                            <TableCell className="text-right font-semibold text-xs md:text-sm w-[70px] md:w-auto">
+                              <div className="text-[10px] md:text-xs whitespace-nowrap">
+                                {fmtBRL(pg.valor)}
+                              </div>
                             </TableCell>
                           </TableRow>
                         ))}

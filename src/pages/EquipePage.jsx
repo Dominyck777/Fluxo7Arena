@@ -48,44 +48,21 @@ const StatCard = ({ icon, title, value, color }) => {
 function MemberDetailsModal({ open, onOpenChange, member, onEdit }) {
   if (!member) return null;
 
-  const DetailRow = ({ label, value }) => (
-    <div className="flex justify-between items-center py-2 border-b border-border/50">
-      <span className="text-sm text-text-secondary">{label}</span>
-      <span className="text-sm font-semibold text-text-primary text-right">{value}</span>
-    </div>
-  );
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[700px] w-full max-h-[90vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-[500px] w-full">
         <DialogHeader>
           <DialogTitle>Detalhes do Funcionário</DialogTitle>
         </DialogHeader>
-        <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
-            <div>
+        <div className="p-4 sm:p-6 space-y-4">
+            <div className="text-center">
                 <h2 className="text-xl font-bold">{member.name}</h2>
                 <p className="text-brand font-semibold">{member.role}</p>
             </div>
 
-            <div>
-                <h4 className="font-semibold text-text-primary mb-2 flex items-center gap-2"><KeyRound className="w-5 h-5 text-text-secondary"/> Permissões de Acesso</h4>
-                <div className="bg-surface-2 p-3 sm:p-4 rounded-lg grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-x-4 sm:gap-y-2">
-                  {permissionsList.map(p => (
-                    <div key={p.id} className="flex items-center justify-between text-sm">
-                      <span className="text-text-secondary">{p.label}</span>
-                      <span className={cn("font-semibold", member.permissions[p.id] ? "text-success" : "text-danger")}>
-                        {member.permissions[p.id] ? (member.permissions[p.id] === 'edit' ? 'Edição' : 'Visualização') : 'Sem Acesso'}
-                      </span>
-                    </div>
-                  ))}
-                  {member.permissions.admin && <div className="col-span-1 sm:col-span-2 text-center font-bold text-success p-2 bg-success/10 rounded-md mt-2">Acesso total de Administrador</div>}
-                </div>
-            </div>
-             <div>
-                <h4 className="font-semibold text-text-primary mb-2 flex items-center gap-2"><Activity className="w-5 h-5 text-text-secondary"/> Log de Atividades Recentes</h4>
-                <div className="bg-surface-2 p-4 rounded-lg text-center">
-                    <p className="text-sm text-text-muted py-8">O histórico de atividades do funcionário aparecerá aqui.</p>
-                </div>
+            <div className="bg-surface-2 p-8 rounded-lg text-center border border-border">
+                <p className="text-lg font-semibold text-text-secondary">🚧 Em desenvolvimento</p>
+                <p className="text-sm text-text-muted mt-2">Detalhes completos do funcionário estarão disponíveis em breve.</p>
             </div>
         </div>
         <DialogFooter className="flex flex-col sm:flex-row gap-2 sm:gap-0">
@@ -508,7 +485,7 @@ export default function EquipePage() {
                                           <TableHead>Funcionário</TableHead>
                                           <TableHead>Cargo</TableHead>
                                           <TableHead>Status</TableHead>
-                                          <TableHead className="w-[50px]"></TableHead>
+                                          <TableHead className="w-[80px] text-center">Ações</TableHead>
                                       </TableRow>
                                   </TableHeader>
                                   <TableBody>
@@ -535,10 +512,10 @@ export default function EquipePage() {
                                                       {member.status === 'active' ? 'Ativo' : 'Inativo'}
                                                   </span>
                                               </TableCell>
-                                              <TableCell>
+                                              <TableCell className="text-center">
                                                   <DropdownMenu>
                                                       <DropdownMenuTrigger asChild>
-                                                          <Button variant="ghost" className="h-8 w-8 p-0" onClick={(e) => e.stopPropagation()}>
+                                                          <Button variant="ghost" className="h-8 w-8 p-0 mx-auto" onClick={(e) => e.stopPropagation()}>
                                                               <MoreHorizontal className="h-4 w-4" />
                                                           </Button>
                                                       </DropdownMenuTrigger>
