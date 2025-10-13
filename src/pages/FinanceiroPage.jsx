@@ -2767,7 +2767,6 @@ export default function FinanceiroPage() {
                   </TableBody>
                 </Table>
               </div>
-            </div>
           </DialogContent>
         </Dialog>
 
