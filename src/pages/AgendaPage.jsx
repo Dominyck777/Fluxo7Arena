@@ -340,6 +340,8 @@ function AgendaPage() {
   // Re-tentativas controladas para Vercel (evita sobrescrever cache com vazio em delays de token)
   const bookingsRetryRef = useRef(false);
   const courtsRetryRef = useRef(false);
+  // ✅ CORREÇÃO: Controla última execução para evitar chamadas duplicadas
+  const lastFetchParamsRef = useRef('');
 
   // Aviso inteligente sobre cancelados
   const [showCanceledInfo, setShowCanceledInfo] = useState(false);
@@ -865,9 +867,8 @@ function AgendaPage() {
         // ✅ CORREÇÃO: Reduz UI busy de 1200ms para 400ms
         setUiBusy(400);
       } else {
-        // ✅ CORREÇÃO ADICIONAL: Se não há cache, garante que bookings inicia vazio (não undefined)
-        dbg('cache:bookings:no-cache (initializing empty)');
-        setBookings([]);
+        // ✅ Sem cache: apenas log, deixa fetchBookings popular o estado
+        dbg('cache:bookings:no-cache (will wait for fetch)');
       }
     } catch {}
   }, [bookingsCacheKey, dbg]);
@@ -936,6 +937,15 @@ function AgendaPage() {
       dbg('fetchBookings:skip (not ready)', { authReady, hasProfile: !!userProfile?.codigo_empresa });
       return;
     }
+    
+    // ✅ CORREÇÃO: Evita chamadas duplicadas com mesmos parâmetros
+    const fetchParams = `${format(currentDate, 'yyyy-MM-dd')}-${userProfile?.codigo_empresa}`;
+    if (lastFetchParamsRef.current === fetchParams && bookingsRetryRef.current === false) {
+      dbg('fetchBookings:skip (duplicate call)', { params: fetchParams });
+      return;
+    }
+    lastFetchParamsRef.current = fetchParams;
+    
     // ✅ CORREÇÃO: Reduz janela de guard de 800ms para 300ms
     if (Date.now() < (returningFromHiddenUntilRef.current || 0)) {
       dbg('fetchBookings:skip (returning guard)', { remaining: (returningFromHiddenUntilRef.current || 0) - Date.now() });
@@ -1028,7 +1038,21 @@ function AgendaPage() {
         auto_disabled: !!row.auto_disabled,
       };
     });
-    setBookings(mapped);
+    
+    // ✅ CORREÇÃO: Só atualiza se os dados realmente mudaram (evita re-renders desnecessários)
+    setBookings(prev => {
+      // Se não há dados anteriores, sempre atualiza
+      if (!prev || prev.length === 0) return mapped;
+      // Se tamanhos diferentes, atualiza
+      if (prev.length !== mapped.length) return mapped;
+      // Verifica se algum ID mudou (comparação rápida)
+      const prevIds = prev.map(b => b.id).sort().join(',');
+      const mappedIds = mapped.map(b => b.id).sort().join(',');
+      if (prevIds !== mappedIds) return mapped;
+      // IDs iguais: mantém prev para evitar re-render
+      return prev;
+    });
+    
     // Persistir no cache (serializando datas e garantindo customer)
     try {
       if (bookingsCacheKey) {
