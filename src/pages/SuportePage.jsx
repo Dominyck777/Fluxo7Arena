@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
-import { LifeBuoy, MessageCircle, Mail, Bug, ClipboardCopy, CheckCircle2, Phone, Trophy } from 'lucide-react';
+import { LifeBuoy, MessageCircle, Mail, Bug, ClipboardCopy, CheckCircle2, Phone, Trophy, Download, Smartphone } from 'lucide-react';
 
 const APP_VERSION = 'v0.0.4'; // ajuste aqui se tiver uma fonte de versão global
 
@@ -54,6 +54,10 @@ export default function SuportePage() {
   const [assunto, setAssunto] = useState('');
   const [descricao, setDescricao] = useState('');
   const [isDesktop, setIsDesktop] = useState(true);
+  
+  // PWA Install
+  const [deferredPrompt, setDeferredPrompt] = useState(null);
+  const [isInstalled, setIsInstalled] = useState(false);
 
   const appName = 'Fluxo7 Arena';
   const supportEmail = 'fluxo7team@gmail.com';
@@ -72,6 +76,46 @@ export default function SuportePage() {
       setIsDesktop(true);
     }
   }, []);
+
+  // PWA Install Detection
+  useEffect(() => {
+    // Detectar se já está instalado
+    if (window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone) {
+      setIsInstalled(true);
+    }
+
+    // Capturar evento de instalação
+    const handleBeforeInstallPrompt = (e) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    };
+
+    const handleAppInstalled = () => {
+      setIsInstalled(true);
+      setDeferredPrompt(null);
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    window.addEventListener('appinstalled', handleAppInstalled);
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+      window.removeEventListener('appinstalled', handleAppInstalled);
+    };
+  }, []);
+
+  const handleInstallClick = async () => {
+    if (!deferredPrompt) return;
+
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    
+    if (outcome === 'accepted') {
+      setIsInstalled(true);
+    }
+    
+    setDeferredPrompt(null);
+  };
 
   const diagnostico = useMemo(() => {
     try {
@@ -165,6 +209,32 @@ export default function SuportePage() {
               </a>
             </div>
           </SectionCard>
+          
+          {/* PWA Install Card */}
+          {!isInstalled && deferredPrompt && (
+            <SectionCard title="Instalar Aplicativo" icon={Smartphone}>
+              <div className="space-y-2">
+                <p className="text-sm text-text-secondary">
+                  Instale o F7 Arena no seu dispositivo para acesso rápido e experiência completa de aplicativo.
+                </p>
+                <button
+                  onClick={handleInstallClick}
+                  className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-md bg-brand text-black font-medium hover:opacity-90 transition"
+                >
+                  <Download className="w-4 h-4" /> Instalar Agora
+                </button>
+              </div>
+            </SectionCard>
+          )}
+          
+          {isInstalled && (
+            <SectionCard title="Aplicativo Instalado" icon={CheckCircle2}>
+              <div className="flex items-center gap-2 text-sm text-success">
+                <CheckCircle2 className="w-4 h-4" />
+                <span>F7 Arena está instalado no seu dispositivo!</span>
+              </div>
+            </SectionCard>
+          )}
         </div>
       </div>
 
