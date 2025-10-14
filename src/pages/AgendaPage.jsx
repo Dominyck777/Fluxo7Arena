@@ -503,7 +503,7 @@ function AgendaPage() {
   const recentStatusUpdatesRef = useRef(new Map()); // id -> { status, ts }
 
   // Salvar no banco (upsert)
-  const handleSaveSettings = useCallback(async () => {
+  const handleSaveSettings = async () => {
     console.log('🔥🔥🔥 [AgendaSettings][SAVE] FUNÇÃO CHAMADA! 🔥🔥🔥');
     
     try {
@@ -517,6 +517,7 @@ function AgendaPage() {
       }
       
       console.log('[AgendaSettings][SAVE] ✅ Autenticado! Preparando payload...');
+      console.log('[AgendaSettings][SAVE] automation atual:', automation);
       
       setSavingSettings(true);
       const payload = {
@@ -563,7 +564,7 @@ function AgendaPage() {
     } finally {
       setSavingSettings(false);
     }
-  }, [authReady, company?.id, automation]);
+  };
 
   // Atualiza status no banco e estados locais
   // source: 'user' | 'automation'
