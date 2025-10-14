@@ -377,6 +377,12 @@ function AgendaPage() {
   const [automation, setAutomation] = useState(defaultAutomation);
   const [savedAutomation, setSavedAutomation] = useState(defaultAutomation); // Último estado salvo no banco
   const [savingSettings, setSavingSettings] = useState(false);
+  const automationRef = useRef(automation); // ✅ Ref para capturar valor atual sem causar re-render
+  
+  // Atualiza ref sempre que automation mudar
+  useEffect(() => {
+    automationRef.current = automation;
+  }, [automation]);
   // Offset de horário do servidor (Brasília) em relação ao relógio local do dispositivo, em ms
   const [serverOffsetMs, setServerOffsetMs] = useState(0);
   // Função utilitária para obter o "agora" corrigido por offset (Brasília)
@@ -513,20 +519,23 @@ function AgendaPage() {
       return;
     }
     
+    // ✅ Captura valor atual do automation via ref (evita dependência no useCallback)
+    const currentAutomation = automationRef.current;
+    
     console.log('[AgendaSettings][SAVE] ✅ Autenticado! Preparando payload...');
     console.log('[AgendaSettings][SAVE] company:', company);
-    console.log('[AgendaSettings][SAVE] automation:', automation);
+    console.log('[AgendaSettings][SAVE] automation:', currentAutomation);
     
     try {
       setSavingSettings(true);
       const payload = {
         empresa_id: company.id,
-        auto_confirm_enabled: !!automation.autoConfirmEnabled,
-        auto_confirm_hours: !!automation.autoConfirmEnabled
-          ? Math.max(0, Math.round(Number(automation.autoConfirmMinutesBefore || 0) / 60))
+        auto_confirm_enabled: !!currentAutomation.autoConfirmEnabled,
+        auto_confirm_hours: !!currentAutomation.autoConfirmEnabled
+          ? Math.max(0, Math.round(Number(currentAutomation.autoConfirmMinutesBefore || 0) / 60))
           : null,
-        auto_start_enabled: !!automation.autoStartEnabled,
-        auto_finish_enabled: !!automation.autoFinishEnabled,
+        auto_start_enabled: !!currentAutomation.autoStartEnabled,
+        auto_finish_enabled: !!currentAutomation.autoFinishEnabled,
       };
       
       console.log('[AgendaSettings][SAVE] Payload preparado:', payload);
@@ -549,8 +558,8 @@ function AgendaPage() {
         console.log('[AgendaSettings][SAVE] ✅ Dados salvos com sucesso:', data[0]);
       }
       
-      setSavedAutomation(automation); // Atualizar último estado salvo
-      console.log('[AgendaSettings][SAVE] ✅ savedAutomation atualizado:', automation);
+      setSavedAutomation(currentAutomation); // Atualizar último estado salvo
+      console.log('[AgendaSettings][SAVE] ✅ savedAutomation atualizado:', currentAutomation);
       
       toast({ title: 'Configurações salvas', description: 'As automações da agenda foram atualizadas com sucesso.' });
       setIsSettingsOpen(false);
