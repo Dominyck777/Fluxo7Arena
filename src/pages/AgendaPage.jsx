@@ -502,22 +502,22 @@ function AgendaPage() {
   // guarda mudanças locais recentes de status, para que um fetch logo em seguida não volte o status antigo
   const recentStatusUpdatesRef = useRef(new Map()); // id -> { status, ts }
 
-  // Salvar no banco (upsert)
-  const handleSaveSettings = async () => {
+  // Salvar no banco (upsert) - Padrão Guard Clause (baseado em AlertsProvider)
+  const handleSaveSettings = useCallback(async () => {
+    console.log('🔥🔥🔥 [AgendaSettings][SAVE] FUNÇÃO CHAMADA! 🔥🔥🔥');
+    
+    // ✅ GUARD CLAUSE - Para se não tiver dados (igual AlertsProvider linha 17)
+    if (!authReady || !company?.id) {
+      console.warn('[AgendaSettings][SAVE] Aguardando autenticação...', { authReady, company_id: company?.id });
+      toast({ title: 'Aguarde', description: 'Carregando dados da empresa...', variant: 'default' });
+      return;
+    }
+    
+    console.log('[AgendaSettings][SAVE] ✅ Autenticado! Preparando payload...');
+    console.log('[AgendaSettings][SAVE] company:', company);
+    console.log('[AgendaSettings][SAVE] automation:', automation);
+    
     try {
-      console.log('🔥🔥🔥 [AgendaSettings][SAVE] FUNÇÃO CHAMADA! 🔥🔥🔥');
-      console.log('[AgendaSettings][SAVE] authReady:', authReady);
-      console.log('[AgendaSettings][SAVE] company:', company);
-      
-      if (!authReady || !company?.id) {
-        console.error('[AgendaSettings][SAVE] ERRO: Não autenticado', { authReady, company });
-        toast({ title: 'Não autenticado', description: 'Faça login para salvar as configurações.', variant: 'destructive' });
-        return;
-      }
-      
-      console.log('[AgendaSettings][SAVE] ✅ Autenticado! Preparando payload...');
-      console.log('[AgendaSettings][SAVE] automation atual:', automation);
-      
       setSavingSettings(true);
       const payload = {
         empresa_id: company.id,
@@ -566,7 +566,7 @@ function AgendaPage() {
       console.log('[AgendaSettings][SAVE] Finally executado');
       setSavingSettings(false);
     }
-  };
+  }, [authReady, company, automation]); // ✅ Dependências corretas (igual AlertsProvider linha 160)
 
   // Atualiza status no banco e estados locais
   // source: 'user' | 'automation'
