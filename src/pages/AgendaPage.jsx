@@ -397,6 +397,9 @@ function AgendaPage() {
       }
       
       try {
+        console.log('[AgendaSettings][LOAD] Modo:', import.meta.env.PROD ? 'PRODUÇÃO (wrapper)' : 'DEV (client original)');
+        console.log('[AgendaSettings][LOAD] Buscando para empresa_id:', company.id);
+        
         const { data, error } = await supabase
           .from('agenda_settings')
           .select('*')
@@ -404,6 +407,7 @@ function AgendaPage() {
           .maybeSingle();
         
         console.log('[AgendaSettings][LOAD] Resultado da query:', { data, error });
+        console.log('[AgendaSettings][LOAD] Data type:', data === null ? 'null' : typeof data);
         
         if (error) {
           // não quebra UX; mantém localStorage/defaults
@@ -533,6 +537,8 @@ function AgendaPage() {
       };
       
       console.log('[AgendaSettings][SAVE] Payload preparado:', payload);
+      console.log('[AgendaSettings][SAVE] Modo:', import.meta.env.PROD ? 'PRODUÇÃO (wrapper)' : 'DEV (client original)');
+      console.log('[AgendaSettings][SAVE] Supabase client type:', typeof supabase.from);
       
       const { data, error } = await supabase
         .from('agenda_settings')
@@ -540,6 +546,8 @@ function AgendaPage() {
         .select();
       
       console.log('[AgendaSettings][SAVE] Resultado do upsert:', { data, error });
+      console.log('[AgendaSettings][SAVE] Data type:', Array.isArray(data) ? 'array' : typeof data);
+      console.log('[AgendaSettings][SAVE] Data length:', data?.length);
       
       if (error) {
         console.error('[AgendaSettings][SAVE] ❌ ERRO no upsert:', error);
@@ -1203,7 +1211,7 @@ function AgendaPage() {
       const fmtHms = (ms) => (typeof ms === 'number' ? format(new Date(ms), 'HH:mm:ss', { locale: ptBR }) : '—');
       const fmtHm = (ms) => (typeof ms === 'number' ? format(new Date(ms), 'HH:mm', { locale: ptBR }) : '—');
       const timeEmoji = usingServer ? '🕒🇧🇷' : '🖥️';
-      const rtOk = String(realtimeStatus).toUpperCase() === 'SUBSCRIBED';
+      const rtOk = String(realtimeStatus).toUpperCase() === 'SUBSCRIBED' || String(realtimeStatus).toLowerCase() === 'polling';
       const rtEmoji = rtOk ? '✅' : '⚠️';
       const nextEmoji = typeof nextAutoAtMs === 'number' ? '⏭️' : '⏸️';
       const count = Array.isArray(bookings) ? bookings.length : 0;
