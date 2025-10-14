@@ -392,22 +392,22 @@ function AgendaPage() {
   // Carrega regras salvas do banco quando empresa está disponível
   // Removido: localStorage auto-save para evitar persistência sem clicar em Salvar
 
-  // Carregar do banco (agenda_settings) quando empresa estiver disponível
-  useEffect(() => {
-    const loadSettings = async () => {
-      console.log('[AgendaSettings][LOAD] Iniciando carregamento...', { authReady, company_id: company?.id });
-      
-      if (!authReady || !company?.id) {
-        console.warn('[AgendaSettings][LOAD] Aguardando autenticação...');
-        return;
-      }
-      
-      try {
-        const { data, error } = await supabase
-          .from('agenda_settings')
-          .select('*')
-          .eq('empresa_id', company.id)
-          .maybeSingle();
+  // Carregar do banco (agenda_settings) quando empresa estiver disponível - Padrão Guard Clause
+  const loadSettings = useCallback(async () => {
+    console.log('[AgendaSettings][LOAD] Iniciando carregamento...', { authReady, company_id: company?.id });
+    
+    // ✅ GUARD CLAUSE - Para se não tiver dados (igual AlertsProvider linha 17)
+    if (!authReady || !company?.id) {
+      console.warn('[AgendaSettings][LOAD] Aguardando autenticação...');
+      return;
+    }
+    
+    try {
+      const { data, error } = await supabase
+        .from('agenda_settings')
+        .select('*')
+        .eq('empresa_id', company.id)
+        .maybeSingle();
         
         console.log('[AgendaSettings][LOAD] Resultado da query:', { data, error });
         
@@ -440,12 +440,17 @@ function AgendaPage() {
         setSavedAutomation(next); // Guardar como último estado salvo
         
         console.log('[AgendaSettings][LOAD] ✅ Estados atualizados com sucesso!');
-      } catch (e) {
-        console.warn('[AgendaSettings] unexpected load error', e);
-      }
-    };
-    loadSettings();
-  }, [authReady, company?.id]);
+    } catch (e) {
+      console.warn('[AgendaSettings] unexpected load error', e);
+    }
+  }, [authReady, company]); // ✅ Dependências corretas (igual AlertsProvider linha 160)
+
+  // ✅ useEffect que executa loadSettings quando dados estiverem prontos (igual AlertsProvider linha 164)
+  useEffect(() => {
+    if (authReady && company?.id) {
+      loadSettings();
+    }
+  }, [authReady, company?.id, loadSettings]);
 
   // Sincroniza periodicamente o horário de Brasília usando Supabase Edge Function (time-br)
   useEffect(() => {
