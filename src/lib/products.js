@@ -140,50 +140,39 @@ export async function getSoldProductsByPeriod({ from, to, codigoEmpresa, limit =
 // ===== Ajustes de estoque =====
 // Incrementa o estoque de um produto (delta pode ser negativo ou positivo)
 export async function adjustProductStock({ productId, delta, codigoEmpresa }) {
-  const inc = Number(delta || 0);
-  if (!productId || !Number.isFinite(inc) || inc === 0) throw new Error('Parâmetros inválidos para ajuste de estoque');
-  const { data, error } = await withTimeout((signal) => {
+  const inc = Number(delta);
+  if (!productId || !Number.isFinite(inc) || inc === 0) {
+    throw new Error('Parâmetros inválidos para ajuste de estoque');
+  }
+  // Passo 1: obter estoque atual (com filtro de empresa quando presente)
+  const { data: cur, error: gerr } = await withTimeout((signal) => {
     let q = supabase
       .from('produtos')
-      .update({
-        estoque: supabase.rpc ? undefined : undefined,
-      })
-      .eq('id', productId)
       .select('id, estoque, estoque_atual')
+      .eq('id', productId)
       .single()
       .abortSignal(signal);
     if (codigoEmpresa) q = q.eq('codigo_empresa', codigoEmpresa);
     return q;
-  }, 10000, 'Timeout adjustProductStock (10s)');
-  // O PostgREST não suporta incremento atômico direto sem RPC; fazemos em 2 passos para simplicidade
-  if (error) {
-    // Tenta caminho de 2 passos: get + update
-    const { data: cur, error: gerr } = await withTimeout((signal) => {
-      let q = supabase
-        .from('produtos')
-        .select('id, estoque, estoque_atual')
-        .eq('id', productId)
-        .single()
-        .abortSignal(signal);
-      if (codigoEmpresa) q = q.eq('codigo_empresa', codigoEmpresa);
-      return q;
-    }, 8000, 'Timeout get current stock (8s)');
-    if (gerr) throw gerr;
-    const current = Number(cur?.estoque ?? cur?.estoque_atual ?? 0);
-    const next = current + inc;
-    const { error: uerr } = await withTimeout((signal) => {
-      let q = supabase
-        .from('produtos')
-        .update({ estoque: next, estoque_atual: next })
-        .eq('id', productId)
-        .abortSignal(signal);
-      if (codigoEmpresa) q = q.eq('codigo_empresa', codigoEmpresa);
-      return q;
-    }, 8000, 'Timeout update stock (8s)');
-    if (uerr) throw uerr;
-    return { id: productId, stock: next };
+  }, 10000, 'Timeout get current stock (10s)');
+  if (gerr) {
+    // Caso típico: PGRST116 quando .single() e 0 linhas por RLS/empresa inválida
+    throw gerr;
   }
-  return { id: data?.id || productId };
+  const current = Number(cur?.estoque ?? cur?.estoque_atual ?? 0);
+  const next = current + inc;
+  // Passo 2: atualizar estoque
+  const { error: uerr } = await withTimeout((signal) => {
+    let q = supabase
+      .from('produtos')
+      .update({ estoque: next, estoque_atual: next })
+      .eq('id', productId)
+      .abortSignal(signal);
+    if (codigoEmpresa) q = q.eq('codigo_empresa', codigoEmpresa);
+    return q;
+  }, 10000, 'Timeout update stock (10s)');
+  if (uerr) throw uerr;
+  return { id: productId, stock: next };
 }
 
 // ===== Relatórios rápidos de produtos =====

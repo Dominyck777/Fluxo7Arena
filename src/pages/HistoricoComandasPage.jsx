@@ -306,7 +306,7 @@ export default function HistoricoComandasPage() {
       // Montar dados para CSV
       const csvData = todasComandas.map(cmd => {
         const mesaLabel = cmd.mesa_id ? `Mesa ${mapMesaNumero.get(cmd.mesa_id) || '?'}` : 'Balcão';
-        const clientes = (namesByComanda[cmd.id] || []).join(', ') || 'Sem cliente';
+        const clientes = namesByComanda[cmd.id] || 'Sem cliente';
         const fins = finsByComanda[cmd.id];
         const finalizadoras = Array.isArray(fins) ? fins.join(', ') : (fins || 'Não informado');
         const statusLabel = cmd.fechado_em ? 'Fechada' : 'Aberta';

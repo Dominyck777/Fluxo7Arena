@@ -1,0 +1,143 @@
+-- =============================================
+-- FLUXO7ARENA - CRIAÇÃO COMPLETA DE EMPRESA
+-- =============================================
+-- Execute este script no Supabase SQL Editor para criar sua empresa
+-- Substitua os valores entre < > pelos seus dados reais
+
+DO $$
+DECLARE
+    v_empresa_id UUID;
+    v_codigo_empresa TEXT;
+    v_user_email TEXT := '<SEU_EMAIL_AQUI>'; -- Email que você usa no Supabase Auth
+    v_user_name TEXT := '<SEU_NOME_COMPLETO>'; -- Seu nome completo
+    v_user_role TEXT := 'admin'; -- Cargo: admin, gerente, etc
+
+    -- Dados da empresa
+    v_razao_social TEXT := '<RAZAO_SOCIAL>'; -- Ex: Empresa LTDA
+    v_nome_fantasia TEXT := '<NOME_FANTASIA>'; -- Ex: Minha Empresa
+    v_cnpj TEXT := '<CNPJ_SEM_PONTOS>'; -- Apenas números: 12345678000123
+    v_email_empresa TEXT := '<EMAIL_EMPRESA>'; -- contato@empresa.com
+    v_telefone TEXT := '<TELEFONE>'; -- (11) 99999-9999
+    v_endereco TEXT := '<ENDERECO_COMPLETO>'; -- Rua X, 123, Bairro, Cidade - UF
+
+    -- Arrays para dados opcionais (declarados sem inicialização)
+    v_quadras TEXT[];
+    v_mesas TEXT[];
+    v_categorias TEXT[];
+
+    v_uid UUID;
+    quadra_item TEXT;
+    mesa_item TEXT;
+    categoria_item TEXT;
+    mesa_numero INTEGER := 1;
+BEGIN
+    -- Validações básicas
+    IF v_razao_social = '<RAZAO_SOCIAL>' OR v_razao_social = '' THEN
+        RAISE EXCEPTION 'Defina a RAZAO_SOCIAL da empresa';
+    END IF;
+
+    IF v_nome_fantasia = '<NOME_FANTASIA>' OR v_nome_fantasia = '' THEN
+        RAISE EXCEPTION 'Defina o NOME_FANTASIA da empresa';
+    END IF;
+
+    -- Gera próximo codigo_empresa sequencial
+    SELECT COALESCE(MAX((codigo_empresa)::INT), 0) + 1
+    INTO v_codigo_empresa
+    FROM public.empresas
+    WHERE codigo_empresa ~ '^[0-9]+$';
+
+    v_codigo_empresa := v_codigo_empresa::TEXT;
+
+    RAISE NOTICE 'Criando empresa com código: %', v_codigo_empresa;
+
+    -- 1. Criar empresa
+    INSERT INTO public.empresas (
+        codigo_empresa, nome, razao_social, nome_fantasia, cnpj, email, telefone, endereco
+    ) VALUES (
+        v_codigo_empresa, v_nome_fantasia, v_razao_social, v_nome_fantasia,
+        NULLIF(v_cnpj, ''), v_email_empresa, v_telefone, v_endereco
+    )
+    RETURNING id INTO v_empresa_id;
+
+    RAISE NOTICE 'Empresa criada com ID: %', v_empresa_id;
+
+    -- 2. Criar contador da empresa
+    INSERT INTO public.empresa_counters (empresa_id, next_cliente_codigo, next_agendamento_codigo)
+    VALUES (v_empresa_id, 1, 1)
+    ON CONFLICT (empresa_id) DO NOTHING;
+
+    -- 3. Criar configurações de agenda
+    INSERT INTO public.agenda_settings (empresa_id, auto_confirm_enabled, auto_start_enabled, auto_finish_enabled)
+    VALUES (v_empresa_id, false, true, true)
+    ON CONFLICT (empresa_id) DO NOTHING;
+
+    -- 4. Criar quadras (se fornecidas)
+    IF array_length(COALESCE(v_quadras, ARRAY[]::TEXT[]), 1) > 0 THEN
+        FOREACH quadra_item IN ARRAY v_quadras
+        LOOP
+            INSERT INTO public.quadras (nome, codigo_empresa)
+            VALUES (quadra_item, v_codigo_empresa);
+        END LOOP;
+        RAISE NOTICE '% quadras criadas', array_length(v_quadras, 1);
+    END IF;
+
+    -- 5. Criar mesas (se fornecidas)
+    IF array_length(COALESCE(v_mesas, ARRAY[]::TEXT[]), 1) > 0 THEN
+        FOREACH mesa_item IN ARRAY v_mesas
+        LOOP
+            INSERT INTO public.mesas (numero, nome, codigo_empresa, status)
+            VALUES (mesa_numero, mesa_item, v_codigo_empresa, 'available');
+            mesa_numero := mesa_numero + 1;
+        END LOOP;
+        RAISE NOTICE '% mesas criadas', array_length(v_mesas, 1);
+    END IF;
+
+    -- 6. Criar categorias (se fornecidas)
+    IF array_length(COALESCE(v_categorias, ARRAY[]::TEXT[]), 1) > 0 THEN
+        FOREACH categoria_item IN ARRAY v_categorias
+        LOOP
+            INSERT INTO public.produto_categorias (nome, codigo_empresa, ativa)
+            VALUES (categoria_item, v_codigo_empresa, true);
+        END LOOP;
+        RAISE NOTICE '% categorias criadas', array_length(v_categorias, 1);
+    END IF;
+
+    -- 7. Vincular usuário existente no Auth
+    IF v_user_email != '<SEU_EMAIL_AQUI>' AND v_user_email != '' THEN
+        SELECT id INTO v_uid FROM auth.users WHERE email = v_user_email;
+
+        IF v_uid IS NOT NULL THEN
+            -- Criar usuário no sistema
+            INSERT INTO public.usuarios (id, email, nome, papel, codigo_empresa)
+            VALUES (v_uid, v_user_email, COALESCE(v_user_name, 'Administrador'), v_user_role, v_codigo_empresa)
+            ON CONFLICT (id) DO UPDATE
+            SET codigo_empresa = EXCLUDED.codigo_empresa,
+                email = EXCLUDED.email,
+                nome = COALESCE(EXCLUDED.nome, public.usuarios.nome),
+                papel = COALESCE(EXCLUDED.papel, public.usuarios.papel);
+
+            -- Criar colaborador
+            INSERT INTO public.colaboradores (id, nome, cargo, ativo, codigo_empresa)
+            VALUES (v_uid, COALESCE(v_user_name, 'Administrador'), v_user_role, true, v_codigo_empresa)
+            ON CONFLICT (id) DO NOTHING;
+
+            RAISE NOTICE 'Usuário vinculado: % (%)', v_user_name, v_user_email;
+        ELSE
+            RAISE NOTICE 'Email % não encontrado no auth.users. Execute o SQL adicional após login.', v_user_email;
+        END IF;
+    END IF;
+
+    RAISE NOTICE '================================================';
+    RAISE NOTICE '✅ EMPRESA CRIADA COM SUCESSO!';
+    RAISE NOTICE 'Código da empresa: %', v_codigo_empresa;
+    RAISE NOTICE 'ID da empresa: %', v_empresa_id;
+    RAISE NOTICE '================================================';
+
+    -- SQL adicional se necessário
+    IF v_user_email != '<SEU_EMAIL_AQUI>' AND v_user_email != '' AND v_uid IS NULL THEN
+        RAISE NOTICE '⚠️  EXECUTE APÓS LOGIN:';
+        RAISE NOTICE 'UPDATE public.colaboradores SET id = (SELECT id FROM auth.users WHERE email = ''%'') WHERE codigo_empresa = ''%'';',
+               v_user_email, v_codigo_empresa;
+    END IF;
+
+END $$;

@@ -15,7 +15,7 @@ import { Calendar } from "@/components/ui/calendar";
 import { format, parseISO } from "date-fns";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Checkbox } from '@/components/ui/checkbox';
-import { listProducts, createProduct, updateProduct, deleteProduct, listCategories, createCategory, removeCategory, getMostSoldProductsToday, getSoldProductsByPeriod, adjustProductStock } from '@/lib/products';
+import { listProducts, createProduct, updateProduct, deleteProduct, listCategories, createCategory, removeCategory, getMostSoldProductsToday, getSoldProductsByPeriod } from '@/lib/products';
 import { useAuth } from '@/contexts/AuthContext';
 import XMLImportModal from '@/components/XMLImportModal';
 
@@ -296,9 +296,7 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
   const [ncm, setNcm] = useState(product?.ncm || '');
   const [ncmDescription, setNcmDescription] = useState(product?.ncmDescription || '');
   const [cest, setCest] = useState(product?.cest || '');
-  // Ajuste de estoque (dialog)
-  const [isAdjustOpen, setIsAdjustOpen] = useState(false);
-  const [adjustDelta, setAdjustDelta] = useState('');
+  
 
   const formatCurrencyBR = (value) => {
     const digits = String(value || '').replace(/\D/g, '');
@@ -709,67 +707,22 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
 
             <TabsContent value="estoque" className="space-y-3 mt-2">
               <div className="grid grid-cols-2 gap-4">
-                <div className="grid grid-cols-3 items-center gap-2">
+                <div className="grid grid-cols-2 items-center gap-2">
                   <Label htmlFor="stock" className="text-right">Estoque</Label>
-                  <Input id="stock" value={stock} readOnly disabled className="col-span-1" />
-                  {product && (
-                    <Button type="button" variant="secondary" className="col-span-1" onClick={()=>{ setAdjustDelta(''); setIsAdjustOpen(true); }}>
-                      Ajustar
-                    </Button>
-                  )}
+                  <Input
+                    id="stock"
+                    value={stock}
+                    onChange={(e)=> setStock(e.target.value.replace(/[^0-9]/g, ''))}
+                    disabled={!editEnabled}
+                    className="col-span-1"
+                    inputMode="numeric"
+                  />
                 </div>
                 <div className="grid grid-cols-2 items-center gap-4">
                   <Label htmlFor="minStock" className="text-right">Estoque Mín.</Label>
-                  <Input id="minStock" value={minStock} onChange={(e)=>setMinStock(e.target.value.replace(/[^0-9\-]/g, ''))} disabled={!editEnabled} />
+                  <Input id="minStock" value={minStock} onChange={(e)=>setMinStock(e.target.value.replace(/[^0-9]/g, ''))} disabled={!editEnabled} inputMode="numeric" />
                 </div>
               </div>
-              {product && (
-                <Dialog open={isAdjustOpen} onOpenChange={setIsAdjustOpen}>
-                  <DialogContent className="max-w-sm" onKeyDown={(e)=>e.stopPropagation()}>
-                    <DialogHeader>
-                      <DialogTitle className="text-xl font-bold">Ajustar Estoque</DialogTitle>
-                      <DialogDescription>Informe a quantidade a ajustar. Positivo para entrada, negativo para saída.</DialogDescription>
-                    </DialogHeader>
-                    <div className="grid grid-cols-4 items-center gap-2">
-                      <Label className="text-right">Qtd</Label>
-                      <Input className="col-span-3" value={adjustDelta} onChange={(e)=> setAdjustDelta(e.target.value.replace(/[^0-9\-]/g, ''))} placeholder="Ex.: 10 ou -2" inputMode="numeric" />
-                    </div>
-                    <div className="mt-2 text-sm text-text-secondary">
-                      {(() => {
-                        const cur = Number(stock || 0);
-                        const delta = Number(adjustDelta || 0) || 0;
-                        const next = cur + delta;
-                        const sign = delta > 0 ? '+' : '';
-                        return (
-                          <div className="flex items-center justify-between p-2 rounded-md bg-surface-2 border">
-                            <span>Estoque atual: <span className="font-mono">{cur}</span></span>
-                            <span>Ajuste: <span className={`font-mono ${delta > 0 ? 'text-success' : delta < 0 ? 'text-danger' : ''}`}>{sign}{delta}</span></span>
-                            <span>Novo estoque: <span className="font-mono font-semibold">{next}</span></span>
-                          </div>
-                        );
-                      })()}
-                    </div>
-                    <DialogFooter>
-                      <DialogClose asChild>
-                        <Button type="button" variant="secondary">Cancelar</Button>
-                      </DialogClose>
-                      <Button type="button" onClick={async ()=>{
-                        try {
-                          const delta = Number(adjustDelta || 0);
-                          if (!delta) { toast({ title: 'Informe a quantidade', variant: 'warning' }); return; }
-                          const next = Number(stock || 0) + delta;
-                          await adjustProductStock({ productId: product.id, delta, codigoEmpresa: userProfile?.codigo_empresa });
-                          setStock(String(next));
-                          toast({ title: 'Estoque atualizado', description: `Novo estoque: ${next}`, variant: 'success' });
-                          setIsAdjustOpen(false);
-                        } catch (err) {
-                          toast({ title: 'Falha ao ajustar estoque', description: err?.message || 'Tente novamente', variant: 'destructive' });
-                        }
-                      }}>{`Aplicar (${Number(adjustDelta || 0) > 0 ? '+' : ''}${Number(adjustDelta || 0) || 0})`}</Button>
-                    </DialogFooter>
-                  </DialogContent>
-                </Dialog>
-              )}
             </TabsContent>
 
             <TabsContent value="preco" className="space-y-3 mt-2">

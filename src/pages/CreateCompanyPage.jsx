@@ -239,6 +239,48 @@ export default function CreateCompanyPage() {
     try {
       setLoading(true);
       
+      // 0. Tenta usar RPC no banco (preferível, bypass RLS via SECURITY DEFINER)
+      try {
+        const rpcPayload = {
+          user: {
+            email: formData.email?.trim() || null,
+            nome: formData.nomeUsuario?.trim() || null,
+            cargo: formData.cargo?.trim() || 'admin',
+          },
+          empresa: {
+            razao_social: formData.razaoSocial?.trim() || null,
+            nome_fantasia: formData.nomeFantasia?.trim() || null,
+            cnpj: formData.cnpj ? formData.cnpj.replace(/\D/g, '') : null,
+            email: formData.emailEmpresa?.trim() || null,
+            telefone: formData.telefone?.trim() || null,
+            endereco: formData.endereco?.trim() || null,
+          },
+          quadras: formData.quadras || [],
+          mesas: formData.mesas || [],
+          categorias: formData.categorias || [],
+        };
+        const { data: rpcRes, error: rpcErr } = await supabase.rpc('create_company_full', { payload: rpcPayload });
+        if (!rpcErr && rpcRes && rpcRes.codigo_empresa) {
+          // Sucesso via RPC: já retorna
+          setResultado({
+            success: true,
+            codigoEmpresa: rpcRes.codigo_empresa,
+            email: formData.email,
+            nomeEmpresa: formData.nomeFantasia,
+            numQuadras: (formData.quadras || []).length,
+            numMesas: (formData.mesas || []).length,
+            numCategorias: (formData.categorias || []).length,
+          });
+          setStep(6);
+          toast({ title: '🎉 Empresa criada com sucesso!', description: `Código: ${rpcRes.codigo_empresa}` });
+          return;
+        } else if (rpcErr) {
+          console.warn('RPC create_company_full indisponível/erro. Usando fluxo local.', rpcErr?.message || rpcErr);
+        }
+      } catch (e) {
+        console.warn('Falha ao tentar RPC create_company_full. Usando fluxo local.', e?.message || e);
+      }
+      
       // 1. Buscar usuário pelo email (se fornecido)
       // Nota: Como não temos acesso à Admin API, vamos buscar pelo email diretamente
       let userId = null;
@@ -351,13 +393,17 @@ WHERE codigo_empresa = '${codigoEmpresa}' AND id = '${tempId}';
         }
       }
       
-      // 6. Criar agenda_settings
-      await supabase.from('agenda_settings').insert({
-        empresa_id: empresa.id,
-        auto_confirm_enabled: false,
-        auto_start_enabled: true,
-        auto_finish_enabled: true,
-      });
+      // 6. Criar agenda_settings (tentar, mas não falhar se a RLS bloquear)
+      try {
+        await supabase.from('agenda_settings').insert({
+          empresa_id: empresa.id,
+          auto_confirm_enabled: false,
+          auto_start_enabled: true,
+          auto_finish_enabled: true,
+        });
+      } catch (e) {
+        console.warn('Aviso: não foi possível criar agenda_settings agora (provável RLS). Será configurado após o primeiro login.', e?.message || e);
+      }
       
       // 7. Finalizadoras removidas - usuário cria após login
       
