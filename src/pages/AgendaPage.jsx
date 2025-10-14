@@ -377,12 +377,6 @@ function AgendaPage() {
   const [automation, setAutomation] = useState(defaultAutomation);
   const [savedAutomation, setSavedAutomation] = useState(defaultAutomation); // Último estado salvo no banco
   const [savingSettings, setSavingSettings] = useState(false);
-  const automationRef = useRef(automation); // ✅ Ref para capturar valor atual sem causar re-render
-  
-  // Atualiza ref sempre que automation mudar
-  useEffect(() => {
-    automationRef.current = automation;
-  }, [automation]);
   // Offset de horário do servidor (Brasília) em relação ao relógio local do dispositivo, em ms
   const [serverOffsetMs, setServerOffsetMs] = useState(0);
   // Função utilitária para obter o "agora" corrigido por offset (Brasília)
@@ -394,14 +388,13 @@ function AgendaPage() {
 
   // Carregar do banco (agenda_settings) quando empresa estiver disponível
   useEffect(() => {
-    // ✅ GUARD CLAUSE - Só executa se tiver dados prontos (igual AlertsProvider linha 164)
-    if (!authReady || !company?.id) {
-      console.warn('[AgendaSettings][LOAD] Aguardando autenticação...', { authReady, company_id: company?.id });
-      return;
-    }
-    
     const loadSettings = async () => {
       console.log('[AgendaSettings][LOAD] Iniciando carregamento...', { authReady, company_id: company?.id });
+      
+      if (!authReady || !company?.id) {
+        console.warn('[AgendaSettings][LOAD] Aguardando autenticação...');
+        return;
+      }
       
       try {
         const { data, error } = await supabase
@@ -445,9 +438,8 @@ function AgendaPage() {
         console.warn('[AgendaSettings] unexpected load error', e);
       }
     };
-    
     loadSettings();
-  }, [authReady, company?.id]); // ✅ Só executa quando authReady e company.id mudarem
+  }, [authReady, company?.id]);
 
   // Sincroniza periodicamente o horário de Brasília usando Supabase Edge Function (time-br)
   useEffect(() => {
@@ -510,34 +502,34 @@ function AgendaPage() {
   // guarda mudanças locais recentes de status, para que um fetch logo em seguida não volte o status antigo
   const recentStatusUpdatesRef = useRef(new Map()); // id -> { status, ts }
 
-  // Salvar no banco (upsert) - Padrão Guard Clause (baseado em AlertsProvider)
-  const handleSaveSettings = useCallback(async () => {
+  // Salvar no banco (upsert)
+  const handleSaveSettings = async () => {
     console.log('🔥🔥🔥 [AgendaSettings][SAVE] FUNÇÃO CHAMADA! 🔥🔥🔥');
-    
-    // ✅ GUARD CLAUSE - Para se não tiver dados (igual AlertsProvider linha 17)
-    if (!authReady || !company?.id) {
-      console.warn('[AgendaSettings][SAVE] Aguardando autenticação...', { authReady, company_id: company?.id });
-      toast({ title: 'Aguarde', description: 'Carregando dados da empresa...', variant: 'default' });
-      return;
-    }
-    
-    // ✅ Captura valor atual do automation via ref (evita dependência no useCallback)
-    const currentAutomation = automationRef.current;
-    
-    console.log('[AgendaSettings][SAVE] ✅ Autenticado! Preparando payload...');
-    console.log('[AgendaSettings][SAVE] company:', company);
-    console.log('[AgendaSettings][SAVE] automation:', currentAutomation);
+    console.log('[AgendaSettings][SAVE] Linha 509 - Antes do try');
     
     try {
+      console.log('[AgendaSettings][SAVE] Linha 511 - Dentro do try');
+      console.log('[AgendaSettings][SAVE] authReady:', authReady);
+      console.log('[AgendaSettings][SAVE] company:', company);
+      
+      if (!authReady || !company?.id) {
+        console.error('[AgendaSettings][SAVE] ERRO: Não autenticado', { authReady, company });
+        toast({ title: 'Não autenticado', description: 'Faça login para salvar as configurações.', variant: 'destructive' });
+        return;
+      }
+      
+      console.log('[AgendaSettings][SAVE] ✅ Autenticado! Preparando payload...');
+      console.log('[AgendaSettings][SAVE] automation atual:', automation);
+      
       setSavingSettings(true);
       const payload = {
         empresa_id: company.id,
-        auto_confirm_enabled: !!currentAutomation.autoConfirmEnabled,
-        auto_confirm_hours: !!currentAutomation.autoConfirmEnabled
-          ? Math.max(0, Math.round(Number(currentAutomation.autoConfirmMinutesBefore || 0) / 60))
+        auto_confirm_enabled: !!automation.autoConfirmEnabled,
+        auto_confirm_hours: !!automation.autoConfirmEnabled
+          ? Math.max(0, Math.round(Number(automation.autoConfirmMinutesBefore || 0) / 60))
           : null,
-        auto_start_enabled: !!currentAutomation.autoStartEnabled,
-        auto_finish_enabled: !!currentAutomation.autoFinishEnabled,
+        auto_start_enabled: !!automation.autoStartEnabled,
+        auto_finish_enabled: !!automation.autoFinishEnabled,
       };
       
       console.log('[AgendaSettings][SAVE] Payload preparado:', payload);
@@ -560,8 +552,8 @@ function AgendaPage() {
         console.log('[AgendaSettings][SAVE] ✅ Dados salvos com sucesso:', data[0]);
       }
       
-      setSavedAutomation(currentAutomation); // Atualizar último estado salvo
-      console.log('[AgendaSettings][SAVE] ✅ savedAutomation atualizado:', currentAutomation);
+      setSavedAutomation(automation); // Atualizar último estado salvo
+      console.log('[AgendaSettings][SAVE] ✅ savedAutomation atualizado:', automation);
       
       toast({ title: 'Configurações salvas', description: 'As automações da agenda foram atualizadas com sucesso.' });
       setIsSettingsOpen(false);
@@ -577,7 +569,7 @@ function AgendaPage() {
       console.log('[AgendaSettings][SAVE] Finally executado');
       setSavingSettings(false);
     }
-  }, [authReady, company]); // ✅ Dependências sem automation (usa ref para capturar valor atual)
+  };
 
   // Atualiza status no banco e estados locais
   // source: 'user' | 'automation'
