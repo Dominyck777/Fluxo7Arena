@@ -392,22 +392,23 @@ function AgendaPage() {
   // Carrega regras salvas do banco quando empresa está disponível
   // Removido: localStorage auto-save para evitar persistência sem clicar em Salvar
 
-  // Carregar do banco (agenda_settings) quando empresa estiver disponível - Padrão Guard Clause
-  const loadSettings = useCallback(async () => {
-    console.log('[AgendaSettings][LOAD] Iniciando carregamento...', { authReady, company_id: company?.id });
-    
-    // ✅ GUARD CLAUSE - Para se não tiver dados (igual AlertsProvider linha 17)
+  // Carregar do banco (agenda_settings) quando empresa estiver disponível
+  useEffect(() => {
+    // ✅ GUARD CLAUSE - Só executa se tiver dados prontos (igual AlertsProvider linha 164)
     if (!authReady || !company?.id) {
-      console.warn('[AgendaSettings][LOAD] Aguardando autenticação...');
+      console.warn('[AgendaSettings][LOAD] Aguardando autenticação...', { authReady, company_id: company?.id });
       return;
     }
     
-    try {
-      const { data, error } = await supabase
-        .from('agenda_settings')
-        .select('*')
-        .eq('empresa_id', company.id)
-        .maybeSingle();
+    const loadSettings = async () => {
+      console.log('[AgendaSettings][LOAD] Iniciando carregamento...', { authReady, company_id: company?.id });
+      
+      try {
+        const { data, error } = await supabase
+          .from('agenda_settings')
+          .select('*')
+          .eq('empresa_id', company.id)
+          .maybeSingle();
         
         console.log('[AgendaSettings][LOAD] Resultado da query:', { data, error });
         
@@ -440,17 +441,13 @@ function AgendaPage() {
         setSavedAutomation(next); // Guardar como último estado salvo
         
         console.log('[AgendaSettings][LOAD] ✅ Estados atualizados com sucesso!');
-    } catch (e) {
-      console.warn('[AgendaSettings] unexpected load error', e);
-    }
-  }, [authReady, company]); // ✅ Dependências corretas (igual AlertsProvider linha 160)
-
-  // ✅ useEffect que executa loadSettings quando dados estiverem prontos (igual AlertsProvider linha 164)
-  useEffect(() => {
-    if (authReady && company?.id) {
-      loadSettings();
-    }
-  }, [authReady, company?.id, loadSettings]);
+      } catch (e) {
+        console.warn('[AgendaSettings] unexpected load error', e);
+      }
+    };
+    
+    loadSettings();
+  }, [authReady, company?.id]); // ✅ Só executa quando authReady e company.id mudarem
 
   // Sincroniza periodicamente o horário de Brasília usando Supabase Edge Function (time-br)
   useEffect(() => {
