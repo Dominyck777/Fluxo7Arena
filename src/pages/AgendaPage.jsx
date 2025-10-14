@@ -505,14 +505,19 @@ function AgendaPage() {
   // Salvar no banco (upsert)
   const handleSaveSettings = useCallback(async () => {
     console.log('🔥🔥🔥 [AgendaSettings][SAVE] FUNÇÃO CHAMADA! 🔥🔥🔥');
-    console.log('[AgendaSettings][SAVE] Iniciando salvamento...', { authReady, company_id: company?.id });
     
-    if (!authReady || !company?.id) {
-      console.error('[AgendaSettings][SAVE] ERRO: Não autenticado', { authReady, company });
-      toast({ title: 'Não autenticado', description: 'Faça login para salvar as configurações.', variant: 'destructive' });
-      return;
-    }
     try {
+      console.log('[AgendaSettings][SAVE] authReady:', authReady);
+      console.log('[AgendaSettings][SAVE] company:', company);
+      
+      if (!authReady || !company?.id) {
+        console.error('[AgendaSettings][SAVE] ERRO: Não autenticado', { authReady, company });
+        toast({ title: 'Não autenticado', description: 'Faça login para salvar as configurações.', variant: 'destructive' });
+        return;
+      }
+      
+      console.log('[AgendaSettings][SAVE] ✅ Autenticado! Preparando payload...');
+      
       setSavingSettings(true);
       const payload = {
         empresa_id: company.id,
