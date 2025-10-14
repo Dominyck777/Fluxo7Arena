@@ -415,6 +415,9 @@ function AgendaPage() {
           console.warn('[AgendaSettings][LOAD] Nenhum registro encontrado (ainda não criado)');
           return; // ainda não criado -> mantém defaults/local cache
         }
+        
+        console.log('[AgendaSettings][LOAD] ✅ Registro encontrado:', data);
+        
         // Mapear colunas (horas -> minutos)
         const next = {
           autoConfirmEnabled: !!data.auto_confirm_enabled,
@@ -424,8 +427,13 @@ function AgendaPage() {
           autoStartEnabled: !!data.auto_start_enabled,
           autoFinishEnabled: !!data.auto_finish_enabled,
         };
+        
+        console.log('[AgendaSettings][LOAD] ✅ Estado mapeado:', next);
+        
         setAutomation((prev) => ({ ...prev, ...next }));
         setSavedAutomation(next); // Guardar como último estado salvo
+        
+        console.log('[AgendaSettings][LOAD] ✅ Estados atualizados com sucesso!');
       } catch (e) {
         console.warn('[AgendaSettings] unexpected load error', e);
       }
@@ -524,10 +532,24 @@ function AgendaPage() {
       
       console.log('[AgendaSettings][SAVE] Resultado do upsert:', { data, error });
       
-      if (error) throw error;
+      if (error) {
+        console.error('[AgendaSettings][SAVE] ❌ ERRO no upsert:', error);
+        throw error;
+      }
+      
+      if (!data || data.length === 0) {
+        console.error('[AgendaSettings][SAVE] ❌ AVISO: Upsert não retornou dados!');
+      } else {
+        console.log('[AgendaSettings][SAVE] ✅ Dados salvos com sucesso:', data[0]);
+      }
+      
       setSavedAutomation(automation); // Atualizar último estado salvo
+      console.log('[AgendaSettings][SAVE] ✅ savedAutomation atualizado:', automation);
+      
       toast({ title: 'Configurações salvas', description: 'As automações da agenda foram atualizadas com sucesso.' });
       setIsSettingsOpen(false);
+      
+      console.log('[AgendaSettings][SAVE] ✅ Salvamento concluído!');
     } catch (e) {
       console.error('[AgendaSettings] save error', e);
       const message = e?.message || 'Falha ao salvar as configurações.';
