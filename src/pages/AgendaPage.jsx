@@ -504,9 +504,8 @@ function AgendaPage() {
 
   // Salvar no banco (upsert)
   const handleSaveSettings = async () => {
-    console.log('🔥🔥🔥 [AgendaSettings][SAVE] FUNÇÃO CHAMADA! 🔥🔥🔥');
-    
     try {
+      console.log('🔥🔥🔥 [AgendaSettings][SAVE] FUNÇÃO CHAMADA! 🔥🔥🔥');
       console.log('[AgendaSettings][SAVE] authReady:', authReady);
       console.log('[AgendaSettings][SAVE] company:', company);
       
@@ -558,10 +557,13 @@ function AgendaPage() {
       
       console.log('[AgendaSettings][SAVE] ✅ Salvamento concluído!');
     } catch (e) {
-      console.error('[AgendaSettings] save error', e);
+      console.error('❌❌❌ [AgendaSettings][SAVE] ERRO CAPTURADO:', e);
+      console.error('[AgendaSettings][SAVE] Stack:', e?.stack);
+      console.error('[AgendaSettings][SAVE] Message:', e?.message);
       const message = e?.message || 'Falha ao salvar as configurações.';
       toast({ title: 'Erro ao salvar', description: message, variant: 'destructive' });
     } finally {
+      console.log('[AgendaSettings][SAVE] Finally executado');
       setSavingSettings(false);
     }
   };
