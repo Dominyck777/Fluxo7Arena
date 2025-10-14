@@ -1,9 +1,23 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
+import { useLocation } from 'react-router-dom';
 import LoginPage from '@/pages/LoginPage';
 
 const ProtectedRoute = ({ children }) => {
   const { user, authReady } = useAuth();
+  const location = useLocation();
+
+  // Salvar a rota atual quando o usuário não estiver autenticado
+  useEffect(() => {
+    if (authReady && !user && location.pathname !== '/login') {
+      try {
+        sessionStorage.setItem('auth:returnUrl', location.pathname + location.search);
+        console.log('[ProtectedRoute] Salvando rota de retorno:', location.pathname + location.search);
+      } catch (e) {
+        console.warn('[ProtectedRoute] Erro ao salvar rota de retorno:', e);
+      }
+    }
+  }, [authReady, user, location.pathname, location.search]);
 
   if (!authReady) {
     return (

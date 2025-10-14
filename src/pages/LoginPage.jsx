@@ -49,11 +49,15 @@ const LoginPage = () => {
   const { signIn, user, authReady } = useAuth();
   const { toast } = useToast();
 
-  // Se já estiver autenticado, redireciona para a página principal
+  // Se já estiver autenticado, redireciona para a página original ou principal
   useEffect(() => {
     if (authReady && user) {
       try {
-        window.location.replace('/');
+        const returnUrl = sessionStorage.getItem('auth:returnUrl');
+        sessionStorage.removeItem('auth:returnUrl');
+        const targetUrl = returnUrl || '/';
+        console.log('[LoginPage] Redirecionando para:', targetUrl);
+        window.location.replace(targetUrl);
       } catch {}
     }
   }, [authReady, !!user]);
@@ -83,9 +87,13 @@ const LoginPage = () => {
         variant: 'default',
       });
 
-      // Redireciona imediatamente após sucesso
+      // Redireciona para a rota original ou página principal
       try {
-        window.location.replace('/');
+        const returnUrl = sessionStorage.getItem('auth:returnUrl');
+        sessionStorage.removeItem('auth:returnUrl');
+        const targetUrl = returnUrl || '/';
+        console.log('[LoginPage] Redirecionando após login para:', targetUrl);
+        window.location.replace(targetUrl);
       } catch {}
 
     } catch (error) {
