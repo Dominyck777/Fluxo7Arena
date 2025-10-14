@@ -389,19 +389,32 @@ function AgendaPage() {
   // Carregar do banco (agenda_settings) quando empresa estiver disponível
   useEffect(() => {
     const loadSettings = async () => {
-      if (!authReady || !company?.id) return;
+      console.log('[AgendaSettings][LOAD] Iniciando carregamento...', { authReady, company_id: company?.id });
+      
+      if (!authReady || !company?.id) {
+        console.warn('[AgendaSettings][LOAD] Aguardando autenticação...');
+        return;
+      }
+      
       try {
         const { data, error } = await supabase
           .from('agenda_settings')
           .select('*')
           .eq('empresa_id', company.id)
           .maybeSingle();
+        
+        console.log('[AgendaSettings][LOAD] Resultado da query:', { data, error });
+        
         if (error) {
           // não quebra UX; mantém localStorage/defaults
-          console.warn('[AgendaSettings] load error', error);
+          console.error('[AgendaSettings][LOAD] ERRO ao carregar:', error);
           return;
         }
-        if (!data) return; // ainda não criado -> mantém defaults/local cache
+        
+        if (!data) {
+          console.warn('[AgendaSettings][LOAD] Nenhum registro encontrado (ainda não criado)');
+          return; // ainda não criado -> mantém defaults/local cache
+        }
         // Mapear colunas (horas -> minutos)
         const next = {
           autoConfirmEnabled: !!data.auto_confirm_enabled,
@@ -483,7 +496,10 @@ function AgendaPage() {
 
   // Salvar no banco (upsert)
   const handleSaveSettings = useCallback(async () => {
+    console.log('[AgendaSettings][SAVE] Iniciando salvamento...', { authReady, company_id: company?.id });
+    
     if (!authReady || !company?.id) {
+      console.error('[AgendaSettings][SAVE] ERRO: Não autenticado', { authReady, company });
       toast({ title: 'Não autenticado', description: 'Faça login para salvar as configurações.', variant: 'destructive' });
       return;
     }
@@ -498,9 +514,16 @@ function AgendaPage() {
         auto_start_enabled: !!automation.autoStartEnabled,
         auto_finish_enabled: !!automation.autoFinishEnabled,
       };
-      const { error } = await supabase
+      
+      console.log('[AgendaSettings][SAVE] Payload preparado:', payload);
+      
+      const { data, error } = await supabase
         .from('agenda_settings')
-        .upsert(payload, { onConflict: 'empresa_id' });
+        .upsert(payload, { onConflict: 'empresa_id' })
+        .select();
+      
+      console.log('[AgendaSettings][SAVE] Resultado do upsert:', { data, error });
+      
       if (error) throw error;
       setSavedAutomation(automation); // Atualizar último estado salvo
       toast({ title: 'Configurações salvas', description: 'As automações da agenda foram atualizadas com sucesso.' });
@@ -1104,14 +1127,25 @@ function AgendaPage() {
         try { dbg('Realtime:debounced fetchBookings fire'); pulseLog('rt:debounced:fire'); setUiBusy(1200); fetchBookings(); } catch {}
       }, 400);
     };
-    const channel = supabase
-      .channel(`agendamentos:${userProfile.codigo_empresa}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'agendamentos', filter: `codigo_empresa=eq.${userProfile.codigo_empresa}` }, onChange)
-      .subscribe((status) => { try { console.debug('[Realtime] channel status', status); } catch {}; try { setRealtimeStatus(String(status || 'unknown')); } catch {} });
+    // 🔴 REAL-TIME DESABILITADO - Plano gratuito Supabase limita a 2 conexões simultâneas
+    // Para reabilitar: remova os comentários abaixo
+    // const channel = supabase
+    //   .channel(`agendamentos:${userProfile.codigo_empresa}`)
+    //   .on('postgres_changes', { event: '*', schema: 'public', table: 'agendamentos', filter: `codigo_empresa=eq.${userProfile.codigo_empresa}` }, onChange)
+    //   .subscribe((status) => { try { console.debug('[Realtime] channel status', status); } catch {}; try { setRealtimeStatus(String(status || 'unknown')); } catch {} });
+    
+    // ✅ POLLING: Recarrega agendamentos a cada 30 segundos
+    const pollingInterval = setInterval(() => {
+      if (!modalOpenRef.current) {
+        fetchBookings();
+      }
+    }, 30000); // 30 segundos
+    
     return () => {
       try { if (realtimeDebounceRef.current) clearTimeout(realtimeDebounceRef.current); } catch {}
-      try { supabase.removeChannel(channel); } catch {}
-      try { setRealtimeStatus('unsubscribed'); } catch {}
+      // try { supabase.removeChannel(channel); } catch {}
+      try { clearInterval(pollingInterval); } catch {}
+      try { setRealtimeStatus('polling'); } catch {}
     };
   }, [authReady, userProfile?.codigo_empresa, currentDate, fetchBookings]);
 
