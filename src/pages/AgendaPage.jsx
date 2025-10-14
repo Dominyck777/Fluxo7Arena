@@ -504,6 +504,7 @@ function AgendaPage() {
 
   // Salvar no banco (upsert)
   const handleSaveSettings = useCallback(async () => {
+    console.log('🔥🔥🔥 [AgendaSettings][SAVE] FUNÇÃO CHAMADA! 🔥🔥🔥');
     console.log('[AgendaSettings][SAVE] Iniciando salvamento...', { authReady, company_id: company?.id });
     
     if (!authReady || !company?.id) {
@@ -5281,7 +5282,15 @@ function AgendaPage() {
               <Button type="button" variant="ghost" className="border border-white/10" onClick={() => setIsSettingsOpen(false)}>
                 Cancelar
               </Button>
-              <Button type="button" variant="default" onClick={handleSaveSettings} disabled={savingSettings}>
+              <Button 
+                type="button" 
+                variant="default" 
+                onClick={() => {
+                  console.log('🚀 BOTÃO SALVAR CLICADO!');
+                  handleSaveSettings();
+                }} 
+                disabled={savingSettings}
+              >
                 {savingSettings ? 'Salvando…' : 'Salvar'}
               </Button>
             </DialogFooter>
