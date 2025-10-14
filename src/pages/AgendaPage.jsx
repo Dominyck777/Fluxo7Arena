@@ -575,7 +575,7 @@ function AgendaPage() {
       console.log('[AgendaSettings][SAVE] Finally executado');
       setSavingSettings(false);
     }
-  }, [authReady, company, automation]); // ✅ Dependências corretas (igual AlertsProvider linha 160)
+  }, [authReady, company]); // ✅ Dependências sem automation (usa ref para capturar valor atual)
 
   // Atualiza status no banco e estados locais
   // source: 'user' | 'automation'
