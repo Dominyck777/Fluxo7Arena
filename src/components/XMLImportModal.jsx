@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
 import { Upload, FileText, CheckCircle, AlertCircle, Loader2, Plus, RefreshCw, Copy } from 'lucide-react';
 import { parseNFeXML, findExistingProduct, convertXMLProductToSystemFormat } from '@/lib/xmlParser';
-import { createProduct, adjustProductStock, listProducts } from '@/lib/products';
+import { createProduct, adjustProductStock, listProducts, updateProduct } from '@/lib/products';
 import { cn } from '@/lib/utils';
 
 export default function XMLImportModal({ open, onOpenChange, products, codigoEmpresa, onSuccess }) {
@@ -88,6 +88,15 @@ export default function XMLImportModal({ open, onOpenChange, products, codigoEmp
         if (item.isNew) {
           // Criar produto novo
           const productData = convertXMLProductToSystemFormat(item.xml, codigoEmpresa);
+          // Garantir que o valor_venda (price) também seja preenchido, além de preco_venda (salePrice)
+          if (productData.salePrice != null && productData.price == null) {
+            productData.price = productData.salePrice;
+          }
+          // Definir estoque inicial diretamente no insert para refletir imediatamente
+          const qtyXml = Number(item.xml.quantidade) || 0;
+          productData.stock = qtyXml;
+          productData.initialStock = qtyXml;
+          productData.currentStock = qtyXml;
           // Garantir marcação/metadata de XML e categoria
           productData.importedViaXML = true;
           productData.category = 'Importados';
@@ -99,7 +108,8 @@ export default function XMLImportModal({ open, onOpenChange, products, codigoEmp
           }
           
           try {
-            await createProduct(productData);
+            // Importante: garantir codigo_empresa no insert (RLS) e refletir preço/estoque imediato
+            await createProduct(productData, { codigoEmpresa });
             results.created++;
             results.details.push({ produto: item.xml.nome, acao: 'Criado', status: 'success' });
           } catch (createError) {
@@ -136,17 +146,27 @@ export default function XMLImportModal({ open, onOpenChange, products, codigoEmp
             }
           }
         } else {
-          // Atualizar estoque do produto existente
-          if (Number(item.xml.quantidade) > 0) {
+          // Atualizar estoque do produto existente e garantir preço se estiver zerado
+          const qty = Number(item.xml.quantidade) || 0;
+          if (qty > 0) {
             await adjustProductStock({
               productId: item.existing.id,
-              delta: Number(item.xml.quantidade) || 0,
+              delta: qty,
               codigoEmpresa
             });
           }
-          
+          // Se o produto existente está com preço 0 e o XML traz valor unitário, ajustar preço de venda
+          const xmlUnit = Number(item.xml.valorUnitario) || 0;
+          const currentPrice = Number(item.existing.price ?? item.existing.salePrice ?? 0);
+          if (xmlUnit > 0 && currentPrice === 0) {
+            try {
+              await updateProduct(item.existing.id, { salePrice: xmlUnit, price: xmlUnit });
+            } catch (e) {
+              console.warn('[XMLImport] Falha ao ajustar preço do produto existente', e);
+            }
+          }
           results.updated++;
-          results.details.push({ produto: item.xml.nome, acao: 'Estoque atualizado', status: 'success' });
+          results.details.push({ produto: item.xml.nome, acao: qty > 0 ? 'Estoque atualizado' : 'Verificado', status: 'success' });
         }
       } catch (error) {
         console.error('[XMLImport] Erro ao processar produto:', item.xml.nome, error);

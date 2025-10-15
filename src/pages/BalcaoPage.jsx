@@ -56,6 +56,21 @@ export default function BalcaoPage() {
   // Product picker (mobile): abre um seletor de produtos em modal em vez de listar na tela
   const [isProductPickerOpen, setIsProductPickerOpen] = useState(false);
   const [pickerSearch, setPickerSearch] = useState('');
+  // Alerta compacto no mobile (banner inferior)
+  const [mobileWarnOpen, setMobileWarnOpen] = useState(false);
+  const [mobileWarnMsg, setMobileWarnMsg] = useState('');
+  // Flag de viewport mobile
+  const [isMobileView, setIsMobileView] = useState(() => {
+    try { return typeof window !== 'undefined' && window.innerWidth <= 640; } catch { return false; }
+  });
+  useEffect(() => {
+    const update = () => {
+      try { setIsMobileView(typeof window !== 'undefined' && window.innerWidth <= 640); } catch { setIsMobileView(false); }
+    };
+    update();
+    window.addEventListener('resize', update);
+    return () => window.removeEventListener('resize', update);
+  }, []);
 
   // Cliente
   const [clientMode, setClientMode] = useState('cadastrado'); // fixo: apenas 'cadastrado'
@@ -437,28 +452,22 @@ export default function BalcaoPage() {
               try {
                 try {
                   const abertas = await listarComandasAbertas({ codigoEmpresa: userProfile?.codigo_empresa });
-                  let abertasComItens = [];
+                  // Nova regra: bloquear se houver QUALQUER comanda aberta
                   if (Array.isArray(abertas) && abertas.length > 0) {
-                    try {
-                      const results = await Promise.all(abertas.map(async (c) => {
-                        try {
-                          const itens = await listarItensDaComanda({ comandaId: c?.id, codigoEmpresa: userProfile?.codigo_empresa });
-                          const temItens = (itens || []).some(it => Number(it?.quantidade || 0) > 0);
-                          return temItens ? c : null;
-                        } catch { return c; }
-                      }));
-                      abertasComItens = results.filter(Boolean);
-                    } catch { abertasComItens = abertas; }
-                  }
-                  if (abertasComItens.length > 0) {
-                    const isMobile = typeof window !== 'undefined' && window.innerWidth <= 640;
-                    if (isMobile) {
+                    if (isMobileView) {
                       setShowMobileWarn(true);
-                      setTimeout(() => setShowMobileWarn(false), 1500);
+                      setMobileWarnMsg(`Existem ${abertas.length} comandas abertas. Feche todas antes de encerrar o caixa.`);
+                      // Mostra no próximo frame para evitar overlay
+                      if (typeof requestAnimationFrame === 'function') {
+                        requestAnimationFrame(() => setMobileWarnOpen(true));
+                      } else {
+                        setMobileWarnOpen(true);
+                      }
+                      setTimeout(() => setMobileWarnOpen(false), 2600);
                     } else {
                       toast({
                         title: 'Fechamento bloqueado',
-                        description: `Existem ${abertasComItens.length} comandas com itens em aberto. Finalize-as antes de fechar o caixa.`,
+                        description: `Existem ${abertas.length} comandas abertas. Feche todas antes de encerrar o caixa.`,
                         variant: 'warning',
                         duration: 2500,
                       });
@@ -470,7 +479,18 @@ export default function BalcaoPage() {
                 setIsCashierOpen(false);
                 toast({ title: 'Caixa fechado!', description: 'O relatório de fechamento foi gerado.', variant: 'success' });
               } catch (e) {
-                toast({ title: 'Falha ao fechar caixa', description: e?.message || 'Tente novamente', variant: 'destructive' });
+                const msg = e?.message || 'Tente novamente';
+                if (isMobileView) {
+                  setMobileWarnMsg(msg.includes('Existem') ? msg : `Falha ao fechar caixa: ${msg}`);
+                  if (typeof requestAnimationFrame === 'function') {
+                    requestAnimationFrame(() => setMobileWarnOpen(true));
+                  } else {
+                    setMobileWarnOpen(true);
+                  }
+                  setTimeout(() => setMobileWarnOpen(false), 2600);
+                } else {
+                  toast({ title: 'Falha ao fechar caixa', description: msg, variant: 'destructive' });
+                }
               }
             }}>Confirmar Fechamento</AlertDialogAction>
           </AlertDialogFooter>
@@ -1893,6 +1913,18 @@ export default function BalcaoPage() {
           )}
         </DialogContent>
       </Dialog>
+      {/* Mobile warning banner */}
+      {mobileWarnOpen && (
+        <div className="fixed left-3 right-3 z-[9999] md:hidden" role="alert" aria-live="assertive" style={{ bottom: 'calc(12px + env(safe-area-inset-bottom, 0px))' }}>
+          <div className="pointer-events-none flex items-start gap-2 rounded-md border border-amber-500 bg-amber-400 text-black px-3 py-2 shadow-lg">
+            <AlertCircle className="h-4 w-4 mt-0.5" aria-hidden="true" />
+            <div className="text-sm font-semibold leading-snug drop-shadow-[0_1px_0_rgba(255,255,255,0.25)]">{mobileWarnMsg || 'Atenção'}</div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+
+// Banner de aviso mobile fixo
+// Renderizar após o componente principal para ficar acima do conteúdo

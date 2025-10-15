@@ -667,11 +667,23 @@ export async function getOrCreateMesaBalcao({ codigoEmpresa } = {}) {
 export async function ensureCaixaAberto({ saldoInicial = 0, codigoEmpresa } = {}) {
   const codigo = codigoEmpresa || getCachedCompanyCode()
   // 1) Verificar se já existe sessão aberta
-  let q = supabase.from('caixa_sessoes').select('id,status,aberto_em').eq('status', 'open').order('aberto_em', { ascending: false }).limit(1)
+  let q = supabase.from('caixa_sessoes').select('id,status,aberto_em,saldo_inicial').eq('status', 'open').order('aberto_em', { ascending: false }).limit(1)
   if (codigo) q = q.eq('codigo_empresa', codigo)
   const { data: abertas, error: errOpen } = await q
   if (errOpen) throw errOpen
-  if (abertas && abertas.length > 0) return abertas[0]
+  if (abertas && abertas.length > 0) {
+    const sess = abertas[0]
+    // Se a sessão aberta está sem saldo_inicial definido, aplicar o saldoInicial informado (idempotente)
+    try {
+      if ((sess?.saldo_inicial == null) && (saldoInicial != null)) {
+        let uq = supabase.from('caixa_sessoes').update({ saldo_inicial: Number(saldoInicial) || 0 }).eq('id', sess.id)
+        if (codigo) uq = uq.eq('codigo_empresa', codigo)
+        await uq
+        return { ...sess, saldo_inicial: Number(saldoInicial) || 0 }
+      }
+    } catch {}
+    return sess
+  }
 
   // 2) Abrir nova
   const payload = { status: 'open', saldo_inicial: saldoInicial }
@@ -748,27 +760,24 @@ export async function fecharCaixa({ saldoFinal = null, codigoEmpresa } = {}) {
     }
 
     // 2) Recarregar a lista e bloquear somente se ainda restarem abertas com itens
-    abertas = await listarComandasAbertas({ codigoEmpresa: codigo })
+    // Retry mais robusto para consistência eventual
+    let attempts = 0
+    while (attempts < 5) {
+      abertas = await listarComandasAbertas({ codigoEmpresa: codigo })
+      if (!abertas || abertas.length === 0) break
+      await new Promise(r => setTimeout(r, 180))
+      attempts++
+    }
     if (abertas && abertas.length > 0) {
-      // Verificar se são todas balcão vazias (fallback super seguro): se alguma tiver item, bloqueia
-      let restantesComItens = 0
-      for (const c of abertas) {
-        try {
-          const itens = await listarItensDaComanda({ comandaId: c.id, codigoEmpresa: codigo })
-          if ((itens || []).length > 0) restantesComItens++
-        } catch {
-          // assumimos que possui itens para evitar fechar indevido
-          restantesComItens++
-        }
-      }
-      if (restantesComItens > 0) {
-        throw new Error(`Existem ${restantesComItens} comandas com itens em aberto. Finalize-as antes de fechar o caixa.`)
-      }
+      // Nova regra: BLOQUEAR se houver QUALQUER comanda aberta (com ou sem itens)
+      throw new Error(`Existem ${abertas.length} comandas abertas. Feche todas antes de encerrar o caixa.`)
     }
   } catch (chkErr) {
-    // Se a verificação de abertas falhar por erro de rede, segue para evitar bloqueios falsos
-    // Porém, se for nosso erro de regra (mensagem acima), propaga
+    // Qualquer incerteza deve BLOQUEAR o fechamento para segurança
     if (chkErr && /Existem \d+ comandas/.test(chkErr.message || '')) throw chkErr
+    const err = new Error('Falha ao validar comandas abertas. Tente novamente e verifique sua conexão.')
+    err.code = 'CASH_CLOSE_VALIDATION_FAILED'
+    throw err
   }
   // pegar sessão aberta (precisamos do id, aberto_em e saldo_inicial)
   let q = supabase.from('caixa_sessoes').select('id,aberto_em,saldo_inicial').eq('status','open').order('aberto_em', { ascending: false }).limit(1)
@@ -808,36 +817,93 @@ export async function fecharCaixa({ saldoFinal = null, codigoEmpresa } = {}) {
     ? Number(saldoFinal)
     : (saldoInicialSessao + totalEntradas + totalMovimentos)
 
-  // Fechar sessão agora com saldo_final definido
-  const { data, error } = await supabase
+  // Double-check imediatamente antes de fechar: se apareceram comandas abertas entre a validação e este ponto, bloqueia
+  try {
+    const abertasFinal = await listarComandasAbertas({ codigoEmpresa: codigo })
+    if (abertasFinal && abertasFinal.length > 0) {
+      throw new Error('Existem comandas abertas. Feche todas antes de encerrar o caixa.')
+    }
+  } catch (e) {
+    // Se falhar a verificação, bloquear por segurança
+    if (!(e && e.message)) {
+      const err = new Error('Falha ao validar comandas abertas no momento do fechamento. Tente novamente.')
+      err.code = 'CASH_CLOSE_FINAL_CHECK_FAILED'
+      throw err
+    }
+    throw e
+  }
+
+  // Fechar sessão agora com saldo_final definido (idempotente: apenas se ainda estiver 'open')
+  let up = supabase
     .from('caixa_sessoes')
     .update({ status: 'closed', saldo_final: efetivoSaldoFinal, fechado_em: fechadoEmIso })
     .eq('id', caixaId)
-    .select('id,status,fechado_em,saldo_final')
-    .single()
-  if (error) throw error
+    .eq('status', 'open')
+  if (codigo) up = up.eq('codigo_empresa', codigo)
+  const { data: closedData, error: closeErr } = await up.select('id,status,fechado_em,saldo_final').single()
+  if (closeErr) {
+    // Se nenhuma linha foi atualizada por já estar fechada, buscar e retornar a sessão
+    const msg = String(closeErr.message || '')
+    if (msg.toLowerCase().includes('row') || msg.toLowerCase().includes('single')) {
+      // Buscar sessão existente
+      let qSess = supabase.from('caixa_sessoes').select('id,status,fechado_em,saldo_final').eq('id', caixaId).limit(1)
+      if (codigo) qSess = qSess.eq('codigo_empresa', codigo)
+      const { data: already } = await qSess
+      if (already && already[0]) {
+        return already[0]
+      }
+    }
+    throw closeErr
+  }
 
   // Criar snapshot do fechamento em caixa_resumos
   try {
-    if (abertoEm && fechadoEmIso) {
-      const resumo = await listarResumoPeriodo({ from: abertoEm, to: fechadoEmIso, codigoEmpresa: codigo })
+    // Criar snapshot apenas se a sessão acabou de ser fechada neste chamado
+    if (abertoEm && fechadoEmIso && closedData?.status === 'closed') {
+      // Usar o resumo específico da sessão para incluir movimentos e saldos
+      let sessResumo;
+      try {
+        sessResumo = await listarResumoDaSessao({ caixaSessaoId: caixaId, codigoEmpresa: codigo })
+      } catch {
+        // Fallback para período simples se função de sessão falhar
+        sessResumo = await listarResumoPeriodo({ from: abertoEm, to: fechadoEmIso, codigoEmpresa: codigo })
+      }
+
       const payload = {
         codigo_empresa: codigo || getCachedCompanyCode(),
         caixa_sessao_id: caixaId,
-        periodo_de: resumo.from || abertoEm,
-        periodo_ate: resumo.to || fechadoEmIso,
-        total_bruto: Number(resumo.totalVendasBrutas || 0),
-        total_descontos: Number(resumo.totalDescontos || 0),
-        total_liquido: Number(resumo.totalVendasLiquidas || 0),
-        total_entradas: Number(resumo.totalEntradas || 0),
-        por_finalizadora: resumo.totalPorFinalizadora || {}
+        periodo_de: (sessResumo?.from) || abertoEm,
+        periodo_ate: (sessResumo?.to) || fechadoEmIso,
+        total_bruto: Number(sessResumo?.totalVendasBrutas || 0),
+        total_descontos: Number(sessResumo?.totalDescontos || 0),
+        total_liquido: Number(sessResumo?.totalVendasLiquidas || 0),
+        total_entradas: Number(sessResumo?.totalEntradas || 0),
+        por_finalizadora: sessResumo?.totalPorFinalizadora || {},
+        // Novos campos para histórico completo
+        saldo_inicial: Number(saldoInicialSessao || sessResumo?.saldoInicial || 0),
+        saldo_final: Number(efetivoSaldoFinal),
+        movimentos: (sessResumo?.movimentos) || null
       }
-      await supabase.from('caixa_resumos').insert(payload)
+      // Primeiro tenta inserir com movimentos; se a coluna não existir no schema, tenta novamente sem ela
+      let ins = await supabase.from('caixa_resumos').insert(payload)
+      if (ins.error) {
+        const msg = `${ins.error.message || ''} ${ins.error.details || ''}`.toLowerCase()
+        const code = String(ins.error.code || '')
+        const missingMov = code === 'PGRST204' || code === '42703' || msg.includes('movimentos')
+        if (missingMov) {
+          const { movimentos, ...payloadSemMov } = payload
+          const retry = await supabase.from('caixa_resumos').insert(payloadSemMov)
+          if (retry.error) throw retry.error
+        } else {
+          throw ins.error
+        }
+      }
     }
   } catch (snapErr) {
     console.warn('[fecharCaixa] Falha ao gravar snapshot de fechamento:', snapErr)
   }
-  return data
+  // Retorna a sessão fechada (linha atualizada)
+  return closedData
 }
 
 // Lê o snapshot do fechamento (se existir) para uma sessão específica
@@ -846,14 +912,42 @@ export async function getCaixaResumo({ caixaSessaoId, codigoEmpresa } = {}) {
   const codigo = codigoEmpresa || getCachedCompanyCode()
   let q = supabase
     .from('caixa_resumos')
-    .select('*')
+    .select('caixa_sessao_id, periodo_de, periodo_ate, total_bruto, total_descontos, total_liquido, total_entradas, por_finalizadora')
     .eq('caixa_sessao_id', caixaSessaoId)
     .order('criado_em', { ascending: false })
     .limit(1)
   if (codigo) q = q.eq('codigo_empresa', codigo)
   const { data, error } = await q
   if (error) throw error
-  return data?.[0] || null
+  let snap = data?.[0] || null
+  // Se não existir snapshot, ou se estiver incompleto, computa on-the-fly a partir da sessão
+  if (!snap || typeof snap.saldo_inicial === 'undefined' || typeof snap.saldo_final === 'undefined') {
+    const sessResumo = await listarResumoDaSessao({ caixaSessaoId, codigoEmpresa: codigo })
+    // Obter saldos diretamente da sessão
+    let sessRow = null
+    try {
+      let qs = supabase.from('caixa_sessoes').select('saldo_inicial, saldo_final').eq('id', caixaSessaoId).limit(1)
+      if (codigo) qs = qs.eq('codigo_empresa', codigo)
+      const { data: s } = await qs
+      sessRow = s?.[0] || null
+    } catch {}
+    snap = {
+      codigo_empresa: codigo,
+      caixa_sessao_id: caixaSessaoId,
+      periodo_de: sessResumo?.from || null,
+      periodo_ate: sessResumo?.to || null,
+      total_bruto: Number(sessResumo?.totalVendasBrutas || 0),
+      total_descontos: Number(sessResumo?.totalDescontos || 0),
+      total_liquido: Number(sessResumo?.totalVendasLiquidas || 0),
+      total_entradas: Number(sessResumo?.totalEntradas || 0),
+      por_finalizadora: sessResumo?.totalPorFinalizadora || {},
+      saldo_inicial: Number(sessRow?.saldo_inicial ?? sessResumo?.saldoInicial ?? 0),
+      saldo_final: (sessRow?.saldo_final != null) ? Number(sessRow.saldo_final) : null,
+      // movimentos pode não existir como coluna no snapshot, mas usamos o agregado on-the-fly quando necessário
+      movimentos: sessResumo?.movimentos || { suprimentos: 0, sangrias: 0, ajustes: 0, troco: 0, totalMovimentos: 0 }
+    }
+  }
+  return snap
 }
 
 // Cria movimentação de caixa (sangria/suprimento/troco/ajuste)

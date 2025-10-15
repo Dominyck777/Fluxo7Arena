@@ -959,7 +959,81 @@ export default function HistoricoComandasPage() {
       </motion.div>
 
       <motion.div variants={itemVariants} className="bg-surface rounded-lg border border-border p-4 overflow-hidden">
-        <div className="overflow-x-auto max-h-[60vh] overflow-y-auto pr-2 sm:pr-3">
+        {/* Mobile: lista sem tabela */}
+        <div className="sm:hidden space-y-2">
+          {loading && (!rows || rows.length === 0) && (
+            <div className="px-2 py-3 text-center text-text-muted"><Loader2 className="inline mr-2 h-4 w-4 animate-spin"/>Carregando fechamentos…</div>
+          )}
+          {(!rows || rows.length === 0) && !loading && (
+            <div className="px-2 py-3 text-center text-text-muted">Nenhum fechamento encontrado no período.</div>
+          )}
+          {(rows || []).map(r => (
+            <button
+              key={r.id}
+              onClick={async () => {
+                try {
+                  setCashDetail({ open: true, loading: true, resumo: null, periodo: { from: r.aberto_em, to: r.fechado_em }, movs: [], movimentosAgg: null, saldos: { inicial: r?.saldo_inicial ?? null, final: r?.saldo_final ?? null } });
+                  const emp = getEmpresaCodigoFromCache();
+                  const [snap, movs] = await Promise.all([
+                    getCaixaResumo({ caixaSessaoId: r.id, codigoEmpresa: emp }).catch(() => null),
+                    listarMovimentacoesCaixa({ caixaSessaoId: r.id, codigoEmpresa: emp }).catch(() => [])
+                  ]);
+                  let movimentosAgg = snap?.movimentos || null;
+                  if (!movimentosAgg && Array.isArray(movs)) {
+                    const acc = { suprimentos: 0, sangrias: 0, ajustes: 0, troco: 0 };
+                    for (const m of movs) {
+                      const t = String(m?.tipo || '').toLowerCase();
+                      const v = Number(m?.valor || 0);
+                      if (t === 'suprimento') acc.suprimentos += v;
+                      else if (t === 'sangria') acc.sangrias += v;
+                      else if (t === 'ajuste') acc.ajustes += v;
+                      else if (t === 'troco') acc.troco += v;
+                    }
+                    movimentosAgg = acc;
+                  }
+                  const resumo = snap ? {
+                    totalDescontos: Number(snap.total_descontos || 0),
+                    totalVendasLiquidas: Number(snap.total_liquido || 0),
+                    totalEntradas: Number(snap.total_entradas || 0),
+                    totalPorFinalizadora: snap.por_finalizadora || {}
+                  } : null;
+                  setCashDetail({
+                    open: true,
+                    loading: false,
+                    resumo,
+                    periodo: { from: snap?.periodo_de || r.aberto_em, to: snap?.periodo_ate || r.fechado_em },
+                    movs: movs || [],
+                    movimentosAgg,
+                    saldos: { inicial: r?.saldo_inicial ?? null, final: r?.saldo_final ?? null }
+                  });
+                } catch {
+                  setCashDetail({ open: true, loading: false, resumo: null, periodo: { from: r.aberto_em, to: r.fechado_em }, movs: [], movimentosAgg: null, saldos: { inicial: r?.saldo_inicial ?? null, final: r?.saldo_final ?? null } });
+                }
+              }}
+              className="w-full text-left p-3 rounded-lg border border-border hover:bg-surface-2 transition"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-xs text-text-secondary">
+                  {fmtDate(r.aberto_em)}<span className="mx-1">→</span>{fmtDate(r.fechado_em)}
+                </div>
+                <div className="text-[11px] px-2 py-0.5 rounded-full border bg-success/10 text-success border-success/30">{statusCaixaPt(r.status)}</div>
+              </div>
+              <div className="mt-1 grid grid-cols-2 gap-2 text-xs">
+                <div className="bg-surface-2 rounded p-2 border border-border">
+                  <div className="text-[10px] text-text-secondary">Saldo Inicial</div>
+                  <div className="font-semibold">{r?.saldo_inicial != null ? fmtMoney(r.saldo_inicial) : '—'}</div>
+                </div>
+                <div className="bg-surface-2 rounded p-2 border border-border">
+                  <div className="text-[10px] text-text-secondary">Saldo Final</div>
+                  <div className="font-semibold">{r?.saldo_final != null ? fmtMoney(r.saldo_final) : '—'}</div>
+                </div>
+              </div>
+            </button>
+          ))}
+        </div>
+
+        {/* Desktop: tabela */}
+        <div className="hidden sm:block overflow-x-auto max-h-[60vh] overflow-y-auto pr-2 sm:pr-3">
           <table className="min-w-full text-sm">
             <thead className="bg-surface-2 text-text-secondary">
               <tr>
@@ -981,11 +1055,12 @@ export default function HistoricoComandasPage() {
                 <tr key={r.id} className="border-t border-border/70 hover:bg-success/10 cursor-pointer transition-all duration-150 hover:translate-x-[1px]" onClick={async () => {
                   // Abrir detalhes do fechamento preferindo snapshot e incluindo movimentações
                   try {
-                    setCashDetail({ open: true, loading: true, resumo: null, periodo: { from: r.aberto_em, to: r.fechado_em }, movs: [] });
+                    setCashDetail({ open: true, loading: true, resumo: null, periodo: { from: r.aberto_em, to: r.fechado_em }, movs: [], movimentosAgg: null, saldos: { inicial: r?.saldo_inicial ?? null, final: r?.saldo_final ?? null } });
                     const loadResumo = async () => {
+                      const emp = getEmpresaCodigoFromCache();
                       const [snap, movs] = await Promise.all([
-                        getCaixaResumo({ caixaSessaoId: r.id }).catch(() => null),
-                        listarMovimentacoesCaixa({ caixaSessaoId: r.id }).catch(() => [])
+                        getCaixaResumo({ caixaSessaoId: r.id, codigoEmpresa: emp }).catch(() => null),
+                        listarMovimentacoesCaixa({ caixaSessaoId: r.id, codigoEmpresa: emp }).catch(() => [])
                       ]);
                       return { snap, movs };
                     };
@@ -996,21 +1071,59 @@ export default function HistoricoComandasPage() {
                       ({ snap, movs } = await loadResumo());
                     }
                     if (snap) {
-                      // Adaptar snapshot ao formato usado no componente
                       const resumo = {
-                        totalVendasBrutas: Number(snap.total_bruto || 0),
                         totalDescontos: Number(snap.total_descontos || 0),
                         totalVendasLiquidas: Number(snap.total_liquido || 0),
                         totalEntradas: Number(snap.total_entradas || 0),
                         totalPorFinalizadora: snap.por_finalizadora || {}
                       }
-                      setCashDetail({ open: true, loading: false, resumo, periodo: { from: snap.periodo_de || r.aberto_em, to: snap.periodo_ate || r.fechado_em }, movs: movs || [] });
+                      // Se o snapshot não tiver movimentos agregados, calcular a partir da lista de movimentações
+                      let movimentosAgg = snap.movimentos || null;
+                      if (!movimentosAgg && Array.isArray(movs)) {
+                        const acc = { suprimentos: 0, sangrias: 0, ajustes: 0, troco: 0 };
+                        for (const m of movs) {
+                          const t = String(m?.tipo || '').toLowerCase();
+                          const v = Number(m?.valor || 0);
+                          if (t === 'suprimento') acc.suprimentos += v;
+                          else if (t === 'sangria') acc.sangrias += v;
+                          else if (t === 'ajuste') acc.ajustes += v;
+                          else if (t === 'troco') acc.troco += v;
+                        }
+                        movimentosAgg = acc;
+                      }
+                      setCashDetail({
+                        open: true,
+                        loading: false,
+                        resumo,
+                        periodo: { from: snap.periodo_de || r.aberto_em, to: snap.periodo_ate || r.fechado_em },
+                        movs: movs || [],
+                        movimentosAgg,
+                        saldos: {
+                          inicial: (typeof snap.saldo_inicial !== 'undefined') ? Number(snap.saldo_inicial) : (r?.saldo_inicial ?? null),
+                          final: (typeof snap.saldo_final !== 'undefined') ? Number(snap.saldo_final) : (r?.saldo_final ?? null)
+                        }
+                      });
                     } else {
-                      const res = await listarResumoPeriodo({ from: r.aberto_em, to: r.fechado_em || new Date().toISOString() });
-                      setCashDetail({ open: true, loading: false, resumo: res || null, periodo: { from: r.aberto_em, to: r.fechado_em }, movs: movs || [] });
+                      const emp = getEmpresaCodigoFromCache();
+                      const res = await listarResumoPeriodo({ from: r.aberto_em, to: r.fechado_em || new Date().toISOString(), codigoEmpresa: emp });
+                      // Sem snapshot: agrega movimentos manualmente para exibir sangrias/suprimentos
+                      let movimentosAgg = null;
+                      if (Array.isArray(movs)) {
+                        const acc = { suprimentos: 0, sangrias: 0, ajustes: 0, troco: 0 };
+                        for (const m of movs) {
+                          const t = String(m?.tipo || '').toLowerCase();
+                          const v = Number(m?.valor || 0);
+                          if (t === 'suprimento') acc.suprimentos += v;
+                          else if (t === 'sangria') acc.sangrias += v;
+                          else if (t === 'ajuste') acc.ajustes += v;
+                          else if (t === 'troco') acc.troco += v;
+                        }
+                        movimentosAgg = acc;
+                      }
+                      setCashDetail({ open: true, loading: false, resumo: res || null, periodo: { from: r.aberto_em, to: r.fechado_em }, movs: movs || [], movimentosAgg, saldos: { inicial: r?.saldo_inicial ?? null, final: r?.saldo_final ?? null } });
                     }
                   } catch (e) {
-                    setCashDetail({ open: true, loading: false, resumo: null, periodo: { from: r.aberto_em, to: r.fechado_em }, movs: [] });
+                    setCashDetail({ open: true, loading: false, resumo: null, periodo: { from: r.aberto_em, to: r.fechado_em }, movs: [], movimentosAgg: null, saldos: { inicial: r?.saldo_inicial ?? null, final: r?.saldo_final ?? null } });
                   }
                 }}>
                   <td className="px-4 py-2">{fmtDate(r.aberto_em)}</td>
@@ -1194,7 +1307,10 @@ export default function HistoricoComandasPage() {
 
       {tab === 'fechamentos' && (
       <Dialog open={cashDetail.open} onOpenChange={(v) => { if (!v) setCashDetail({ open: false, loading: false, resumo: null, periodo: { from: null, to: null } }); }}>
-        <DialogContent className="max-w-2xl" onKeyDown={(e) => e.stopPropagation()}>
+        <DialogContent 
+          className="sm:max-w-2xl w-[92vw] max-h-[85vh] animate-none flex flex-col overflow-hidden overflow-x-hidden"
+          onKeyDown={(e) => e.stopPropagation()}
+        >
           <DialogHeader>
             <DialogTitle>Fechamento do Período</DialogTitle>
             <DialogDescription>
@@ -1203,24 +1319,39 @@ export default function HistoricoComandasPage() {
               {cashDetail.periodo.to ? fmtDate(cashDetail.periodo.to) : '—'}
             </DialogDescription>
           </DialogHeader>
+          <div className="flex-1 overflow-y-auto pr-1">
           {cashDetail.loading ? (
-            <div className="p-4 text-text-muted"><Loader2 className="inline mr-2 h-4 w-4 animate-spin"/>Carregando resumo…</div>
+            <div className="p-3 sm:p-4 text-text-muted"><Loader2 className="inline mr-2 h-4 w-4 animate-spin"/>Carregando resumo…</div>
           ) : (
-            <div className="space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="space-y-3 sm:space-y-4">
+              {/* KPIs principais: Saldo Inicial / Entradas / Saldo Final */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-3">
                 <div className="bg-surface-2 rounded-lg p-3 border border-border">
-                  <p className="text-xs text-text-secondary">Vendas Brutas (itens)</p>
-                  <p className="text-xl font-bold">{fmtMoney(cashDetail.resumo?.totalVendasBrutas || 0)}</p>
-                </div>
-                <div className="bg-surface-2 rounded-lg p-3 border border-border">
-                  <p className="text-xs text-text-secondary">Descontos</p>
-                  <p className="text-xl font-bold">{fmtMoney(cashDetail.resumo?.totalDescontos || 0)}</p>
+                  <p className="text-xs text-text-secondary">Saldo Inicial</p>
+                  <p className="text-xl font-bold">{fmtMoney(cashDetail?.saldos?.inicial ?? 0)}</p>
                 </div>
                 <div className="bg-surface-2 rounded-lg p-3 border border-border">
                   <p className="text-xs text-text-secondary">Entradas (pagamentos)</p>
-                  <p className="text-xl font-bold">{fmtMoney(cashDetail.resumo?.totalEntradas || 0)}</p>
+                  <p className="text-xl font-bold text-success">{fmtMoney(cashDetail.resumo?.totalEntradas || 0)}</p>
+                </div>
+                <div className="bg-surface-2 rounded-lg p-3 border border-border col-span-2 sm:col-span-1">
+                  <p className="text-xs text-text-secondary">Saldo Final</p>
+                  <p className="text-xl font-bold">{fmtMoney(cashDetail?.saldos?.final ?? 0)}</p>
                 </div>
               </div>
+
+              {/* KPIs de Vendas (sem Bruto) */}
+              <div className="grid grid-cols-2 sm:grid-cols-2 gap-2 sm:gap-3">
+                <div className="bg-surface-2 rounded-lg p-3 border border-border">
+                  <p className="text-xs text-text-secondary">Descontos</p>
+                  <p className="text-xl font-bold text-warning">{fmtMoney(cashDetail.resumo?.totalDescontos || 0)}</p>
+                </div>
+                <div className="bg-surface-2 rounded-lg p-3 border border-border">
+                  <p className="text-xs text-text-secondary">Líquido</p>
+                  <p className="text-xl font-bold">{fmtMoney(cashDetail.resumo?.totalVendasLiquidas || 0)}</p>
+                </div>
+              </div>
+
               <div>
                 <div className="text-sm font-semibold mb-1">Por Finalizadora</div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -1232,16 +1363,88 @@ export default function HistoricoComandasPage() {
                       </div>
                     ))
                   ) : (
-                    <div className="text-sm text-text-muted">Sem pagamentos registrados no período.</div>
+                    <div className="text-sm text-text-muted">Sem dados de finalizadoras</div>
                   )}
                 </div>
               </div>
-              <div className="text-xs text-text-muted">Observação: Sangrias, suprimentos e troco ainda não foram implementados.</div>
+              {/* Resumo de Movimentações */}
+              <div>
+                <div className="text-sm font-semibold mb-1">Resumo de Movimentações</div>
+                {!cashDetail.movimentosAgg ? (
+                  <div className="text-sm text-text-muted">Sem movimentações agregadas nesta sessão.</div>
+                ) : (
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
+                    <div className="bg-surface-2 rounded-lg p-3 border border-border">
+                      <p className="text-xs text-text-secondary">Suprimentos</p>
+                      <p className="text-lg font-bold text-success">{fmtMoney(cashDetail.movimentosAgg?.suprimentos || 0)}</p>
+                    </div>
+                    <div className="bg-surface-2 rounded-lg p-3 border border-border">
+                      <p className="text-xs text-text-secondary">Sangrias</p>
+                      <p className="text-lg font-bold text-danger">{fmtMoney(cashDetail.movimentosAgg?.sangrias || 0)}</p>
+                    </div>
+                    <div className="bg-surface-2 rounded-lg p-3 border border-border">
+                      <p className="text-xs text-text-secondary">Ajustes</p>
+                      <p className="text-lg font-bold">{fmtMoney(cashDetail.movimentosAgg?.ajustes || 0)}</p>
+                    </div>
+                    <div className="bg-surface-2 rounded-lg p-3 border border-border">
+                      <p className="text-xs text-text-secondary">Troco</p>
+                      <p className="text-lg font-bold">{fmtMoney(cashDetail.movimentosAgg?.troco || 0)}</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Movimentações detalhadas */}
+              <div>
+                <div className="text-sm font-semibold mb-1">Movimentações</div>
+                {!cashDetail.movs || cashDetail.movs.length === 0 ? (
+                  <div className="text-sm text-text-muted">Nenhuma movimentação registrada</div>
+                ) : (
+                  <>
+                    {/* Mobile: lista empilhada, sem tabela */}
+                    <ul className="sm:hidden divide-y divide-border rounded-md border border-border overflow-hidden">
+                      {cashDetail.movs.map((m, idx) => (
+                        <li key={idx} className="px-3 py-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-xs text-text-secondary whitespace-nowrap">{fmtDate(m.criado_em)}</span>
+                            <span className="text-sm font-semibold whitespace-nowrap">{fmtMoney(m.valor || 0)}</span>
+                          </div>
+                          <div className="mt-0.5 flex items-center gap-2 text-xs">
+                            <span className="px-1.5 py-0.5 rounded bg-surface-2 border border-border text-text-secondary whitespace-nowrap">{String(m.tipo || '').toUpperCase()}</span>
+                            <span className="text-xs text-text-primary whitespace-normal break-words flex-1">{m.observacao || '—'}</span>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                    {/* Desktop (>= sm): tabela */}
+                    <div className="hidden sm:block rounded-md border border-border overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead className="bg-surface-2">
+                          <tr>
+                            <th className="text-left px-3 py-2">Data</th>
+                            <th className="text-left px-3 py-2">Tipo</th>
+                            <th className="text-left px-3 py-2">Obs</th>
+                            <th className="text-right px-3 py-2">Valor</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {cashDetail.movs.map((m, idx) => (
+                            <tr key={idx} className="border-t border-border/60">
+                              <td className="px-3 py-2 whitespace-nowrap">{fmtDate(m.criado_em)}</td>
+                              <td className="px-3 py-2 whitespace-nowrap">{String(m.tipo || '').toUpperCase()}</td>
+                              <td className="px-3 py-2 whitespace-normal break-words">{m.observacao || '—'}</td>
+                              <td className="px-3 py-2 text-right font-semibold whitespace-nowrap">{fmtMoney(m.valor || 0)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
+                )}
+              </div>
             </div>
           )}
-          <DialogFooter>
-            <Button size="sm" variant="secondary" onClick={() => setCashDetail({ open: false, loading: false, resumo: null, periodo: { from: null, to: null } })}>Fechar</Button>
-          </DialogFooter>
+          </div>
         </DialogContent>
       </Dialog>
       )}

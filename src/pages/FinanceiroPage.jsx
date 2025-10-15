@@ -1204,6 +1204,8 @@ export default function FinanceiroPage() {
                     ))}
                   </div>
                 </div>
+
+                
               )}
             </motion.div>
 
@@ -1522,6 +1524,12 @@ export default function FinanceiroPage() {
                               // Calcular dinâmico via período do fechamento
                               resumo = await listarResumoPeriodo({ from: h.aberto_em, to: h.fechado_em || new Date().toISOString(), codigoEmpresa: codigo });
                             }
+                            // Enriquecer sessão com saldos do snapshot (se presentes)
+                            const sessaoOut = {
+                              ...h,
+                              saldo_inicial: (resumoSnap && typeof resumoSnap.saldo_inicial !== 'undefined') ? Number(resumoSnap.saldo_inicial) : h.saldo_inicial,
+                              saldo_final: (resumoSnap && typeof resumoSnap.saldo_final !== 'undefined') ? Number(resumoSnap.saldo_final) : h.saldo_final,
+                            };
                             // Fallback: se não houver totalPorFinalizadora, calcular diretamente dos pagamentos
                             const needFallbackPF = !resumo || !resumo.totalPorFinalizadora || Object.keys(resumo.totalPorFinalizadora).length === 0;
                             if (needFallbackPF) {
@@ -1555,6 +1563,7 @@ export default function FinanceiroPage() {
                             }
                             // Movimentações da sessão
                             const movimentacoes = await listarMovimentacoesCaixa({ caixaSessaoId: h.id, codigoEmpresa: codigo });
+                            const movimentosAgg = resumoSnap && resumoSnap.movimentos ? resumoSnap.movimentos : null;
                             // Recebimentos no período do fechamento
                             const fromIso = h.aberto_em;
                             const toIso = h.fechado_em || new Date().toISOString();
@@ -1567,7 +1576,7 @@ export default function FinanceiroPage() {
                             if (codigo) qpDet = qpDet.eq('codigo_empresa', codigo);
                             const { data: pagamentosDet } = await qpDet;
                             console.log('[Caixa][Fechamento][Pays]', { count: (pagamentosDet||[]).length });
-                            setCaixaModalData({ resumo, movimentacoes, pagamentos: (pagamentosDet||[]), sessao: h });
+                            setCaixaModalData({ resumo, movimentacoes, movimentosAgg, pagamentos: (pagamentosDet||[]), sessao: sessaoOut });
                             const t1 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
                             const movCount = Array.isArray(movimentacoes) ? movimentacoes.length : 0;
                             const finCount = resumo && resumo.totalPorFinalizadora ? Object.keys(resumo.totalPorFinalizadora).length : 0;
@@ -1623,8 +1632,14 @@ export default function FinanceiroPage() {
                           if (!resumo) {
                             resumo = await listarResumoPeriodo({ from: h.aberto_em, to: h.fechado_em || new Date().toISOString(), codigoEmpresa: codigo });
                           }
+                          const sessaoOut = {
+                            ...h,
+                            saldo_inicial: (resumoSnap && typeof resumoSnap.saldo_inicial !== 'undefined') ? Number(resumoSnap.saldo_inicial) : h.saldo_inicial,
+                            saldo_final: (resumoSnap && typeof resumoSnap.saldo_final !== 'undefined') ? Number(resumoSnap.saldo_final) : h.saldo_final,
+                          };
                           const movimentacoes = await listarMovimentacoesCaixa({ caixaSessaoId: h.id, codigoEmpresa: codigo });
-                          setCaixaModalData({ resumo, movimentacoes, sessao: h, pagamentos: [] });
+                          const movimentosAgg = resumoSnap && resumoSnap.movimentos ? resumoSnap.movimentos : null;
+                          setCaixaModalData({ resumo, movimentacoes, movimentosAgg, sessao: sessaoOut, pagamentos: [] });
                         } catch (e) {
                           console.error('[Caixa][Fechamento][Error]', e);
                           toast({ title: 'Erro ao carregar detalhes', description: e?.message, variant: 'destructive' });
@@ -2488,12 +2503,8 @@ export default function FinanceiroPage() {
                   </div>
                 </div>
 
-                {/* KPIs de Vendas */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <div className="bg-surface-2 rounded-lg p-3 border border-border">
-                    <p className="text-xs text-text-secondary">Bruto</p>
-                    <p className="text-2xl font-bold tabular-nums">{fmtBRL(caixaModalData.resumo?.totalVendasBrutas)}</p>
-                  </div>
+                {/* KPIs de Vendas (sem 'Bruto', conforme solicitação) */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div className="bg-surface-2 rounded-lg p-3 border border-border">
                     <p className="text-xs text-text-secondary">Descontos</p>
                     <p className="text-2xl font-bold text-warning tabular-nums">{fmtBRL(caixaModalData.resumo?.totalDescontos)}</p>

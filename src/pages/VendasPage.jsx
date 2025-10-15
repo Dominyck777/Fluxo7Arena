@@ -86,10 +86,27 @@ function VendasPage() {
   // Estados do pagamento serão locais dentro do PayDialog para evitar re-render global a cada clique
   // Abrir Caixa (AlertDialog)
   const [openCashDialogOpen, setOpenCashDialogOpen] = useState(false);
+  // Preservar rascunho do valor inicial do caixa entre re-renders
+  const openCashInitialRef = useRef('');
   // Modal Mobile para Visualizar Mesa
   const [isMobileModalOpen, setIsMobileModalOpen] = useState(false);
   // Controlar aba ativa do modal mobile para evitar reset ao re-render
   const [mobileTableTab, setMobileTableTab] = useState('order');
+  // Alerta compacto no mobile
+  const [mobileWarnOpen, setMobileWarnOpen] = useState(false);
+  const [mobileWarnMsg, setMobileWarnMsg] = useState('');
+  // Flag de viewport mobile (inicializa com valor imediato)
+  const [isMobileView, setIsMobileView] = useState(() => {
+    try { return typeof window !== 'undefined' && window.innerWidth <= 640; } catch { return false; }
+  });
+  useEffect(() => {
+    const update = () => {
+      try { setIsMobileView(typeof window !== 'undefined' && window.innerWidth <= 640); } catch { setIsMobileView(false); }
+    };
+    update();
+    window.addEventListener('resize', update);
+    return () => window.removeEventListener('resize', update);
+  }, []);
 
   // Evita movimentação do layout quando diálogos estão abertos (bloqueia scroll do fundo)
   const anyDialogOpen = isCreateMesaOpen || isOpenTableDialog || isOrderDetailsOpen || isCashierDetailsOpen || isPayOpen || openCashDialogOpen || isCounterModeOpen || isProductDetailsOpen || isMobileModalOpen || false;
@@ -1479,6 +1496,8 @@ function VendasPage() {
   const CreateMesaDialog = () => {
     const [numeroVal, setNumeroVal] = useState('');
     const [nomeVal, setNomeVal] = useState('');
+    // Estado apenas em memória para máxima responsividade (sem localStorage)
+    const setNumeroPersist = (value) => { setNumeroVal(value); };
     const confirmCreate = async () => {
       try {
         setLoading(true);
@@ -1517,7 +1536,10 @@ function VendasPage() {
       }
     };
     return (
-      <Dialog open={isCreateMesaOpen} onOpenChange={(open) => { setIsCreateMesaOpen(open); if (!open) { setNumeroVal(''); setNomeVal(''); } }}>
+      <Dialog open={isCreateMesaOpen} onOpenChange={(open) => { 
+        setIsCreateMesaOpen(open); 
+        if (!open) { setNumeroVal(''); setNomeVal(''); }
+      }}>
         <DialogContent
           className="sm:max-w-md w-[92vw] sm:w-[400px]"
           onOpenAutoFocus={(e) => e.preventDefault()}
@@ -1537,11 +1559,18 @@ function VendasPage() {
               type="text"
               placeholder="Ex.: Mesa 1, Pátio 1, VIP..."
               value={nomeVal}
-              onChange={(e) => setNomeVal(e.target.value)}
+              onChange={(e) => { setNomeVal(e.target.value); }}
               onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Enter') e.preventDefault(); }}
               onKeyUp={(e) => e.stopPropagation()}
               onKeyPress={(e) => e.stopPropagation()}
             />
+            {/* Campo opcional de número explícito (avançado): oculto por padrão, deixar pronto se necessário */}
+            {/* <Label htmlFor="nova-mesa-numero">Número da mesa (opcional)</Label>
+            <Input id="nova-mesa-numero" type="number" min="1" placeholder="Auto"
+              value={numeroVal}
+              onChange={(e) => setNumeroPersist(e.target.value)}
+              onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Enter') e.preventDefault(); }}
+            /> */}
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => setIsCreateMesaOpen(false)} disabled={loading}>Cancelar</Button>
@@ -2278,6 +2307,10 @@ function VendasPage() {
   // Componente interno: conteúdo do modal Abrir Caixa (estado local para evitar re-render global)
   const OpenCashContent = () => {
     const [openCashInitial, setOpenCashInitial] = useState('');
+    // Restaurar do ref ao montar (evita perda ao re-render/remount)
+    useEffect(() => {
+      if (openCashInitialRef.current) setOpenCashInitial(openCashInitialRef.current);
+    }, []);
     return (
       <>
         <AlertDialogHeader>
@@ -2307,6 +2340,7 @@ function VendasPage() {
                 const cents = digits ? Number(digits) / 100 : 0;
                 const formatted = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(cents);
                 setOpenCashInitial(formatted);
+                openCashInitialRef.current = formatted;
               }}
               onKeyDown={(e) => {
                 e.stopPropagation();
@@ -2332,10 +2366,13 @@ function VendasPage() {
             try {
               const cleaned = String(openCashInitial).replace(/\./g, '').replace(',', '.');
               const v = Number(cleaned) || 0;
-              await ensureCaixaAberto({ saldoInicial: v });
+              await ensureCaixaAberto({ saldoInicial: v, codigoEmpresa: userProfile?.codigo_empresa });
               setIsCashierOpen(true);
               setOpenCashDialogOpen(false);
               toast({ title: 'Caixa aberto com sucesso!', variant: 'success' });
+              // Limpar rascunho após abrir
+              openCashInitialRef.current = '';
+              setOpenCashInitial('');
             } catch (e) {
               toast({ title: 'Falha ao abrir caixa', description: e?.message || 'Tente novamente', variant: 'destructive' });
             }
@@ -2438,29 +2475,22 @@ function VendasPage() {
                 // Pré-checagem: bloquear se houver comandas abertas
                 try {
                   const abertas = await listarComandasAbertas({ codigoEmpresa: userProfile?.codigo_empresa });
-                  let abertasComItens = [];
                   if (Array.isArray(abertas) && abertas.length > 0) {
-                    try {
-                      const results = await Promise.all(abertas.map(async (c) => {
-                        try {
-                          const itens = await listarItensDaComanda({ comandaId: c?.id, codigoEmpresa: userProfile?.codigo_empresa });
-                          const temItens = (itens || []).some(it => Number(it?.quantidade || 0) > 0);
-                          return temItens ? c : null;
-                        } catch { return c; }
-                      }));
-                      abertasComItens = results.filter(Boolean);
-                    } catch { abertasComItens = abertas; }
-                  }
-
-                  if (abertasComItens.length > 0) {
-                    const isMobile = typeof window !== 'undefined' && window.innerWidth <= 640;
-                    if (isMobile) {
-                      setShowMobileWarn(true);
-                      setTimeout(() => setShowMobileWarn(false), 1500);
+                    if (isMobileView) {
+                      // Fechar diálogo e exibir banner (mobile) no próximo frame para não ficar atrás do overlay
+                      setMobileWarnMsg(`Existem ${abertas.length} comandas abertas. Feche todas antes de encerrar o caixa.`);
+                      try { setIsCloseCashOpen(false); } catch {}
+                      if (typeof requestAnimationFrame === 'function') {
+                        requestAnimationFrame(() => { setMobileWarnOpen(true); });
+                      } else {
+                        setMobileWarnOpen(true);
+                      }
+                      setTimeout(() => setMobileWarnOpen(false), 2600);
                     } else {
+                      // Desktop: toast padrão e manter diálogo
                       toast({
                         title: 'Fechamento bloqueado',
-                        description: `Existem ${abertasComItens.length} comandas com itens em aberto. Finalize-as antes de fechar o caixa.`,
+                        description: `Existem ${abertas.length} comandas abertas. Feche todas antes de encerrar o caixa.`,
                         variant: 'warning',
                         duration: 2500,
                       });
@@ -2493,7 +2523,20 @@ function VendasPage() {
                 }
               } catch (e) {
                 console.error(e);
-                toast({ title: 'Falha ao fechar caixa', description: e?.message || 'Tente novamente', variant: 'destructive' });
+                const msg = e?.message || 'Tente novamente';
+                if (isMobileView) {
+                  setMobileWarnMsg(msg.includes('Existem') ? msg : `Falha ao fechar caixa: ${msg}`);
+                  try { setIsCloseCashOpen(false); } catch {}
+                  if (typeof requestAnimationFrame === 'function') {
+                    requestAnimationFrame(() => { setMobileWarnOpen(true); });
+                  } else {
+                    setMobileWarnOpen(true);
+                  }
+                  setTimeout(() => setMobileWarnOpen(false), 2600);
+                } else {
+                  // Desktop toast
+                  toast({ title: 'Falha ao fechar caixa', description: msg, variant: 'destructive' });
+                }
               } finally { setClosing(false); }
             }}>Confirmar Fechamento</AlertDialogAction>
           </AlertDialogFooter>
@@ -3072,6 +3115,15 @@ function VendasPage() {
       <ManageClientsDialog />
       <OpenTableDialog />
       <CreateMesaDialog />
+      {/* Warning banner (always-on overlay, mobile-focused) */}
+      {mobileWarnOpen && (
+        <div className="fixed left-3 right-3 z-[9999]" role="alert" aria-live="assertive" style={{ bottom: 'calc(12px + env(safe-area-inset-bottom, 0px))' }}>
+          <div className="pointer-events-none flex items-start gap-2 rounded-md border border-amber-500 bg-amber-400 text-black px-3 py-2 shadow-lg">
+            <AlertCircle className="h-4 w-4 mt-0.5" aria-hidden="true" />
+            <div className="text-sm font-semibold leading-snug drop-shadow-[0_1px_0_rgba(255,255,255,0.25)]">{mobileWarnMsg || 'Atenção'}</div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

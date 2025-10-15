@@ -700,17 +700,35 @@ export default function FinalizadorasPage() {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="taxa">Taxa (%)</Label>
-              <Input
-                id="taxa"
-                type="number"
-                step="0.01"
-                min="0"
-                max="100"
-                placeholder="0.00"
-                value={formData.taxa_percentual}
-                onChange={(e) => setFormData({ ...formData, taxa_percentual: e.target.value })}
-              />
+              <Label htmlFor="taxa">Taxa</Label>
+              <div className="relative">
+                <Input
+                  id="taxa"
+                  inputMode="decimal"
+                  placeholder="0,00"
+                  className="pr-10"
+                  value={formData.taxa_percentual}
+                  onChange={(e) => {
+                    const v = String(e.target.value).replace(/[^0-9.,]/g, '').replace(/,/g, '.');
+                    if (v === '') { setFormData({ ...formData, taxa_percentual: '' }); return; }
+                    const n = Number(v);
+                    if (Number.isFinite(n)) {
+                      const clamped = Math.max(0, Math.min(100, n));
+                      setFormData({ ...formData, taxa_percentual: String(clamped) });
+                    }
+                  }}
+                  onBlur={() => {
+                    const v = String(formData.taxa_percentual || '').replace(/,/g, '.');
+                    if (v === '') return;
+                    const n = Number(v);
+                    if (Number.isFinite(n)) {
+                      const clamped = Math.max(0, Math.min(100, n));
+                      setFormData((prev) => ({ ...prev, taxa_percentual: clamped.toFixed(2) }));
+                    }
+                  }}
+                />
+                <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-text-muted text-sm">%</span>
+              </div>
               <p className="text-xs text-text-muted">Deixe vazio se não houver taxa</p>
             </div>
 
