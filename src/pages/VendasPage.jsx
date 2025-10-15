@@ -88,6 +88,8 @@ function VendasPage() {
   const [openCashDialogOpen, setOpenCashDialogOpen] = useState(false);
   // Preservar rascunho do valor inicial do caixa entre re-renders
   const openCashInitialRef = useRef('');
+  // Evitar reentrância ao abrir o caixa
+  const [openCashInProgress, setOpenCashInProgress] = useState(false);
   // Modal Mobile para Visualizar Mesa
   const [isMobileModalOpen, setIsMobileModalOpen] = useState(false);
   // Controlar aba ativa do modal mobile para evitar reset ao re-render
@@ -2363,11 +2365,15 @@ function VendasPage() {
         <AlertDialogFooter>
           <AlertDialogCancel onClick={() => setOpenCashDialogOpen(false)}>Cancelar</AlertDialogCancel>
           <AlertDialogAction onClick={async () => {
+            if (openCashInProgress) return;
+            setOpenCashInProgress(true);
             try {
               const cleaned = String(openCashInitial).replace(/\./g, '').replace(',', '.');
               const v = Number(cleaned) || 0;
+              try { localStorage.setItem('cash:opening', String(Date.now())); } catch {}
               await ensureCaixaAberto({ saldoInicial: v, codigoEmpresa: userProfile?.codigo_empresa });
-              setIsCashierOpen(true);
+              await refreshCashierStatus();
+              await refreshTablesLight({ showToast: false });
               setOpenCashDialogOpen(false);
               toast({ title: 'Caixa aberto com sucesso!', variant: 'success' });
               // Limpar rascunho após abrir
@@ -2375,6 +2381,9 @@ function VendasPage() {
               setOpenCashInitial('');
             } catch (e) {
               toast({ title: 'Falha ao abrir caixa', description: e?.message || 'Tente novamente', variant: 'destructive' });
+            } finally {
+              try { localStorage.removeItem('cash:opening'); } catch {}
+              setOpenCashInProgress(false);
             }
           }}>Confirmar Abertura</AlertDialogAction>
         </AlertDialogFooter>
@@ -2385,7 +2394,7 @@ function VendasPage() {
   const OpenCashierDialog = () => (
     <AlertDialog open={openCashDialogOpen} onOpenChange={setOpenCashDialogOpen}>
       <AlertDialogTrigger asChild>
-          <Button variant="success" size="sm" disabled={isCashierOpen} onClick={() => setOpenCashDialogOpen(true)} className="px-3">
+          <Button variant="success" size="sm" disabled={isCashierOpen || openCashInProgress} onClick={() => setOpenCashDialogOpen(true)} className="px-3">
             <Unlock className="h-4 w-4" />
             <span className="ml-2 md:hidden">Abrir</span>
             <span className="ml-2 hidden md:inline">Abrir Caixa</span>

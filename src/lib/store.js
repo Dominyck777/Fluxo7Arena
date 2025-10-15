@@ -725,52 +725,16 @@ export async function ensureCaixaAberto({ saldoInicial = 0, codigoEmpresa } = {}
         } catch {}
         // Segue para abrir nova sessão abaixo
       } else {
-        // Política: ao abrir caixa manualmente, sempre iniciar uma sessão nova
-        // Fechar a sessão aberta atual (mesmo dia) com cálculo seguro e prosseguir para abrir nova
-        const fechadoAgora = now.toISOString()
-        let entradas = 0; let movTotal = 0
+        // Mesma data: NÃO fechar automaticamente. Apenas garantir saldo_inicial e retornar.
         try {
-          const tmp = await listarResumoPeriodo({ from: sess.aberto_em, to: fechadoAgora, codigoEmpresa: codigo })
-          entradas = Number(tmp?.totalEntradas || 0)
-        } catch {}
-        try {
-          let qmov = supabase.from('caixa_movimentacoes').select('tipo,valor').eq('caixa_sessao_id', sess.id)
-          if (codigo) qmov = qmov.eq('codigo_empresa', codigo)
-          const { data: mv } = await qmov
-          for (const m of (mv || [])) {
-            const v = Number(m?.valor || 0)
-            const t = String(m?.tipo || '').toLowerCase()
-            if (t === 'suprimento' || t === 'ajuste') movTotal += v
-            else if (t === 'sangria' || t === 'troco') movTotal -= v
+          if ((sess?.saldo_inicial == null) && (saldoInicial != null)) {
+            let uq = supabase.from('caixa_sessoes').update({ saldo_inicial: Number(saldoInicial) || 0 }).eq('id', sess.id)
+            if (codigo) uq = uq.eq('codigo_empresa', codigo)
+            await uq
+            return { ...sess, saldo_inicial: Number(saldoInicial) || 0 }
           }
         } catch {}
-        const saldoFinalSess = Number(sess?.saldo_inicial || 0) + entradas + movTotal
-        let up = supabase.from('caixa_sessoes')
-          .update({ status: 'closed', saldo_final: saldoFinalSess, fechado_em: fechadoAgora })
-          .eq('id', sess.id)
-          .eq('status', 'open')
-        if (codigo) up = up.eq('codigo_empresa', codigo)
-        await up
-        // Snapshot mínimo da sessão fechada
-        try {
-          const resumo = await listarResumoDaSessao({ caixaSessaoId: sess.id, codigoEmpresa: codigo }).catch(async () => (
-            await listarResumoPeriodo({ from: sess.aberto_em, to: fechadoAgora, codigoEmpresa: codigo })
-          ))
-          const payload = {
-            codigo_empresa: codigo || getCachedCompanyCode(),
-            caixa_sessao_id: sess.id,
-            periodo_de: (resumo?.from) || sess.aberto_em,
-            periodo_ate: (resumo?.to) || fechadoAgora,
-            total_bruto: Number(resumo?.totalVendasBrutas || 0),
-            total_descontos: Number(resumo?.totalDescontos || 0),
-            total_liquido: Number(resumo?.totalVendasLiquidas || 0),
-            total_entradas: Number(resumo?.totalEntradas || 0),
-            por_finalizadora: resumo?.totalPorFinalizadora || {}
-          }
-          const pf = payload.por_finalizadora
-          await supabase.from('caixa_resumos').insert({ ...payload, por_finalizadora: (pf && typeof pf !== 'string') ? JSON.stringify(pf) : pf })
-        } catch {}
-        // segue para abrir nova sessão abaixo
+        return sess
       }
     } catch {}
     return sess
