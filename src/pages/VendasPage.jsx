@@ -2499,17 +2499,7 @@ function VendasPage() {
                   }
                 } catch {}
                 await fecharCaixa({ codigoEmpresa: userProfile?.codigo_empresa });
-                // Verifica se realmente fechou (idempotência e consistência eventual)
-                let closedOk = false;
-                for (let i = 0; i < 4; i++) {
-                  const sess = await getCaixaAberto({ codigoEmpresa: userProfile?.codigo_empresa }).catch(() => null);
-                  if (!sess || !sess.id) { closedOk = true; break; }
-                  await new Promise(r => setTimeout(r, 250));
-                }
-                if (!closedOk) {
-                  toast({ title: 'Fechamento pendente', description: 'Ainda há uma sessão marcada como aberta. Aguarde e tente novamente.', variant: 'warning' });
-                  return;
-                }
+                // Considera fechado ao concluir a operação e atualiza UI imediatamente
                 setIsCashierOpen(false);
                 // Evita condições de corrida de portal/unmount no mobile: fecha no próximo frame e só então mostra toast
                 if (typeof requestAnimationFrame === 'function') {
@@ -2521,6 +2511,10 @@ function VendasPage() {
                   setIsCloseCashOpen(false);
                   toast({ title: 'Caixa fechado!', description: 'O relatório de fechamento foi gerado.' });
                 }
+                // Sincroniza status em background sem bloquear a UI
+                setTimeout(async () => {
+                  try { await getCaixaAberto({ codigoEmpresa: userProfile?.codigo_empresa }); } catch {}
+                }, 0);
               } catch (e) {
                 console.error(e);
                 const msg = e?.message || 'Tente novamente';

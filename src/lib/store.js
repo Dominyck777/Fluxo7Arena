@@ -869,6 +869,7 @@ export async function fecharCaixa({ saldoFinal = null, codigoEmpresa } = {}) {
         sessResumo = await listarResumoPeriodo({ from: abertoEm, to: fechadoEmIso, codigoEmpresa: codigo })
       }
 
+      // Payload mínimo, compatível com schemas enxutos (sem colunas extras)
       const payload = {
         codigo_empresa: codigo || getCachedCompanyCode(),
         caixa_sessao_id: caixaId,
@@ -878,26 +879,20 @@ export async function fecharCaixa({ saldoFinal = null, codigoEmpresa } = {}) {
         total_descontos: Number(sessResumo?.totalDescontos || 0),
         total_liquido: Number(sessResumo?.totalVendasLiquidas || 0),
         total_entradas: Number(sessResumo?.totalEntradas || 0),
-        por_finalizadora: sessResumo?.totalPorFinalizadora || {},
-        // Novos campos para histórico completo
-        saldo_inicial: Number(saldoInicialSessao || sessResumo?.saldoInicial || 0),
-        saldo_final: Number(efetivoSaldoFinal),
-        movimentos: (sessResumo?.movimentos) || null
+        por_finalizadora: sessResumo?.totalPorFinalizadora || {}
       }
-      // Primeiro tenta inserir com movimentos; se a coluna não existir no schema, tenta novamente sem ela
-      let ins = await supabase.from('caixa_resumos').insert(payload)
-      if (ins.error) {
-        const msg = `${ins.error.message || ''} ${ins.error.details || ''}`.toLowerCase()
-        const code = String(ins.error.code || '')
-        const missingMov = code === 'PGRST204' || code === '42703' || msg.includes('movimentos')
-        if (missingMov) {
-          const { movimentos, ...payloadSemMov } = payload
-          const retry = await supabase.from('caixa_resumos').insert(payloadSemMov)
-          if (retry.error) throw retry.error
-        } else {
-          throw ins.error
-        }
-      }
+      // Tenta inserir com tolerância a colunas ausentes (movimentos/saldo_inicial/saldo_final)
+      const tryInsert = async (p) => {
+        // Alguns schemas podem esperar string em por_finalizadora
+        const pf = p.por_finalizadora;
+        const coerced = {
+          ...p,
+          por_finalizadora: (pf && typeof pf !== 'string') ? JSON.stringify(pf) : pf
+        };
+        return await supabase.from('caixa_resumos').insert(coerced);
+      };
+      const ins = await tryInsert(payload);
+      if (ins.error) throw ins.error;
     }
   } catch (snapErr) {
     console.warn('[fecharCaixa] Falha ao gravar snapshot de fechamento:', snapErr)
@@ -910,16 +905,21 @@ export async function fecharCaixa({ saldoFinal = null, codigoEmpresa } = {}) {
 export async function getCaixaResumo({ caixaSessaoId, codigoEmpresa } = {}) {
   if (!caixaSessaoId) throw new Error('caixaSessaoId é obrigatório')
   const codigo = codigoEmpresa || getCachedCompanyCode()
-  let q = supabase
-    .from('caixa_resumos')
-    .select('caixa_sessao_id, periodo_de, periodo_ate, total_bruto, total_descontos, total_liquido, total_entradas, por_finalizadora')
-    .eq('caixa_sessao_id', caixaSessaoId)
-    .order('criado_em', { ascending: false })
-    .limit(1)
-  if (codigo) q = q.eq('codigo_empresa', codigo)
-  const { data, error } = await q
-  if (error) throw error
-  let snap = data?.[0] || null
+  let snap = null
+  try {
+    let q = supabase
+      .from('caixa_resumos')
+      .select('caixa_sessao_id, periodo_de, periodo_ate, total_bruto, total_descontos, total_liquido, total_entradas, por_finalizadora')
+      .eq('caixa_sessao_id', caixaSessaoId)
+      .order('criado_em', { ascending: false })
+      .limit(1)
+    if (codigo) q = q.eq('codigo_empresa', codigo)
+    const { data } = await q
+    snap = data?.[0] || null
+  } catch (e) {
+    // Se falhar (ex.: coluna ausente PGRST204), continua com fallback dinâmico
+    try { console.warn('[getCaixaResumo] Snapshot select falhou, usando fallback dinâmico:', e?.message || e) } catch {}
+  }
   // Se não existir snapshot, ou se estiver incompleto, computa on-the-fly a partir da sessão
   if (!snap || typeof snap.saldo_inicial === 'undefined' || typeof snap.saldo_final === 'undefined') {
     const sessResumo = await listarResumoDaSessao({ caixaSessaoId, codigoEmpresa: codigo })
@@ -945,6 +945,11 @@ export async function getCaixaResumo({ caixaSessaoId, codigoEmpresa } = {}) {
       saldo_final: (sessRow?.saldo_final != null) ? Number(sessRow.saldo_final) : null,
       // movimentos pode não existir como coluna no snapshot, mas usamos o agregado on-the-fly quando necessário
       movimentos: sessResumo?.movimentos || { suprimentos: 0, sangrias: 0, ajustes: 0, troco: 0, totalMovimentos: 0 }
+    }
+  } else {
+    // Normalizar estrutura do snapshot: por_finalizadora pode vir string
+    if (typeof snap.por_finalizadora === 'string') {
+      try { snap.por_finalizadora = JSON.parse(snap.por_finalizadora) } catch { snap.por_finalizadora = {} }
     }
   }
   return snap
