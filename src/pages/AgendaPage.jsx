@@ -389,19 +389,39 @@ function AgendaPage() {
   // Carregar do banco (agenda_settings) quando empresa estiver disponível
   useEffect(() => {
     const loadSettings = async () => {
-      if (!authReady || !company?.id) return;
+      console.log('[AgendaSettings][LOAD] Iniciando carregamento...', { authReady, company_id: company?.id });
+      
+      if (!authReady || !company?.id) {
+        console.warn('[AgendaSettings][LOAD] Aguardando autenticação...');
+        return;
+      }
+      
       try {
+        console.log('[AgendaSettings][LOAD] Modo:', import.meta.env.PROD ? 'PRODUÇÃO (wrapper)' : 'DEV (client original)');
+        console.log('[AgendaSettings][LOAD] Buscando para empresa_id:', company.id);
+        
         const { data, error } = await supabase
           .from('agenda_settings')
           .select('*')
           .eq('empresa_id', company.id)
           .maybeSingle();
+        
+        console.log('[AgendaSettings][LOAD] Resultado da query:', { data, error });
+        console.log('[AgendaSettings][LOAD] Data type:', data === null ? 'null' : typeof data);
+        
         if (error) {
           // não quebra UX; mantém localStorage/defaults
-          console.warn('[AgendaSettings] load error', error);
+          console.error('[AgendaSettings][LOAD] ERRO ao carregar:', error);
           return;
         }
-        if (!data) return; // ainda não criado -> mantém defaults/local cache
+        
+        if (!data) {
+          console.warn('[AgendaSettings][LOAD] Nenhum registro encontrado (ainda não criado)');
+          return; // ainda não criado -> mantém defaults/local cache
+        }
+        
+        console.log('[AgendaSettings][LOAD] ✅ Registro encontrado:', data);
+        
         // Mapear colunas (horas -> minutos)
         const next = {
           autoConfirmEnabled: !!data.auto_confirm_enabled,
@@ -411,8 +431,13 @@ function AgendaPage() {
           autoStartEnabled: !!data.auto_start_enabled,
           autoFinishEnabled: !!data.auto_finish_enabled,
         };
+        
+        console.log('[AgendaSettings][LOAD] ✅ Estado mapeado:', next);
+        
         setAutomation((prev) => ({ ...prev, ...next }));
         setSavedAutomation(next); // Guardar como último estado salvo
+        
+        console.log('[AgendaSettings][LOAD] ✅ Estados atualizados com sucesso!');
       } catch (e) {
         console.warn('[AgendaSettings] unexpected load error', e);
       }
@@ -482,12 +507,24 @@ function AgendaPage() {
   const recentStatusUpdatesRef = useRef(new Map()); // id -> { status, ts }
 
   // Salvar no banco (upsert)
-  const handleSaveSettings = useCallback(async () => {
-    if (!authReady || !company?.id) {
-      toast({ title: 'Não autenticado', description: 'Faça login para salvar as configurações.', variant: 'destructive' });
-      return;
-    }
+  const handleSaveSettings = async () => {
+    console.log('🔥🔥🔥 [AgendaSettings][SAVE] FUNÇÃO CHAMADA! 🔥🔥🔥');
+    console.log('[AgendaSettings][SAVE] Linha 509 - Antes do try');
+    
     try {
+      console.log('[AgendaSettings][SAVE] Linha 511 - Dentro do try');
+      console.log('[AgendaSettings][SAVE] authReady:', authReady);
+      console.log('[AgendaSettings][SAVE] company:', company);
+      
+      if (!authReady || !company?.id) {
+        console.error('[AgendaSettings][SAVE] ERRO: Não autenticado', { authReady, company });
+        toast({ title: 'Não autenticado', description: 'Faça login para salvar as configurações.', variant: 'destructive' });
+        return;
+      }
+      
+      console.log('[AgendaSettings][SAVE] ✅ Autenticado! Preparando payload...');
+      console.log('[AgendaSettings][SAVE] automation atual:', automation);
+      
       setSavingSettings(true);
       const payload = {
         empresa_id: company.id,
@@ -498,21 +535,49 @@ function AgendaPage() {
         auto_start_enabled: !!automation.autoStartEnabled,
         auto_finish_enabled: !!automation.autoFinishEnabled,
       };
-      const { error } = await supabase
+      
+      console.log('[AgendaSettings][SAVE] Payload preparado:', payload);
+      console.log('[AgendaSettings][SAVE] Modo:', import.meta.env.PROD ? 'PRODUÇÃO (wrapper)' : 'DEV (client original)');
+      console.log('[AgendaSettings][SAVE] Supabase client type:', typeof supabase.from);
+      
+      const { data, error } = await supabase
         .from('agenda_settings')
-        .upsert(payload, { onConflict: 'empresa_id' });
-      if (error) throw error;
+        .upsert(payload, { onConflict: 'empresa_id' })
+        .select();
+      
+      console.log('[AgendaSettings][SAVE] Resultado do upsert:', { data, error });
+      console.log('[AgendaSettings][SAVE] Data type:', Array.isArray(data) ? 'array' : typeof data);
+      console.log('[AgendaSettings][SAVE] Data length:', data?.length);
+      
+      if (error) {
+        console.error('[AgendaSettings][SAVE] ❌ ERRO no upsert:', error);
+        throw error;
+      }
+      
+      if (!data || data.length === 0) {
+        console.error('[AgendaSettings][SAVE] ❌ AVISO: Upsert não retornou dados!');
+      } else {
+        console.log('[AgendaSettings][SAVE] ✅ Dados salvos com sucesso:', data[0]);
+      }
+      
       setSavedAutomation(automation); // Atualizar último estado salvo
+      console.log('[AgendaSettings][SAVE] ✅ savedAutomation atualizado:', automation);
+      
       toast({ title: 'Configurações salvas', description: 'As automações da agenda foram atualizadas com sucesso.' });
       setIsSettingsOpen(false);
+      
+      console.log('[AgendaSettings][SAVE] ✅ Salvamento concluído!');
     } catch (e) {
-      console.error('[AgendaSettings] save error', e);
+      console.error('❌❌❌ [AgendaSettings][SAVE] ERRO CAPTURADO:', e);
+      console.error('[AgendaSettings][SAVE] Stack:', e?.stack);
+      console.error('[AgendaSettings][SAVE] Message:', e?.message);
       const message = e?.message || 'Falha ao salvar as configurações.';
       toast({ title: 'Erro ao salvar', description: message, variant: 'destructive' });
     } finally {
+      console.log('[AgendaSettings][SAVE] Finally executado');
       setSavingSettings(false);
     }
-  }, [authReady, company?.id, automation]);
+  };
 
   // Atualiza status no banco e estados locais
   // source: 'user' | 'automation'
@@ -1104,14 +1169,25 @@ function AgendaPage() {
         try { dbg('Realtime:debounced fetchBookings fire'); pulseLog('rt:debounced:fire'); setUiBusy(1200); fetchBookings(); } catch {}
       }, 400);
     };
-    const channel = supabase
-      .channel(`agendamentos:${userProfile.codigo_empresa}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'agendamentos', filter: `codigo_empresa=eq.${userProfile.codigo_empresa}` }, onChange)
-      .subscribe((status) => { try { console.debug('[Realtime] channel status', status); } catch {}; try { setRealtimeStatus(String(status || 'unknown')); } catch {} });
+    // 🔴 REAL-TIME DESABILITADO - Plano gratuito Supabase limita a 2 conexões simultâneas
+    // Para reabilitar: remova os comentários abaixo
+    // const channel = supabase
+    //   .channel(`agendamentos:${userProfile.codigo_empresa}`)
+    //   .on('postgres_changes', { event: '*', schema: 'public', table: 'agendamentos', filter: `codigo_empresa=eq.${userProfile.codigo_empresa}` }, onChange)
+    //   .subscribe((status) => { try { console.debug('[Realtime] channel status', status); } catch {}; try { setRealtimeStatus(String(status || 'unknown')); } catch {} });
+    
+    // ✅ POLLING: Recarrega agendamentos a cada 30 segundos
+    const pollingInterval = setInterval(() => {
+      if (!modalOpenRef.current) {
+        fetchBookings();
+      }
+    }, 30000); // 30 segundos
+    
     return () => {
       try { if (realtimeDebounceRef.current) clearTimeout(realtimeDebounceRef.current); } catch {}
-      try { supabase.removeChannel(channel); } catch {}
-      try { setRealtimeStatus('unsubscribed'); } catch {}
+      // try { supabase.removeChannel(channel); } catch {}
+      try { clearInterval(pollingInterval); } catch {}
+      try { setRealtimeStatus('polling'); } catch {}
     };
   }, [authReady, userProfile?.codigo_empresa, currentDate, fetchBookings]);
 
@@ -1135,7 +1211,7 @@ function AgendaPage() {
       const fmtHms = (ms) => (typeof ms === 'number' ? format(new Date(ms), 'HH:mm:ss', { locale: ptBR }) : '—');
       const fmtHm = (ms) => (typeof ms === 'number' ? format(new Date(ms), 'HH:mm', { locale: ptBR }) : '—');
       const timeEmoji = usingServer ? '🕒🇧🇷' : '🖥️';
-      const rtOk = String(realtimeStatus).toUpperCase() === 'SUBSCRIBED';
+      const rtOk = String(realtimeStatus).toUpperCase() === 'SUBSCRIBED' || String(realtimeStatus).toLowerCase() === 'polling';
       const rtEmoji = rtOk ? '✅' : '⚠️';
       const nextEmoji = typeof nextAutoAtMs === 'number' ? '⏭️' : '⏸️';
       const count = Array.isArray(bookings) ? bookings.length : 0;
@@ -5225,7 +5301,15 @@ function AgendaPage() {
               <Button type="button" variant="ghost" className="border border-white/10" onClick={() => setIsSettingsOpen(false)}>
                 Cancelar
               </Button>
-              <Button type="button" variant="default" onClick={handleSaveSettings} disabled={savingSettings}>
+              <Button 
+                type="button" 
+                variant="default" 
+                onClick={() => {
+                  console.log('🚀 BOTÃO SALVAR CLICADO!');
+                  handleSaveSettings();
+                }} 
+                disabled={savingSettings}
+              >
                 {savingSettings ? 'Salvando…' : 'Salvar'}
               </Button>
             </DialogFooter>

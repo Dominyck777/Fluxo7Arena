@@ -186,6 +186,12 @@ class SupabaseQueryBuilder {
     return this
   }
   
+  maybeSingle() {
+    this.params.limit = 1
+    this.isMaybeSingle = true
+    return this
+  }
+  
   abortSignal(signal) {
     this.signal = signal
     return this
@@ -195,6 +201,10 @@ class SupabaseQueryBuilder {
     try {
       const result = await supabaseFetch(this.table, { params: this.params, signal: this.signal })
       if (this.isSingle && result.data) {
+        result.data = result.data[0] || null
+      }
+      if (this.isMaybeSingle && result.data) {
+        // maybeSingle retorna null se não encontrar, não lança erro
         result.data = result.data[0] || null
       }
       resolve(result)
@@ -251,6 +261,10 @@ class SupabaseModifyBuilder extends SupabaseQueryBuilder {
         headers: this.headers || {}
       })
       if (this.isSingle && result.data) {
+        result.data = result.data[0] || null
+      }
+      if (this.isMaybeSingle && result.data) {
+        // maybeSingle retorna null se não encontrar, não lança erro
         result.data = result.data[0] || null
       }
       resolve(result)
