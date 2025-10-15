@@ -898,6 +898,65 @@ export async function fecharCaixa({ saldoFinal = null, codigoEmpresa } = {}) {
     console.warn('[fecharCaixa] Falha ao gravar snapshot de fechamento:', snapErr)
   }
   // Retorna a sessão fechada (linha atualizada)
+  try {
+    // Saneamento: garantir que não restou nenhuma sessão 'open' por inconsistência
+    let qLeft = supabase.from('caixa_sessoes').select('id,aberto_em,saldo_inicial').eq('status','open')
+    if (codigo) qLeft = qLeft.eq('codigo_empresa', codigo)
+    const { data: leftOpen } = await qLeft
+    if (Array.isArray(leftOpen) && leftOpen.length > 0) {
+      for (const sess of leftOpen) {
+        try {
+          const aberto = sess?.aberto_em;
+          const saldoIni = Number(sess?.saldo_inicial || 0);
+          const fechadoAgora = new Date().toISOString();
+          // Recalcular entradas do período desta sessão remanescente
+          let entradas = 0; let movTotal = 0;
+          try {
+            const tmp = await listarResumoPeriodo({ from: aberto, to: fechadoAgora, codigoEmpresa: codigo })
+            entradas = Number(tmp?.totalEntradas || 0)
+          } catch {}
+          try {
+            let qmov = supabase.from('caixa_movimentacoes').select('tipo,valor').eq('caixa_sessao_id', sess.id)
+            if (codigo) qmov = qmov.eq('codigo_empresa', codigo)
+            const { data: mv } = await qmov
+            for (const m of (mv || [])) {
+              const v = Number(m?.valor || 0)
+              const t = String(m?.tipo || '').toLowerCase()
+              if (t === 'suprimento' || t === 'ajuste') movTotal += v
+              else if (t === 'sangria' || t === 'troco') movTotal -= v
+            }
+          } catch {}
+          const saldoFinalSess = saldoIni + entradas + movTotal;
+          await supabase.from('caixa_sessoes')
+            .update({ status: 'closed', saldo_final: saldoFinalSess, fechado_em: fechadoAgora })
+            .eq('id', sess.id)
+            .eq('status', 'open')
+            .eq(codigo ? 'codigo_empresa' : 'id', codigo ? codigo : sess.id)
+          // Criar snapshot mínimo
+          try {
+            const resumo = await listarResumoDaSessao({ caixaSessaoId: sess.id, codigoEmpresa: codigo }).catch(async () => (
+              await listarResumoPeriodo({ from: aberto, to: fechadoAgora, codigoEmpresa: codigo })
+            ))
+            const payload2 = {
+              codigo_empresa: codigo || getCachedCompanyCode(),
+              caixa_sessao_id: sess.id,
+              periodo_de: (resumo?.from) || aberto,
+              periodo_ate: (resumo?.to) || fechadoAgora,
+              total_bruto: Number(resumo?.totalVendasBrutas || 0),
+              total_descontos: Number(resumo?.totalDescontos || 0),
+              total_liquido: Number(resumo?.totalVendasLiquidas || 0),
+              total_entradas: Number(resumo?.totalEntradas || 0),
+              por_finalizadora: resumo?.totalPorFinalizadora || {}
+            }
+            const pf = payload2.por_finalizadora
+            await supabase.from('caixa_resumos').insert({ ...payload2, por_finalizadora: (pf && typeof pf !== 'string') ? JSON.stringify(pf) : pf })
+          } catch {}
+        } catch (e) {
+          try { console.warn('[fecharCaixa] Saneamento: falhou ao fechar sessão remanescente', sess?.id, e?.message || e) } catch {}
+        }
+      }
+    }
+  } catch {}
   return closedData
 }
 
