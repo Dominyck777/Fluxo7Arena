@@ -437,7 +437,12 @@ export async function listarComandas({ status, from, to, search = '', limit = 50
 // - total por finalizadora (pagamentos)
 // - total de vendas brutas, descontos, vendas líquidas (comandas fechadas no período)
 export async function listarResumoPeriodo({ from, to, codigoEmpresa } = {}) {
+  const trace = '[listarResumoPeriodo]'
   const codigo = codigoEmpresa || getCachedCompanyCode()
+  
+  console.log(`${trace} Iniciando consulta`)
+  console.log(`${trace} Período: ${from || 'SEM from'} até ${to || 'SEM to'}`)
+  console.log(`${trace} codigo_empresa: ${codigo}`)
   // 1) Comandas fechadas no período
   let comandasFechadas = []
   try {
@@ -487,8 +492,16 @@ export async function listarResumoPeriodo({ from, to, codigoEmpresa } = {}) {
     if (codigo) qp = qp.eq('codigo_empresa', codigo)
     if (from) qp = qp.gte('recebido_em', new Date(from).toISOString())
     if (to) qp = qp.lte('recebido_em', new Date(to).toISOString())
+    
+    console.log(`${trace} Consultando pagamentos...`)
     const { data, error } = await qp
-    if (error) throw error
+    if (error) {
+      console.error(`${trace} ❌ Erro ao buscar pagamentos:`, error)
+      throw error
+    }
+    
+    console.log(`${trace} Total de pagamentos encontrados: ${(data || []).length}`)
+    
     for (const pg of (data || [])) {
       const ok = (pg.status || 'Pago') !== 'Cancelado' && (pg.status || 'Pago') !== 'Estornado'
       if (!ok) continue
@@ -497,7 +510,12 @@ export async function listarResumoPeriodo({ from, to, codigoEmpresa } = {}) {
       porFinalizadora[key] = (porFinalizadora[key] || 0) + v
       totalEntradas += v
     }
-  } catch {}
+    
+    console.log(`${trace} ✅ Resumo por finalizadora:`, porFinalizadora)
+    console.log(`${trace} Total de entradas: R$ ${totalEntradas.toFixed(2)}`)
+  } catch (e) {
+    console.error(`${trace} ❌ Exception ao processar pagamentos:`, e)
+  }
 
   return {
     from: from ? new Date(from).toISOString() : null,
