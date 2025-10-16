@@ -75,7 +75,12 @@ const buildQueryString = (params) => {
   const searchParams = new URLSearchParams()
   Object.entries(params).forEach(([key, value]) => {
     if (value !== undefined && value !== null) {
-      searchParams.append(key, String(value))
+      // Se value for array, adicionar múltiplas vezes (para gte+lte na mesma coluna)
+      if (Array.isArray(value)) {
+        value.forEach(v => searchParams.append(key, String(v)))
+      } else {
+        searchParams.append(key, String(value))
+      }
     }
   })
   return searchParams.toString()
@@ -309,13 +314,14 @@ class SupabaseQueryBuilder {
       // Mesclar multiFilters em params para enviar ao fetch
       const finalParams = { ...this.params }
       
-      // Para cada coluna com múltiplos filtros, combiná-los com 'and'
+      // Para cada coluna com múltiplos filtros, passar como array
+      // buildQueryString vai adicionar múltiplas vezes na query string
       Object.entries(this.multiFilters).forEach(([column, filters]) => {
         if (filters.length === 1) {
           finalParams[column] = filters[0]
         } else if (filters.length > 1) {
-          // PostgREST: múltiplos filtros na mesma coluna devem ser combinados com 'and'
-          finalParams[column] = `and(${filters.join(',')})`
+          // Múltiplos filtros: passar como array para buildQueryString
+          finalParams[column] = filters
         }
       })
       
@@ -384,7 +390,8 @@ class SupabaseModifyBuilder extends SupabaseQueryBuilder {
         if (filters.length === 1) {
           finalParams[column] = filters[0]
         } else if (filters.length > 1) {
-          finalParams[column] = `and(${filters.join(',')})`
+          // Múltiplos filtros: passar como array para buildQueryString
+          finalParams[column] = filters
         }
       })
       
