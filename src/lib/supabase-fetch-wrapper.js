@@ -65,7 +65,7 @@ const buildQueryString = (params) => {
 
 // Helper para fazer request
 const supabaseFetch = async (endpoint, options = {}) => {
-  const { method = 'GET', body, headers: customHeaders = {}, params = {}, signal } = options
+  const { method = 'GET', body, headers: customHeaders = {}, params = {}, signal, timeoutMs = 8000 } = options
   
   const queryString = buildQueryString(params)
   const url = `${SUPABASE_URL}/rest/v1/${endpoint}${queryString ? `?${queryString}` : ''}`
@@ -101,13 +101,41 @@ const supabaseFetch = async (endpoint, options = {}) => {
     config.signal = signal
   }
   
-  const response = await fetch(url, config)
-  
-  if (!response.ok) {
-    const error = await response.text()
-    throw new Error(`Supabase error: ${response.status} - ${error}`)
+  // Timeout com AbortController para evitar requests travados na produção
+  const controller = new AbortController()
+  const timer = setTimeout(() => {
+    try { controller.abort('timeout') } catch {}
+  }, Math.max(2000, timeoutMs))
+  // respeita o signal externo se fornecido
+  const finalSignal = (() => {
+    if (!signal) return controller.signal
+    try {
+      // Se houver signal externo, quando ele abortar, aborta também o controller local
+      signal.addEventListener('abort', () => {
+        try { controller.abort('upstream-abort') } catch {}
+      })
+    } catch {}
+    return controller.signal
+  })()
+  config.signal = finalSignal
+
+  const startedAt = Date.now()
+  let response
+  try {
+    response = await fetch(url, config)
+  } finally {
+    clearTimeout(timer)
   }
   
+  if (!response.ok) {
+    let errorText = ''
+    try { errorText = await response.text() } catch {}
+    const elapsed = Date.now() - startedAt
+    throw new Error(`[Supabase Wrapper] HTTP ${response.status} (${elapsed}ms) - ${errorText || 'unknown error'}`)
+  }
+  
+  const elapsed = Date.now() - startedAt
+  try { console.debug(`[Supabase Wrapper] fetch ${endpoint} OK (${elapsed}ms)`) } catch {}
   const data = await response.json()
   return { data, error: null }
 }
