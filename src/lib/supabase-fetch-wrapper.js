@@ -8,6 +8,50 @@
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY
 
+// Descobre o ref do projeto a partir do SUPABASE_URL (ex: https://<ref>.supabase.co)
+function getProjectRef() {
+  try {
+    const u = new URL(SUPABASE_URL)
+    const host = u.host || ''
+    const parts = host.split('.')
+    // Geralmente o primeiro subdomínio é o ref do projeto
+    return parts[0] || ''
+  } catch {
+    return ''
+  }
+}
+
+// Constrói a chave do localStorage usada pelo supabase-js v2
+function getAuthStorageKey() {
+  const ref = getProjectRef()
+  return ref ? `sb-${ref}-auth-token` : 'sb-auth-token'
+}
+
+// Obtém o access_token do usuário autenticado
+async function getAccessToken() {
+  // 1) Tenta via auth.getSession() se o supabaseWrapper.auth foi injetado
+  try {
+    // eslint-disable-next-line no-undef
+    if (typeof supabaseWrapper !== 'undefined' && supabaseWrapper?.auth?.getSession) {
+      const { data } = await supabaseWrapper.auth.getSession()
+      const token = data?.session?.access_token
+      if (token) return token
+    }
+  } catch {}
+
+  // 2) Fallback: lê do localStorage usando a chave baseada no ref do projeto
+  try {
+    const key = getAuthStorageKey()
+    const raw = localStorage.getItem(key)
+    if (raw) {
+      const parsed = JSON.parse(raw)
+      if (parsed?.access_token) return parsed.access_token
+      if (parsed?.currentSession?.access_token) return parsed.currentSession.access_token
+    }
+  } catch {}
+  return null
+}
+
 // Helper para construir query string
 const buildQueryString = (params) => {
   const searchParams = new URLSearchParams()
@@ -34,17 +78,14 @@ const supabaseFetch = async (endpoint, options = {}) => {
     ...customHeaders,
   }
   
-  // Adicionar auth token se existir
-  const authData = localStorage.getItem('sb-dlfryxtyxqoacuunswuc-auth-token')
-  if (authData) {
-    try {
-      const { access_token } = JSON.parse(authData)
-      if (access_token) {
-        headers['Authorization'] = `Bearer ${access_token}`
-      }
-    } catch (e) {
-      console.warn('[Supabase Wrapper] Erro ao ler auth token:', e)
+  // Adicionar auth token do usuário (sobrescreve anon key se disponível)
+  try {
+    const token = await getAccessToken()
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`
     }
+  } catch (e) {
+    console.warn('[Supabase Wrapper] Erro ao obter token de sessão:', e)
   }
   
   const config = {

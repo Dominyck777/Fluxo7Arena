@@ -28,6 +28,19 @@ const originalClient = createClient(supabaseUrl, supabaseAnonKey, {
   },
 })
 
+// Disponibiliza o auth original dentro do wrapper para que ele consiga acessar a sessão atual
+try {
+  if (typeof window !== 'undefined') {
+    // supabaseWrapper é importado acima e exportado de supabase-fetch-wrapper.js
+    // Aqui garantimos que o wrapper possa consultar o token via getSession()
+    // sem depender de uma chave fixa no localStorage
+    // eslint-disable-next-line no-undef
+    if (supabaseWrapper) {
+      supabaseWrapper.auth = originalClient.auth
+    }
+  }
+} catch {}
+
 // 🔧 WORKAROUND: Em produção, usar wrapper com fetch direto
 // O @supabase/supabase-js quebra com minificação do Vite no Netlify/Vercel
 export const supabase = import.meta.env.PROD ? {
