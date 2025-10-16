@@ -174,7 +174,8 @@ const supabaseFetch = async (endpoint, options = {}) => {
 class SupabaseQueryBuilder {
   constructor(table) {
     this.table = table
-    this.params = {}
+    this.params = {} // Armazena filtros simples
+    this.multiFilters = {} // Armazena array de filtros por coluna (para gte+lte, etc)
     this.selectColumns = '*'
     this.signal = null
   }
@@ -186,7 +187,7 @@ class SupabaseQueryBuilder {
   }
   
   eq(column, value) {
-    this.params[column] = `eq.${value}`
+    this._addFilter(column, `eq.${value}`)
     return this
   }
   
@@ -202,7 +203,7 @@ class SupabaseQueryBuilder {
   
   // Greater than or equal
   gte(column, value) {
-    this.params[column] = `gte.${value}`
+    this._addFilter(column, `gte.${value}`)
     return this
   }
   
@@ -213,7 +214,7 @@ class SupabaseQueryBuilder {
   }
   
   lte(column, value) {
-    this.params[column] = `lte.${value}`
+    this._addFilter(column, `lte.${value}`)
     return this
   }
   
@@ -258,13 +259,13 @@ class SupabaseQueryBuilder {
   }
   
   filter(column, operator, value) {
-    this.params[column] = `${operator}.${value}`
+    this._addFilter(column, `${operator}.${value}`)
     return this
   }
   
   order(column, options = {}) {
-    const { ascending = true } = options
-    this.params.order = `${column}.${ascending ? 'asc' : 'desc'}`
+    const direction = options.ascending === false ? 'desc' : 'asc'
+    this.params.order = `${column}.${direction}`
     return this
   }
   
@@ -296,9 +297,33 @@ class SupabaseQueryBuilder {
     return this
   }
   
+  _addFilter(column, filterValue) {
+    if (!this.multiFilters[column]) {
+      this.multiFilters[column] = []
+    }
+    this.multiFilters[column].push(filterValue)
+  }
+  
   async then(resolve, reject) {
     try {
-      const result = await supabaseFetch(this.table, { params: this.params, signal: this.signal })
+      // Mesclar multiFilters em params para enviar ao fetch
+      const finalParams = { ...this.params }
+      
+      // Para cada coluna com múltiplos filtros, combiná-los com 'and'
+      Object.entries(this.multiFilters).forEach(([column, filters]) => {
+        if (filters.length === 1) {
+          finalParams[column] = filters[0]
+        } else if (filters.length > 1) {
+          // PostgREST: múltiplos filtros na mesma coluna devem ser combinados com 'and'
+          finalParams[column] = `and(${filters.join(',')})`
+        }
+      })
+      
+      const result = await supabaseFetch(this.table, {
+        method: 'GET',
+        params: finalParams,
+        signal: this.signal
+      })
       if (this.isSingle && result.data) {
         result.data = result.data[0] || null
       }
