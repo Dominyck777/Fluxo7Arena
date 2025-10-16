@@ -377,10 +377,21 @@ class SupabaseModifyBuilder extends SupabaseQueryBuilder {
   
   async then(resolve, reject) {
     try {
+      // Mesclar multiFilters em params (importante para UPDATE/DELETE com WHERE)
+      const finalParams = { ...this.params }
+      
+      Object.entries(this.multiFilters).forEach(([column, filters]) => {
+        if (filters.length === 1) {
+          finalParams[column] = filters[0]
+        } else if (filters.length > 1) {
+          finalParams[column] = `and(${filters.join(',')})`
+        }
+      })
+      
       const result = await supabaseFetch(this.table, { 
         method: this.method || 'GET',
         body: this.body,
-        params: this.params,
+        params: finalParams,
         signal: this.signal,
         headers: this.headers || {}
       })
