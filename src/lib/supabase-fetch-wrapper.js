@@ -27,17 +27,26 @@ function getAuthStorageKey() {
   return ref ? `sb-${ref}-auth-token` : 'sb-auth-token'
 }
 
-// Obtém o access_token do usuário autenticado
+// Obtém o access_token do usuário autenticado com timeout
 async function getAccessToken() {
-  // 1) Tenta via auth.getSession() se o supabaseWrapper.auth foi injetado
+  // 1) Tenta via auth.getSession() com timeout de 1s
   try {
     // eslint-disable-next-line no-undef
     if (typeof supabaseWrapper !== 'undefined' && supabaseWrapper?.auth?.getSession) {
-      const { data } = await supabaseWrapper.auth.getSession()
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('getSession timeout')), 1000)
+      )
+      const sessionPromise = supabaseWrapper.auth.getSession()
+      const { data } = await Promise.race([sessionPromise, timeoutPromise])
       const token = data?.session?.access_token
-      if (token) return token
+      if (token) {
+        console.debug('[Supabase Wrapper] Token obtido via getSession')
+        return token
+      }
     }
-  } catch {}
+  } catch (e) {
+    console.debug('[Supabase Wrapper] getSession falhou ou timeout:', e.message)
+  }
 
   // 2) Fallback: lê do localStorage usando a chave baseada no ref do projeto
   try {
@@ -45,10 +54,19 @@ async function getAccessToken() {
     const raw = localStorage.getItem(key)
     if (raw) {
       const parsed = JSON.parse(raw)
-      if (parsed?.access_token) return parsed.access_token
-      if (parsed?.currentSession?.access_token) return parsed.currentSession.access_token
+      if (parsed?.access_token) {
+        console.debug('[Supabase Wrapper] Token obtido via localStorage')
+        return parsed.access_token
+      }
+      if (parsed?.currentSession?.access_token) {
+        console.debug('[Supabase Wrapper] Token obtido via localStorage (currentSession)')
+        return parsed.currentSession.access_token
+      }
     }
-  } catch {}
+  } catch (e) {
+    console.warn('[Supabase Wrapper] Erro ao ler localStorage:', e)
+  }
+  console.warn('[Supabase Wrapper] ⚠️ Nenhum token encontrado - usando anon key')
   return null
 }
 
@@ -135,8 +153,20 @@ const supabaseFetch = async (endpoint, options = {}) => {
   }
   
   const elapsed = Date.now() - startedAt
-  try { console.debug(`[Supabase Wrapper] fetch ${endpoint} OK (${elapsed}ms)`) } catch {}
-  const data = await response.json()
+  let data
+  try {
+    data = await response.json()
+  } catch (e) {
+    console.error(`[Supabase Wrapper] Erro ao parsear JSON de ${endpoint}:`, e)
+    throw new Error(`[Supabase Wrapper] JSON parse error: ${e.message}`)
+  }
+  
+  if (elapsed > 3000) {
+    console.warn(`[Supabase Wrapper] ⚠️ fetch ${endpoint} LENTO (${elapsed}ms)`)
+  } else {
+    console.debug(`[Supabase Wrapper] fetch ${endpoint} OK (${elapsed}ms)`)
+  }
+  
   return { data, error: null }
 }
 

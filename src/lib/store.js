@@ -566,29 +566,49 @@ export async function listarClientes({ searchTerm = '', limit = 20, codigoEmpres
 
 // Lista comandas abertas (open/awaiting-payment)
 export async function listarComandasAbertas({ codigoEmpresa } = {}) {
+  const trace = '[listarComandasAbertas]'
   const codigo = codigoEmpresa || getCachedCompanyCode()
   
-  // CONSULTA MAIS AMPLA: buscar todas as comandas sem fechado_em, independente do status
-  let q = supabase
-    .from('comandas')
-    .select('id, mesa_id, status, aberto_em, fechado_em')
-    .is('fechado_em', null)
-    .order('aberto_em', { ascending: false })
-  if (codigo) q = q.eq('codigo_empresa', codigo)
-  const { data, error } = await q
-  if (error) throw error
+  console.log(`${trace} Iniciando - codigo_empresa:`, codigo)
   
-  // Debug: log para verificar comandas encontradas
-  console.log(`[listarComandasAbertas] Consulta ampla encontrou ${(data || []).length} comandas:`, data)
-  
-  // Filtrar apenas as que realmente estão abertas
-  const abertas = (data || []).filter(c => 
-    c.status === 'open' || c.status === 'awaiting-payment'
-  )
-  
-  console.log(`[listarComandasAbertas] Após filtro: ${abertas.length} comandas abertas:`, abertas)
-  
-  return abertas
+  try {
+    // Timeout de 5s para evitar travamento
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('listarComandasAbertas timeout após 5s')), 5000)
+    )
+    
+    // CONSULTA MAIS AMPLA: buscar todas as comandas sem fechado_em, independente do status
+    let q = supabase
+      .from('comandas')
+      .select('id, mesa_id, status, aberto_em, fechado_em')
+      .is('fechado_em', null)
+      .order('aberto_em', { ascending: false })
+    if (codigo) q = q.eq('codigo_empresa', codigo)
+    
+    console.log(`${trace} Query montada, executando...`)
+    const queryPromise = q
+    
+    const { data, error } = await Promise.race([queryPromise, timeoutPromise])
+    
+    if (error) {
+      console.error(`${trace} ❌ ERRO:`, error)
+      throw error
+    }
+    
+    console.log(`${trace} Consulta retornou ${(data || []).length} comandas (fechado_em=null)`)
+    
+    // Filtrar apenas as que realmente estão abertas
+    const abertas = (data || []).filter(c => 
+      c.status === 'open' || c.status === 'awaiting-payment'
+    )
+    
+    console.log(`${trace} ✅ Após filtro: ${abertas.length} comandas abertas`)
+    
+    return abertas
+  } catch (e) {
+    console.error(`${trace} ❌ EXCEPTION:`, e?.message || e)
+    throw e
+  }
 }
 
 // Carrega itens de várias comandas e retorna um mapa { comanda_id: total }
@@ -610,12 +630,36 @@ export async function listarTotaisPorComanda(comandaIds = [], codigoEmpresa) {
 
 // Mesas
 export async function listMesas(codigoEmpresa) {
+  const trace = '[listMesas]'
   const codigo = codigoEmpresa || getCachedCompanyCode()
-  let query = supabase.from('mesas').select('*').order('numero', { ascending: true })
-  if (codigo) query = query.eq('codigo_empresa', codigo)
-  const { data, error } = await query
-  if (error) throw error
-  return data || []
+  
+  console.log(`${trace} Iniciando - codigo_empresa:`, codigo)
+  
+  try {
+    // Timeout de 5s para evitar travamento
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('listMesas timeout após 5s')), 5000)
+    )
+    
+    let query = supabase.from('mesas').select('*').order('numero', { ascending: true })
+    if (codigo) query = query.eq('codigo_empresa', codigo)
+    
+    console.log(`${trace} Query montada, executando...`)
+    const queryPromise = query
+    
+    const { data, error } = await Promise.race([queryPromise, timeoutPromise])
+    
+    if (error) {
+      console.error(`${trace} ❌ ERRO:`, error)
+      throw error
+    }
+    
+    console.log(`${trace} ✅ Sucesso - ${(data || []).length} mesas carregadas`)
+    return data || []
+  } catch (e) {
+    console.error(`${trace} ❌ EXCEPTION:`, e?.message || e)
+    throw e
+  }
 }
 
 // Cria uma nova mesa com o próximo número disponível (ou número específico)
