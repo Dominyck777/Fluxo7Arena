@@ -1024,7 +1024,7 @@ function ProdutosPage() {
         } catch {}
       }, 2000);
       try {
-        const data = await listProducts({ includeInactive: filters.status === 'inactive', search: searchTerm, codigoEmpresa });
+        const data = await listProducts({ includeInactive: filters.status === 'all' || filters.status === 'inactive', search: searchTerm, codigoEmpresa });
         if (!mountedRef.current) return;
         setProducts(data);
         try { localStorage.setItem(cacheKey, JSON.stringify(data)); } catch {}
@@ -1205,9 +1205,9 @@ function ProdutosPage() {
                 activeFilter === 'expired' ? (p.validade && p.validade < today) :
                 false;
 
-            // Regra: quando status = 'all', escondemos inativos por padrão
+            // Regra: quando status = 'all', mostra todos incluindo inativos
             const statusMatch = filters.status === 'all'
-              ? (p.status !== 'inactive')
+              ? true
               : (p.status === filters.status);
 
             const typeMatch = (filters.type === 'all' || p.type === filters.type);
