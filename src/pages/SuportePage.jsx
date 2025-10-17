@@ -263,24 +263,18 @@ export default function SuportePage() {
                 <p className="text-sm text-text-secondary">
                   Instale o F7 Arena no seu dispositivo para acesso rápido e experiência completa de aplicativo.
                 </p>
-                {deferredPrompt ? (
-                  <button
-                    onClick={handleInstallClick}
-                    className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-md bg-brand text-black font-medium hover:opacity-90 transition"
-                  >
-                    <Download className="w-4 h-4" /> Instalar Agora
-                  </button>
-                ) : (
-                  <div className="space-y-2">
-                    <p className="text-xs text-text-muted">
-                      Para instalar o aplicativo:
-                    </p>
-                    <ul className="text-xs text-text-muted space-y-1 pl-4 list-disc">
-                      <li><strong>Chrome/Edge:</strong> Clique no ícone de instalação na barra de endereço (ou menu ⋮ → "Instalar F7 Arena")</li>
-                      <li><strong>Firefox:</strong> Adicione aos favoritos ou crie um atalho na área de trabalho</li>
-                      <li><strong>Safari:</strong> Use Arquivo → Adicionar à Dock</li>
-                    </ul>
-                  </div>
+                <button
+                  onClick={deferredPrompt ? handleInstallClick : () => {
+                    alert('Para instalar o aplicativo:\n\n• Chrome/Edge: Clique no ícone de instalação na barra de endereço (ou menu ⋮ → "Instalar F7 Arena")\n• Firefox: Adicione aos favoritos ou crie um atalho\n• Safari: Use Arquivo → Adicionar à Dock');
+                  }}
+                  className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-md bg-brand text-black font-medium hover:opacity-90 transition"
+                >
+                  <Download className="w-4 h-4" /> Instalar App
+                </button>
+                {!deferredPrompt && (
+                  <p className="text-xs text-text-muted text-center">
+                    Se o botão não funcionar, use o menu do navegador para instalar
+                  </p>
                 )}
               </div>
             </SectionCard>
