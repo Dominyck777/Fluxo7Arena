@@ -56,8 +56,8 @@ export default function SuportePage() {
   const [descricao, setDescricao] = useState('');
   const [isDesktop, setIsDesktop] = useState(true);
   
-  // PWA Install
-  const [deferredPrompt, setDeferredPrompt] = useState(null);
+  // PWA Install - usa window para persistir entre navegações
+  const [deferredPrompt, setDeferredPrompt] = useState(() => window.__installPrompt || null);
   const [isInstalled, setIsInstalled] = useState(false);
   const [isIOS, setIsIOS] = useState(false);
   const [showInstallModal, setShowInstallModal] = useState(false);
@@ -109,14 +109,21 @@ export default function SuportePage() {
     // Capturar evento de instalação (não funciona no iOS)
     const handleBeforeInstallPrompt = (e) => {
       e.preventDefault();
+      window.__installPrompt = e; // Armazena globalmente
       setDeferredPrompt(e);
     };
 
     const handleAppInstalled = () => {
       setIsInstalled(true);
       setDeferredPrompt(null);
+      window.__installPrompt = null; // Limpa do global
       setShowInstallModal(false);
     };
+
+    // Verifica se já existe um prompt armazenado globalmente
+    if (window.__installPrompt && !deferredPrompt) {
+      setDeferredPrompt(window.__installPrompt);
+    }
 
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
     window.addEventListener('appinstalled', handleAppInstalled);
@@ -125,7 +132,7 @@ export default function SuportePage() {
       window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
       window.removeEventListener('appinstalled', handleAppInstalled);
     };
-  }, []);
+  }, [deferredPrompt]);
 
   const handleInstallClick = async () => {
     if (deferredPrompt) {
@@ -141,6 +148,7 @@ export default function SuportePage() {
         }
         
         setDeferredPrompt(null);
+        window.__installPrompt = null; // Limpa do global após uso
       } catch (err) {
         console.error('Erro ao mostrar prompt de instalação:', err);
         setShowInstallModal(true);

@@ -1382,11 +1382,6 @@ function AgendaPage() {
         }
       }
       courtsRetryRef.current = false; // sucesso (ou segunda tentativa)
-      console.log('🏟️ [Quadras Carregadas]', {
-        empresa: userProfile?.codigo_empresa,
-        total: rows.length,
-        quadras: rows.map(q => ({ id: q.id, nome: q.nome }))
-      });
       setDbCourts(rows);
       try { localStorage.setItem(courtsCacheKey, JSON.stringify(rows)); } catch {}
       setCourtsLoading(false);
@@ -3580,12 +3575,6 @@ function AgendaPage() {
                         now < (pickerBlockUntilRef.current || 0) ||
                         isUiBusy()
                       );
-                      console.log('[PickerEvt] onOpenChange', { ts: new Date().toISOString(), requestedOpen: open, guardActive, guards: {
-                        selectionLockUntil: selectionLockUntilRef.current,
-                        suppressCloseUntil: suppressPickerCloseRef.current,
-                        pickerBlockUntil: pickerBlockUntilRef.current,
-                        uiBusyUntil: uiBusyUntilRef.current,
-                      }});
                       // Não fechar automaticamente enquanto o modal de novo cliente estiver aberto ou enquanto a lista estiver recarregando
                       if ((isClientFormOpen || clientsLoading) && open === false) return;
                       // Bloqueio de fechamento durante janelas de proteção / uiBusy
@@ -3689,7 +3678,6 @@ function AgendaPage() {
                           now < (pickerBlockUntilRef.current || 0) ||
                           isUiBusy()
                         );
-                        console.log('[PickerEvt] onPointerDownOutside', { ts: new Date().toISOString(), guardActive });
                         if (guardActive) { e.preventDefault(); return; }
                         // Permitir interação externa quando não estiver carregando e nem com o modal de cliente aberto
                         if (isClientFormOpen || clientsLoading) { e.preventDefault(); return; }
@@ -3884,7 +3872,6 @@ function AgendaPage() {
                                     isPickerOpen: !!effectiveCustomerPickerOpen,
                                     isModalOpen: !!isModalOpen,
                                   };
-                                  console.warn('[CustomerPicker][CONCLUDE:mousedown]', dump);
                                 } catch {}
                               } catch {}
                               // Evita que o mousedown seja interpretado como outside imediatamente
@@ -3954,7 +3941,6 @@ function AgendaPage() {
                                   pickerOpen: !!effectiveCustomerPickerOpen,
                                   modalOpen: !!isModalOpen,
                                 };
-                                console.warn('[CustomerPicker][CLOSE:conclude]', dump);
                               } catch {}
                               // Libera flag de fechamento após a janela de trava
                               setTimeout(() => { try { pickerClosingRef.current = false; } catch {} }, 3000);
@@ -4659,8 +4645,6 @@ function AgendaPage() {
                   disabled={isSavingPayments}
                   onClick={async () => {
                     const tClick = Date.now();
-                    const traceId = `[PaymentsSave Trace ${tClick}]`;
-                    try { console.groupCollapsed(traceId); } catch {}
                     try {
                       const snap = {
                         modalOpen: isPaymentModalOpen,
@@ -4672,17 +4656,13 @@ function AgendaPage() {
                         hiddenIds: [...(paymentHiddenIds || [])],
                         paymentTotal,
                       };
-                      try { console.info('[PaymentsSave] click', snap); } catch {}
                       if (isSavingPayments) {
-                        try { console.warn('[PaymentsSave] ignored: already saving'); } catch {}
                         return;
                       }
                       setIsSavingPayments(true);
-                      try { console.debug('[PaymentsSave] state set: isSavingPayments=true'); } catch {}
                       const agendamentoId = editingBooking?.id;
                       const codigo = userProfile?.codigo_empresa;
                       if (!agendamentoId || !codigo) {
-                        try { console.error('[PaymentsSave] missing identifiers', { agendamentoId, codigo }); } catch {}
                         toast({ title: 'Erro ao salvar pagamentos', description: 'Agendamento ou empresa indisponível.', variant: 'destructive' });
                         return;
                       }
@@ -4698,12 +4678,9 @@ function AgendaPage() {
                           return acc + (st !== 'Pago' ? 1 : 0);
                         }, 0);
                       } catch (calcErr) {
-                        try { console.error('[PaymentsSave] calc error', calcErr, { participantsForm, formSelected: form?.selectedClients, paymentHiddenIds }); } catch {}
                         toast({ title: 'Erro ao processar participantes', description: 'Tente novamente.', variant: 'destructive' });
                         return;
                       }
-                      try { console.debug('[PaymentsSave] pendingCount', { pendingCount, effectiveSelected: effectiveSelected.map(c => c.id) }); } catch {}
-                      // manter apenas toast para usuário mais abaixo; sem logs adicionais
 
                       const tDel0 = Date.now();
                       const { error: delErr } = await supabase
@@ -4716,35 +4693,22 @@ function AgendaPage() {
                         toast({ title: 'Erro ao salvar pagamentos', description: 'Falha ao limpar registros anteriores.', variant: 'destructive' });
                         throw delErr;
                       }
-                      try { console.debug('[PaymentsSave] delete ok', { ms: Date.now() - tDel0 }); } catch {}
-                      
-                      console.log('[PaymentsSave] ANTES DE MONTAR ROWS:', { 
-                        effectiveSelected: effectiveSelected.map(c => ({ id: c.id, nome: c.nome })),
-                        participantsForm,
-                        payMethods: payMethods.map(m => ({ id: m.id, nome: m.nome })),
-                      });
                       
                       const rows = effectiveSelected.map((c) => {
                         const pf = participantsForm.find(p => p.cliente_id === c.id);
-                        if (!pf) {
-                          console.error('[PaymentsSave] ⚠️ Participante não encontrado em participantsForm:', { cliente_id: c.id, nome: c.nome, participantsFormLen: participantsForm.length });
-                        }
                         const valor = parseBRL(pf?.valor_cota);
                         const finId = pf?.finalizadora_id || (payMethods[0]?.id ? String(payMethods[0].id) : null);
                         const row = {
                           codigo_empresa: codigo,
                           agendamento_id: agendamentoId,
                           cliente_id: c.id,
-                          nome: c.nome, // ✅ CORREÇÃO: Preserva o nome do participante
+                          nome: c.nome,
                           valor_cota: Number.isFinite(valor) ? valor : 0,
                           status_pagamento: pf?.status_pagamento || 'Pendente',
                           finalizadora_id: finId,
                         };
-                        console.log('[PaymentsSave] Row montada:', { cliente: c.nome, finalizadora_id: finId, pf });
                         return row;
                       });
-                      console.log('[PaymentsSave] ✅ TODAS AS ROWS MONTADAS:', rows);
-                      try { console.debug('[PaymentsSave] rows prepared', { count: rows.length, sample: rows.slice(0,3) }); } catch {}
                       
                       if (rows.length > 0) {
                         const tIns0 = Date.now();
@@ -4757,7 +4721,6 @@ function AgendaPage() {
                           toast({ title: 'Erro ao salvar pagamentos', description: 'Falha ao inserir pagamentos.', variant: 'destructive' });
                           throw error;
                         }
-                        try { console.debug('[PaymentsSave] insert ok', { insertedCount: inserted?.length || 0, ms: Date.now() - tIns0 }); } catch {}
                         
                       } else {
                         // nenhum participante selecionado
@@ -4778,7 +4741,6 @@ function AgendaPage() {
                             })
                             .eq('codigo_empresa', codigo)
                             .eq('id', agendamentoId);
-                          try { console.debug('[PaymentsSave] booking updated after removals', { primaryId: primary?.id || null, count: newSelected.length, ms: Date.now() - tUpd0 }); } catch {}
                           // Reflete imediatamente no formulário/modais
                           setForm(f => ({ ...f, selectedClients: newSelected }));
                           // Atualiza o cartão na agenda (nome do cliente primário)
@@ -4803,11 +4765,9 @@ function AgendaPage() {
                             try { if (participantsCacheKey) localStorage.setItem(participantsCacheKey, JSON.stringify(next)); } catch {}
                             return next;
                           });
-                          try { console.debug('[PaymentsSave] refresh participants ok', { count: freshParts?.length || 0, ms: Date.now() - tRf0 }); } catch {}
                         }
                       } catch (rfErr) {
                         // falha silenciosa; indicador pode não atualizar imediatamente
-                        try { console.warn('[PaymentsSave] refresh participants failed', rfErr); } catch {}
                       }
                       
                       // Avalia total atribuído vs total alvo e pendências (notificações; salvamento não é bloqueado)
@@ -4818,7 +4778,6 @@ function AgendaPage() {
                         const v = parseBRL(pf?.valor_cota);
                         return sum + (Number.isFinite(v) ? v : 0);
                       }, 0);
-                      try { console.info('[PaymentsSave] totals', { totalTarget, totalAssigned, pendingCount }); } catch {}
                       if (totalTarget > 0 && totalAssigned < totalTarget - 0.005) {
                         toast({
                           title: 'Pagamentos salvos',
@@ -4835,17 +4794,13 @@ function AgendaPage() {
                         toast({ title: 'Pagamentos salvos', variant: 'success' });
                       }
                       setPaymentWarning(null);
-                      try { console.info('[PaymentsSave] done', { ms: Date.now() - t0 }); } catch {}
                       // Fecha o modal de pagamentos e, em seguida, o modal principal
                       setIsPaymentModalOpen(false);
                       setIsModalOpen(false);
                     } catch (e) {
                       toast({ title: 'Erro ao salvar pagamentos', description: 'Tente novamente.', variant: 'destructive' });
-                      // eslint-disable-next-line no-console
-                      console.error('[PaymentsSave] error', e);
                     } finally {
                       setIsSavingPayments(false);
-                      try { console.groupEnd(); } catch {}
                     }
                   }}
                 >Salvar Pagamentos</Button>

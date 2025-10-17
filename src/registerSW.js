@@ -5,7 +5,7 @@ export function registerServiceWorker() {
       navigator.serviceWorker
         .register('/sw.js', { scope: '/' })
         .then((registration) => {
-          console.log('[SW] Service Worker registrado com sucesso:', registration.scope);
+          // Service Worker registrado com sucesso
 
           // Verifica atualizações a cada 60 segundos
           setInterval(() => {
@@ -15,11 +15,9 @@ export function registerServiceWorker() {
           // Listener para atualizações
           registration.addEventListener('updatefound', () => {
             const newWorker = registration.installing;
-            console.log('[SW] Nova versão encontrada, instalando...');
 
             newWorker.addEventListener('statechange', () => {
               if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                console.log('[SW] Nova versão disponível! Recarregue a página para atualizar.');
                 
                 // Opcional: Notificar o usuário sobre atualização
                 if (window.confirm('Nova versão disponível! Deseja atualizar agora?')) {
@@ -36,12 +34,9 @@ export function registerServiceWorker() {
 
       // Listener para quando o SW tomar controle
       navigator.serviceWorker.addEventListener('controllerchange', () => {
-        console.log('[SW] Service Worker atualizado, recarregando...');
         window.location.reload();
       });
     });
-  } else {
-    console.warn('[SW] Service Worker não é suportado neste navegador');
   }
 }
 

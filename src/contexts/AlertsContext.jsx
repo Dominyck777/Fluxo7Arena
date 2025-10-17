@@ -210,7 +210,6 @@ export const AlertsProvider = ({ children }) => {
         });
       }
       
-      console.log('📊 [AlertsContext] Alertas carregados:', alertasList.length, alertasList);
       setAlerts(alertasList);
     } catch (error) {
       console.error('[AlertsContext] Erro ao carregar alertas:', error);

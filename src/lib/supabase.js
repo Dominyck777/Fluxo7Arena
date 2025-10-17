@@ -4,10 +4,6 @@ import { supabaseWrapper } from './supabase-fetch-wrapper'
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
 
-console.log('[Supabase Init] URL:', supabaseUrl ? '✅ OK' : '❌ FALTANDO')
-console.log('[Supabase Init] Key:', supabaseAnonKey ? '✅ OK' : '❌ FALTANDO')
-console.log('[Supabase Init] Env Mode:', import.meta.env.MODE)
-
 if (!supabaseUrl || !supabaseAnonKey) {
   console.error('[Supabase] ❌ ERRO CRÍTICO: Variáveis de ambiente ausentes!')
   throw new Error('Supabase: Variáveis de ambiente não configuradas!')
@@ -68,13 +64,9 @@ export const supabase = import.meta.env.PROD ? {
   supabaseKey: supabaseAnonKey,
 } : originalClient
 
-console.log('[Supabase Init] Modo:', import.meta.env.PROD ? '🔧 WRAPPER (produção)' : '✅ CLIENT ORIGINAL (dev)')
-console.log('[Supabase Init] Client criado:', !!supabase)
-
 // Expor para depuração
 if (typeof window !== 'undefined') {
   window.__supabase = supabase
   window.__supabase_original = originalClient
   window.__supabase_wrapper = supabaseWrapper
-  console.log('[Supabase Init] ✅ Exposto em window.__supabase')
 }
