@@ -1246,7 +1246,7 @@ export default function BalcaoPage() {
                         </div>
                         <p className="text-sm text-text-muted">R$ {price.toFixed(2)}</p>
                       </div>
-                      <Button size="icon" variant="outline" className="flex-shrink-0" onClick={async () => { await addProduct(prod); }} aria-label={`Adicionar ${prod.name}`}>
+                      <Button size="icon" className="flex-shrink-0 bg-amber-500 hover:bg-amber-400 text-black border border-amber-500/60" onClick={async () => { await addProduct(prod); }} aria-label={`Adicionar ${prod.name}`}>
                         <Plus className="h-4 w-4" />
                       </Button>
                     </li>
@@ -1315,8 +1315,7 @@ export default function BalcaoPage() {
                         </div>
                         <Button 
                           size="icon" 
-                          variant="outline" 
-                          className="flex-shrink-0" 
+                          className="flex-shrink-0 bg-amber-500 hover:bg-amber-400 text-black border border-amber-500/60"
                           onClick={(e) => {
                             e.stopPropagation();
                             addProduct(prod);
@@ -1351,8 +1350,7 @@ export default function BalcaoPage() {
               {/* Botão Produto */}
               <Button
                 size="sm"
-                variant="outline"
-                className="h-8 px-2 text-xs whitespace-nowrap"
+                className="h-8 px-2 text-xs whitespace-nowrap bg-amber-500 hover:bg-amber-400 text-black border border-amber-500/60"
                 disabled={!isCashierOpen}
                 onClick={() => { if (!isCashierOpen) { toast({ title: 'Caixa Fechado', description: 'Abra o caixa antes de adicionar produtos.', variant: 'warning' }); return; } setIsProductPickerOpen(true); }}
                 title="Adicionar produto"
