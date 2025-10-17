@@ -482,40 +482,97 @@ export async function listarResumoPeriodo({ from, to, codigoEmpresa } = {}) {
   }
   const totalVendasLiquidas = Math.max(0, totalVendasBrutas - totalDescontos)
 
-  // 3) Pagamentos por finalizadora no período (pela data de recebimento)
+  // 3) Pagamentos por finalizadora no período
   const porFinalizadora = {}
   let totalEntradas = 0
+  
+  // 3.1) Pagamentos de COMANDAS (tabela pagamentos)
   try {
     let qp = supabase
       .from('pagamentos')
-      .select('metodo, valor, recebido_em, status')
+      .select('metodo, valor, recebido_em, status, finalizadoras!pagamentos_finalizadora_id_fkey(nome)')
     if (codigo) qp = qp.eq('codigo_empresa', codigo)
     if (from) qp = qp.gte('recebido_em', new Date(from).toISOString())
     if (to) qp = qp.lte('recebido_em', new Date(to).toISOString())
     
-    console.log(`${trace} Consultando pagamentos...`)
+    console.log(`${trace} Consultando pagamentos de comandas...`)
     const { data, error } = await qp
     if (error) {
       console.error(`${trace} ❌ Erro ao buscar pagamentos:`, error)
       throw error
     }
     
-    console.log(`${trace} Total de pagamentos encontrados: ${(data || []).length}`)
+    console.log(`${trace} Total de pagamentos de comandas encontrados: ${(data || []).length}`)
     
     for (const pg of (data || [])) {
       const ok = (pg.status || 'Pago') !== 'Cancelado' && (pg.status || 'Pago') !== 'Estornado'
       if (!ok) continue
-      const key = pg.metodo || 'outros'
+      // Priorizar nome da finalizadora, fallback para metodo
+      const key = pg.finalizadoras?.nome || pg.metodo || 'outros'
       const v = Number(pg.valor || 0)
       porFinalizadora[key] = (porFinalizadora[key] || 0) + v
       totalEntradas += v
     }
     
-    console.log(`${trace} ✅ Resumo por finalizadora:`, porFinalizadora)
-    console.log(`${trace} Total de entradas: R$ ${totalEntradas.toFixed(2)}`)
+    console.log(`${trace} ✅ Resumo comandas por finalizadora:`, porFinalizadora)
   } catch (e) {
-    console.error(`${trace} ❌ Exception ao processar pagamentos:`, e)
+    console.error(`${trace} ❌ Exception ao processar pagamentos de comandas:`, e)
   }
+  
+  // 3.2) Pagamentos de AGENDAMENTOS (tabela agendamento_participantes)
+  try {
+    // Buscar agendamentos no período
+    let qa = supabase
+      .from('agendamentos')
+      .select('id, inicio')
+    if (codigo) qa = qa.eq('codigo_empresa', codigo)
+    if (from) qa = qa.gte('inicio', new Date(from).toISOString())
+    if (to) qa = qa.lte('inicio', new Date(to).toISOString())
+    
+    console.log(`${trace} Consultando agendamentos no período...`)
+    const { data: agendamentos, error: agErr } = await qa
+    if (agErr) {
+      console.error(`${trace} ❌ Erro ao buscar agendamentos:`, agErr)
+      throw agErr
+    }
+    
+    console.log(`${trace} Total de agendamentos encontrados: ${(agendamentos || []).length}`)
+    
+    if (agendamentos && agendamentos.length > 0) {
+      const agendamentoIds = agendamentos.map(a => a.id)
+      
+      // Buscar participantes pagos desses agendamentos
+      let qp = supabase
+        .from('agendamento_participantes')
+        .select('valor_cota, status_pagamento, finalizadora_id, finalizadoras!agendamento_participantes_finalizadora_id_fkey(nome)')
+        .in('agendamento_id', agendamentoIds)
+        .eq('status_pagamento', 'Pago')
+      if (codigo) qp = qp.eq('codigo_empresa', codigo)
+      
+      console.log(`${trace} Consultando participantes pagos...`)
+      const { data: participantes, error: partErr } = await qp
+      if (partErr) {
+        console.error(`${trace} ❌ Erro ao buscar participantes:`, partErr)
+        throw partErr
+      }
+      
+      console.log(`${trace} Total de participantes pagos encontrados: ${(participantes || []).length}`)
+      
+      for (const part of (participantes || [])) {
+        const key = part.finalizadoras?.nome || 'Outros'
+        const v = Number(part.valor_cota || 0)
+        porFinalizadora[key] = (porFinalizadora[key] || 0) + v
+        totalEntradas += v
+      }
+      
+      console.log(`${trace} ✅ Resumo agendamentos por finalizadora:`, porFinalizadora)
+    }
+  } catch (e) {
+    console.error(`${trace} ❌ Exception ao processar pagamentos de agendamentos:`, e)
+  }
+  
+  console.log(`${trace} ✅ RESUMO FINAL por finalizadora:`, porFinalizadora)
+  console.log(`${trace} Total de entradas: R$ ${totalEntradas.toFixed(2)}`)
 
   return {
     from: from ? new Date(from).toISOString() : null,
