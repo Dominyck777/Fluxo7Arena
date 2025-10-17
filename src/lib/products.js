@@ -322,8 +322,10 @@ export async function listProducts(options = {}) {
       q = q.eq('codigo_empresa', codigoEmpresa)
     }
     if (!includeInactive) {
-      // Incluir linhas onde status é null (produtos antigos) e excluir onde é 'inactive'
-      q = q.or('status.is.null,status.neq.inactive')
+      // Excluir produtos com status='inactive' OU active=false
+      q = q.neq('status', 'inactive')
+      // Se active existe, deve ser true (permite null para produtos antigos)
+      q = q.not('active', 'eq', false)
     }
     if (search && search.trim().length > 0) {
       const term = search.trim()
