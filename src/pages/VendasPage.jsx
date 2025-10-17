@@ -350,13 +350,9 @@ function VendasPage() {
         }
         // (removido) hooks aninhados: refreshCashierStatus e efeitos — agora definidos no topo do componente
         try {
-          let prods = await listProducts({ includeInactive: false, codigoEmpresa });
-          if (!Array.isArray(prods) || prods.length === 0) {
-            console.warn('[VendasPage] Nenhum produto ativo encontrado. Tentando carregar inativos também...');
-            prods = await listProducts({ includeInactive: true, codigoEmpresa });
-          }
+          const prods = await listProducts({ includeInactive: false, codigoEmpresa });
           setProducts(prods || []);
-          console.info('[VendasPage] Produtos carregados:', (prods || []).length);
+          console.info('[VendasPage] Produtos ativos carregados:', (prods || []).length);
         } catch (e) { console.warn('Falha ao carregar produtos:', e?.message || e); }
         try { console.log('ok', { tables: uiTables.length, openComandas: (openComandas || []).length }); } catch {}
         try { console.groupEnd(); } catch {}
