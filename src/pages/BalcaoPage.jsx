@@ -903,6 +903,11 @@ export default function BalcaoPage() {
 
   const addProduct = async (prod, opts = {}) => {
     try {
+      // Verificar se caixa está aberto ANTES de tudo
+      if (!isCashierOpen) {
+        toast({ title: 'Caixa Fechado', description: 'Abra o caixa antes de iniciar uma venda.', variant: 'warning' });
+        return;
+      }
       if (!clientChosen && !opts.skipClientCheck) {
         setPendingProduct(prod);
         setIsClientWizardOpen(true);
@@ -1241,7 +1246,7 @@ export default function BalcaoPage() {
                         </div>
                         <p className="text-sm text-text-muted">R$ {price.toFixed(2)}</p>
                       </div>
-                      <Button size="icon" variant="outline" className="flex-shrink-0" onClick={async () => { await addProduct(prod); }} aria-label={`Adicionar ${prod.name}`}>
+                      <Button size="icon" className="flex-shrink-0 bg-amber-500 hover:bg-amber-400 text-black border border-amber-500/60" onClick={async () => { await addProduct(prod); }} aria-label={`Adicionar ${prod.name}`}>
                         <Plus className="h-4 w-4" />
                       </Button>
                     </li>
@@ -1310,8 +1315,7 @@ export default function BalcaoPage() {
                         </div>
                         <Button 
                           size="icon" 
-                          variant="outline" 
-                          className="flex-shrink-0" 
+                          className="flex-shrink-0 bg-amber-500 hover:bg-amber-400 text-black border border-amber-500/60"
                           onClick={(e) => {
                             e.stopPropagation();
                             addProduct(prod);
@@ -1346,16 +1350,16 @@ export default function BalcaoPage() {
               {/* Botão Produto */}
               <Button
                 size="sm"
-                variant="outline"
-                className="h-8 px-2 text-xs whitespace-nowrap"
-                onClick={() => setIsProductPickerOpen(true)}
+                className="h-8 px-2 text-xs whitespace-nowrap bg-amber-500 hover:bg-amber-400 text-black border border-amber-500/60"
+                disabled={!isCashierOpen}
+                onClick={() => { if (!isCashierOpen) { toast({ title: 'Caixa Fechado', description: 'Abra o caixa antes de adicionar produtos.', variant: 'warning' }); return; } setIsProductPickerOpen(true); }}
                 title="Adicionar produto"
               >
                 <Plus className="h-4 w-4 mr-1" />
                 Produto
               </Button>
               {clientChosen && (
-                <Button size="sm" variant="outline" className="h-8 px-2 text-xs whitespace-nowrap" onClick={() => setIsClientWizardOpen(true)}>+ Cliente</Button>
+                <Button size="sm" variant="outline" className="h-8 px-2 text-xs whitespace-nowrap" disabled={!isCashierOpen} onClick={() => { if (!isCashierOpen) { toast({ title: 'Caixa Fechado', description: 'Abra o caixa antes de adicionar clientes.', variant: 'warning' }); return; } setIsClientWizardOpen(true); }}>+ Cliente</Button>
               )}
               {clientChosen ? (
                 <AlertDialog>
@@ -1390,7 +1394,7 @@ export default function BalcaoPage() {
             {(!clientChosen) ? (
               <div className="text-center pt-12">
                 <div className="text-sm text-text-secondary mb-3">Para começar, inicie uma nova venda e selecione o cliente.</div>
-                <Button onClick={() => setIsClientWizardOpen(true)}>Iniciar nova venda</Button>
+                <Button disabled={!isCashierOpen} onClick={() => { if (!isCashierOpen) { toast({ title: 'Caixa Fechado', description: 'Abra o caixa antes de iniciar uma venda.', variant: 'warning' }); return; } setIsClientWizardOpen(true); }}>Iniciar nova venda</Button>
               </div>
             ) : items.length === 0 ? (
               <div className="text-center text-text-muted pt-16">Comanda vazia. Use o botão "+" para adicionar produtos.</div>

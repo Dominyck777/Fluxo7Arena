@@ -1445,7 +1445,7 @@ function VendasPage() {
                   </AlertDialog>
                 </>
               ) : (
-                <Button size="sm" className="h-7 px-2.5 rounded-full text-[12px] font-medium leading-none whitespace-nowrap" onClick={() => { setPendingTable(table); setIsOpenTableDialog(true); }}>Abrir Mesa</Button>
+                <Button size="sm" className="h-7 px-2.5 rounded-full text-[12px] font-medium leading-none whitespace-nowrap" disabled={!isCashierOpen} onClick={() => { if (!isCashierOpen) { toast({ title: 'Caixa Fechado', description: 'Abra o caixa antes de abrir uma mesa.', variant: 'warning' }); return; } setPendingTable(table); setIsOpenTableDialog(true); }}>Abrir Mesa</Button>
               )}
             </div>
           </div>
@@ -1581,6 +1581,10 @@ function VendasPage() {
 
   const addProductToComanda = async (prod) => {
     try {
+      if (!isCashierOpen) {
+        toast({ title: 'Caixa Fechado', description: 'Abra o caixa antes de adicionar produtos.', variant: 'warning' });
+        return;
+      }
       if (!selectedTable?.comandaId) {
         toast({ title: 'Selecione uma mesa', description: 'Abra a comanda clicando na mesa primeiro.', variant: 'destructive' });
         return;
