@@ -2902,6 +2902,7 @@ function AgendaPage() {
           .select('id, nome, codigo, email, telefone, status, codigo_empresa')
           .eq('codigo_empresa', userProfile.codigo_empresa)
           .eq('status', 'active')  // ✅ Filtro: apenas clientes ativos
+          .eq('flag_cliente', true)  // ✅ Filtro: apenas registros marcados como cliente
           .order('nome', { ascending: true });
         if (error) {
           // eslint-disable-next-line no-console
