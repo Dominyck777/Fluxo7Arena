@@ -460,12 +460,21 @@ export default function SuportePage() {
                     <div className="flex gap-3 items-start">
                       <div className="flex-shrink-0 w-8 h-8 rounded-full bg-brand text-black flex items-center justify-center font-bold">2</div>
                       <div className="flex-1">
-                        <p className="font-semibold mb-2">Procure a opção</p>
-                        <div className="bg-brand/20 rounded-md p-3 border-2 border-brand/40 mb-3">
-                          <p className="font-bold text-center">📱 "Instalar aplicativo"</p>
-                          <p className="text-xs text-center text-text-muted mt-1">ou "Adicionar à tela inicial"</p>
+                        <p className="font-semibold mb-3">Procure uma destas opções:</p>
+                        <div className="space-y-2 mb-3">
+                          <div className="bg-brand/20 rounded-md p-3 border-2 border-brand/40">
+                            <p className="font-bold text-center text-base">📱 "Instalar aplicativo"</p>
+                          </div>
+                          <div className="flex items-center justify-center gap-2 text-text-muted text-sm font-medium">
+                            <div className="h-px bg-border flex-1"></div>
+                            <span>OU</span>
+                            <div className="h-px bg-border flex-1"></div>
+                          </div>
+                          <div className="bg-brand/20 rounded-md p-3 border-2 border-brand/40">
+                            <p className="font-bold text-center text-base">🏠 "Adicionar à tela inicial"</p>
+                          </div>
                         </div>
-                        <p className="text-sm text-text-secondary">Toque nesta opção no menu que abrir</p>
+                        <p className="text-sm text-text-secondary">Toque em qualquer uma dessas opções no menu</p>
                       </div>
                     </div>
                   </div>
@@ -521,10 +530,19 @@ export default function SuportePage() {
                     <div className="flex gap-3 items-start">
                       <div className="flex-shrink-0 w-8 h-8 rounded-full bg-orange-500 text-white flex items-center justify-center font-bold">2</div>
                       <div className="flex-1">
-                        <p className="font-semibold mb-2">Procure a opção</p>
-                        <div className="bg-orange-500/20 rounded-md p-3 border-2 border-orange-500/40 mb-3">
-                          <p className="font-bold text-center">📱 "Instalar"</p>
-                          <p className="text-xs text-center text-text-muted mt-1">ou "Adicionar à tela inicial"</p>
+                        <p className="font-semibold mb-3">Procure uma destas opções:</p>
+                        <div className="space-y-2">
+                          <div className="bg-orange-500/20 rounded-md p-3 border-2 border-orange-500/40">
+                            <p className="font-bold text-center text-base">📱 "Instalar"</p>
+                          </div>
+                          <div className="flex items-center justify-center gap-2 text-text-muted text-sm font-medium">
+                            <div className="h-px bg-border flex-1"></div>
+                            <span>OU</span>
+                            <div className="h-px bg-border flex-1"></div>
+                          </div>
+                          <div className="bg-orange-500/20 rounded-md p-3 border-2 border-orange-500/40">
+                            <p className="font-bold text-center text-base">🏠 "Adicionar à tela inicial"</p>
+                          </div>
                         </div>
                       </div>
                     </div>
