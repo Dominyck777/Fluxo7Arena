@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
-import { LifeBuoy, MessageCircle, Mail, Bug, ClipboardCopy, CheckCircle2, Phone, Trophy, Download, Smartphone, Share } from 'lucide-react';
+import { LifeBuoy, MessageCircle, Mail, Bug, ClipboardCopy, CheckCircle2, Phone, Trophy, Download, Smartphone, Share, X, Chrome, Monitor } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
 const APP_VERSION = 'v1.0.0'; // ajuste aqui se tiver uma fonte de versão global
 
@@ -59,6 +60,8 @@ export default function SuportePage() {
   const [deferredPrompt, setDeferredPrompt] = useState(null);
   const [isInstalled, setIsInstalled] = useState(false);
   const [isIOS, setIsIOS] = useState(false);
+  const [showInstallModal, setShowInstallModal] = useState(false);
+  const [browserType, setBrowserType] = useState('unknown');
 
   const appName = 'Fluxo7 Arena';
   const supportEmail = 'fluxo7team@gmail.com';
@@ -84,42 +87,88 @@ export default function SuportePage() {
     const isIOSDevice = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
     setIsIOS(isIOSDevice);
 
+    // Detectar tipo de navegador
+    const ua = navigator.userAgent;
+    if (ua.includes('Chrome') && !ua.includes('Edg')) {
+      setBrowserType('chrome');
+    } else if (ua.includes('Edg')) {
+      setBrowserType('edge');
+    } else if (ua.includes('Firefox')) {
+      setBrowserType('firefox');
+    } else if (ua.includes('Safari') && !ua.includes('Chrome')) {
+      setBrowserType('safari');
+    } else {
+      setBrowserType('other');
+    }
+
     // Detectar se já está instalado
     if (window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone) {
       setIsInstalled(true);
+      return; // Se já instalado, não precisa continuar
     }
 
     // Capturar evento de instalação (não funciona no iOS)
     const handleBeforeInstallPrompt = (e) => {
+      console.log('[PWA] beforeinstallprompt disparado');
       e.preventDefault();
       setDeferredPrompt(e);
+      // Salva no localStorage para persistir entre recarregamentos
+      localStorage.setItem('pwa-prompt-available', 'true');
     };
 
     const handleAppInstalled = () => {
+      console.log('[PWA] App instalado com sucesso');
       setIsInstalled(true);
       setDeferredPrompt(null);
+      setShowInstallModal(false);
+      localStorage.removeItem('pwa-prompt-available');
     };
+
+    // Verifica se o prompt estava disponível antes
+    const wasPromptAvailable = localStorage.getItem('pwa-prompt-available');
+    if (wasPromptAvailable && !deferredPrompt) {
+      console.log('[PWA] Prompt estava disponível anteriormente');
+    }
 
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
     window.addEventListener('appinstalled', handleAppInstalled);
 
+    // Tenta forçar o evento após um delay (alguns navegadores precisam disso)
+    const timer = setTimeout(() => {
+      if (!deferredPrompt && !isInstalled) {
+        console.log('[PWA] Prompt não capturado após 3s, pode não estar disponível');
+      }
+    }, 3000);
+
     return () => {
       window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
       window.removeEventListener('appinstalled', handleAppInstalled);
+      clearTimeout(timer);
     };
   }, []);
 
   const handleInstallClick = async () => {
-    if (!deferredPrompt) return;
-
-    deferredPrompt.prompt();
-    const { outcome } = await deferredPrompt.userChoice;
-    
-    if (outcome === 'accepted') {
-      setIsInstalled(true);
+    if (deferredPrompt) {
+      try {
+        await deferredPrompt.prompt();
+        const { outcome } = await deferredPrompt.userChoice;
+        
+        if (outcome === 'accepted') {
+          setIsInstalled(true);
+          setShowInstallModal(false);
+        } else {
+          setShowInstallModal(true);
+        }
+        
+        setDeferredPrompt(null);
+      } catch (err) {
+        console.error('Erro ao mostrar prompt de instalação:', err);
+        setShowInstallModal(true);
+      }
+    } else {
+      // Se não houver prompt disponível, mostrar modal com instruções
+      setShowInstallModal(true);
     }
-    
-    setDeferredPrompt(null);
   };
 
   const handleIOSInstall = () => {
@@ -264,18 +313,14 @@ export default function SuportePage() {
                   Instale o F7 Arena no seu dispositivo para acesso rápido e experiência completa de aplicativo.
                 </p>
                 <button
-                  onClick={deferredPrompt ? handleInstallClick : () => {
-                    alert('Para instalar o aplicativo:\n\n• Chrome/Edge: Clique no ícone de instalação na barra de endereço (ou menu ⋮ → "Instalar F7 Arena")\n• Firefox: Adicione aos favoritos ou crie um atalho\n• Safari: Use Arquivo → Adicionar à Dock');
-                  }}
+                  onClick={handleInstallClick}
                   className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-md bg-brand text-black font-medium hover:opacity-90 transition"
                 >
                   <Download className="w-4 h-4" /> Instalar App
                 </button>
-                {!deferredPrompt && (
-                  <p className="text-xs text-text-muted text-center">
-                    Se o botão não funcionar, use o menu do navegador para instalar
-                  </p>
-                )}
+                <p className="text-xs text-text-muted text-center">
+                  Clique para instalar ou ver instruções detalhadas
+                </p>
               </div>
             </SectionCard>
           )}
@@ -385,6 +430,172 @@ export default function SuportePage() {
           </div>
         </div>
       </div>
+
+      {/* Modal de Instalação */}
+      <Dialog open={showInstallModal} onOpenChange={setShowInstallModal}>
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-xl bg-brand/10 border border-brand/30 flex items-center justify-center">
+                <Download className="w-6 h-6 text-brand" />
+              </div>
+              <div>
+                <h2 className="text-xl font-bold">Como Instalar o F7 Arena</h2>
+                <p className="text-sm text-text-secondary font-normal">Siga as instruções para o seu navegador</p>
+              </div>
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="mt-6 space-y-6">
+            {/* Chrome/Edge */}
+            {(browserType === 'chrome' || browserType === 'edge') && (
+              <div className="bg-surface-2 rounded-lg p-5 border border-border">
+                <div className="flex items-center gap-3 mb-4">
+                  <Chrome className="w-6 h-6 text-brand" />
+                  <h3 className="text-lg font-semibold">
+                    {browserType === 'chrome' ? 'Google Chrome' : 'Microsoft Edge'}
+                  </h3>
+                </div>
+                <ol className="space-y-3 text-sm">
+                  <li className="flex gap-3">
+                    <span className="flex-shrink-0 w-6 h-6 rounded-full bg-brand text-black flex items-center justify-center font-bold text-xs">1</span>
+                    <div>
+                      <p className="font-medium mb-1">Procure o ícone de instalação</p>
+                      <p className="text-text-secondary">Na barra de endereço (URL), procure por um ícone de <strong>computador com seta para baixo</strong> ou <strong>+ (mais)</strong></p>
+                    </div>
+                  </li>
+                  <li className="flex gap-3">
+                    <span className="flex-shrink-0 w-6 h-6 rounded-full bg-brand text-black flex items-center justify-center font-bold text-xs">2</span>
+                    <div>
+                      <p className="font-medium mb-1">Clique no ícone</p>
+                      <p className="text-text-secondary">Aparecerá a opção <strong>"Instalar F7 Arena"</strong> ou <strong>"Instalar aplicativo"</strong></p>
+                    </div>
+                  </li>
+                  <li className="flex gap-3">
+                    <span className="flex-shrink-0 w-6 h-6 rounded-full bg-brand text-black flex items-center justify-center font-bold text-xs">3</span>
+                    <div>
+                      <p className="font-medium mb-1">Confirme a instalação</p>
+                      <p className="text-text-secondary">Clique em <strong>"Instalar"</strong> na janela que aparecer</p>
+                    </div>
+                  </li>
+                </ol>
+                <div className="mt-4 p-3 bg-background rounded-md border border-border/50">
+                  <p className="text-xs text-text-muted">
+                    <strong>Alternativa:</strong> Clique no menu <strong>⋮</strong> (três pontos) → <strong>"Instalar F7 Arena"</strong>
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Firefox */}
+            {browserType === 'firefox' && (
+              <div className="bg-surface-2 rounded-lg p-5 border border-border">
+                <div className="flex items-center gap-3 mb-4">
+                  <Monitor className="w-6 h-6 text-brand" />
+                  <h3 className="text-lg font-semibold">Mozilla Firefox</h3>
+                </div>
+                <ol className="space-y-3 text-sm">
+                  <li className="flex gap-3">
+                    <span className="flex-shrink-0 w-6 h-6 rounded-full bg-brand text-black flex items-center justify-center font-bold text-xs">1</span>
+                    <div>
+                      <p className="font-medium mb-1">Adicione aos favoritos</p>
+                      <p className="text-text-secondary">Pressione <strong>Ctrl + D</strong> (Windows) ou <strong>Cmd + D</strong> (Mac)</p>
+                    </div>
+                  </li>
+                  <li className="flex gap-3">
+                    <span className="flex-shrink-0 w-6 h-6 rounded-full bg-brand text-black flex items-center justify-center font-bold text-xs">2</span>
+                    <div>
+                      <p className="font-medium mb-1">Crie um atalho</p>
+                      <p className="text-text-secondary">Ou arraste o ícone da URL para a área de trabalho</p>
+                    </div>
+                  </li>
+                </ol>
+              </div>
+            )}
+
+            {/* Safari */}
+            {browserType === 'safari' && (
+              <div className="bg-surface-2 rounded-lg p-5 border border-border">
+                <div className="flex items-center gap-3 mb-4">
+                  <Monitor className="w-6 h-6 text-brand" />
+                  <h3 className="text-lg font-semibold">Safari (macOS)</h3>
+                </div>
+                <ol className="space-y-3 text-sm">
+                  <li className="flex gap-3">
+                    <span className="flex-shrink-0 w-6 h-6 rounded-full bg-brand text-black flex items-center justify-center font-bold text-xs">1</span>
+                    <div>
+                      <p className="font-medium mb-1">Abra o menu Arquivo</p>
+                      <p className="text-text-secondary">No topo da tela, clique em <strong>Arquivo</strong></p>
+                    </div>
+                  </li>
+                  <li className="flex gap-3">
+                    <span className="flex-shrink-0 w-6 h-6 rounded-full bg-brand text-black flex items-center justify-center font-bold text-xs">2</span>
+                    <div>
+                      <p className="font-medium mb-1">Adicionar à Dock</p>
+                      <p className="text-text-secondary">Selecione <strong>"Adicionar à Dock"</strong></p>
+                    </div>
+                  </li>
+                </ol>
+              </div>
+            )}
+
+            {/* Outros navegadores */}
+            {browserType === 'other' && (
+              <div className="bg-surface-2 rounded-lg p-5 border border-border">
+                <div className="flex items-center gap-3 mb-4">
+                  <Monitor className="w-6 h-6 text-brand" />
+                  <h3 className="text-lg font-semibold">Instruções Gerais</h3>
+                </div>
+                <div className="space-y-3 text-sm text-text-secondary">
+                  <p>Procure por uma das seguintes opções no menu do seu navegador:</p>
+                  <ul className="list-disc list-inside space-y-2 ml-4">
+                    <li><strong>"Instalar aplicativo"</strong></li>
+                    <li><strong>"Adicionar à tela inicial"</strong></li>
+                    <li><strong>"Criar atalho"</strong></li>
+                    <li>Ícone de <strong>instalação na barra de endereço</strong></li>
+                  </ul>
+                </div>
+              </div>
+            )}
+
+            {/* Benefícios */}
+            <div className="bg-brand/5 rounded-lg p-4 border border-brand/20">
+              <h4 className="font-semibold mb-2 flex items-center gap-2">
+                <CheckCircle2 className="w-5 h-5 text-brand" />
+                Benefícios do App Instalado
+              </h4>
+              <ul className="space-y-1.5 text-sm text-text-secondary">
+                <li className="flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-brand"></span>
+                  Acesso rápido direto da área de trabalho ou menu iniciar
+                </li>
+                <li className="flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-brand"></span>
+                  Funciona em tela cheia, sem barras do navegador
+                </li>
+                <li className="flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-brand"></span>
+                  Notificações e atualizações automáticas
+                </li>
+                <li className="flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-brand"></span>
+                  Melhor desempenho e experiência de uso
+                </li>
+              </ul>
+            </div>
+
+            {/* Botão de fechar */}
+            <div className="flex justify-end">
+              <button
+                onClick={() => setShowInstallModal(false)}
+                className="px-6 py-2.5 rounded-md bg-surface-2 hover:bg-surface text-text-primary font-medium transition"
+              >
+                Entendi
+              </button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -5,6 +5,10 @@ import App from '@/App';
 import '@/index.css';
 import { Toaster } from "@/components/ui/toaster";
 import { AuthProvider } from '@/contexts/AuthContext';
+import { registerServiceWorker } from '@/registerSW';
+
+// Registrar Service Worker para PWA
+registerServiceWorker();
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <BrowserRouter>
