@@ -230,7 +230,7 @@ function Sidebar({ onNavigate, isVisible, setIsVisible, sidebarPinned }) {
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.6, duration: 0.4 }}
-        className="px-6 pb-6 flex-shrink-0">
+        className="px-6 pb-6 md:pb-6 pt-4 flex-shrink-0">
          <NavItem to="/suporte" icon={LifeBuoy} label="Suporte" index={navItems.length} onNavigate={handleNavClick} />
       </motion.div>
     </motion.aside>
