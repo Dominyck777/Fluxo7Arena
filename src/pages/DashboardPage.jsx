@@ -278,7 +278,7 @@ function DashboardPage() {
   const [agendamentosHoje, setAgendamentosHoje] = useState({ finalizados: 0, total: 0 });
   const [proximasReservas, setProximasReservas] = useState(0);
   const [quadrasEmUso, setQuadrasEmUso] = useState(0);
-  const [horariosDisponiveis, setHorariosDisponiveis] = useState(0);
+  const [taxaOcupacao, setTaxaOcupacao] = useState(0);
   const [comandasAbertas, setComandasAbertas] = useState(0);
   const [mesasOcupadas, setMesasOcupadas] = useState(0);
   const [vendasLoja, setVendasLoja] = useState(0);
@@ -338,7 +338,7 @@ function DashboardPage() {
         // 2. Agendamentos de Hoje
         const { data: agendamentos } = await supabase
           .from('agendamentos')
-          .select('id, status, inicio')
+          .select('id, status, inicio, fim')
           .eq('codigo_empresa', codigo)
           .gte('inicio', inicioHoje)
           .lte('inicio', fimHoje);
@@ -357,13 +357,39 @@ function DashboardPage() {
         const emUso = (agendamentos || []).filter(a => a.status === 'in_progress').length;
         setQuadrasEmUso(emUso);
 
-        // 5. Horários Disponíveis
+        // 5. Taxa de Ocupação do Dia
+        // Calcular slots totais disponíveis (todas as quadras x horários operacionais)
         const { data: quadras } = await supabase
           .from('quadras')
           .select('id')
           .eq('codigo_empresa', codigo);
         const totalQuadras = quadras?.length || 0;
-        setHorariosDisponiveis(totalQuadras * 3);
+        
+        // Assumindo horário de operação: 6h às 23h = 17 horas
+        // Cada slot de agendamento = 1 hora (ajuste conforme sua regra de negócio)
+        const horasPorDia = 17; // 6h às 23h
+        const slotsTotais = totalQuadras * horasPorDia;
+        
+        // Calcular slots ocupados (duração dos agendamentos em horas)
+        let slotsOcupados = 0;
+        for (const ag of (agendamentos || [])) {
+          if (!['canceled', 'no_show'].includes(ag.status)) {
+            if (ag.inicio && ag.fim) {
+              // Calcular duração real em horas
+              const inicio = new Date(ag.inicio);
+              const fim = new Date(ag.fim);
+              const duracaoMs = fim - inicio;
+              const duracaoHoras = duracaoMs / (1000 * 60 * 60);
+              slotsOcupados += duracaoHoras;
+            } else {
+              // Se não tiver fim, assumir 1 hora por padrão
+              slotsOcupados += 1;
+            }
+          }
+        }
+        
+        const taxa = slotsTotais > 0 ? Math.round((slotsOcupados / slotsTotais) * 100) : 0;
+        setTaxaOcupacao(taxa);
 
         // 6. Comandas Abertas
         const { data: comandas } = await supabase
@@ -524,8 +550,12 @@ function DashboardPage() {
                   <span className="font-bold text-success tabular-nums">{quadrasEmUso}</span>
                 </li>
                 <li className="flex justify-between items-center">
-                  <span className="text-text-secondary">Horários Disponíveis</span> 
-                  <span className="font-bold text-info tabular-nums">{horariosDisponiveis}</span>
+                  <span className="text-text-secondary">Taxa de Ocupação</span> 
+                  <span className={`font-bold tabular-nums ${
+                    taxaOcupacao >= 70 ? 'text-success' : 
+                    taxaOcupacao >= 40 ? 'text-warning' : 
+                    'text-danger'
+                  }`}>{taxaOcupacao}%</span>
                 </li>
               </ul>
             </div>
