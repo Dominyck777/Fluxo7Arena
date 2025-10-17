@@ -106,30 +106,21 @@ export default function SuportePage() {
       setIsInstalled(true);
     }
 
-    // Capturar evento de instalação (não funciona no iOS)
-    const handleBeforeInstallPrompt = (e) => {
-      e.preventDefault();
-      window.__installPrompt = e; // Armazena globalmente
-      setDeferredPrompt(e);
-    };
-
-    const handleAppInstalled = () => {
-      setIsInstalled(true);
-      setDeferredPrompt(null);
-      window.__installPrompt = null; // Limpa do global
-      setShowInstallModal(false);
-    };
-
-    // Verifica se já existe um prompt armazenado globalmente
+    // Sincroniza com o prompt global capturado no main.jsx
     if (window.__installPrompt && !deferredPrompt) {
       setDeferredPrompt(window.__installPrompt);
     }
 
-    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    // Listener para quando o app for instalado
+    const handleAppInstalled = () => {
+      setIsInstalled(true);
+      setDeferredPrompt(null);
+      setShowInstallModal(false);
+    };
+
     window.addEventListener('appinstalled', handleAppInstalled);
 
     return () => {
-      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
       window.removeEventListener('appinstalled', handleAppInstalled);
     };
   }, [deferredPrompt]);
