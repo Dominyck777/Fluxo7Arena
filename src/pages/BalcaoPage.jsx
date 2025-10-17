@@ -1225,6 +1225,11 @@ export default function BalcaoPage() {
                   const code = String(p.code || p.codigo || '').toLowerCase();
                   return name.includes(q) || code.includes(q);
                 })
+                .sort((a, b) => {
+                  const codeA = a.code ? parseInt(a.code, 10) : 999999;
+                  const codeB = b.code ? parseInt(b.code, 10) : 999999;
+                  return codeA - codeB;
+                })
                 .map(prod => {
                   const qty = qtyByProductId.get(prod.id) || 0;
                   const stock = Number(prod.stock ?? prod.currentStock ?? 0);
@@ -1287,7 +1292,11 @@ export default function BalcaoPage() {
               </div>
             ) : (
               <ul className="space-y-2">
-                {products.map(prod => {
+                {products.sort((a, b) => {
+                  const codeA = a.code ? parseInt(a.code, 10) : 999999;
+                  const codeB = b.code ? parseInt(b.code, 10) : 999999;
+                  return codeA - codeB;
+                }).map(prod => {
                   const qty = qtyByProductId.get(prod.id) || 0;
                   const stock = Number(prod.stock ?? prod.currentStock ?? 0);
                   const remaining = Math.max(0, stock - qty);
