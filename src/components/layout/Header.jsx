@@ -158,10 +158,10 @@ function Header({ onToggleSidebar, sidebarVisible, sidebarPinned }) {
           <Menu className={`w-7 h-7 transition-colors ${sidebarVisible ? 'text-brand' : 'text-text-primary'}`} />
         </Button>
         <div
-          className="group pl-3 pr-5 py-1.5 rounded-full border border-white/10 bg-gradient-to-b from-surface-2/60 to-surface/60 text-text-primary flex items-center gap-4 shadow-sm hover:border-white/20 transition-colors"
+          className="group pl-3 pr-5 py-1.5 border border-white/10 bg-gradient-to-b from-surface-2/60 to-surface/60 text-text-primary flex items-center gap-4 shadow-sm hover:border-white/20 transition-colors"
           title={companyName}
         >
-          <div className="relative w-11 h-11 shrink-0 rounded-full overflow-hidden border border-white/10 ring-2 ring-brand/30 ring-offset-0 bg-surface-2/60 grid place-items-center shadow-[0_0_0_3px_RGBA(0,0,0,0.2)]">
+          <div className="relative w-11 h-11 shrink-0 overflow-hidden border border-white/10 ring-2 ring-brand/30 ring-offset-0 bg-surface-2/60 grid place-items-center shadow-[0_0_0_3px_RGBA(0,0,0,0.2)]">
             {companyLogoSrc ? (
               <img src={companyLogoSrc} alt="Logo" className="w-full h-full object-cover" />
             ) : (
@@ -201,7 +201,7 @@ function Header({ onToggleSidebar, sidebarVisible, sidebarPinned }) {
         </Button>
         <div className="w-px h-8 bg-border mx-2"></div>
         <div
-          className="group pl-4 pr-4 py-1.5 border border-white/10 bg-gradient-to-b from-surface-2/60 to-surface/60 text-text-primary flex items-center gap-3 shadow-sm hover:border-white/20 transition-colors"
+          className="group pl-4 pr-4 py-1.5 rounded-full border border-white/10 bg-gradient-to-b from-surface-2/60 to-surface/60 text-text-primary flex items-center gap-3 shadow-sm hover:border-white/20 transition-colors"
           title={`${userName} • ${userRole}`}
         >
           <span className="text-sm font-semibold truncate max-w-[180px]">{userName}</span>
