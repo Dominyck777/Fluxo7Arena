@@ -903,6 +903,11 @@ export default function BalcaoPage() {
 
   const addProduct = async (prod, opts = {}) => {
     try {
+      // Verificar se caixa está aberto ANTES de tudo
+      if (!isCashierOpen) {
+        toast({ title: 'Caixa Fechado', description: 'Abra o caixa antes de iniciar uma venda.', variant: 'warning' });
+        return;
+      }
       if (!clientChosen && !opts.skipClientCheck) {
         setPendingProduct(prod);
         setIsClientWizardOpen(true);
@@ -1348,14 +1353,15 @@ export default function BalcaoPage() {
                 size="sm"
                 variant="outline"
                 className="h-8 px-2 text-xs whitespace-nowrap"
-                onClick={() => setIsProductPickerOpen(true)}
+                disabled={!isCashierOpen}
+                onClick={() => { if (!isCashierOpen) { toast({ title: 'Caixa Fechado', description: 'Abra o caixa antes de adicionar produtos.', variant: 'warning' }); return; } setIsProductPickerOpen(true); }}
                 title="Adicionar produto"
               >
                 <Plus className="h-4 w-4 mr-1" />
                 Produto
               </Button>
               {clientChosen && (
-                <Button size="sm" variant="outline" className="h-8 px-2 text-xs whitespace-nowrap" onClick={() => setIsClientWizardOpen(true)}>+ Cliente</Button>
+                <Button size="sm" variant="outline" className="h-8 px-2 text-xs whitespace-nowrap" disabled={!isCashierOpen} onClick={() => { if (!isCashierOpen) { toast({ title: 'Caixa Fechado', description: 'Abra o caixa antes de adicionar clientes.', variant: 'warning' }); return; } setIsClientWizardOpen(true); }}>+ Cliente</Button>
               )}
               {clientChosen ? (
                 <AlertDialog>
@@ -1390,7 +1396,7 @@ export default function BalcaoPage() {
             {(!clientChosen) ? (
               <div className="text-center pt-12">
                 <div className="text-sm text-text-secondary mb-3">Para começar, inicie uma nova venda e selecione o cliente.</div>
-                <Button onClick={() => setIsClientWizardOpen(true)}>Iniciar nova venda</Button>
+                <Button disabled={!isCashierOpen} onClick={() => { if (!isCashierOpen) { toast({ title: 'Caixa Fechado', description: 'Abra o caixa antes de iniciar uma venda.', variant: 'warning' }); return; } setIsClientWizardOpen(true); }}>Iniciar nova venda</Button>
               </div>
             ) : items.length === 0 ? (
               <div className="text-center text-text-muted pt-16">Comanda vazia. Use o botão "+" para adicionar produtos.</div>
