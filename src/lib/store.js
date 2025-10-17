@@ -645,8 +645,6 @@ export async function listarComandasAbertas({ codigoEmpresa } = {}) {
   const trace = '[listarComandasAbertas]'
   const codigo = codigoEmpresa || getCachedCompanyCode()
   
-  console.log(`${trace} Iniciando - codigo_empresa:`, codigo)
-  
   try {
     // Timeout de 5s para evitar travamento
     const timeoutPromise = new Promise((_, reject) => 
@@ -661,7 +659,6 @@ export async function listarComandasAbertas({ codigoEmpresa } = {}) {
       .order('aberto_em', { ascending: false })
     if (codigo) q = q.eq('codigo_empresa', codigo)
     
-    console.log(`${trace} Query montada, executando...`)
     const queryPromise = q
     
     const { data, error } = await Promise.race([queryPromise, timeoutPromise])
@@ -671,14 +668,10 @@ export async function listarComandasAbertas({ codigoEmpresa } = {}) {
       throw error
     }
     
-    console.log(`${trace} Consulta retornou ${(data || []).length} comandas (fechado_em=null)`)
-    
     // Filtrar apenas as que realmente estão abertas
     const abertas = (data || []).filter(c => 
       c.status === 'open' || c.status === 'awaiting-payment'
     )
-    
-    console.log(`${trace} ✅ Após filtro: ${abertas.length} comandas abertas`)
     
     return abertas
   } catch (e) {
@@ -709,8 +702,6 @@ export async function listMesas(codigoEmpresa) {
   const trace = '[listMesas]'
   const codigo = codigoEmpresa || getCachedCompanyCode()
   
-  console.log(`${trace} Iniciando - codigo_empresa:`, codigo)
-  
   try {
     // Timeout de 5s para evitar travamento
     const timeoutPromise = new Promise((_, reject) => 
@@ -720,7 +711,6 @@ export async function listMesas(codigoEmpresa) {
     let query = supabase.from('mesas').select('*').order('numero', { ascending: true })
     if (codigo) query = query.eq('codigo_empresa', codigo)
     
-    console.log(`${trace} Query montada, executando...`)
     const queryPromise = query
     
     const { data, error } = await Promise.race([queryPromise, timeoutPromise])
@@ -730,7 +720,6 @@ export async function listMesas(codigoEmpresa) {
       throw error
     }
     
-    console.log(`${trace} ✅ Sucesso - ${(data || []).length} mesas carregadas`)
     return data || []
   } catch (e) {
     console.error(`${trace} ❌ EXCEPTION:`, e?.message || e)

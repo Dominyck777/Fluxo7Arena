@@ -248,17 +248,13 @@ function VendasPage() {
       try {
         if (!authReady || !codigoEmpresa) return;
         const myReq = ++loadReqIdRef.current;
-        try { console.group(trace); } catch {}
-        try { console.log('start', { codigoEmpresa }); } catch {}
         const slowFallback = setTimeout(() => {
           if (!mountedRef.current) return;
-          try { console.warn(trace + ' still waiting... (showing cached tables if any)'); } catch {}
           hydrateFromCache();
         }, 2000);
         // Safety timeout para não travar o loading
         const safetyTimer = setTimeout(() => {
           if (mountedRef.current && loadReqIdRef.current === myReq) {
-            try { console.warn(trace + ' safety timeout reached'); } catch {}
             hydrateFromCache();
           }
         }, 10000);
@@ -267,7 +263,6 @@ function VendasPage() {
         let openComandas = [];
         try { 
           openComandas = await listarComandasAbertas({ codigoEmpresa }); 
-          console.log(`[VendasPage:load] Comandas abertas carregadas:`, openComandas);
         } catch (err) {
           console.error(`[VendasPage:load] Erro ao carregar comandas abertas:`, err);
         }
@@ -352,10 +347,7 @@ function VendasPage() {
         try {
           const prods = await listProducts({ includeInactive: false, codigoEmpresa });
           setProducts(prods || []);
-          console.info('[VendasPage] Produtos ativos carregados:', (prods || []).length);
         } catch (e) { console.warn('Falha ao carregar produtos:', e?.message || e); }
-        try { console.log('ok', { tables: uiTables.length, openComandas: (openComandas || []).length }); } catch {}
-        try { console.groupEnd(); } catch {}
         clearTimeout(slowFallback);
         clearTimeout(safetyTimer);
       } catch (e) {
@@ -546,19 +538,14 @@ function VendasPage() {
     try {
       const codigoEmpresa = userProfile?.codigo_empresa;
       if (!codigoEmpresa) {
-        console.warn('[refreshTablesLight] Código da empresa não disponível');
         return;
       }
       
-      console.log('[refreshTablesLight] Iniciando atualização das mesas...');
-      
       const mesas = await listMesas(codigoEmpresa);
-      console.log('[refreshTablesLight] Mesas carregadas:', mesas?.length || 0);
       
       let openComandas = [];
       try { 
         openComandas = await listarComandasAbertas({ codigoEmpresa }); 
-        console.log('[refreshTablesLight] Comandas abertas:', openComandas?.length || 0);
       } catch (err) {
         console.error('[refreshTablesLight] Erro ao carregar comandas:', err);
       }
@@ -589,7 +576,6 @@ function VendasPage() {
               const itemTotal = (item.quantidade || 0) * (item.preco_unitario || 0) - (item.desconto || 0);
               return acc + itemTotal;
             }, 0);
-            console.log(`[refreshTablesLight] Comanda ${comandaId}: ${itens?.length || 0} itens, total: R$ ${total.toFixed(2)}`);
             return { comandaId, total };
           } catch (err) {
             console.error(`[refreshTablesLight] Erro ao buscar itens da comanda ${comandaId}:`, err);
@@ -627,7 +613,6 @@ function VendasPage() {
       });
       
       setTables(uiTables);
-      console.log('[refreshTablesLight] Mesas atualizadas com sucesso:', uiTables.length);
       
     } catch (err) {
       console.error('[refreshTablesLight] Erro fatal:', err);
@@ -649,8 +634,6 @@ function VendasPage() {
       setLoading(true);
       if (table.comandaId) {
         // VERIFICAR se a comanda ainda está ativa antes de carregar dados
-        console.log(`[handleSelectTable] Verificando status da comanda ${table.comandaId}`);
-        
         try {
           const { data: comandaAtual, error } = await supabase
             .from('comandas')
@@ -660,21 +643,18 @@ function VendasPage() {
             .single();
             
           if (error || !comandaAtual) {
-            console.log(`[handleSelectTable] Comanda ${table.comandaId} não encontrada, criando nova`);
             setPendingTable(table);
             setIsOpenTableDialog(true);
             return;
           }
           
           if (comandaAtual.fechado_em || comandaAtual.status === 'closed') {
-            console.log(`[handleSelectTable] Comanda ${table.comandaId} está fechada, criando nova`);
             setPendingTable(table);
             setIsOpenTableDialog(true);
             return;
           }
           
           // Só carregar dados se comanda estiver realmente ativa
-          console.log(`[handleSelectTable] Comanda ${table.comandaId} ativa, carregando dados`);
           const itens = await listarItensDaComanda({ comandaId: table.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
           const order = (itens || []).map((it) => ({ id: it.id, name: it.descricao || 'Item', price: Number(it.preco_unitario || 0), quantity: Number(it.quantidade || 1) }));
           
@@ -683,7 +663,6 @@ function VendasPage() {
             const vinculos = await listarClientesDaComanda({ comandaId: table.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
             const nomes = (vinculos || []).map(v => v?.nome).filter(Boolean);
             customer = nomes.length ? nomes.join(', ') : null;
-            console.log(`[handleSelectTable] Clientes da comanda ativa ${table.comandaId}:`, nomes);
           } catch (err) {
             console.error(`[handleSelectTable] Erro ao carregar clientes:`, err);
           }
@@ -1427,12 +1406,9 @@ function VendasPage() {
                         <AlertDialogCancel>Voltar</AlertDialogCancel>
                         <AlertDialogAction onClick={async () => {
                           try {
-                            console.log('[Cancelar Comanda] Iniciando cancelamento da comanda:', table.comandaId);
                             await cancelarComandaEMesa({ comandaId: table.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
-                            console.log('[Cancelar Comanda] Comanda cancelada com sucesso');
                             setSelectedTable(null);
                             await refreshTablesLight({ showToast: true });
-                            console.log('[Cancelar Comanda] Mesas atualizadas');
                             toast({ title: 'Comanda cancelada', variant: 'success' });
                           } catch (e) {
                             console.error('[Cancelar Comanda] Erro:', e);
@@ -2127,8 +2103,6 @@ function VendasPage() {
           const mesas = await listMesas(userProfile?.codigo_empresa);
           const openComandas = await listarComandasAbertas({ codigoEmpresa: userProfile?.codigo_empresa });
           
-          console.log(`[confirmOpen] Após aguardar: ${openComandas.length} comandas abertas encontradas`);
-          
           const namesByComanda = {};
           const totalsByComanda = {};
           
@@ -2167,7 +2141,6 @@ function VendasPage() {
           });
           
           setTables(enrichedTables);
-          console.log('[confirmOpen] Estado das mesas atualizado após abertura');
         } catch (err) {
           console.error('[confirmOpen] Erro ao atualizar mesas:', err);
         }
@@ -2646,11 +2619,8 @@ function VendasPage() {
         const toAdd = localLinked.filter(id => !initialLinkedRef.current.includes(id));
         const toRemove = initialLinkedRef.current.filter(id => !localLinked.includes(id));
         
-        console.log('[confirmChanges] toAdd:', toAdd, 'toRemove:', toRemove);
-        
         // Remover clientes
         for (const clientId of toRemove) {
-          console.log('[confirmChanges] Removendo cliente:', clientId);
           const { error } = await supabase
             .from('comanda_clientes')
             .delete()

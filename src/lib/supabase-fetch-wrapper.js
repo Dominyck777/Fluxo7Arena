@@ -430,15 +430,12 @@ export const supabaseWrapper = {
   supabaseKey: SUPABASE_ANON_KEY,
 }
 
-// Teste automático
+// Teste automático (silenciado)
 if (typeof window !== 'undefined' && import.meta.env.PROD) {
-  console.log('[Supabase Wrapper] Testando wrapper...')
   supabaseWrapper.from('empresas').select('id').limit(1)
     .then(({ data, error }) => {
       if (error) {
         console.error('[Supabase Wrapper] ❌ ERRO:', error)
-      } else {
-        console.log('[Supabase Wrapper] ✅ SUCESSO com WRAPPER:', data)
       }
     })
     .catch(err => {

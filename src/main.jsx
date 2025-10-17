@@ -11,10 +11,11 @@ import { registerServiceWorker } from '@/registerSW';
 registerServiceWorker();
 
 // Capturar evento de instalação PWA globalmente (antes do React montar)
+// Nota: preventDefault() bloqueia o banner automático do navegador, permitindo controle manual
 window.addEventListener('beforeinstallprompt', (e) => {
-  e.preventDefault();
+  e.preventDefault(); // Suprime banner automático (warning esperado no console)
   window.__installPrompt = e;
-});
+}, { passive: false });
 
 window.addEventListener('appinstalled', () => {
   window.__installPrompt = null;
