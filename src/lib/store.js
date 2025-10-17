@@ -622,6 +622,7 @@ export async function listarClientes({ searchTerm = '', limit = 20, codigoEmpres
     .from('clientes')
     .select('*')
     .eq('status', 'active')  // ✅ Filtro: apenas clientes ativos
+    .eq('flag_cliente', true)  // ✅ Filtro: apenas registros com flag_cliente = true
     .order('nome', { ascending: true })
     .limit(limit)
   if (codigo) q = q.eq('codigo_empresa', codigo)

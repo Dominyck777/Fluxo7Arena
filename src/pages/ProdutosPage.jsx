@@ -439,6 +439,18 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
       toast({ title: 'Preencha os campos obrigatórios', description: errors.join(', '), variant: 'destructive' });
       return;
     }
+    console.log('[ProdutosPage] handleSave - Estado active antes de salvar:', active);
+    
+    // Sincronizar status com active: se inativo, forçar status='inactive'
+    let finalStatus = status;
+    if (!active) {
+      finalStatus = 'inactive';
+    } else if (status === 'inactive' && active) {
+      // Se está ativando um produto que estava inativo, voltar para active
+      finalStatus = 'active';
+    }
+    console.log('[ProdutosPage] handleSave - Status ajustado:', finalStatus);
+    
     const payload = {
       id: product?.id,
       code: code?.trim() || '',
@@ -449,7 +461,7 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
       stock: Number(stock || 0),
       minStock: Number(minStock || 0),
       // Datas/Status
-      status,
+      status: finalStatus,
       validade,
       // Dados
       unit,
@@ -658,11 +670,11 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
                 <div className="col-span-1 sm:col-span-3">
                   {product ? (
                     <>
-                      <Checkbox checked={active} onCheckedChange={(v)=>setActive(!!v)} disabled={!editEnabled} />
+                      <Checkbox checked={active} onCheckedChange={(v)=>{ console.log('[ProdutosPage] Checkbox active mudou para:', v); setActive(!!v); }} disabled={!editEnabled} />
                       <span className="ml-2 text-xs sm:text-sm">Ativo</span>
                     </>
                   ) : (
-                    <Select value={active ? 'ativo' : 'inativo'} onValueChange={(v)=>setActive(v === 'ativo')}>
+                    <Select value={active ? 'ativo' : 'inativo'} onValueChange={(v)=>{ console.log('[ProdutosPage] Select active mudou para:', v); setActive(v === 'ativo'); }}>
                       <SelectTrigger className="w-full sm:w-48 text-sm" disabled={!editEnabled}>
                         <SelectValue placeholder="Selecione" />
                       </SelectTrigger>
@@ -1024,11 +1036,14 @@ function ProdutosPage() {
         } catch {}
       }, 2000);
       try {
-        const data = await listProducts({ includeInactive: filters.status === 'all' || filters.status === 'inactive', search: searchTerm, codigoEmpresa });
+        const includeInactive = filters.status === 'all' || filters.status === 'inactive';
+        console.log('[Produtos] refetchProducts - Filtro status:', filters.status, 'includeInactive:', includeInactive);
+        const data = await listProducts({ includeInactive, search: searchTerm, codigoEmpresa });
         if (!mountedRef.current) return;
+        console.log('[Produtos] refetchProducts - Produtos carregados:', data.length);
         setProducts(data);
         try { localStorage.setItem(cacheKey, JSON.stringify(data)); } catch {}
-        lastSizeRef.current = Array.isArray(data) ? data.length : 0;
+        lastSizeRef.current = data.length;
         lastLoadTsRef.current = Date.now();
       } catch (err) {
         // eslint-disable-next-line no-console
@@ -1379,10 +1394,11 @@ function ProdutosPage() {
         if (payload.id) {
           const updated = await withLocalTimeout(updateProduct(payload.id, payload, { codigoEmpresa }));
           // eslint-disable-next-line no-console
-          console.log('[Produtos] Produto atualizado', updated);
+          console.log('[Produtos] Produto atualizado - active:', updated.active, 'status:', updated.status);
           setProducts(prev => prev.map(p => p.id === updated.id ? updated : p));
-          // Refetch em background para não travar UI
-          setTimeout(() => { refetchProducts().catch(err => console.error('[Produtos] refetch pós-update falhou', err)); }, 0);
+          // Refetch imediato para garantir sincronização
+          await refetchProducts();
+          console.log('[Produtos] Refetch concluído após update');
         } else {
           const created = await withLocalTimeout(createProduct(payload, { codigoEmpresa }));
           // eslint-disable-next-line no-console
@@ -1414,19 +1430,21 @@ function ProdutosPage() {
         // Refetch para garantir consistência com RLS, triggers, etc.
         await refetchProducts();
         const m = mapDbErrorToMessage(null, { action: 'delete' });
-        toast({ title: 'Produto inativado', description: 'O produto foi marcado como inativo.', variant: 'success', duration: 4000, className: 'bg-amber-500 text-black shadow-xl' });
+        toast({
+          variant: 'success',
+          title: m.title,
+          description: `Produto "${productToDelete.name}" foi inativado com sucesso.`,
+        });
       } catch (err) {
-        // eslint-disable-next-line no-console
-        console.error(err);
         const m = mapDbErrorToMessage(err, { action: 'delete' });
-        toast({ title: m.title, description: m.description, variant: 'destructive' });
+        toast({ variant: 'destructive', ...m });
       } finally {
         setDeleting(false);
         setConfirmOpen(false);
         setProductToDelete(null);
       }
     };
-    
+
     // Código sugerido automático para novo produto (4 dígitos)
     const suggestedCode = useMemo(() => {
       const numericCodes = products

@@ -311,7 +311,8 @@ function mapUiToDb(data) {
 export async function listProducts(options = {}) {
   const { includeInactive = false, search = '', codigoEmpresa } = options
   // eslint-disable-next-line no-console
-  console.info('[products.api] listProducts: start')
+  console.log('[products.api] ====== listProducts INICIO ======')
+  console.log('[products.api] Parametros:', { includeInactive, search, codigoEmpresa })
   const { data, error } = await withTimeout((signal) => {
     let q = supabase
       .from('produtos')
@@ -322,10 +323,13 @@ export async function listProducts(options = {}) {
       q = q.eq('codigo_empresa', codigoEmpresa)
     }
     if (!includeInactive) {
+      console.log('[products.api] Aplicando filtro de ativos...')
       // Excluir produtos com status='inactive' OU ativo=false
       q = q.neq('status', 'inactive')
-      // Se ativo existe, deve ser true (permite null para produtos antigos)
-      q = q.not('ativo', 'eq', false)
+      // Incluir produtos onde ativo=true OU ativo=null (produtos antigos)
+      // Excluir apenas onde ativo=false explicitamente
+      q = q.or('ativo.is.null,ativo.eq.true')
+      console.log('[products.api] Filtro aplicado: status != inactive AND (ativo IS NULL OR ativo = true)')
     }
     if (search && search.trim().length > 0) {
       const term = search.trim()
@@ -342,7 +346,16 @@ export async function listProducts(options = {}) {
   }
   const mapped = (data || []).map(mapDbToUi)
   // eslint-disable-next-line no-console
-  console.info('[products.api] listProducts: ok', { count: mapped.length })
+  console.log('[products.api] listProducts RETORNOU:', mapped.length, 'produtos');
+  console.log('[products.api] includeInactive:', includeInactive);
+  // Log produtos sem código
+  const semCodigo = mapped.filter(p => !p.code || p.code.trim() === '');
+  console.log('[products.api] Produtos SEM código:', semCodigo.length);
+  if (semCodigo.length > 0) {
+    semCodigo.forEach(p => {
+      console.log('  -', p.name, '| active:', p.active, '| status:', p.status, '| code:', p.code || 'NULL');
+    });
+  }
   return mapped
 }
 

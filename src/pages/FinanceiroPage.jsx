@@ -426,16 +426,21 @@ export default function FinanceiroPage() {
           itens = itensData || [];
         }
         
-        // Agrupar por produto
+        // Agrupar por produto (quantidade vendida + valor total)
         const prodMap = {};
         (itens || []).forEach(item => {
           const nome = item.produtos?.nome || 'Produto sem nome';
-          const valor = Number(item.quantidade || 0) * Number(item.preco_unitario || 0);
-          prodMap[nome] = (prodMap[nome] || 0) + valor;
+          const quantidade = Number(item.quantidade || 0);
+          const valor = quantidade * Number(item.preco_unitario || 0);
+          if (!prodMap[nome]) {
+            prodMap[nome] = { quantidade: 0, valor: 0 };
+          }
+          prodMap[nome].quantidade += quantidade;
+          prodMap[nome].valor += valor;
         });
         
         const produtosArr = Object.entries(prodMap)
-          .map(([nome, valor]) => ({ nome, valor }))
+          .map(([nome, data]) => ({ nome, quantidade: data.quantidade, valor: data.valor }))
           .sort((a, b) => b.valor - a.valor);
         setAllProdutos(produtosArr);
         setTopProdutos(produtosArr.slice(0, 5));
@@ -1251,7 +1256,7 @@ export default function FinanceiroPage() {
               <motion.div variants={itemVariants} className="fx-card p-4 border-0 ring-0 outline-none focus-visible:outline-none shadow-none cursor-pointer" onClick={() => setOpenProdutosModal(true)}>
                 <div className="flex items-center gap-2 text-text-secondary text-xs font-semibold uppercase tracking-wider mb-3">
                   <Package className="w-4 h-4 text-brand" />
-                  <span>Produtos (por faturamento)</span>
+                  <span>Produtos mais vendidos</span>
                   {allProdutos.length > 5 && (
                     <Button variant="outline" size="xs" className="ml-auto h-7 px-2" onClick={() => setOpenProdutosModal(true)}>Ver todos</Button>
                   )}
@@ -1263,7 +1268,10 @@ export default function FinanceiroPage() {
                     {topProdutos.map((prod, idx) => (
                       <div key={idx} className="flex items-center justify-between py-2 border-b border-border last:border-0">
                         <span className="text-sm text-text-primary">{idx + 1}. {prod.nome}</span>
-                        <span className="text-sm font-bold text-success">{fmtBRL(prod.valor)}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-text-secondary">{fmtBRL(prod.valor)}</span>
+                          <span className="text-sm font-bold text-brand">x{prod.quantidade}</span>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -2441,20 +2449,22 @@ export default function FinanceiroPage() {
           <DialogContent className="max-w-2xl bg-surface text-text-primary border-0">
             <DialogHeader>
               <DialogTitle>Todos os Produtos</DialogTitle>
-              <DialogDescription>Ordenados por faturamento no período selecionado</DialogDescription>
+              <DialogDescription>Ordenados por valor de vendas</DialogDescription>
             </DialogHeader>
             <div className="max-h-[60vh] overflow-y-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead>Produto</TableHead>
-                    <TableHead className="text-right">Valor</TableHead>
+                    <TableHead className="text-center">Quantidade</TableHead>
+                    <TableHead className="text-right">Valor Total</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {allProdutos.map((p, i) => (
                     <TableRow key={`${p.nome}-${i}`}>
                       <TableCell>{i + 1}. {p.nome}</TableCell>
+                      <TableCell className="text-center">x{p.quantidade}</TableCell>
                       <TableCell className="text-right font-semibold">{fmtBRL(p.valor)}</TableCell>
                     </TableRow>
                   ))}
