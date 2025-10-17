@@ -4100,8 +4100,8 @@ function AgendaPage() {
                   </SelectContent>
                 </Select>
                 {nextAutomationMessage && (
-                  <div className="mt-1 text-xs text-text-secondary italic">
-                    {nextAutomationMessage}
+                  <div className="mt-2 text-sm text-text-primary font-medium bg-brand/10 border border-brand/30 rounded-md px-3 py-2">
+                    ⏰ {nextAutomationMessage}
                   </div>
                 )}
               </div>
