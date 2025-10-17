@@ -222,17 +222,26 @@ function Sidebar({ onNavigate, isVisible, setIsVisible, sidebarPinned }) {
               </ul>
             )}
           </motion.li>
+          
+          {/* Suporte - movido para dentro do nav */}
+          <motion.li
+            custom={navItems.length + 1}
+            variants={navItemVariants}
+            initial="hidden"
+            animate="visible"
+            className="pt-4 border-t border-border/50 mt-4"
+          >
+            <NavLink
+              to="/suporte"
+              onClick={handleNavClick}
+              className={({ isActive }) => (isActive ? "flex items-center h-[52px] px-4 rounded-sm bg-brand text-primary-foreground font-bold shadow-lg shadow-brand/10 border-l-4 border-brand" : "flex items-center h-[52px] px-4 rounded-sm text-text-secondary hover:bg-surface-2 hover:text-text-primary transition-all duration-200 border-l-4 border-transparent")}
+            >
+              <LifeBuoy className="h-5 w-5 mr-4 flex-shrink-0" />
+              <span className="text-base">Suporte</span>
+            </NavLink>
+          </motion.li>
         </ul>
       </nav>
-
-      {/* Rodapé */}
-      <motion.div 
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.6, duration: 0.4 }}
-        className="px-6 pb-2 md:pb-6 pt-6 md:pt-4 flex-shrink-0">
-         <NavItem to="/suporte" icon={LifeBuoy} label="Suporte" index={navItems.length} onNavigate={handleNavClick} />
-      </motion.div>
     </motion.aside>
     </>
   );
