@@ -38,7 +38,7 @@ function PrivateApp() {
     <AlertsProvider>
       <div className="flex h-screen bg-background text-text-primary">
         <Helmet>
-            <title>Fluxo7 Arena - Gestão de Quadras Esportivas</title>
+            <title>F7 Arena</title>
             <meta name="description" content="Software para gestão de quadras esportivas." />
         </Helmet>
         
