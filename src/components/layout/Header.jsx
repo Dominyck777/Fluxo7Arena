@@ -201,7 +201,7 @@ function Header({ onToggleSidebar, sidebarVisible, sidebarPinned }) {
         </Button>
         <div className="w-px h-8 bg-border mx-2"></div>
         <div
-          className="group pl-4 pr-4 py-1.5 rounded-sm border border-white/10 bg-gradient-to-b from-surface-2/60 to-surface/60 text-text-primary flex items-center gap-3 shadow-sm hover:border-white/20 transition-colors"
+          className="group pl-4 pr-4 py-1.5 border border-white/10 bg-gradient-to-b from-surface-2/60 to-surface/60 text-text-primary flex items-center gap-3 shadow-sm hover:border-white/20 transition-colors"
           title={`${userName} • ${userRole}`}
         >
           <span className="text-sm font-semibold truncate max-w-[180px]">{userName}</span>
