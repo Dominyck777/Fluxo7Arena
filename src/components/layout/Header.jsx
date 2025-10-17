@@ -182,7 +182,7 @@ function Header({ onToggleSidebar, sidebarVisible, sidebarPinned }) {
         </div>
       ) : null}
 
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1 md:gap-2">
         <Button 
           variant="ghost" 
           size="icon" 
@@ -196,16 +196,16 @@ function Header({ onToggleSidebar, sidebarVisible, sidebarPinned }) {
             </span>
           )}
         </Button>
-        <Button variant="ghost" size="icon" onClick={handleLogout} className="text-text-secondary hover:text-brand hover:bg-brand/10 transition-colors duration-200">
+        <Button variant="ghost" size="icon" onClick={handleLogout} className="text-text-secondary hover:text-brand hover:bg-brand/10 transition-colors duration-200 shrink-0">
           <LogOut className="h-5 w-5" />
         </Button>
-        <div className="w-px h-8 bg-border mx-2"></div>
+        <div className="w-px h-8 bg-border mx-1 md:mx-2"></div>
         <div
-          className="group pl-4 pr-4 py-1.5 rounded-full border border-white/10 bg-gradient-to-b from-surface-2/60 to-surface/60 text-text-primary flex items-center gap-3 shadow-sm hover:border-white/20 transition-colors"
+          className="group pl-2 pr-3 md:pl-4 md:pr-4 py-1.5 rounded-full border border-white/10 bg-gradient-to-b from-surface-2/60 to-surface/60 text-text-primary flex items-center gap-2 md:gap-3 shadow-sm hover:border-white/20 transition-colors"
           title={`${userName} • ${userRole}`}
         >
-          <span className="text-sm font-semibold truncate max-w-[180px]">{userName}</span>
-          <span className="text-[11px] px-2 py-0.5 rounded-full bg-brand/15 text-brand font-medium tracking-wide">{userRole}</span>
+          <span className="text-xs md:text-sm font-semibold truncate max-w-[120px] md:max-w-[180px]">{userName}</span>
+          <span className="text-[10px] md:text-[11px] px-1.5 md:px-2 py-0.5 rounded-full bg-brand/15 text-brand font-medium tracking-wide">{userRole}</span>
         </div>
       </div>
 
