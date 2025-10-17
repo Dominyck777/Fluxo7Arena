@@ -544,7 +544,7 @@ export async function listarResumoPeriodo({ from, to, codigoEmpresa } = {}) {
       // Buscar participantes pagos desses agendamentos
       let qp = supabase
         .from('agendamento_participantes')
-        .select('valor_cota, status_pagamento, finalizadora_id, finalizadoras!agendamento_participantes_finalizadora_id_fkey(nome)')
+        .select('valor_cota, status_pagamento, finalizadora_id, finalizadoras!agp_finalizadora_id_fkey(nome)')
         .in('agendamento_id', agendamentoIds)
         .eq('status_pagamento', 'Pago')
       if (codigo) qp = qp.eq('codigo_empresa', codigo)
