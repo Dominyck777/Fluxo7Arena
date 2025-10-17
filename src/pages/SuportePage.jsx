@@ -104,46 +104,26 @@ export default function SuportePage() {
     // Detectar se já está instalado
     if (window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone) {
       setIsInstalled(true);
-      return; // Se já instalado, não precisa continuar
     }
 
     // Capturar evento de instalação (não funciona no iOS)
     const handleBeforeInstallPrompt = (e) => {
-      console.log('[PWA] beforeinstallprompt disparado');
       e.preventDefault();
       setDeferredPrompt(e);
-      // Salva no localStorage para persistir entre recarregamentos
-      localStorage.setItem('pwa-prompt-available', 'true');
     };
 
     const handleAppInstalled = () => {
-      console.log('[PWA] App instalado com sucesso');
       setIsInstalled(true);
       setDeferredPrompt(null);
       setShowInstallModal(false);
-      localStorage.removeItem('pwa-prompt-available');
     };
-
-    // Verifica se o prompt estava disponível antes
-    const wasPromptAvailable = localStorage.getItem('pwa-prompt-available');
-    if (wasPromptAvailable && !deferredPrompt) {
-      console.log('[PWA] Prompt estava disponível anteriormente');
-    }
 
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
     window.addEventListener('appinstalled', handleAppInstalled);
 
-    // Tenta forçar o evento após um delay (alguns navegadores precisam disso)
-    const timer = setTimeout(() => {
-      if (!deferredPrompt && !isInstalled) {
-        console.log('[PWA] Prompt não capturado após 3s, pode não estar disponível');
-      }
-    }, 3000);
-
     return () => {
       window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
       window.removeEventListener('appinstalled', handleAppInstalled);
-      clearTimeout(timer);
     };
   }, []);
 
@@ -319,7 +299,7 @@ export default function SuportePage() {
                   <Download className="w-4 h-4" /> Instalar App
                 </button>
                 <p className="text-xs text-text-muted text-center">
-                  Clique para instalar ou ver instruções detalhadas
+                  Pode demorar alguns segundos. Se não aparecer nada, veja as instruções no tutorial.
                 </p>
               </div>
             </SectionCard>
@@ -447,113 +427,151 @@ export default function SuportePage() {
           </DialogHeader>
 
           <div className="mt-6 space-y-6">
-            {/* Chrome/Edge */}
+            {/* Chrome Mobile */}
             {(browserType === 'chrome' || browserType === 'edge') && (
-              <div className="bg-surface-2 rounded-lg p-5 border border-border">
-                <div className="flex items-center gap-3 mb-4">
-                  <Chrome className="w-6 h-6 text-brand" />
-                  <h3 className="text-lg font-semibold">
-                    {browserType === 'chrome' ? 'Google Chrome' : 'Microsoft Edge'}
-                  </h3>
+              <div className="bg-gradient-to-br from-brand/10 to-brand/5 rounded-xl p-6 border-2 border-brand/30">
+                <div className="flex items-center gap-3 mb-5">
+                  <div className="w-10 h-10 rounded-lg bg-brand flex items-center justify-center">
+                    <Chrome className="w-6 h-6 text-black" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-bold">Chrome (Celular)</h3>
+                    <p className="text-xs text-text-muted">Siga os passos abaixo</p>
+                  </div>
                 </div>
-                <ol className="space-y-3 text-sm">
-                  <li className="flex gap-3">
-                    <span className="flex-shrink-0 w-6 h-6 rounded-full bg-brand text-black flex items-center justify-center font-bold text-xs">1</span>
-                    <div>
-                      <p className="font-medium mb-1">Procure o ícone de instalação</p>
-                      <p className="text-text-secondary">Na barra de endereço (URL), procure por um ícone de <strong>computador com seta para baixo</strong> ou <strong>+ (mais)</strong></p>
+                
+                <div className="space-y-4">
+                  {/* Passo 1 */}
+                  <div className="bg-surface rounded-lg p-4 border border-border">
+                    <div className="flex gap-3 items-start">
+                      <div className="flex-shrink-0 w-8 h-8 rounded-full bg-brand text-black flex items-center justify-center font-bold">1</div>
+                      <div className="flex-1">
+                        <p className="font-semibold mb-2">Toque nos 3 pontinhos <span className="text-2xl">⋮</span></p>
+                        <p className="text-sm text-text-secondary mb-3">No canto superior direito da tela</p>
+                        <div className="bg-background/50 rounded-md p-3 border border-border/50">
+                          <p className="text-xs text-text-muted">💡 Os 3 pontinhos ficam ao lado da barra de endereço</p>
+                        </div>
+                      </div>
                     </div>
-                  </li>
-                  <li className="flex gap-3">
-                    <span className="flex-shrink-0 w-6 h-6 rounded-full bg-brand text-black flex items-center justify-center font-bold text-xs">2</span>
-                    <div>
-                      <p className="font-medium mb-1">Clique no ícone</p>
-                      <p className="text-text-secondary">Aparecerá a opção <strong>"Instalar F7 Arena"</strong> ou <strong>"Instalar aplicativo"</strong></p>
+                  </div>
+
+                  {/* Passo 2 */}
+                  <div className="bg-surface rounded-lg p-4 border border-border">
+                    <div className="flex gap-3 items-start">
+                      <div className="flex-shrink-0 w-8 h-8 rounded-full bg-brand text-black flex items-center justify-center font-bold">2</div>
+                      <div className="flex-1">
+                        <p className="font-semibold mb-2">Procure a opção</p>
+                        <div className="bg-brand/20 rounded-md p-3 border-2 border-brand/40 mb-3">
+                          <p className="font-bold text-center">📱 "Instalar aplicativo"</p>
+                          <p className="text-xs text-center text-text-muted mt-1">ou "Adicionar à tela inicial"</p>
+                        </div>
+                        <p className="text-sm text-text-secondary">Toque nesta opção no menu que abrir</p>
+                      </div>
                     </div>
-                  </li>
-                  <li className="flex gap-3">
-                    <span className="flex-shrink-0 w-6 h-6 rounded-full bg-brand text-black flex items-center justify-center font-bold text-xs">3</span>
-                    <div>
-                      <p className="font-medium mb-1">Confirme a instalação</p>
-                      <p className="text-text-secondary">Clique em <strong>"Instalar"</strong> na janela que aparecer</p>
+                  </div>
+
+                  {/* Passo 3 */}
+                  <div className="bg-surface rounded-lg p-4 border border-border">
+                    <div className="flex gap-3 items-start">
+                      <div className="flex-shrink-0 w-8 h-8 rounded-full bg-brand text-black flex items-center justify-center font-bold">3</div>
+                      <div className="flex-1">
+                        <p className="font-semibold mb-2">Confirme a instalação</p>
+                        <p className="text-sm text-text-secondary mb-3">Aparecerá uma janela perguntando se deseja instalar</p>
+                        <div className="bg-success/10 rounded-md p-3 border border-success/30">
+                          <p className="text-sm font-medium text-center">✅ Toque em "Instalar"</p>
+                        </div>
+                      </div>
                     </div>
-                  </li>
-                </ol>
-                <div className="mt-4 p-3 bg-background rounded-md border border-border/50">
-                  <p className="text-xs text-text-muted">
-                    <strong>Alternativa:</strong> Clique no menu <strong>⋮</strong> (três pontos) → <strong>"Instalar F7 Arena"</strong>
-                  </p>
+                  </div>
+
+                  {/* Resultado */}
+                  <div className="bg-success/5 rounded-lg p-4 border border-success/20">
+                    <p className="text-sm font-medium text-success mb-1">🎉 Pronto!</p>
+                    <p className="text-xs text-text-secondary">O app aparecerá na sua tela inicial e você poderá abri-lo como qualquer outro aplicativo!</p>
+                  </div>
                 </div>
               </div>
             )}
 
-            {/* Firefox */}
+            {/* Firefox Mobile */}
             {browserType === 'firefox' && (
-              <div className="bg-surface-2 rounded-lg p-5 border border-border">
-                <div className="flex items-center gap-3 mb-4">
-                  <Monitor className="w-6 h-6 text-brand" />
-                  <h3 className="text-lg font-semibold">Mozilla Firefox</h3>
+              <div className="bg-gradient-to-br from-orange-500/10 to-orange-500/5 rounded-xl p-6 border-2 border-orange-500/30">
+                <div className="flex items-center gap-3 mb-5">
+                  <div className="w-10 h-10 rounded-lg bg-orange-500 flex items-center justify-center">
+                    <Monitor className="w-6 h-6 text-white" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-bold">Firefox (Celular)</h3>
+                    <p className="text-xs text-text-muted">Siga os passos abaixo</p>
+                  </div>
                 </div>
-                <ol className="space-y-3 text-sm">
-                  <li className="flex gap-3">
-                    <span className="flex-shrink-0 w-6 h-6 rounded-full bg-brand text-black flex items-center justify-center font-bold text-xs">1</span>
-                    <div>
-                      <p className="font-medium mb-1">Adicione aos favoritos</p>
-                      <p className="text-text-secondary">Pressione <strong>Ctrl + D</strong> (Windows) ou <strong>Cmd + D</strong> (Mac)</p>
+                
+                <div className="space-y-4">
+                  <div className="bg-surface rounded-lg p-4 border border-border">
+                    <div className="flex gap-3 items-start">
+                      <div className="flex-shrink-0 w-8 h-8 rounded-full bg-orange-500 text-white flex items-center justify-center font-bold">1</div>
+                      <div className="flex-1">
+                        <p className="font-semibold mb-2">Toque nos 3 pontinhos <span className="text-2xl">⋮</span></p>
+                        <p className="text-sm text-text-secondary">No canto inferior direito da tela</p>
+                      </div>
                     </div>
-                  </li>
-                  <li className="flex gap-3">
-                    <span className="flex-shrink-0 w-6 h-6 rounded-full bg-brand text-black flex items-center justify-center font-bold text-xs">2</span>
-                    <div>
-                      <p className="font-medium mb-1">Crie um atalho</p>
-                      <p className="text-text-secondary">Ou arraste o ícone da URL para a área de trabalho</p>
+                  </div>
+
+                  <div className="bg-surface rounded-lg p-4 border border-border">
+                    <div className="flex gap-3 items-start">
+                      <div className="flex-shrink-0 w-8 h-8 rounded-full bg-orange-500 text-white flex items-center justify-center font-bold">2</div>
+                      <div className="flex-1">
+                        <p className="font-semibold mb-2">Procure a opção</p>
+                        <div className="bg-orange-500/20 rounded-md p-3 border-2 border-orange-500/40 mb-3">
+                          <p className="font-bold text-center">📱 "Instalar"</p>
+                          <p className="text-xs text-center text-text-muted mt-1">ou "Adicionar à tela inicial"</p>
+                        </div>
+                      </div>
                     </div>
-                  </li>
-                </ol>
+                  </div>
+
+                  <div className="bg-success/5 rounded-lg p-4 border border-success/20">
+                    <p className="text-sm font-medium text-success mb-1">🎉 Pronto!</p>
+                    <p className="text-xs text-text-secondary">O app será adicionado à sua tela inicial!</p>
+                  </div>
+                </div>
               </div>
             )}
 
-            {/* Safari */}
-            {browserType === 'safari' && (
-              <div className="bg-surface-2 rounded-lg p-5 border border-border">
-                <div className="flex items-center gap-3 mb-4">
-                  <Monitor className="w-6 h-6 text-brand" />
-                  <h3 className="text-lg font-semibold">Safari (macOS)</h3>
-                </div>
-                <ol className="space-y-3 text-sm">
-                  <li className="flex gap-3">
-                    <span className="flex-shrink-0 w-6 h-6 rounded-full bg-brand text-black flex items-center justify-center font-bold text-xs">1</span>
-                    <div>
-                      <p className="font-medium mb-1">Abra o menu Arquivo</p>
-                      <p className="text-text-secondary">No topo da tela, clique em <strong>Arquivo</strong></p>
-                    </div>
-                  </li>
-                  <li className="flex gap-3">
-                    <span className="flex-shrink-0 w-6 h-6 rounded-full bg-brand text-black flex items-center justify-center font-bold text-xs">2</span>
-                    <div>
-                      <p className="font-medium mb-1">Adicionar à Dock</p>
-                      <p className="text-text-secondary">Selecione <strong>"Adicionar à Dock"</strong></p>
-                    </div>
-                  </li>
-                </ol>
-              </div>
-            )}
+            {/* Safari não tem versão Android, então removido */}
 
             {/* Outros navegadores */}
-            {browserType === 'other' && (
-              <div className="bg-surface-2 rounded-lg p-5 border border-border">
-                <div className="flex items-center gap-3 mb-4">
-                  <Monitor className="w-6 h-6 text-brand" />
-                  <h3 className="text-lg font-semibold">Instruções Gerais</h3>
+            {(browserType === 'safari' || browserType === 'other') && (
+              <div className="bg-gradient-to-br from-purple-500/10 to-purple-500/5 rounded-xl p-6 border-2 border-purple-500/30">
+                <div className="flex items-center gap-3 mb-5">
+                  <div className="w-10 h-10 rounded-lg bg-purple-500 flex items-center justify-center">
+                    <Smartphone className="w-6 h-6 text-white" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-bold">Outros Navegadores</h3>
+                    <p className="text-xs text-text-muted">Instruções gerais</p>
+                  </div>
                 </div>
-                <div className="space-y-3 text-sm text-text-secondary">
-                  <p>Procure por uma das seguintes opções no menu do seu navegador:</p>
-                  <ul className="list-disc list-inside space-y-2 ml-4">
-                    <li><strong>"Instalar aplicativo"</strong></li>
-                    <li><strong>"Adicionar à tela inicial"</strong></li>
-                    <li><strong>"Criar atalho"</strong></li>
-                    <li>Ícone de <strong>instalação na barra de endereço</strong></li>
-                  </ul>
+                
+                <div className="space-y-4">
+                  <div className="bg-surface rounded-lg p-4 border border-border">
+                    <p className="font-semibold mb-3">Procure no menu do navegador:</p>
+                    <div className="space-y-2">
+                      <div className="bg-purple-500/10 rounded-md p-3 border border-purple-500/30">
+                        <p className="font-medium">📱 "Instalar aplicativo"</p>
+                      </div>
+                      <div className="bg-purple-500/10 rounded-md p-3 border border-purple-500/30">
+                        <p className="font-medium">🏠 "Adicionar à tela inicial"</p>
+                      </div>
+                      <div className="bg-purple-500/10 rounded-md p-3 border border-purple-500/30">
+                        <p className="font-medium">➕ "Criar atalho"</p>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div className="bg-background/50 rounded-lg p-4 border border-border/50">
+                    <p className="text-sm text-text-muted">💡 Geralmente a opção está no menu de 3 pontos ou 3 linhas do navegador</p>
+                  </div>
                 </div>
               </div>
             )}
