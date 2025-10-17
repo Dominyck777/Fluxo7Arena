@@ -57,6 +57,7 @@ function ClientFormModal({ open, onOpenChange, client, onSaved }) {
   });
   const [form, setForm] = useState(initialForm(client));
   const [activeTab, setActiveTab] = useState('basicos');
+  const [loadingCEP, setLoadingCEP] = useState(false);
 
   useEffect(() => {
     // Determina tipo_cadastro baseado nas flags
@@ -155,6 +156,12 @@ function ClientFormModal({ open, onOpenChange, client, onSaved }) {
   };
   const maskUF = (v) => String(v || '').replace(/[^a-z]/gi, '').toUpperCase().slice(0,2);
   const maskNumber = (v, max=6) => sanitizers.digits(v).slice(0,max);
+  const maskMoney = (v) => {
+    const digits = sanitizers.digits(v);
+    if (!digits) return '';
+    const num = Number(digits) / 100;
+    return num.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  };
 
   const handleMaskedChange = (id, raw) => {
     let val = raw;
@@ -165,6 +172,7 @@ function ClientFormModal({ open, onOpenChange, client, onSaved }) {
     if (id === 'uf') val = maskUF(raw);
     if (id === 'numero') val = maskNumber(raw, 8);
     if (id === 'cidade_ibge') val = maskNumber(raw, 7);
+    if (id === 'limite_credito') val = maskMoney(raw);
     setForm((p) => ({ ...p, [id]: val }));
   };
 
@@ -175,19 +183,42 @@ function ClientFormModal({ open, onOpenChange, client, onSaved }) {
       return;
     }
     try {
+      setLoadingCEP(true);
+      // Placeholder temporário nos campos
+      setForm((prev) => ({
+        ...prev,
+        endereco: 'Buscando...',
+        bairro: 'Buscando...',
+        cidade: 'Buscando...',
+        uf: '',
+      }));
+      
       const res = await fetch(`https://viacep.com.br/ws/${cepNum}/json/`);
       const data = await res.json();
       if (data.erro) throw new Error('CEP não encontrado');
+      
       setForm((prev) => ({
         ...prev,
-        endereco: data.logradouro || prev.endereco,
-        bairro: data.bairro || prev.bairro,
-        cidade: data.localidade || prev.cidade,
-        uf: data.uf || prev.uf,
-        cidade_ibge: data.ibge || prev.cidade_ibge,
+        endereco: data.logradouro || '',
+        bairro: data.bairro || '',
+        cidade: data.localidade || '',
+        uf: data.uf || '',
+        cidade_ibge: data.ibge || '',
       }));
+      
+      toast({ title: 'CEP encontrado!', description: 'Endereço preenchido automaticamente.', variant: 'success' });
     } catch (err) {
+      // Limpar placeholders em caso de erro
+      setForm((prev) => ({
+        ...prev,
+        endereco: '',
+        bairro: '',
+        cidade: '',
+        uf: '',
+      }));
       toast({ title: 'Falha ao buscar CEP', description: err.message || 'Tente novamente.', variant: 'destructive' });
+    } finally {
+      setLoadingCEP(false);
     }
   };
 
@@ -426,7 +457,9 @@ function ClientFormModal({ open, onOpenChange, client, onSaved }) {
                 <Label htmlFor="cep">CEP</Label>
                 <div className="flex gap-2">
                   <Input id="cep" value={form.cep} onChange={(e)=>handleMaskedChange('cep', e.target.value)} placeholder="00000-000" />
-                  <Button type="button" variant="outline" onClick={fetchCEP}>Buscar</Button>
+                  <Button type="button" variant="outline" onClick={fetchCEP} disabled={loadingCEP}>
+                    {loadingCEP ? 'Buscando...' : 'Buscar'}
+                  </Button>
                 </div>
               </div>
               <div className="col-span-12 sm:col-span-6">
@@ -464,7 +497,16 @@ function ClientFormModal({ open, onOpenChange, client, onSaved }) {
             <div className="grid grid-cols-12 gap-3 sm:gap-4">
               <div className="col-span-12 sm:col-span-3">
                 <Label htmlFor="limite_credito">Limite de Crédito</Label>
-                <Input id="limite_credito" value={form.limite_credito} onChange={handleChange} placeholder="0,00" />
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary text-sm">R$</span>
+                  <Input 
+                    id="limite_credito" 
+                    value={form.limite_credito} 
+                    onChange={(e) => handleMaskedChange('limite_credito', e.target.value)} 
+                    placeholder="0,00" 
+                    className="pl-10"
+                  />
+                </div>
               </div>
               <div className="col-span-12 sm:col-span-3">
                 <Label>Tipo de Recebimento</Label>
