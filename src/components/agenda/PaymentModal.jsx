@@ -445,9 +445,9 @@ export default function PaymentModal({
           e.preventDefault();
         }}
       >
-        <DialogHeader className="relative">
-          <div className="flex items-start justify-between gap-4">
-            <div className="flex-1">
+        <DialogHeader className="relative pb-4">
+          <div className="flex flex-col sm:flex-row items-start justify-between gap-3 sm:gap-4">
+            <div className="flex-1 w-full sm:w-auto">
               <DialogTitle>Registrar pagamento</DialogTitle>
               <DialogDescription>
                 Gerencie valores, divisão e status de pagamento dos participantes.
@@ -458,11 +458,11 @@ export default function PaymentModal({
               variant="outline"
               size="sm"
               onClick={baixarRelatorioImagem}
-              className="flex-shrink-0 gap-2"
+              className="flex-shrink-0 gap-2 w-full sm:w-auto mt-2 sm:mt-0"
               title="Baixar relatório como imagem"
             >
               <Download className="w-4 h-4" />
-              <span className="hidden sm:inline">Baixar</span>
+              <span>Baixar Relatório</span>
             </Button>
           </div>
         </DialogHeader>
