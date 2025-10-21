@@ -955,75 +955,79 @@ export default function PaymentModal({
         position: 'fixed',
         left: '-9999px',
         top: '-9999px',
-        width: '800px',
-        padding: '40px',
+        width: '900px',
+        padding: '50px',
         backgroundColor: '#1a1a1a',
         color: '#ffffff',
-        fontFamily: 'monospace',
+        fontFamily: 'Arial, sans-serif',
       }}
     >
-      <div style={{ marginBottom: '30px', textAlign: 'center', borderBottom: '3px solid #4ade80', paddingBottom: '20px' }}>
-        <h1 style={{ fontSize: '28px', fontWeight: 'bold', color: '#4ade80', margin: 0 }}>
+      <div style={{ marginBottom: '40px', textAlign: 'center', borderBottom: '4px solid #4ade80', paddingBottom: '25px' }}>
+        <h1 style={{ fontSize: '36px', fontWeight: 'bold', color: '#4ade80', margin: 0, letterSpacing: '1px' }}>
           RELATÓRIO DE PAGAMENTOS
         </h1>
       </div>
 
-      <div style={{ marginBottom: '30px', backgroundColor: '#2a2a2a', padding: '20px', borderRadius: '8px', borderLeft: '4px solid #3b82f6' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', fontSize: '14px' }}>
+      <div style={{ marginBottom: '35px', backgroundColor: '#2a2a2a', padding: '25px', borderRadius: '10px', borderLeft: '5px solid #3b82f6' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', fontSize: '17px' }}>
           <div>
-            <span style={{ color: '#9ca3af' }}>📅 Data:</span>
-            <strong style={{ marginLeft: '10px' }}>
+            <span style={{ color: '#9ca3af', fontSize: '16px' }}>📅 Data:</span>
+            <strong style={{ marginLeft: '12px', fontSize: '18px' }}>
               {editingBooking?.start ? new Date(editingBooking.start).toLocaleDateString('pt-BR') : ''}
             </strong>
           </div>
           <div>
-            <span style={{ color: '#9ca3af' }}>🕐 Horário:</span>
-            <strong style={{ marginLeft: '10px' }}>
+            <span style={{ color: '#9ca3af', fontSize: '16px' }}>🕐 Horário:</span>
+            <strong style={{ marginLeft: '12px', fontSize: '18px' }}>
               {editingBooking?.start && editingBooking?.end 
                 ? `${new Date(editingBooking.start).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} - ${new Date(editingBooking.end).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`
                 : ''}
             </strong>
           </div>
           <div>
-            <span style={{ color: '#9ca3af' }}>🏐 Quadra:</span>
-            <strong style={{ marginLeft: '10px' }}>{editingBooking?.court || ''}</strong>
+            <span style={{ color: '#9ca3af', fontSize: '16px' }}>🏐 Quadra:</span>
+            <strong style={{ marginLeft: '12px', fontSize: '18px' }}>{editingBooking?.court || ''}</strong>
           </div>
           <div>
-            <span style={{ color: '#9ca3af' }}>🎯 Modalidade:</span>
-            <strong style={{ marginLeft: '10px' }}>{editingBooking?.modality || ''}</strong>
+            <span style={{ color: '#9ca3af', fontSize: '16px' }}>🎯 Modalidade:</span>
+            <strong style={{ marginLeft: '12px', fontSize: '18px' }}>{editingBooking?.modality || ''}</strong>
           </div>
-          <div style={{ gridColumn: 'span 2' }}>
-            <span style={{ color: '#9ca3af' }}>📋 Código:</span>
-            <strong style={{ marginLeft: '10px' }}>#{editingBooking?.code || ''}</strong>
+          <div>
+            <span style={{ color: '#9ca3af', fontSize: '16px' }}>📋 Código:</span>
+            <strong style={{ marginLeft: '12px', fontSize: '18px' }}>#{editingBooking?.code || ''}</strong>
+          </div>
+          <div>
+            <span style={{ color: '#9ca3af', fontSize: '16px' }}>💰 Valor Total:</span>
+            <strong style={{ marginLeft: '12px', color: '#4ade80', fontSize: '20px' }}>R$ {maskBRL(paymentTotal || 0)}</strong>
           </div>
         </div>
       </div>
 
-      <div style={{ marginBottom: '30px' }}>
-        <h2 style={{ fontSize: '18px', fontWeight: 'bold', color: '#4ade80', marginBottom: '15px', borderBottom: '2px solid #374151', paddingBottom: '10px' }}>
+      <div style={{ marginBottom: '35px' }}>
+        <h2 style={{ fontSize: '24px', fontWeight: 'bold', color: '#4ade80', marginBottom: '20px', borderBottom: '3px solid #374151', paddingBottom: '12px' }}>
           PARTICIPANTES
         </h2>
         {(localParticipantsForm || [])
           .filter((_, idx) => !(paymentHiddenIndexes || []).includes(idx))
           .map((p, index) => (
-            <div key={index} style={{ marginBottom: '20px', backgroundColor: '#2a2a2a', padding: '15px', borderRadius: '8px', borderLeft: p.status_pagamento === 'Pago' ? '4px solid #4ade80' : '4px solid #fbbf24' }}>
-              <div style={{ fontSize: '16px', fontWeight: 'bold', marginBottom: '10px', color: p.status_pagamento === 'Pago' ? '#4ade80' : '#fbbf24' }}>
+            <div key={index} style={{ marginBottom: '25px', backgroundColor: '#2a2a2a', padding: '20px', borderRadius: '10px', borderLeft: p.status_pagamento === 'Pago' ? '5px solid #4ade80' : '5px solid #fbbf24' }}>
+              <div style={{ fontSize: '20px', fontWeight: 'bold', marginBottom: '12px', color: p.status_pagamento === 'Pago' ? '#4ade80' : '#fbbf24' }}>
                 {index + 1}. {p.nome || 'Sem nome'}
               </div>
-              <div style={{ fontSize: '13px', color: '#d1d5db', lineHeight: '1.8' }}>
-                <div><span style={{ color: '#9ca3af' }}>Código:</span> {p.codigo || 'N/A'}</div>
-                <div><span style={{ color: '#9ca3af' }}>Valor:</span> R$ {maskBRL(p.valor_cota || 0)}</div>
-                <div><span style={{ color: '#9ca3af' }}>Status:</span> {p.status_pagamento === 'Pago' ? '✅' : '⏳'} {p.status_pagamento || 'Pendente'}</div>
-                <div><span style={{ color: '#9ca3af' }}>Método:</span> {p.metodo_pagamento || 'Não definido'}</div>
+              <div style={{ fontSize: '16px', color: '#e5e7eb', lineHeight: '2' }}>
+                <div><span style={{ color: '#9ca3af' }}>Código:</span> <strong style={{ marginLeft: '8px' }}>{p.codigo || 'N/A'}</strong></div>
+                <div><span style={{ color: '#9ca3af' }}>Valor:</span> <strong style={{ marginLeft: '8px', color: '#4ade80' }}>R$ {maskBRL(p.valor_cota || 0)}</strong></div>
+                <div><span style={{ color: '#9ca3af' }}>Status:</span> <strong style={{ marginLeft: '8px' }}>{p.status_pagamento === 'Pago' ? '✅' : '⏳'} {p.status_pagamento || 'Pendente'}</strong></div>
+                <div><span style={{ color: '#9ca3af' }}>Finalizadora:</span> <strong style={{ marginLeft: '8px' }}>{payMethods.find(m => String(m.id) === String(p.finalizadora_id))?.nome || 'Não definido'}</strong></div>
                 {p.pago_em && (
-                  <div><span style={{ color: '#9ca3af' }}>Pago em:</span> {new Date(p.pago_em).toLocaleString('pt-BR')}</div>
+                  <div><span style={{ color: '#9ca3af' }}>Pago em:</span> <strong style={{ marginLeft: '8px' }}>{new Date(p.pago_em).toLocaleString('pt-BR')}</strong></div>
                 )}
               </div>
             </div>
           ))}
       </div>
 
-      <div style={{ marginTop: '30px', textAlign: 'center', fontSize: '12px', color: '#6b7280', borderTop: '2px solid #374151', paddingTop: '15px' }}>
+      <div style={{ marginTop: '35px', textAlign: 'center', fontSize: '14px', color: '#9ca3af', borderTop: '3px solid #374151', paddingTop: '20px' }}>
         Gerado em: {new Date().toLocaleString('pt-BR')}
       </div>
     </div>
