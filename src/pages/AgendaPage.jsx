@@ -1689,7 +1689,7 @@ function AgendaPage() {
                     return (
                       <span 
                         className={cn(
-                          "font-bold rounded-full border flex items-center gap-1",
+                          "font-bold rounded-full border flex items-center gap-1 whitespace-nowrap",
                           isHalfHour ? "px-2 py-0.5 text-xs" : "px-2.5 py-1 text-sm",
                           paidCount === totalParticipants 
                             ? 'text-emerald-300 bg-emerald-500/10 border-emerald-400/30' 
@@ -1697,8 +1697,8 @@ function AgendaPage() {
                         )} 
                         style={{ fontSize: Math.max(isHalfHour ? 11 : 13, Math.round((isHalfHour ? 11 : 13) * (isLong ? scale : 1))) }}
                       >
-                        <DollarSign className="w-3 h-3" />
-                        <span>{paidCount}/{totalParticipants}{isMobileView ? '' : ' pagos'}</span>
+                        <DollarSign className="w-3 h-3 flex-shrink-0" />
+                        <span className="whitespace-nowrap">{paidCount}/{totalParticipants}{isMobileView ? '' : ' pagos'}</span>
                       </span>
                     );
                   })()}
