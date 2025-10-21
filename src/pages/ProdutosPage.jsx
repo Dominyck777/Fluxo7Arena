@@ -651,7 +651,29 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
               )}
               <div className="grid grid-cols-1 sm:grid-cols-4 items-start sm:items-center gap-2 sm:gap-4">
                 <Label htmlFor="unit" className="text-left sm:text-right text-xs sm:text-sm">Unidade {(!unit?.trim()) && (<span className="text-danger">*</span>)}</Label>
-                <Input id="unit" value={unit} onChange={(e)=>setUnit(e.target.value.toUpperCase().slice(0,5))} className="col-span-1 sm:col-span-3 text-sm" placeholder="UN, KG, LT" disabled={!editEnabled} />
+                <Select value={unit} onValueChange={(v)=> editEnabled && setUnit(v)}>
+                  <SelectTrigger className="col-span-1 sm:col-span-3 text-sm" disabled={!editEnabled}>
+                    <SelectValue placeholder="Selecione a unidade" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="UN">UN - Unidade</SelectItem>
+                    <SelectItem value="CX">CX - Caixa</SelectItem>
+                    <SelectItem value="PC">PC - Peça</SelectItem>
+                    <SelectItem value="KG">KG - Quilograma</SelectItem>
+                    <SelectItem value="G">G - Grama</SelectItem>
+                    <SelectItem value="L">L - Litro</SelectItem>
+                    <SelectItem value="ML">ML - Mililitro</SelectItem>
+                    <SelectItem value="M">M - Metro</SelectItem>
+                    <SelectItem value="M2">M² - Metro Quadrado</SelectItem>
+                    <SelectItem value="M3">M³ - Metro Cúbico</SelectItem>
+                    <SelectItem value="PAR">PAR - Par</SelectItem>
+                    <SelectItem value="DZ">DZ - Dúzia</SelectItem>
+                    <SelectItem value="FD">FD - Fardo</SelectItem>
+                    <SelectItem value="SC">SC - Saco</SelectItem>
+                    <SelectItem value="PT">PT - Pacote</SelectItem>
+                    <SelectItem value="SERV">SERV - Serviço</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-4 items-start sm:items-center gap-2 sm:gap-4">
                 <Label className="text-left sm:text-right text-xs sm:text-sm">Tipo {(!type) && (<span className="text-danger">*</span>)}</Label>

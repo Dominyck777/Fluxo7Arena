@@ -1024,8 +1024,8 @@ export default function HistoricoComandasPage() {
                   <div className="font-semibold">{r?.saldo_inicial != null ? fmtMoney(r.saldo_inicial) : '—'}</div>
                 </div>
                 <div className="bg-surface-2 rounded p-2 border border-border">
-                  <div className="text-[10px] text-text-secondary">Saldo Final</div>
-                  <div className="font-semibold">{r?.saldo_final != null ? fmtMoney(r.saldo_final) : '—'}</div>
+                  <div className="text-[10px] text-text-secondary">Saldo Final (contado)</div>
+                  <div className="font-semibold">{r?.valor_final_dinheiro != null ? fmtMoney(r.valor_final_dinheiro) : '—'}</div>
                 </div>
               </div>
             </button>
@@ -1041,7 +1041,7 @@ export default function HistoricoComandasPage() {
                 <th className="text-left px-4 py-3">Fechamento</th>
                 <th className="text-left px-4 py-3">Status</th>
                 <th className="text-right px-4 py-3">Saldo Inicial</th>
-                <th className="text-right px-4 py-3">Saldo Final</th>
+                <th className="text-right px-4 py-3">Saldo Final (contado)</th>
               </tr>
             </thead>
             <tbody>
@@ -1100,7 +1100,7 @@ export default function HistoricoComandasPage() {
                         movimentosAgg,
                         saldos: {
                           inicial: (typeof snap.saldo_inicial !== 'undefined') ? Number(snap.saldo_inicial) : (r?.saldo_inicial ?? null),
-                          final: (typeof snap.saldo_final !== 'undefined') ? Number(snap.saldo_final) : (r?.saldo_final ?? null)
+                          final: (typeof snap.valor_final_dinheiro !== 'undefined') ? Number(snap.valor_final_dinheiro) : (r?.valor_final_dinheiro ?? null)
                         }
                       });
                     } else {
@@ -1120,17 +1120,17 @@ export default function HistoricoComandasPage() {
                         }
                         movimentosAgg = acc;
                       }
-                      setCashDetail({ open: true, loading: false, resumo: res || null, periodo: { from: r.aberto_em, to: r.fechado_em }, movs: movs || [], movimentosAgg, saldos: { inicial: r?.saldo_inicial ?? null, final: r?.saldo_final ?? null } });
+                      setCashDetail({ open: true, loading: false, resumo: res || null, periodo: { from: r.aberto_em, to: r.fechado_em }, movs: movs || [], movimentosAgg, saldos: { inicial: r?.saldo_inicial ?? null, final: r?.valor_final_dinheiro ?? null } });
                     }
                   } catch (e) {
-                    setCashDetail({ open: true, loading: false, resumo: null, periodo: { from: r.aberto_em, to: r.fechado_em }, movs: [], movimentosAgg: null, saldos: { inicial: r?.saldo_inicial ?? null, final: r?.saldo_final ?? null } });
+                    setCashDetail({ open: true, loading: false, resumo: null, periodo: { from: r.aberto_em, to: r.fechado_em }, movs: [], movimentosAgg: null, saldos: { inicial: r?.saldo_inicial ?? null, final: r?.valor_final_dinheiro ?? null } });
                   }
                 }}>
                   <td className="px-4 py-2">{fmtDate(r.aberto_em)}</td>
                   <td className="px-4 py-2">{fmtDate(r.fechado_em)}</td>
                   <td className="px-4 py-2">{statusCaixaPt(r.status)}</td>
                   <td className="px-4 py-2 text-right">{r?.saldo_inicial != null ? fmtMoney(r.saldo_inicial) : '—'}</td>
-                  <td className="px-4 py-2 text-right">{r?.saldo_final != null ? fmtMoney(r.saldo_final) : '—'}</td>
+                  <td className="px-4 py-2 text-right">{r?.valor_final_dinheiro != null ? fmtMoney(r.valor_final_dinheiro) : '—'}</td>
                 </tr>
               ))}
             </tbody>
@@ -1335,8 +1335,8 @@ export default function HistoricoComandasPage() {
                   <p className="text-xl font-bold text-success">{fmtMoney(cashDetail.resumo?.totalEntradas || 0)}</p>
                 </div>
                 <div className="bg-surface-2 rounded-lg p-3 border border-border col-span-2 sm:col-span-1">
-                  <p className="text-xs text-text-secondary">Saldo Final</p>
-                  <p className="text-xl font-bold">{fmtMoney(cashDetail?.saldos?.final ?? 0)}</p>
+                  <p className="text-xs text-text-secondary">Saldo Final (contado)</p>
+                  <p className="text-xl font-bold">{cashDetail?.saldos?.final != null ? fmtMoney(cashDetail.saldos.final) : '—'}</p>
                 </div>
               </div>
 

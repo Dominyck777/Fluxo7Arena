@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Input as UiInput } from '@/components/ui/input';
 import { useToast } from '@/components/ui/use-toast';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { listarFinalizadoras, criarFinalizadora, atualizarFinalizadora, ativarDesativarFinalizadora } from '@/lib/store';
@@ -37,7 +39,33 @@ export default function CadastrosPage() {
   const { toast } = useToast();
   const [finalizadoras, setFinalizadoras] = useState([]);
   const [loadingFins, setLoadingFins] = useState(false);
-  const [formFin, setFormFin] = useState({ nome: '', tipo: 'outros', ativo: true, ordem: 0, taxa_percentual: '' });
+  const [formFin, setFormFin] = useState({ nome: '', tipo: 'outros', ativo: true, ordem: 0, taxa_percentual: '', codigo_sefaz: '' });
+
+  // Modal de seleção NFe (SEFAZ)
+  const [openNfeModal, setOpenNfeModal] = useState(false);
+  const [nfeSearch, setNfeSearch] = useState('');
+  const NFE_OPTIONS = [
+    { code: '01', name: 'Dinheiro' },
+    { code: '02', name: 'Cheque' },
+    { code: '03', name: 'Cartão de Crédito' },
+    { code: '04', name: 'Cartão de Débito' },
+    { code: '05', name: 'Cartão da Loja (Private Label)' },
+    { code: '10', name: 'Vale Alimentação' },
+    { code: '11', name: 'Vale Refeição' },
+    { code: '12', name: 'Vale Presente' },
+    { code: '13', name: 'Vale Combustível' },
+    { code: '14', name: 'Duplicata Mercantil' },
+    { code: '15', name: 'Boleto Bancário' },
+    { code: '16', name: 'Depósito Bancário' },
+    { code: '17', name: 'PIX - Dinâmico' },
+    { code: '18', name: 'Transferência/Carteira Digital' },
+    { code: '19', name: 'Programa Fidelidade/Cashback/Crédito Virtual' },
+    { code: '20', name: 'PIX - Estático' },
+    { code: '21', name: 'Crédito em Loja' },
+    { code: '22', name: 'Pag. Eletrônico não Informado' },
+    { code: '90', name: 'Sem Pagamento' },
+    { code: '99', name: 'Outros' },
+  ];
 
   // Mock Quadras
   const [quadras, setQuadras] = useState([
@@ -90,9 +118,10 @@ export default function CadastrosPage() {
         ativo: !!formFin.ativo,
         ordem: Number(formFin.ordem || 0),
         taxa_percentual: formFin.taxa_percentual === '' ? null : Number(formFin.taxa_percentual),
+        codigo_sefaz: formFin.codigo_sefaz || null,
       };
       await criarFinalizadora(payload);
-      setFormFin({ nome: '', tipo: 'outros', ativo: true, ordem: 0, taxa_percentual: '' });
+      setFormFin({ nome: '', tipo: 'outros', ativo: true, ordem: 0, taxa_percentual: '', codigo_sefaz: '' });
       await loadFinalizadoras();
       toast({ title: 'Finalizadora criada', variant: 'success' });
     } catch (e) {
@@ -168,36 +197,86 @@ export default function CadastrosPage() {
           <TabsContent value="finalizadoras" className="space-y-6">
             <SectionCard>
               <h2 className="text-lg font-bold text-text-primary mb-4">Nova Finalizadora</h2>
-              <form onSubmit={submitFin} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                <Input label="Nome" value={formFin.nome} onChange={(e) => setFormFin({ ...formFin, nome: e.target.value })} placeholder="Ex.: PIX, Cartão Crédito" />
-                <label className="flex flex-col gap-1 text-sm">
-                  <span className="text-xs text-text-muted">Tipo</span>
-                  <select value={formFin.tipo} onChange={(e) => setFormFin({ ...formFin, tipo: e.target.value })} className="bg-surface-2 border border-border rounded-md px-3 py-2 text-sm">
-                    <option value="dinheiro">Dinheiro</option>
-                    <option value="credito">Crédito</option>
-                    <option value="debito">Débito</option>
-                    <option value="pix">PIX</option>
-                    <option value="voucher">Voucher</option>
-                    <option value="outros">Outros</option>
-                  </select>
-                </label>
-                <label className="flex flex-col gap-1 text-sm">
-                  <span className="text-xs text-text-muted">Ordem</span>
-                  <input type="number" value={formFin.ordem} onChange={(e) => setFormFin({ ...formFin, ordem: Number(e.target.value) })} className="bg-surface-2 border border-border rounded-md px-3 py-2 text-sm" />
-                </label>
-                <label className="flex flex-col gap-1 text-sm">
-                  <span className="text-xs text-text-muted">Taxa (%)</span>
-                  <input type="number" step="0.01" value={formFin.taxa_percentual} onChange={(e) => setFormFin({ ...formFin, taxa_percentual: e.target.value })} className="bg-surface-2 border border-border rounded-md px-3 py-2 text-sm" />
-                </label>
-                <label className="flex items-center gap-2 text-sm mt-6">
-                  <input type="checkbox" checked={formFin.ativo} onChange={(e) => setFormFin({ ...formFin, ativo: e.target.checked })} />
-                  <span>Ativo</span>
-                </label>
-                <div className="flex items-end">
-                  <Button type="submit" className="w-full md:w-auto" disabled={loadingFins}>Adicionar</Button>
-                </div>
-              </form>
+              {/* Container com scroll visível para indicar que há mais campos ao descer */}
+              <div className="max-h-[340px] overflow-y-auto fx-scroll pr-2">
+                <form onSubmit={submitFin} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  <Input label="Nome" value={formFin.nome} onChange={(e) => setFormFin({ ...formFin, nome: e.target.value })} placeholder="Ex.: PIX, Cartão Crédito" />
+                  <label className="flex flex-col gap-1 text-sm">
+                    <span className="text-xs text-text-muted">Tipo</span>
+                    <select value={formFin.tipo} onChange={(e) => setFormFin({ ...formFin, tipo: e.target.value })} className="bg-surface-2 border border-border rounded-md px-3 py-2 text-sm">
+                      <option value="dinheiro">Dinheiro</option>
+                      <option value="credito">Crédito</option>
+                      <option value="debito">Débito</option>
+                      <option value="pix">PIX</option>
+                      <option value="voucher">Voucher</option>
+                      <option value="outros">Outros</option>
+                    </select>
+                  </label>
+                  {/* Escolha da Forma de Pagamento NFe (SEFAZ) via Modal */}
+                  <label className="flex flex-col gap-1 text-sm">
+                    <span className="text-xs text-text-muted">Forma de Pagamento NFe (SEFAZ)</span>
+                    <button
+                      type="button"
+                      onClick={() => setOpenNfeModal(true)}
+                      className="bg-surface-2 border border-border rounded-md px-3 py-2 text-left text-sm hover:bg-surface-2/80"
+                    >
+                      {formFin.codigo_sefaz ? `${formFin.codigo_sefaz} - ${NFE_OPTIONS.find(o => o.code === formFin.codigo_sefaz)?.name || ''}` : 'Selecione a forma de pagamento'}
+                    </button>
+                    <span className="text-[11px] text-text-muted">Obrigatório para emissão de NFe/NFC-e.</span>
+                  </label>
+                  <label className="flex flex-col gap-1 text-sm">
+                    <span className="text-xs text-text-muted">Ordem</span>
+                    <input type="number" value={formFin.ordem} onChange={(e) => setFormFin({ ...formFin, ordem: Number(e.target.value) })} className="bg-surface-2 border border-border rounded-md px-3 py-2 text-sm" />
+                  </label>
+                  <label className="flex flex-col gap-1 text-sm">
+                    <span className="text-xs text-text-muted">Taxa (%)</span>
+                    <input type="number" step="0.01" value={formFin.taxa_percentual} onChange={(e) => setFormFin({ ...formFin, taxa_percentual: e.target.value })} className="bg-surface-2 border border-border rounded-md px-3 py-2 text-sm" />
+                  </label>
+                  <label className="flex items-center gap-2 text-sm mt-6">
+                    <input type="checkbox" checked={formFin.ativo} onChange={(e) => setFormFin({ ...formFin, ativo: e.target.checked })} />
+                    <span>Ativo</span>
+                  </label>
+                  <div className="flex items-end">
+                    <Button type="submit" className="w-full md:w-auto" disabled={loadingFins}>Adicionar</Button>
+                  </div>
+                </form>
+              </div>
             </SectionCard>
+
+            {/* Modal: Seleção Forma de Pagamento NFe (SEFAZ) */}
+            <Dialog open={openNfeModal} onOpenChange={setOpenNfeModal}>
+              <DialogContent className="sm:max-w-[520px] bg-surface text-text-primary border border-border">
+                <DialogHeader>
+                  <DialogTitle>Selecionar Forma de Pagamento (NFe)</DialogTitle>
+                  <DialogDescription>Escolha conforme a tabela oficial da SEFAZ</DialogDescription>
+                </DialogHeader>
+                <div className="space-y-3">
+                  <UiInput placeholder="Buscar por código ou nome..." value={nfeSearch} onChange={(e)=>setNfeSearch(e.target.value)} />
+                  <div className="max-h-[360px] overflow-auto fx-scroll rounded-md border border-border">
+                    <ul className="divide-y divide-border">
+                      {NFE_OPTIONS
+                        .filter(o => {
+                          const q = (nfeSearch||'').toLowerCase();
+                          if (!q) return true;
+                          return o.code.includes(q) || o.name.toLowerCase().includes(q);
+                        })
+                        .map(o => (
+                          <li key={o.code}>
+                            <button
+                              type="button"
+                              onClick={() => { setFormFin(prev => ({ ...prev, codigo_sefaz: o.code })); setOpenNfeModal(false); }}
+                              className={`w-full text-left px-3 py-2 hover:bg-surface-2 ${formFin.codigo_sefaz===o.code ? 'bg-surface-2' : ''}`}
+                            >
+                              <span className="font-mono mr-2 text-text-secondary">{o.code}</span>
+                              <span>{o.name}</span>
+                            </button>
+                          </li>
+                        ))}
+                    </ul>
+                  </div>
+                </div>
+              </DialogContent>
+            </Dialog>
 
             <SectionCard>
               <div className="flex items-center justify-between mb-4">
