@@ -724,23 +724,29 @@ function ClientDetailsModal({ open, onOpenChange, client, onEdit, onInactivate, 
         </div>
 
         <DialogFooter className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 sm:gap-0 sm:justify-between">
-          <div className="w-full sm:flex-1">
-            <Button 
-              type="button" 
-              variant="destructive"
-              className="bg-red-600 hover:bg-red-500 text-white w-full sm:w-auto"
-              onClick={() => onInactivate?.(client)}
-            >
-              <UserX className="mr-2 h-4 w-4" /> Inativar Cliente
-            </Button>
-          </div>
+          {/* Não mostrar botão de inativar para Cliente Consumidor */}
+          {!client?.is_consumidor_final && (
+            <div className="w-full sm:flex-1">
+              <Button 
+                type="button" 
+                variant="destructive"
+                className="bg-red-600 hover:bg-red-500 text-white w-full sm:w-auto"
+                onClick={() => onInactivate?.(client)}
+              >
+                <UserX className="mr-2 h-4 w-4" /> Inativar Cliente
+              </Button>
+            </div>
+          )}
           <div className="flex gap-2 w-full sm:w-auto sm:ml-auto">
             <DialogClose asChild>
               <Button type="button" variant="secondary" className="flex-1 sm:flex-none">Fechar</Button>
             </DialogClose>
-            <Button onClick={() => onEdit(client)} className="flex-1 sm:flex-none">
-              <Edit className="mr-2 h-4 w-4" /> Editar Cliente
-            </Button>
+            {/* Não mostrar botão de editar para Cliente Consumidor */}
+            {!client?.is_consumidor_final && (
+              <Button onClick={() => onEdit(client)} className="flex-1 sm:flex-none">
+                <Edit className="mr-2 h-4 w-4" /> Editar Cliente
+              </Button>
+            )}
           </div>
         </DialogFooter>
       </DialogContent>
@@ -796,7 +802,7 @@ function ClientesPage() {
         const cacheKey = `clientes:list:${userProfile.codigo_empresa}`;
         let query = supabase
           .from('clientes')
-          .select('*')
+          .select('*, is_consumidor_final')
           .eq('codigo_empresa', userProfile.codigo_empresa)
           .order('codigo', { ascending: true });
 
@@ -1055,13 +1061,19 @@ function ClientesPage() {
     const [sort, setSort] = useState({ by: 'codigo', dir: 'asc' });
     const toggleSort = (by) => {
       setSort((prev) => (
-        prev.by === by
-          ? { by, dir: prev.dir === 'asc' ? 'desc' : 'asc' }
+        prev.by === by && prev.dir === 'asc'
+          ? { by, dir: 'desc' }
           : { by, dir: 'asc' }
       ));
     };
+
     const sortedClients = useMemo(() => {
-      const arr = [...filteredClients];
+      // Separar cliente consumidor dos demais
+      const clienteConsumidor = filteredClients.find(c => c?.is_consumidor_final === true);
+      const clientesNormais = filteredClients.filter(c => c?.is_consumidor_final !== true);
+      
+      // Ordenar apenas clientes normais
+      const arr = [...clientesNormais];
       const dir = sort.dir === 'asc' ? 1 : -1;
       const safeNum = (n, fallback) => (Number.isFinite(n) ? n : fallback);
       arr.sort((a, b) => {
@@ -1079,9 +1091,11 @@ function ClientesPage() {
         }
         return 0;
       });
-      return arr;
+      
+      // Cliente consumidor sempre no topo, depois os ordenados
+      return clienteConsumidor ? [clienteConsumidor, ...arr] : arr;
     }, [filteredClients, sort]);
-    
+
     const handleViewDetails = (client) => {
       setSelectedClient(client);
       setIsDetailsOpen(true);
@@ -1230,11 +1244,27 @@ function ClientesPage() {
                           {loading ? (
                             <div className="text-center py-8 text-text-muted">Carregando...</div>
                           ) : sortedClients.length > 0 ? (
-                            sortedClients.map(client => (
-                              <div key={client.id} className="rounded-lg border border-border bg-surface p-4 space-y-3 cursor-pointer hover:border-brand/50 transition-colors" onClick={() => handleViewDetails(client)}>
+                            sortedClients.map(client => {
+                              const isConsumidorFinal = client?.is_consumidor_final === true;
+                              return (
+                              <div 
+                                key={client.id} 
+                                className={cn(
+                                  "rounded-lg border bg-surface p-4 space-y-3 cursor-pointer transition-all",
+                                  isConsumidorFinal 
+                                    ? "bg-gradient-to-r from-amber-500/5 to-transparent hover:from-amber-500/10 border-l-4 border-l-amber-500/40 border-t-border border-r-border border-b-border"
+                                    : "border-border hover:border-brand/50"
+                                )} 
+                                onClick={() => handleViewDetails(client)}
+                              >
                                 {/* Header: Código + Status */}
                                 <div className="flex items-center justify-between gap-3">
-                                  <span className="font-mono text-sm font-semibold text-text-primary">{client.codigo}</span>
+                                  <span className={cn(
+                                    "font-mono text-sm font-semibold",
+                                    isConsumidorFinal ? "text-amber-300/90" : "text-text-primary"
+                                  )}>
+                                    {client.codigo}
+                                  </span>
                                   <span className={cn(
                                     "px-2 py-0.5 text-xs font-semibold rounded-full flex-shrink-0",
                                     client.status === 'active' ? "bg-success/10 text-success" : "bg-danger/10 text-danger"
@@ -1245,7 +1275,20 @@ function ClientesPage() {
 
                                 {/* Nome e Documento */}
                                 <div>
-                                  <h3 className="font-semibold text-base text-text-primary mb-1">{client.nome || '—'}</h3>
+                                  <h3 className={cn(
+                                    "font-semibold text-base mb-1",
+                                    isConsumidorFinal ? "text-amber-100/90" : "text-text-primary"
+                                  )}>
+                                    {client.nome || '—'}
+                                  </h3>
+                                  {isConsumidorFinal && (
+                                    <span className="inline-flex items-center gap-1 text-[11px] text-amber-400/70 font-medium mb-1">
+                                      <svg className="w-3 h-3 opacity-60" fill="currentColor" viewBox="0 0 20 20">
+                                        <path fillRule="evenodd" d="M6.267 3.455a3.066 3.066 0 001.745-.723 3.066 3.066 0 013.976 0 3.066 3.066 0 001.745.723 3.066 3.066 0 012.812 2.812c.051.643.304 1.254.723 1.745a3.066 3.066 0 010 3.976 3.066 3.066 0 00-.723 1.745 3.066 3.066 0 01-2.812 2.812 3.066 3.066 0 00-1.745.723 3.066 3.066 0 01-3.976 0 3.066 3.066 0 00-1.745-.723 3.066 3.066 0 01-2.812-2.812 3.066 3.066 0 00-.723-1.745 3.066 3.066 0 010-3.976 3.066 3.066 0 00.723-1.745 3.066 3.066 0 012.812-2.812zm7.44 5.252a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                                      </svg>
+                                      Cliente Padrão
+                                    </span>
+                                  )}
                                   <p className="text-sm text-text-muted">
                                     {(client.cpf && `CPF: ${client.cpf}`) || (client.cnpj && `CNPJ: ${client.cnpj}`) || (client.apelido ? `Apelido: ${client.apelido}` : ' ')}
                                   </p>
@@ -1278,7 +1321,8 @@ function ClientesPage() {
                                   Toque para ver detalhes
                                 </div>
                               </div>
-                            ))
+                              );
+                            })
                           ) : (
                             <div className="text-center py-8 text-text-muted">
                               Nenhum cliente encontrado com os filtros aplicados.
@@ -1316,13 +1360,42 @@ function ClientesPage() {
                                       <TableCell colSpan={5} className="h-24 text-center">Carregando...</TableCell>
                                     </TableRow>
                                   ) : sortedClients.length > 0 ? (
-                                      sortedClients.map(client => (
-                                          <TableRow key={client.id} className="cursor-pointer" onClick={() => handleViewDetails(client)}>
-                                              <TableCell className="font-mono text-base font-semibold text-text-primary">{client.codigo}</TableCell>
+                                      sortedClients.map(client => {
+                                        const isConsumidorFinal = client?.is_consumidor_final === true;
+                                        return (
+                                          <TableRow 
+                                            key={client.id} 
+                                            className={cn(
+                                              "cursor-pointer transition-all",
+                                              isConsumidorFinal 
+                                                ? "bg-gradient-to-r from-amber-500/5 to-transparent hover:from-amber-500/10 border-l-2 border-l-amber-500/40"
+                                                : "hover:bg-surface-2"
+                                            )}
+                                            onClick={() => handleViewDetails(client)}
+                                          >
+                                              <TableCell className={cn(
+                                                "font-mono text-base font-semibold",
+                                                isConsumidorFinal ? "text-amber-300/90" : "text-text-primary"
+                                              )}>
+                                                {client.codigo}
+                                              </TableCell>
                                               {/* Cliente */}
                                               <TableCell>
-                                                  <div className="flex flex-col">
-                                                      <span className="text-base font-semibold text-text-primary truncate">{client.nome || '—'}</span>
+                                                  <div className="flex flex-col gap-1">
+                                                      <span className={cn(
+                                                        "text-base font-semibold truncate",
+                                                        isConsumidorFinal ? "text-amber-100/90" : "text-text-primary"
+                                                      )}>
+                                                        {client.nome || '—'}
+                                                      </span>
+                                                      {isConsumidorFinal && (
+                                                        <span className="inline-flex items-center gap-1 text-[11px] text-amber-400/70 font-medium">
+                                                          <svg className="w-3 h-3 opacity-60" fill="currentColor" viewBox="0 0 20 20">
+                                                            <path fillRule="evenodd" d="M6.267 3.455a3.066 3.066 0 001.745-.723 3.066 3.066 0 013.976 0 3.066 3.066 0 001.745.723 3.066 3.066 0 012.812 2.812c.051.643.304 1.254.723 1.745a3.066 3.066 0 010 3.976 3.066 3.066 0 00-.723 1.745 3.066 3.066 0 01-2.812 2.812 3.066 3.066 0 00-1.745.723 3.066 3.066 0 01-3.976 0 3.066 3.066 0 00-1.745-.723 3.066 3.066 0 01-2.812-2.812 3.066 3.066 0 00-.723-1.745 3.066 3.066 0 010-3.976 3.066 3.066 0 00.723-1.745 3.066 3.066 0 012.812-2.812zm7.44 5.252a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                                                          </svg>
+                                                          Cliente Padrão
+                                                        </span>
+                                                      )}
                                                       <span className="text-xs text-text-muted truncate">
                                                         {(client.cpf && `CPF: ${client.cpf}`) || (client.cnpj && `CNPJ: ${client.cnpj}`) || (client.apelido ? `Apelido: ${client.apelido}` : ' ')}
                                                       </span>
@@ -1359,7 +1432,8 @@ function ClientesPage() {
                                                   </span>
                                               </TableCell>
                                           </TableRow>
-                                      ))
+                                        );
+                                      })
                                   ) : (
                                       <TableRow>
                                           <TableCell colSpan={5} className="h-24 text-center">

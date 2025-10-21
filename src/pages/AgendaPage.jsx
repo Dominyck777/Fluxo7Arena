@@ -2930,7 +2930,7 @@ function AgendaPage() {
         // Carregar clientes da empresa - apenas clientes ativos
         const { data, error } = await supabase
           .from('clientes')
-          .select('id, nome, codigo, email, telefone, status, codigo_empresa')
+          .select('id, nome, codigo, email, telefone, status, codigo_empresa, is_consumidor_final')
           .eq('codigo_empresa', userProfile.codigo_empresa)
           .eq('status', 'active')  // ✅ Filtro: apenas clientes ativos
           .eq('flag_cliente', true)  // ✅ Filtro: apenas registros marcados como cliente
@@ -3812,24 +3812,34 @@ function AgendaPage() {
                           {!clientsLoading && ((localCustomers || []).length === 0) && (
                             <div className="px-3 py-4 text-sm text-text-muted">Nenhum cliente encontrado</div>
                           )}
-                          {!clientsLoading && ((localCustomers || [])
-                            .filter((c) => {
+                          {!clientsLoading && (() => {
+                            const filtered = (localCustomers || []).filter((c) => {
                               const q = customerQuery.trim().toLowerCase();
                               if (!q) return true;
                               const label = String(getCustomerLabel(c) || '').toLowerCase();
                               return label.includes(q);
-                            })
-                            // Ordena por codigo asc (itens sem codigo vão para o final); desempate por nome
-                            .slice()
-                            .sort((a, b) => {
+                            });
+
+                            // Separar cliente consumidor dos demais
+                            const clienteConsumidor = filtered.find(c => c?.is_consumidor_final === true);
+                            const clientesNormais = filtered.filter(c => c?.is_consumidor_final !== true);
+
+                            // Ordenar clientes normais por codigo
+                            const sortedNormais = clientesNormais.slice().sort((a, b) => {
                               const ca = typeof a === 'object' ? (Number.isFinite(Number(a?.codigo)) ? Number(a.codigo) : Infinity) : Infinity;
                               const cb = typeof b === 'object' ? (Number.isFinite(Number(b?.codigo)) ? Number(b.codigo) : Infinity) : Infinity;
                               if (ca !== cb) return ca - cb;
                               const na = String(getCustomerName(a) || '').toLowerCase();
                               const nb = String(getCustomerName(b) || '').toLowerCase();
                               return na.localeCompare(nb);
-                            })
-                          ).map((c) => {
+                            });
+
+                            // Cliente consumidor sempre no topo, depois os normais
+                            const finalList = clienteConsumidor ? [clienteConsumidor, ...sortedNormais] : sortedNormais;
+
+                            return finalList;
+                          })().map((c) => {
+                            const isConsumidorFinal = c?.is_consumidor_final === true;
                             const id = typeof c === 'object' ? c.id : null;
                             const nome = getCustomerName(c);
                             const codigo = typeof c === 'object' ? c.codigo : null;
@@ -3840,8 +3850,12 @@ function AgendaPage() {
                               <button
                                 key={id || nameKey}
                                 type="button"
-                                className={`w-full text-left py-3 px-4 flex items-center gap-3 transition-colors border-b border-border last:border-0 ${
-                                  selected ? 'bg-emerald-600/20 hover:bg-emerald-600/30' : 'hover:bg-surface-2'
+                                className={`w-full text-left py-3 px-4 flex items-center gap-3 transition-all border-b border-border last:border-0 ${
+                                  isConsumidorFinal
+                                    ? 'bg-gradient-to-r from-amber-500/5 to-transparent hover:from-amber-500/10 border-l-2 border-l-amber-500/40' // Cliente Consumidor com destaque sutil
+                                    : selected 
+                                      ? 'bg-emerald-600/20 hover:bg-emerald-600/30' 
+                                      : 'hover:bg-surface-2'
                                 }`}
                                 onMouseDown={(e) => { e.stopPropagation(); }}
                                 role="option"
@@ -3862,12 +3876,28 @@ function AgendaPage() {
                                 }}
                               >
                                 <div className="flex items-center gap-3 flex-1">
-                                  {codigo && (
-                                    <span className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-emerald-600/20 text-emerald-400 font-bold text-sm">
+                                  {codigo !== null && codigo !== undefined && (
+                                    <span className={`inline-flex items-center justify-center w-10 h-10 rounded-full font-bold text-sm transition-colors ${
+                                      isConsumidorFinal 
+                                        ? 'bg-amber-500/15 text-amber-300/90 ring-1 ring-amber-500/20' 
+                                        : 'bg-emerald-600/20 text-emerald-400'
+                                    }`}>
                                       #{codigo}
                                     </span>
                                   )}
-                                  <span className="flex-1 font-medium truncate">{nome}</span>
+                                  <div className="flex-1 flex flex-col gap-1">
+                                    <span className={`font-medium truncate ${isConsumidorFinal ? 'text-amber-100/90' : ''}`}>
+                                      {nome}
+                                    </span>
+                                    {isConsumidorFinal && (
+                                      <span className="inline-flex items-center gap-1 text-[11px] text-amber-400/70 font-medium">
+                                        <svg className="w-3 h-3 opacity-60" fill="currentColor" viewBox="0 0 20 20">
+                                          <path fillRule="evenodd" d="M6.267 3.455a3.066 3.066 0 001.745-.723 3.066 3.066 0 013.976 0 3.066 3.066 0 001.745.723 3.066 3.066 0 012.812 2.812c.051.643.304 1.254.723 1.745a3.066 3.066 0 010 3.976 3.066 3.066 0 00-.723 1.745 3.066 3.066 0 01-2.812 2.812 3.066 3.066 0 00-1.745.723 3.066 3.066 0 01-3.976 0 3.066 3.066 0 00-1.745-.723 3.066 3.066 0 01-2.812-2.812 3.066 3.066 0 00-.723-1.745 3.066 3.066 0 010-3.976 3.066 3.066 0 00.723-1.745 3.066 3.066 0 012.812-2.812zm7.44 5.252a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                                        </svg>
+                                        Cliente Padrão
+                                      </span>
+                                    )}
+                                  </div>
                                 </div>
                                 {(() => {
                                   const selectionCount = (form.selectedClients || []).filter(sc => isSame(sc)).length;

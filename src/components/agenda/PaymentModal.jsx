@@ -932,19 +932,28 @@ export default function PaymentModal({
             {(() => {
               const searchLower = addParticipantSearch.toLowerCase().trim();
               const filtered = (localCustomers || [])
-                .sort((a, b) => {
-                  const codigoA = a.codigo || 0;
-                  const codigoB = b.codigo || 0;
-                  return codigoA - codigoB;
-                })
                 .filter(cliente => {
                   if (!searchLower) return true;
                   const codigo = String(cliente.codigo || '');
                   const nome = (cliente.nome || '').toLowerCase();
                   return codigo.includes(searchLower) || nome.includes(searchLower);
                 });
+
+              // Separar cliente consumidor dos demais
+              const clienteConsumidor = filtered.find(c => c?.is_consumidor_final === true);
+              const clientesNormais = filtered.filter(c => c?.is_consumidor_final !== true);
+
+              // Ordenar clientes normais por codigo
+              const sortedNormais = clientesNormais.sort((a, b) => {
+                const codigoA = a.codigo || 0;
+                const codigoB = b.codigo || 0;
+                return codigoA - codigoB;
+              });
+
+              // Cliente consumidor sempre no topo
+              const finalList = clienteConsumidor ? [clienteConsumidor, ...sortedNormais] : sortedNormais;
               
-              if (filtered.length === 0) {
+              if (finalList.length === 0) {
                 return (
                   <div className="p-8 text-center text-text-muted">
                     Nenhum cliente encontrado.
@@ -952,15 +961,20 @@ export default function PaymentModal({
                 );
               }
               
-              return filtered.map((cliente) => {
+              return finalList.map((cliente) => {
+                const isConsumidorFinal = cliente?.is_consumidor_final === true;
                 const selectionCount = selectedParticipants.filter(p => p.id === cliente.id).length;
                 
                 return (
                   <button
                     key={cliente.id}
                     type="button"
-                    className={`w-full px-4 py-3 text-left transition-colors border-b border-border last:border-0 flex items-center gap-3 ${
-                      selectionCount > 0 ? 'bg-emerald-600/20 hover:bg-emerald-600/30' : 'hover:bg-surface-2'
+                    className={`w-full px-4 py-3 text-left transition-all border-b border-border last:border-0 flex items-center gap-3 ${
+                      isConsumidorFinal
+                        ? 'bg-gradient-to-r from-amber-500/5 to-transparent hover:from-amber-500/10 border-l-2 border-l-amber-500/40'
+                        : selectionCount > 0 
+                          ? 'bg-emerald-600/20 hover:bg-emerald-600/30' 
+                          : 'hover:bg-surface-2'
                     }`}
                     onClick={() => {
                       // Adicionar timestamp único para permitir duplicados
@@ -973,12 +987,28 @@ export default function PaymentModal({
                     }}
                   >
                     <div className="flex items-center gap-3 flex-1">
-                      {cliente.codigo && (
-                        <span className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-emerald-600/20 text-emerald-400 font-bold text-sm">
+                      {cliente.codigo !== null && cliente.codigo !== undefined && (
+                        <span className={`inline-flex items-center justify-center w-10 h-10 rounded-full font-bold text-sm transition-colors ${
+                          isConsumidorFinal 
+                            ? 'bg-amber-500/15 text-amber-300/90 ring-1 ring-amber-500/20' 
+                            : 'bg-emerald-600/20 text-emerald-400'
+                        }`}>
                           #{cliente.codigo}
                         </span>
                       )}
-                      <span className="flex-1 font-medium">{cliente.nome}</span>
+                      <div className="flex-1 flex flex-col gap-1">
+                        <span className={`font-medium ${isConsumidorFinal ? 'text-amber-100/90' : ''}`}>
+                          {cliente.nome}
+                        </span>
+                        {isConsumidorFinal && (
+                          <span className="inline-flex items-center gap-1 text-[11px] text-amber-400/70 font-medium">
+                            <svg className="w-3 h-3 opacity-60" fill="currentColor" viewBox="0 0 20 20">
+                              <path fillRule="evenodd" d="M6.267 3.455a3.066 3.066 0 001.745-.723 3.066 3.066 0 013.976 0 3.066 3.066 0 001.745.723 3.066 3.066 0 012.812 2.812c.051.643.304 1.254.723 1.745a3.066 3.066 0 010 3.976 3.066 3.066 0 00-.723 1.745 3.066 3.066 0 01-2.812 2.812 3.066 3.066 0 00-1.745.723 3.066 3.066 0 01-3.976 0 3.066 3.066 0 00-1.745-.723 3.066 3.066 0 01-2.812-2.812 3.066 3.066 0 00-.723-1.745 3.066 3.066 0 010-3.976 3.066 3.066 0 00.723-1.745 3.066 3.066 0 012.812-2.812zm7.44 5.252a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                            </svg>
+                            Cliente Padrão
+                          </span>
+                        )}
+                      </div>
                     </div>
                     {selectionCount > 0 && (
                       <div className="flex items-center gap-2">

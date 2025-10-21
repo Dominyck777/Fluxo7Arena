@@ -129,21 +129,28 @@ export default function EditParticipantModal({
   if (!isEditParticipantModalOpen) return null;
   
   const query = editParticipantSearch.trim().toLowerCase();
-  const filtered = (localCustomers || [])
+  const filteredBase = (localCustomers || [])
     .filter(c => {
       if (!query) return true;
       return String(c?.nome || '').toLowerCase().includes(query);
-    })
-    .sort((a, b) => {
-      // Ordenar por código (numérico)
-      const codigoA = Number(a?.codigo);
-      const codigoB = Number(b?.codigo);
-      if (Number.isFinite(codigoA) && Number.isFinite(codigoB)) {
-        return codigoA - codigoB;
-      }
-      // Se não tiver código válido, ordenar por nome
-      return String(a?.nome || '').localeCompare(String(b?.nome || ''));
     });
+
+  // Separar cliente consumidor dos demais
+  const clienteConsumidor = filteredBase.find(c => c?.is_consumidor_final === true);
+  const clientesNormais = filteredBase.filter(c => c?.is_consumidor_final !== true);
+
+  // Ordenar clientes normais por código
+  const sortedNormais = clientesNormais.sort((a, b) => {
+    const codigoA = Number(a?.codigo);
+    const codigoB = Number(b?.codigo);
+    if (Number.isFinite(codigoA) && Number.isFinite(codigoB)) {
+      return codigoA - codigoB;
+    }
+    return String(a?.nome || '').localeCompare(String(b?.nome || ''));
+  });
+
+  // Cliente consumidor sempre no topo
+  const filtered = clienteConsumidor ? [clienteConsumidor, ...sortedNormais] : sortedNormais;
   
   return (
     <Dialog
@@ -204,32 +211,53 @@ export default function EditParticipantModal({
             ) : (
               filtered.map((cliente) => {
                 const isCurrentParticipant = cliente.id === editParticipantData.participantId;
+                const isConsumidorFinal = cliente?.is_consumidor_final === true;
                 
                 return (
                   <button
                     key={cliente.id}
                     type="button"
                     className={cn(
-                      "w-full px-4 py-3 text-left hover:bg-surface-2 transition-colors",
+                      "w-full px-4 py-3 text-left transition-all",
                       "border-b border-border last:border-b-0",
-                      isCurrentParticipant && "bg-brand/10 cursor-not-allowed opacity-60"
+                      "flex items-center gap-3",
+                      isCurrentParticipant && "bg-brand/10 cursor-not-allowed opacity-60",
+                      !isCurrentParticipant && isConsumidorFinal && "bg-gradient-to-r from-amber-500/5 to-transparent hover:from-amber-500/10 border-l-2 border-l-amber-500/40",
+                      !isCurrentParticipant && !isConsumidorFinal && "hover:bg-surface-2"
                     )}
                     disabled={isCurrentParticipant}
                     onClick={() => handleSelectParticipant(cliente)}
                   >
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <div className="font-medium">{cliente.nome}</div>
-                        {cliente.codigo && (
-                          <div className="text-xs text-text-muted">
-                            Código: {cliente.codigo}
-                          </div>
+                    <div className="flex items-center gap-3 flex-1">
+                      {cliente.codigo !== null && cliente.codigo !== undefined && (
+                        <span className={cn(
+                          "inline-flex items-center justify-center w-10 h-10 rounded-full font-bold text-sm transition-colors",
+                          isConsumidorFinal && "bg-amber-500/15 text-amber-300/90 ring-1 ring-amber-500/20",
+                          !isConsumidorFinal && "bg-emerald-600/20 text-emerald-400"
+                        )}>
+                          #{cliente.codigo}
+                        </span>
+                      )}
+                      <div className="flex-1 flex flex-col gap-1">
+                        <span className={cn(
+                          "font-medium",
+                          isConsumidorFinal && "text-amber-100/90"
+                        )}>
+                          {cliente.nome}
+                        </span>
+                        {isConsumidorFinal && (
+                          <span className="inline-flex items-center gap-1 text-[11px] text-amber-400/70 font-medium">
+                            <svg className="w-3 h-3 opacity-60" fill="currentColor" viewBox="0 0 20 20">
+                              <path fillRule="evenodd" d="M6.267 3.455a3.066 3.066 0 001.745-.723 3.066 3.066 0 013.976 0 3.066 3.066 0 001.745.723 3.066 3.066 0 012.812 2.812c.051.643.304 1.254.723 1.745a3.066 3.066 0 010 3.976 3.066 3.066 0 00-.723 1.745 3.066 3.066 0 01-2.812 2.812 3.066 3.066 0 00-1.745.723 3.066 3.066 0 01-3.976 0 3.066 3.066 0 00-1.745-.723 3.066 3.066 0 01-2.812-2.812 3.066 3.066 0 00-.723-1.745 3.066 3.066 0 010-3.976 3.066 3.066 0 00.723-1.745 3.066 3.066 0 012.812-2.812zm7.44 5.252a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                            </svg>
+                            Cliente Padrão
+                          </span>
                         )}
                       </div>
-                      {isCurrentParticipant && (
-                        <span className="text-xs text-brand font-medium">Atual</span>
-                      )}
                     </div>
+                    {isCurrentParticipant && (
+                      <span className="text-xs text-brand font-medium">Atual</span>
+                    )}
                   </button>
                 );
               })
