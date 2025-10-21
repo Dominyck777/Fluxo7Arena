@@ -1681,7 +1681,15 @@ function AgendaPage() {
                 <div className="flex items-center gap-1.5 text-base flex-wrap justify-end">
                   <div className="flex items-center gap-1">
                     <Icon className={cn(config.text)} style={{ width: iconPx, height: iconPx }} />
-                    <span className={cn("truncate font-semibold", config.text)} style={{ fontSize: namePx }}>{config.label}</span>
+                    <span className={cn("truncate font-semibold", config.text)} style={{ fontSize: namePx }}>
+                      {(() => {
+                        const isMobileView = typeof window !== 'undefined' && window.innerWidth < 768;
+                        if (isMobileView && booking.status === 'in_progress') {
+                          return 'Andamento';
+                        }
+                        return config.label;
+                      })()}
+                    </span>
                   </div>
                   {/* Chip de pagamentos ao lado direito do status */}
                   {totalParticipants > 0 && (() => {
