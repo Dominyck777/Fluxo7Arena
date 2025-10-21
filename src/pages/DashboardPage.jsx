@@ -11,7 +11,7 @@ import { supabase } from '@/lib/supabase';
 import { format, startOfDay, endOfDay } from 'date-fns';
 import { useNavigate } from 'react-router-dom';
 
-const StatCard = ({ icon: Icon, title, value, trend, trendValue, color, className }) => {
+const StatCard = ({ icon: Icon, title, value, trend, trendValue, color, className, loading }) => {
   const TrendIcon = trend === 'up' ? ArrowUpRight : ArrowDownRight;
   const trendColor = trend === 'up' ? 'text-success' : 'text-danger';
 
@@ -28,7 +28,7 @@ const StatCard = ({ icon: Icon, title, value, trend, trendValue, color, classNam
             <div className={`flex items-center justify-center h-10 w-10 rounded-md border border-white/10 bg-white/5 transition-colors duration-300 group-hover:border-brand/50 group-hover:bg-brand/10`} style={{ color: `var(--${color})` }}>
                 <Icon className="h-5 w-5" />
             </div>
-            {trend && trendValue && (
+            {!loading && trend && trendValue && (
               <div className={`flex items-center text-xs font-bold ${trendColor}`}>
                 <TrendIcon className={`w-3.5 h-3.5 mr-1`} />
                 <span>{trendValue}</span>
@@ -37,7 +37,11 @@ const StatCard = ({ icon: Icon, title, value, trend, trendValue, color, classNam
         </div>
         <div>
           <p className="text-xs font-semibold text-text-secondary uppercase tracking-wider mb-2">{title}</p>
-          <p className="text-3xl font-bold text-text-primary tabular-nums tracking-tight">{value}</p>
+          {loading ? (
+            <div className="h-9 bg-white/5 rounded animate-pulse"></div>
+          ) : (
+            <p className="text-3xl font-bold text-text-primary tabular-nums tracking-tight">{value}</p>
+          )}
         </div>
       </div>
     </motion.div>
@@ -163,7 +167,7 @@ const AlertCard = ({ alerts, className }) => {
   );
 };
 
-const MinimalFinanceCard = ({ title, icon: Icon, data, color, className }) => {
+const MinimalFinanceCard = ({ title, icon: Icon, data, color, className, loading }) => {
   const totalReceita = data.reduce((acc, d) => acc + (d.receita || 0), 0);
   const totalDespesa = data.reduce((acc, d) => acc + (d.despesa || 0), 0);
   const totalSaldo = totalReceita - totalDespesa;
@@ -207,22 +211,34 @@ const MinimalFinanceCard = ({ title, icon: Icon, data, color, className }) => {
       <div className="grid grid-cols-3 gap-3 text-xs">
         <div>
           <p className="text-text-secondary">Receita</p>
-          <p className="font-bold text-success tabular-nums">R$ {totalReceita.toLocaleString('pt-BR')}</p>
+          {loading ? (
+            <div className="h-5 w-20 bg-white/5 rounded animate-pulse mt-1"></div>
+          ) : (
+            <p className="font-bold text-success tabular-nums">R$ {totalReceita.toLocaleString('pt-BR')}</p>
+          )}
         </div>
         <div>
           <p className="text-text-secondary">Despesa</p>
-          <p className="font-bold text-danger tabular-nums">R$ {totalDespesa.toLocaleString('pt-BR')}</p>
+          {loading ? (
+            <div className="h-5 w-20 bg-white/5 rounded animate-pulse mt-1"></div>
+          ) : (
+            <p className="font-bold text-danger tabular-nums">R$ {totalDespesa.toLocaleString('pt-BR')}</p>
+          )}
         </div>
         <div>
           <p className="text-text-secondary">Saldo</p>
-          <p className="font-bold text-text-primary tabular-nums">R$ {totalSaldo.toLocaleString('pt-BR')}</p>
+          {loading ? (
+            <div className="h-5 w-20 bg-white/5 rounded animate-pulse mt-1"></div>
+          ) : (
+            <p className="font-bold text-text-primary tabular-nums">R$ {totalSaldo.toLocaleString('pt-BR')}</p>
+          )}
         </div>
       </div>
     </motion.div>
   );
 };
 
-const StoreInfoCard = ({ title, icon: Icon, data, color, className }) => {
+const StoreInfoCard = ({ title, icon: Icon, data, color, className, loading }) => {
   return (
      <motion.div
       variants={{
@@ -238,12 +254,21 @@ const StoreInfoCard = ({ title, icon: Icon, data, color, className }) => {
         <h3 className="text-base font-bold text-text-primary">{title}</h3>
       </div>
       <div className="space-y-3 mt-auto">
-        {data.map((item, index) => (
-          <div key={index} className="flex items-center justify-between text-sm">
-            <span className="text-text-secondary">{item.name}</span>
-            <span className="font-bold text-text-primary tabular-nums">{item.value}</span>
-          </div>
-        ))}
+        {loading ? (
+          Array.from({ length: 3 }).map((_, index) => (
+            <div key={index} className="flex items-center justify-between text-sm">
+              <div className="h-4 w-24 bg-white/5 rounded animate-pulse"></div>
+              <div className="h-4 w-12 bg-white/5 rounded animate-pulse"></div>
+            </div>
+          ))
+        ) : (
+          data.map((item, index) => (
+            <div key={index} className="flex items-center justify-between text-sm">
+              <span className="text-text-secondary">{item.name}</span>
+              <span className="font-bold text-text-primary tabular-nums">{item.value}</span>
+            </div>
+          ))
+        )}
       </div>
     </motion.div>
   );
@@ -488,17 +513,6 @@ function DashboardPage() {
     { name: "Vendas Hoje", value: vendasLoja },
   ];
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-96">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-brand mx-auto mb-4"></div>
-          <p className="text-text-secondary">Carregando dashboard...</p>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <>
       <motion.div
@@ -515,7 +529,7 @@ function DashboardPage() {
               <div className="absolute inset-0 bg-court-pattern opacity-[0.03] mix-blend-overlay"></div>
               <div className="relative z-10 max-w-[720px]">
                 <h1 className="text-3xl font-black mb-2 text-text-primary tracking-tighter">
-                  Bem-vindo de volta, <span className="text-brand">{userProfile?.nome_exibicao || userProfile?.nome || userProfile?.email?.split('@')[0] || 'Admin'}!</span>
+                  Bem-vindo de volta, <span className="text-brand">{(userProfile?.nome_exibicao || userProfile?.nome || userProfile?.email?.split('@')[0] || 'Admin').split(' ')[0]}!</span>
                 </h1>
                 <p className="text-text-secondary mb-3 max-w-[60ch] text-sm md:text-base font-normal">
                   Sua central de comando para uma gestão de sucesso. Monitore agendamentos, faturamento e clientes em um só lugar.
@@ -543,19 +557,31 @@ function DashboardPage() {
               <ul className="space-y-2 text-sm">
                 <li className="flex justify-between items-center">
                   <span className="text-text-secondary">Próximas Reservas</span> 
-                  <span className="font-bold text-text-primary tabular-nums">{proximasReservas}</span>
+                  {loading ? (
+                    <div className="h-6 w-12 bg-white/5 rounded animate-pulse"></div>
+                  ) : (
+                    <span className="font-bold text-text-primary tabular-nums">{proximasReservas}</span>
+                  )}
                 </li>
                 <li className="flex justify-between items-center">
                   <span className="text-text-secondary">Quadras em Uso</span> 
-                  <span className="font-bold text-success tabular-nums">{quadrasEmUso}</span>
+                  {loading ? (
+                    <div className="h-6 w-12 bg-white/5 rounded animate-pulse"></div>
+                  ) : (
+                    <span className="font-bold text-success tabular-nums">{quadrasEmUso}</span>
+                  )}
                 </li>
                 <li className="flex justify-between items-center">
                   <span className="text-text-secondary">Taxa de Ocupação</span> 
-                  <span className={`font-bold tabular-nums ${
-                    taxaOcupacao >= 70 ? 'text-success' : 
-                    taxaOcupacao >= 40 ? 'text-warning' : 
-                    'text-danger'
-                  }`}>{taxaOcupacao}%</span>
+                  {loading ? (
+                    <div className="h-6 w-16 bg-white/5 rounded animate-pulse"></div>
+                  ) : (
+                    <span className={`font-bold tabular-nums ${
+                      taxaOcupacao >= 70 ? 'text-success' : 
+                      taxaOcupacao >= 40 ? 'text-warning' : 
+                      'text-danger'
+                    }`}>{taxaOcupacao}%</span>
+                  )}
                 </li>
               </ul>
             </div>
@@ -570,7 +596,8 @@ function DashboardPage() {
               title="Faturamento do Dia" 
               value={fmtBRL(faturamentoHoje)} 
               color="success" 
-              className="h-full" 
+              className="h-full"
+              loading={loading}
             />
           </div>
           <div className="xl:col-span-3">
@@ -579,7 +606,8 @@ function DashboardPage() {
               title="Agend. Finalizados" 
               value={`${agendamentosHoje.finalizados} de ${agendamentosHoje.total}`} 
               color="info" 
-              className="h-full" 
+              className="h-full"
+              loading={loading}
             />
           </div>
           <div className="xl:col-span-3">
@@ -592,6 +620,7 @@ function DashboardPage() {
               data={storeData}
               color="purple"
               className="h-full"
+              loading={loading}
             />
           </div>
         </motion.div>
@@ -603,6 +632,7 @@ function DashboardPage() {
             title="Resumo Financeiro"
             data={financeMiniData}
             color="brand"
+            loading={loading}
           />
         </motion.div>
       </motion.div>

@@ -151,6 +151,13 @@ const itemVariants = {
   visible: { opacity: 1, y: 0, transition: { duration: 0.5 } },
 };
 
+// Helper function para formatar minutos em HH:MM
+const formatMinutesToTime = (minutes) => {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+};
+
 function AgendaPage() {
   const { toast } = useToast();
   const location = useLocation();
@@ -265,6 +272,10 @@ function AgendaPage() {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [bookings, setBookings] = useState([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  // Estados para agendamento fixo/recorrente
+  const [isRecorrente, setIsRecorrente] = useState(false);
+  const [quantidadeSemanas, setQuantidadeSemanas] = useState(4);
+  const [showRecorrenteConfirm, setShowRecorrenteConfirm] = useState(false);
   // editingBooking agora vem do contexto, mas vou criar um alias local
   const editingBooking = editingBookingContext;
   const setEditingBooking = setEditingBookingContext;
@@ -2825,66 +2836,146 @@ function AgendaPage() {
           // Se o existente estiver cancelado, não atualiza: cairá no INSERT para manter histórico do cancelado
         }
 
-        const { data, error } = await supabase
-          .from('agendamentos')
-          .insert({
-            codigo_empresa: userProfile.codigo_empresa,
-            quadra_id: court.id,
-            cliente_id: primaryClient?.id ?? null,
-            clientes: clientesArr,
-            inicio: inicio.toISOString(),
-            fim: fim.toISOString(),
-            modalidade: form.modality,
-            status: form.status,
-          })
-          .select('id, codigo')
-          .single();
-        if (error) throw error;
-        const newItem = {
-          id: data.id,
-          code: data.codigo,
-          court: form.court,
-          customer: primaryClient?.nome || clientesArr[0] || '',
-          start: inicio,
-          end: fim,
-          status: form.status,
-          modality: form.modality,
-        };
-        setBookings((prev) => [...prev, newItem]);
-        toast({ title: 'Agendamento criado' });
-
-        // Participantes (não bloqueia conclusão do salvamento principal)
-        try {
-          const rows = (form.selectedClients || []).map((c) => ({
-            codigo_empresa: userProfile.codigo_empresa,
-            agendamento_id: data.id,
-            cliente_id: c.id,
-            nome: c.nome,
-            valor_cota: 0,
-            status_pagamento: 'Pendente',
-          }));
-          if (rows.length > 0) {
-            const { error: perr } = await supabase
-              .from('agendamento_participantes')
-              .insert(rows);
-            if (!perr) {
-              // Atualiza imediatamente o estado dos participantes para exibir o chip correto
-              const participantsForState = rows.map(row => ({
-                agendamento_id: row.agendamento_id,
-                cliente_id: row.cliente_id,
-                nome: form.selectedClients.find(c => c.id === row.cliente_id)?.nome || '',
-                codigo: form.selectedClients.find(c => c.id === row.cliente_id)?.codigo || null,
-                valor_cota: row.valor_cota,
-                status_pagamento: row.status_pagamento
-              }));
-              setParticipantsByAgendamento(prev => ({
-                ...prev,
-                [data.id]: participantsForState
-              }));
-            }
+        // ✅ AGENDAMENTO RECORRENTE: Criar múltiplos agendamentos
+        if (isRecorrente && quantidadeSemanas > 1) {
+          const agendamentosParaCriar = [];
+          const newBookingsForState = [];
+          
+          // Gerar datas para as próximas semanas
+          for (let semana = 0; semana < quantidadeSemanas; semana++) {
+            const dataAgendamento = addDays(form.date, semana * 7);
+            const inicioRecorrente = new Date(dataAgendamento);
+            inicioRecorrente.setHours(Math.floor(form.startMinutes / 60), form.startMinutes % 60, 0, 0);
+            const fimRecorrente = new Date(dataAgendamento);
+            fimRecorrente.setHours(Math.floor(form.endMinutes / 60), form.endMinutes % 60, 0, 0);
+            
+            agendamentosParaCriar.push({
+              codigo_empresa: userProfile.codigo_empresa,
+              quadra_id: court.id,
+              cliente_id: primaryClient?.id ?? null,
+              clientes: clientesArr,
+              inicio: inicioRecorrente.toISOString(),
+              fim: fimRecorrente.toISOString(),
+              modalidade: form.modality,
+              status: form.status,
+            });
           }
-        } catch (pe) {
-          /* swallow participants create console noise */
+          
+          // Inserir todos os agendamentos
+          const { data: agendamentosCriados, error: errorBatch } = await supabase
+            .from('agendamentos')
+            .insert(agendamentosParaCriar)
+            .select('id, codigo, inicio, fim');
+          
+          if (errorBatch) throw errorBatch;
+          
+          // Criar participantes para cada agendamento
+          const todosParticipantes = [];
+          for (const agendamento of agendamentosCriados) {
+            const participantesRows = (form.selectedClients || []).map((c) => ({
+              codigo_empresa: userProfile.codigo_empresa,
+              agendamento_id: agendamento.id,
+              cliente_id: c.id,
+              nome: c.nome,
+              valor_cota: 0,
+              status_pagamento: 'Pendente',
+            }));
+            todosParticipantes.push(...participantesRows);
+            
+            // Adicionar ao estado local
+            newBookingsForState.push({
+              id: agendamento.id,
+              code: agendamento.codigo,
+              court: form.court,
+              customer: primaryClient?.nome || clientesArr[0] || '',
+              start: new Date(agendamento.inicio),
+              end: new Date(agendamento.fim),
+              status: form.status,
+              modality: form.modality,
+            });
+          }
+          
+          // Inserir todos os participantes de uma vez
+          if (todosParticipantes.length > 0) {
+            await supabase
+              .from('agendamento_participantes')
+              .insert(todosParticipantes);
+          }
+          
+          // Atualizar estado
+          setBookings((prev) => [...prev, ...newBookingsForState]);
+          toast({ 
+            title: `${quantidadeSemanas} Agendamentos criados!`,
+            description: `Agendamentos recorrentes criados com sucesso.`,
+            variant: 'success'
+          });
+          
+          // Limpar estado de recorrente
+          setIsRecorrente(false);
+          setQuantidadeSemanas(4);
+        } else {
+          // ✅ AGENDAMENTO ÚNICO (lógica original)
+          const { data, error } = await supabase
+            .from('agendamentos')
+            .insert({
+              codigo_empresa: userProfile.codigo_empresa,
+              quadra_id: court.id,
+              cliente_id: primaryClient?.id ?? null,
+              clientes: clientesArr,
+              inicio: inicio.toISOString(),
+              fim: fim.toISOString(),
+              modalidade: form.modality,
+              status: form.status,
+            })
+            .select('id, codigo')
+            .single();
+          if (error) throw error;
+          const newItem = {
+            id: data.id,
+            code: data.codigo,
+            court: form.court,
+            customer: primaryClient?.nome || clientesArr[0] || '',
+            start: inicio,
+            end: fim,
+            status: form.status,
+            modality: form.modality,
+          };
+          setBookings((prev) => [...prev, newItem]);
+          toast({ title: 'Agendamento criado' });
+
+          // Participantes (não bloqueia conclusão do salvamento principal)
+          try {
+            const rows = (form.selectedClients || []).map((c) => ({
+              codigo_empresa: userProfile.codigo_empresa,
+              agendamento_id: data.id,
+              cliente_id: c.id,
+              nome: c.nome,
+              valor_cota: 0,
+              status_pagamento: 'Pendente',
+            }));
+            if (rows.length > 0) {
+              const { error: perr } = await supabase
+                .from('agendamento_participantes')
+                .insert(rows);
+              if (!perr) {
+                // Atualiza imediatamente o estado dos participantes para exibir o chip correto
+                const participantsForState = rows.map(row => ({
+                  agendamento_id: row.agendamento_id,
+                  cliente_id: row.cliente_id,
+                  nome: form.selectedClients.find(c => c.id === row.cliente_id)?.nome || '',
+                  codigo: form.selectedClients.find(c => c.id === row.cliente_id)?.codigo || null,
+                  valor_cota: row.valor_cota,
+                  status_pagamento: row.status_pagamento
+                }));
+                setParticipantsByAgendamento(prev => ({
+                  ...prev,
+                  [data.id]: participantsForState
+                }));
+              }
+            }
+          } catch (pe) {
+            /* swallow participants create console noise */
+          }
         }
 
         completedSaveRef.current = true;
@@ -3008,9 +3099,8 @@ function AgendaPage() {
         const loadedParts = participantsByAgendamento[editingBooking.id] || [];
         const selectedFromParts = loadedParts
           .filter(p => p && p.cliente_id)
-          .map(p => ({ id: p.cliente_id, nome: p.nome, codigo: p.codigo }))
-          // Evitar duplicidades por segurança
-          .filter((v, i, a) => a.findIndex(x => x.id === v.id) === i);
+          .map(p => ({ id: p.cliente_id, nome: p.nome, codigo: p.codigo || null }));
+          // Removido filtro de deduplicação para permitir clientes duplicados
         // Garante modalidade válida para a quadra do agendamento
         const allowedForEdit = courtsMap[editingBooking.court]?.modalidades || modalities;
         const safeModality = allowedForEdit.includes(editingBooking.modality) ? editingBooking.modality : (allowedForEdit[0] || '');
@@ -3148,14 +3238,17 @@ function AgendaPage() {
       if (!loadedParts.length) return;
       const selectedFromParts = loadedParts
         .filter(p => p && p.cliente_id)
-        .map(p => ({ id: p.cliente_id, nome: p.nome }))
-        .filter((v, i, a) => a.findIndex(x => x.id === v.id) === i);
-      if ((form.selectedClients || []).length === 0 && selectedFromParts.length > 0) {
+        .map(p => ({ id: p.cliente_id, nome: p.nome, codigo: p.codigo || null }));
+        // Removido filtro de deduplicação para permitir clientes duplicados
+      
+      // ✅ CORREÇÃO: Sempre atualiza os participantes quando o modal abre, não apenas quando está vazio
+      if (selectedFromParts.length > 0) {
         setForm(f => ({ ...f, selectedClients: selectedFromParts }));
         setParticipantsForm(
           loadedParts.map(p => ({
             cliente_id: p.cliente_id,
             nome: p.nome,
+            codigo: p.codigo || null,
             valor_cota: (() => {
               const num = Number.isFinite(Number(p.valor_cota)) ? Number(p.valor_cota) : parseBRL(p.valor_cota);
               return maskBRL(String((Number.isFinite(num) ? num : 0).toFixed(2)));
@@ -4264,6 +4357,92 @@ function AgendaPage() {
                 </div>
                 <div className="mt-1 inline-block text-xs font-semibold text-text-secondary bg-white/5 border border-white/10 rounded px-2 py-0.5">Duração: {durationLabel}</div>
               </div>
+
+              {/* Agendamento Fixo/Recorrente - Apenas para NOVOS agendamentos */}
+              {!editingBooking && (
+                <div className="border-t border-border pt-4 mt-4">
+                  <div className="flex items-start gap-3">
+                    <input
+                      type="checkbox"
+                      id="is-recorrente"
+                      checked={isRecorrente}
+                      onChange={(e) => setIsRecorrente(e.target.checked)}
+                      className="mt-1 h-4 w-4 rounded border-gray-300 text-brand focus:ring-brand"
+                    />
+                    <div className="flex-1">
+                      <label htmlFor="is-recorrente" className="font-semibold text-text-primary cursor-pointer">
+                        Agendamento Fixo (Recorrente)
+                      </label>
+                      <p className="text-xs text-text-secondary mt-0.5">
+                        Criar este agendamento automaticamente nas próximas semanas, no mesmo dia e horário
+                      </p>
+                    </div>
+                  </div>
+
+                  {isRecorrente && (
+                    <div className="ml-7 mt-3 space-y-3">
+                      <div>
+                        <Label htmlFor="quantidade-semanas" className="text-sm font-medium">
+                          Repetir por quantas semanas?
+                        </Label>
+                        <div className="flex items-center gap-3 mt-1.5">
+                          <Input
+                            id="quantidade-semanas"
+                            type="number"
+                            min={2}
+                            max={12}
+                            value={quantidadeSemanas}
+                            onChange={(e) => setQuantidadeSemanas(Math.max(2, Math.min(12, parseInt(e.target.value) || 2)))}
+                            className="w-24"
+                          />
+                          <span className="text-sm text-text-secondary">
+                            semanas ({quantidadeSemanas} agendamentos)
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Preview das datas que serão criadas */}
+                      {form.date && (
+                        <div className="bg-slate-800/50 border border-slate-700 rounded-lg p-3">
+                          <p className="text-xs font-semibold text-slate-300 mb-2 uppercase tracking-wide">Datas que serão criadas:</p>
+                          <div className="flex flex-wrap gap-2">
+                            {Array.from({ length: quantidadeSemanas }).map((_, index) => {
+                              const dataAgendamento = addDays(form.date, index * 7);
+                              return (
+                                <div key={index} className="inline-flex items-center gap-1.5 bg-slate-700/50 border border-slate-600 rounded px-2 py-1">
+                                  <svg className="w-3.5 h-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                  </svg>
+                                  <span className="text-xs font-medium text-white">
+                                    {format(dataAgendamento, "dd/MM/yyyy '('EEEE')'", { locale: ptBR })}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="bg-slate-800/50 border-l-4 border-blue-600 rounded-r-lg p-3">
+                        <div className="flex gap-3">
+                          <div className="flex-shrink-0 mt-0.5">
+                            <svg className="w-5 h-5 text-blue-400" fill="currentColor" viewBox="0 0 20 20">
+                              <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                            </svg>
+                          </div>
+                          <div className="text-xs text-gray-300">
+                            <p className="font-semibold mb-1 text-blue-300">Importante: Revise os dados antes de salvar</p>
+                            <p>
+                              Serão criados <strong className="text-white">{quantidadeSemanas} agendamentos</strong> incluindo a data selecionada e as próximas {quantidadeSemanas - 1} semanas.
+                              Editar ou cancelar depois exigirá alterar cada agendamento individualmente.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
             </div>
           </div>
@@ -4344,6 +4523,13 @@ function AgendaPage() {
                       if (isSavingBooking) {
                         return;
                       }
+                      
+                      // Se for recorrente e não estiver editando, mostrar modal de confirmação
+                      if (isRecorrente && !editingBooking) {
+                        setShowRecorrenteConfirm(true);
+                        return;
+                      }
+                      
                       pendingSaveRef.current = true;
                       completedSaveRef.current = false;
                       await saveBookingOnce();
@@ -4360,6 +4546,110 @@ function AgendaPage() {
         </DialogContent>
         </Dialog>
       )}
+
+      {/* Modal de Confirmação para Agendamento Recorrente */}
+      <AlertDialog open={showRecorrenteConfirm} onOpenChange={setShowRecorrenteConfirm}>
+        <AlertDialogContent className="max-w-2xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-3 text-xl">
+              <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-orange-600/20 border border-orange-600/40">
+                <svg className="w-6 h-6 text-orange-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+              </div>
+              Confirmar Criação de Agendamentos Recorrentes
+            </AlertDialogTitle>
+            <AlertDialogDescription className="space-y-4 mt-4">
+              {/* Preview das datas no modal */}
+              {form.date && (
+                <div className="bg-slate-800/50 border border-slate-700 rounded-lg p-3">
+                  <p className="text-xs font-semibold text-slate-300 mb-2 uppercase tracking-wide">📅 Datas que serão criadas:</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    {Array.from({ length: quantidadeSemanas }).map((_, index) => {
+                      const dataAgendamento = addDays(form.date, index * 7);
+                      return (
+                        <div key={index} className="flex items-center gap-2 bg-slate-700/50 border border-slate-600 rounded px-2 py-1.5">
+                          <span className="text-xs font-semibold text-slate-400">#{index + 1}</span>
+                          <span className="text-xs font-medium text-white">
+                            {format(dataAgendamento, "dd/MM/yyyy '('EEEE')'", { locale: ptBR })}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Resumo dos Dados */}
+              <div className="bg-slate-800/50 border border-slate-700 rounded-lg p-4">
+                <h4 className="text-sm font-semibold text-slate-300 mb-3 uppercase tracking-wide">Resumo do Agendamento</h4>
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between py-2 border-b border-slate-700/50">
+                    <span className="text-sm text-slate-400">Quadra</span>
+                    <span className="font-semibold text-white">{courtsMap[form.court]?.name || form.court}</span>
+                  </div>
+                  <div className="flex items-center justify-between py-2 border-b border-slate-700/50">
+                    <span className="text-sm text-slate-400">Horário</span>
+                    <span className="font-semibold text-white font-mono">
+                      {formatMinutesToTime(form.startMinutes)} - {formatMinutesToTime(form.endMinutes)}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between py-2 border-b border-slate-700/50">
+                    <span className="text-sm text-slate-400">Modalidade</span>
+                    <span className="font-semibold text-white">{form.modality}</span>
+                  </div>
+                  <div className="flex items-start justify-between py-2">
+                    <span className="text-sm text-slate-400">Participantes</span>
+                    <span className="font-semibold text-white text-right max-w-xs">
+                      {form.selectedClients?.length > 0 
+                        ? form.selectedClients.map(c => c.nome).join(', ')
+                        : 'Nenhum participante'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Aviso Importante */}
+              <div className="bg-red-900/30 border-l-4 border-red-600 rounded-r-lg p-4">
+                <div className="flex gap-3">
+                  <div className="flex-shrink-0">
+                    <svg className="w-5 h-5 text-red-400 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                    </svg>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-300">
+                      <strong className="text-red-300">Importante:</strong> Após criar, editar ou cancelar exigirá alterar cada agendamento individualmente. Certifique-se de que todos os dados estão corretos!
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="gap-2">
+            <AlertDialogCancel 
+              onClick={() => setShowRecorrenteConfirm(false)}
+              className="border-slate-600 hover:bg-slate-800"
+            >
+              Cancelar e Revisar
+            </AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-emerald-700 hover:bg-emerald-600 text-white font-semibold"
+              onClick={async () => {
+                setShowRecorrenteConfirm(false);
+                pendingSaveRef.current = true;
+                completedSaveRef.current = false;
+                await saveBookingOnce();
+              }}
+            >
+              <svg className="w-4 h-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+              Confirmar e Criar {quantidadeSemanas} Agendamentos
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       
       {/* Removido modal de pagamentos antigo - agora está em componente separado */}
       

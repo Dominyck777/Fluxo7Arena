@@ -4,11 +4,12 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { AlertTriangle, Edit, Search, X, Check } from 'lucide-react';
+import { AlertTriangle, Edit, Search, X, Check, Download } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import { supabase } from '@/lib/supabase';
 import { useAgenda } from '@/contexts/AgendaContext';
 import { useAuth } from '@/contexts/AuthContext';
+import { toPng } from 'html-to-image';
 
 // Helpers de moeda BRL
 const maskBRL = (raw) => {
@@ -358,6 +359,62 @@ export default function PaymentModal({
     }
   }, [isAddParticipantOpen]);
   
+  // Ref para o elemento que será convertido em imagem
+  const relatorioRef = useRef(null);
+
+  // Função para baixar relatório como imagem
+  const baixarRelatorioImagem = async () => {
+    try {
+      if (!relatorioRef.current) {
+        throw new Error('Elemento do relatório não encontrado');
+      }
+
+      toast({
+        title: 'Gerando imagem...',
+        description: 'Aguarde um momento.',
+      });
+
+      // Tornar o elemento visível temporariamente
+      const elemento = relatorioRef.current;
+      elemento.style.left = '0';
+      elemento.style.top = '0';
+      elemento.style.zIndex = '9999';
+
+      // Aguardar um pouco para garantir que o elemento foi renderizado
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      const dataUrl = await toPng(elemento, {
+        quality: 1,
+        pixelRatio: 2,
+        backgroundColor: '#1a1a1a',
+      });
+
+      // Ocultar o elemento novamente
+      elemento.style.left = '-9999px';
+      elemento.style.top = '-9999px';
+      elemento.style.zIndex = '-1';
+
+      // Criar link para download
+      const link = document.createElement('a');
+      link.download = `relatorio-pagamento-${editingBooking?.code || 'agendamento'}.png`;
+      link.href = dataUrl;
+      link.click();
+
+      toast({
+        title: 'Imagem baixada!',
+        description: 'O relatório foi salvo como imagem.',
+        variant: 'success'
+      });
+    } catch (error) {
+      console.error('Erro ao gerar imagem:', error);
+      toast({
+        title: 'Erro ao gerar imagem',
+        description: error?.message || 'Não foi possível gerar a imagem.',
+        variant: 'destructive'
+      });
+    }
+  };
+  
   if (!isPaymentModalOpen) return null;
   
   return (
@@ -388,11 +445,26 @@ export default function PaymentModal({
           e.preventDefault();
         }}
       >
-        <DialogHeader>
-          <DialogTitle>Registrar pagamento</DialogTitle>
-          <DialogDescription>
-            Gerencie valores, divisão e status de pagamento dos participantes.
-          </DialogDescription>
+        <DialogHeader className="relative">
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex-1">
+              <DialogTitle>Registrar pagamento</DialogTitle>
+              <DialogDescription>
+                Gerencie valores, divisão e status de pagamento dos participantes.
+              </DialogDescription>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={baixarRelatorioImagem}
+              className="flex-shrink-0 gap-2"
+              title="Baixar relatório como imagem"
+            >
+              <Download className="w-4 h-4" />
+              <span className="hidden sm:inline">Baixar</span>
+            </Button>
+          </div>
         </DialogHeader>
         
         <div className="space-y-3 sm:space-y-6">
@@ -875,6 +947,86 @@ export default function PaymentModal({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+
+    {/* Elemento oculto para gerar imagem do relatório */}
+    <div 
+      ref={relatorioRef}
+      style={{
+        position: 'fixed',
+        left: '-9999px',
+        top: '-9999px',
+        width: '800px',
+        padding: '40px',
+        backgroundColor: '#1a1a1a',
+        color: '#ffffff',
+        fontFamily: 'monospace',
+      }}
+    >
+      <div style={{ marginBottom: '30px', textAlign: 'center', borderBottom: '3px solid #4ade80', paddingBottom: '20px' }}>
+        <h1 style={{ fontSize: '28px', fontWeight: 'bold', color: '#4ade80', margin: 0 }}>
+          RELATÓRIO DE PAGAMENTOS
+        </h1>
+      </div>
+
+      <div style={{ marginBottom: '30px', backgroundColor: '#2a2a2a', padding: '20px', borderRadius: '8px', borderLeft: '4px solid #3b82f6' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', fontSize: '14px' }}>
+          <div>
+            <span style={{ color: '#9ca3af' }}>📅 Data:</span>
+            <strong style={{ marginLeft: '10px' }}>
+              {editingBooking?.start ? new Date(editingBooking.start).toLocaleDateString('pt-BR') : ''}
+            </strong>
+          </div>
+          <div>
+            <span style={{ color: '#9ca3af' }}>🕐 Horário:</span>
+            <strong style={{ marginLeft: '10px' }}>
+              {editingBooking?.start && editingBooking?.end 
+                ? `${new Date(editingBooking.start).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} - ${new Date(editingBooking.end).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`
+                : ''}
+            </strong>
+          </div>
+          <div>
+            <span style={{ color: '#9ca3af' }}>🏐 Quadra:</span>
+            <strong style={{ marginLeft: '10px' }}>{editingBooking?.court || ''}</strong>
+          </div>
+          <div>
+            <span style={{ color: '#9ca3af' }}>🎯 Modalidade:</span>
+            <strong style={{ marginLeft: '10px' }}>{editingBooking?.modality || ''}</strong>
+          </div>
+          <div style={{ gridColumn: 'span 2' }}>
+            <span style={{ color: '#9ca3af' }}>📋 Código:</span>
+            <strong style={{ marginLeft: '10px' }}>#{editingBooking?.code || ''}</strong>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ marginBottom: '30px' }}>
+        <h2 style={{ fontSize: '18px', fontWeight: 'bold', color: '#4ade80', marginBottom: '15px', borderBottom: '2px solid #374151', paddingBottom: '10px' }}>
+          PARTICIPANTES
+        </h2>
+        {(localParticipantsForm || [])
+          .filter((_, idx) => !(paymentHiddenIndexes || []).includes(idx))
+          .map((p, index) => (
+            <div key={index} style={{ marginBottom: '20px', backgroundColor: '#2a2a2a', padding: '15px', borderRadius: '8px', borderLeft: p.status_pagamento === 'Pago' ? '4px solid #4ade80' : '4px solid #fbbf24' }}>
+              <div style={{ fontSize: '16px', fontWeight: 'bold', marginBottom: '10px', color: p.status_pagamento === 'Pago' ? '#4ade80' : '#fbbf24' }}>
+                {index + 1}. {p.nome || 'Sem nome'}
+              </div>
+              <div style={{ fontSize: '13px', color: '#d1d5db', lineHeight: '1.8' }}>
+                <div><span style={{ color: '#9ca3af' }}>Código:</span> {p.codigo || 'N/A'}</div>
+                <div><span style={{ color: '#9ca3af' }}>Valor:</span> R$ {maskBRL(p.valor_cota || 0)}</div>
+                <div><span style={{ color: '#9ca3af' }}>Status:</span> {p.status_pagamento === 'Pago' ? '✅' : '⏳'} {p.status_pagamento || 'Pendente'}</div>
+                <div><span style={{ color: '#9ca3af' }}>Método:</span> {p.metodo_pagamento || 'Não definido'}</div>
+                {p.pago_em && (
+                  <div><span style={{ color: '#9ca3af' }}>Pago em:</span> {new Date(p.pago_em).toLocaleString('pt-BR')}</div>
+                )}
+              </div>
+            </div>
+          ))}
+      </div>
+
+      <div style={{ marginTop: '30px', textAlign: 'center', fontSize: '12px', color: '#6b7280', borderTop: '2px solid #374151', paddingTop: '15px' }}>
+        Gerado em: {new Date().toLocaleString('pt-BR')}
+      </div>
+    </div>
     
     {/* Dialog para adicionar participante */}
     <Dialog open={isAddParticipantOpen} onOpenChange={setIsAddParticipantOpen}>
