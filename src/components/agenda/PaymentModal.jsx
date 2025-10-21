@@ -1122,10 +1122,11 @@ export default function PaymentModal({
                 const selectionCount = selectedParticipants.filter(p => p.id === cliente.id).length;
                 
                 return (
-                  <button
+                  <div
                     key={cliente.id}
-                    type="button"
-                    className={`w-full px-4 py-3 text-left transition-all border-b border-border last:border-0 flex items-center gap-3 ${
+                    role="button"
+                    tabIndex={0}
+                    className={`w-full px-4 py-3 text-left transition-all border-b border-border last:border-0 flex items-center gap-3 cursor-pointer ${
                       isConsumidorFinal
                         ? 'bg-gradient-to-r from-amber-500/5 to-transparent hover:from-amber-500/10 border-l-2 border-l-amber-500/40'
                         : selectionCount > 0 
@@ -1135,11 +1136,15 @@ export default function PaymentModal({
                     onClick={() => {
                       // Adicionar timestamp único para permitir duplicados
                       const participantWithTimestamp = { ...cliente, timestamp: Date.now() };
-                      
-                      setSelectedParticipants(prev => {
-                        // Sempre adiciona, mesmo se já existir (permite duplicados)
-                        return [...prev, participantWithTimestamp];
-                      });
+                      setSelectedParticipants(prev => [...prev, participantWithTimestamp]);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        // Adicionar timestamp único para permitir duplicados
+                        const participantWithTimestamp = { ...cliente, timestamp: Date.now() };
+                        setSelectedParticipants(prev => [...prev, participantWithTimestamp]);
+                      }
                     }}
                   >
                     <div className="flex items-center gap-3 flex-1">
@@ -1204,7 +1209,7 @@ export default function PaymentModal({
                         </button>
                       </div>
                     )}
-                  </button>
+                  </div>
                 );
               });
             })()}
