@@ -955,79 +955,79 @@ export default function PaymentModal({
         position: 'fixed',
         left: '-9999px',
         top: '-9999px',
-        width: '900px',
-        padding: '50px',
+        width: '1000px',
+        padding: '60px',
         backgroundColor: '#1a1a1a',
         color: '#ffffff',
         fontFamily: 'Arial, sans-serif',
       }}
     >
-      <div style={{ marginBottom: '40px', textAlign: 'center', borderBottom: '4px solid #4ade80', paddingBottom: '25px' }}>
-        <h1 style={{ fontSize: '36px', fontWeight: 'bold', color: '#4ade80', margin: 0, letterSpacing: '1px' }}>
+      <div style={{ marginBottom: '50px', textAlign: 'center', borderBottom: '5px solid #4ade80', paddingBottom: '30px' }}>
+        <h1 style={{ fontSize: '48px', fontWeight: 'bold', color: '#4ade80', margin: 0, letterSpacing: '2px' }}>
           RELATÓRIO DE PAGAMENTOS
         </h1>
       </div>
 
-      <div style={{ marginBottom: '35px', backgroundColor: '#2a2a2a', padding: '25px', borderRadius: '10px', borderLeft: '5px solid #3b82f6' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', fontSize: '17px' }}>
+      <div style={{ marginBottom: '45px', backgroundColor: '#2a2a2a', padding: '35px', borderRadius: '12px', borderLeft: '6px solid #3b82f6' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '25px', fontSize: '20px' }}>
           <div>
-            <span style={{ color: '#9ca3af', fontSize: '16px' }}>📅 Data:</span>
-            <strong style={{ marginLeft: '12px', fontSize: '18px' }}>
+            <span style={{ color: '#9ca3af', fontSize: '20px' }}>📅 Data:</span>
+            <strong style={{ marginLeft: '15px', fontSize: '24px' }}>
               {editingBooking?.start ? new Date(editingBooking.start).toLocaleDateString('pt-BR') : ''}
             </strong>
           </div>
           <div>
-            <span style={{ color: '#9ca3af', fontSize: '16px' }}>🕐 Horário:</span>
-            <strong style={{ marginLeft: '12px', fontSize: '18px' }}>
+            <span style={{ color: '#9ca3af', fontSize: '20px' }}>🕐 Horário:</span>
+            <strong style={{ marginLeft: '15px', fontSize: '24px' }}>
               {editingBooking?.start && editingBooking?.end 
                 ? `${new Date(editingBooking.start).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} - ${new Date(editingBooking.end).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`
                 : ''}
             </strong>
           </div>
           <div>
-            <span style={{ color: '#9ca3af', fontSize: '16px' }}>🏐 Quadra:</span>
-            <strong style={{ marginLeft: '12px', fontSize: '18px' }}>{editingBooking?.court || ''}</strong>
+            <span style={{ color: '#9ca3af', fontSize: '20px' }}>🏐 Quadra:</span>
+            <strong style={{ marginLeft: '15px', fontSize: '24px' }}>{editingBooking?.court || ''}</strong>
           </div>
           <div>
-            <span style={{ color: '#9ca3af', fontSize: '16px' }}>🎯 Modalidade:</span>
-            <strong style={{ marginLeft: '12px', fontSize: '18px' }}>{editingBooking?.modality || ''}</strong>
+            <span style={{ color: '#9ca3af', fontSize: '20px' }}>🎯 Modalidade:</span>
+            <strong style={{ marginLeft: '15px', fontSize: '24px' }}>{editingBooking?.modality || ''}</strong>
           </div>
           <div>
-            <span style={{ color: '#9ca3af', fontSize: '16px' }}>📋 Código:</span>
-            <strong style={{ marginLeft: '12px', fontSize: '18px' }}>#{editingBooking?.code || ''}</strong>
+            <span style={{ color: '#9ca3af', fontSize: '20px' }}>📋 Código:</span>
+            <strong style={{ marginLeft: '15px', fontSize: '24px' }}>#{editingBooking?.code || ''}</strong>
           </div>
           <div>
-            <span style={{ color: '#9ca3af', fontSize: '16px' }}>💰 Valor Total:</span>
-            <strong style={{ marginLeft: '12px', color: '#4ade80', fontSize: '20px' }}>R$ {maskBRL(paymentTotal || 0)}</strong>
+            <span style={{ color: '#9ca3af', fontSize: '20px' }}>💰 Valor Total:</span>
+            <strong style={{ marginLeft: '15px', color: '#4ade80', fontSize: '26px' }}>R$ {maskBRL(paymentTotal || 0)}</strong>
           </div>
         </div>
       </div>
 
-      <div style={{ marginBottom: '35px' }}>
-        <h2 style={{ fontSize: '24px', fontWeight: 'bold', color: '#4ade80', marginBottom: '20px', borderBottom: '3px solid #374151', paddingBottom: '12px' }}>
+      <div style={{ marginBottom: '45px' }}>
+        <h2 style={{ fontSize: '32px', fontWeight: 'bold', color: '#4ade80', marginBottom: '25px', borderBottom: '4px solid #374151', paddingBottom: '15px' }}>
           PARTICIPANTES
         </h2>
         {(localParticipantsForm || [])
           .filter((_, idx) => !(paymentHiddenIndexes || []).includes(idx))
           .map((p, index) => (
-            <div key={index} style={{ marginBottom: '25px', backgroundColor: '#2a2a2a', padding: '20px', borderRadius: '10px', borderLeft: p.status_pagamento === 'Pago' ? '5px solid #4ade80' : '5px solid #fbbf24' }}>
-              <div style={{ fontSize: '20px', fontWeight: 'bold', marginBottom: '12px', color: p.status_pagamento === 'Pago' ? '#4ade80' : '#fbbf24' }}>
+            <div key={index} style={{ marginBottom: '30px', backgroundColor: '#2a2a2a', padding: '28px', borderRadius: '12px', borderLeft: p.status_pagamento === 'Pago' ? '6px solid #4ade80' : '6px solid #fbbf24' }}>
+              <div style={{ fontSize: '26px', fontWeight: 'bold', marginBottom: '15px', color: p.status_pagamento === 'Pago' ? '#4ade80' : '#fbbf24' }}>
                 {index + 1}. {p.nome || 'Sem nome'}
               </div>
-              <div style={{ fontSize: '16px', color: '#e5e7eb', lineHeight: '2' }}>
-                <div><span style={{ color: '#9ca3af' }}>Código:</span> <strong style={{ marginLeft: '8px' }}>{p.codigo || 'N/A'}</strong></div>
-                <div><span style={{ color: '#9ca3af' }}>Valor:</span> <strong style={{ marginLeft: '8px', color: '#4ade80' }}>R$ {maskBRL(p.valor_cota || 0)}</strong></div>
-                <div><span style={{ color: '#9ca3af' }}>Status:</span> <strong style={{ marginLeft: '8px' }}>{p.status_pagamento === 'Pago' ? '✅' : '⏳'} {p.status_pagamento || 'Pendente'}</strong></div>
-                <div><span style={{ color: '#9ca3af' }}>Finalizadora:</span> <strong style={{ marginLeft: '8px' }}>{payMethods.find(m => String(m.id) === String(p.finalizadora_id))?.nome || 'Não definido'}</strong></div>
+              <div style={{ fontSize: '20px', color: '#e5e7eb', lineHeight: '2.2' }}>
+                <div><span style={{ color: '#9ca3af' }}>Código:</span> <strong style={{ marginLeft: '12px', fontSize: '22px' }}>{p.codigo || 'N/A'}</strong></div>
+                <div><span style={{ color: '#9ca3af' }}>Valor:</span> <strong style={{ marginLeft: '12px', color: '#4ade80', fontSize: '22px' }}>R$ {maskBRL(p.valor_cota || 0)}</strong></div>
+                <div><span style={{ color: '#9ca3af' }}>Status:</span> <strong style={{ marginLeft: '12px', fontSize: '22px' }}>{p.status_pagamento === 'Pago' ? '✅' : '⏳'} {p.status_pagamento || 'Pendente'}</strong></div>
+                <div><span style={{ color: '#9ca3af' }}>Finalizadora:</span> <strong style={{ marginLeft: '12px', fontSize: '22px' }}>{payMethods.find(m => String(m.id) === String(p.finalizadora_id))?.nome || 'Não definido'}</strong></div>
                 {p.pago_em && (
-                  <div><span style={{ color: '#9ca3af' }}>Pago em:</span> <strong style={{ marginLeft: '8px' }}>{new Date(p.pago_em).toLocaleString('pt-BR')}</strong></div>
+                  <div><span style={{ color: '#9ca3af' }}>Pago em:</span> <strong style={{ marginLeft: '12px', fontSize: '22px' }}>{new Date(p.pago_em).toLocaleString('pt-BR')}</strong></div>
                 )}
               </div>
             </div>
           ))}
       </div>
 
-      <div style={{ marginTop: '35px', textAlign: 'center', fontSize: '14px', color: '#9ca3af', borderTop: '3px solid #374151', paddingTop: '20px' }}>
+      <div style={{ marginTop: '45px', textAlign: 'center', fontSize: '18px', color: '#9ca3af', borderTop: '4px solid #374151', paddingTop: '25px' }}>
         Gerado em: {new Date().toLocaleString('pt-BR')}
       </div>
     </div>
