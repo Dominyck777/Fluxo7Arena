@@ -297,6 +297,14 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
   const [ncmDescription, setNcmDescription] = useState(product?.ncmDescription || '');
   const [cest, setCest] = useState(product?.cest || '');
   
+  // Desmembrar preço
+  const [showDismember, setShowDismember] = useState(false);
+  const [dismemberTotal, setDismemberTotal] = useState('');
+  const [dismemberQty, setDismemberQty] = useState('');
+  const [mergeWithExisting, setMergeWithExisting] = useState(false);
+  const [similarProducts, setSimilarProducts] = useState([]);
+  const [selectedMergeProduct, setSelectedMergeProduct] = useState(null);
+  
 
   const formatCurrencyBR = (value) => {
     const digits = String(value || '').replace(/\D/g, '');
@@ -772,6 +780,199 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
                 <Label htmlFor="marginPercent" className="text-right">% de Lucro</Label>
                 <Input id="marginPercent" inputMode="decimal" placeholder="Calculado" value={`${marginPercent || '0,00'} %`} onChange={(e)=> setMarginPercent(formatPercent(e.target.value))} disabled={!editEnabled} className="col-span-3" />
               </div>
+              
+              {/* Desmembrar Preço */}
+              {showDismember && (
+                <div className="border-t pt-3 mt-4">
+                  <div className="p-4 bg-surface border border-border rounded-md space-y-3">
+                    <p className="text-sm text-text-secondary font-medium">
+                      Divida o valor total pela quantidade de unidades
+                    </p>
+                    <div className="grid grid-cols-4 items-center gap-4">
+                      <Label className="text-right text-sm">Valor Total (R$)</Label>
+                      <Input 
+                        inputMode="numeric" 
+                        placeholder="0,00" 
+                        value={dismemberTotal ? `R$ ${dismemberTotal}` : ''} 
+                        onChange={(e)=> setDismemberTotal(formatCurrencyBR(e.target.value))} 
+                        className="col-span-3" 
+                      />
+                    </div>
+                    <div className="grid grid-cols-4 items-center gap-4">
+                      <Label className="text-right text-sm">Quantidade</Label>
+                      <Input 
+                        type="number" 
+                        placeholder="0" 
+                        value={dismemberQty} 
+                        onChange={(e)=> setDismemberQty(e.target.value.replace(/[^0-9]/g, ''))} 
+                        className="col-span-3" 
+                      />
+                    </div>
+                    
+                    {dismemberTotal && dismemberQty && Number(dismemberQty) > 0 && (
+                      <div className="bg-success/10 border border-success/30 p-3 rounded">
+                        <p className="text-sm font-medium mb-1 text-text-secondary">Preço Unitário:</p>
+                        <p className="text-xl font-bold text-success">
+                          R$ {(currencyToNumber(dismemberTotal) / Number(dismemberQty)).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </p>
+                      </div>
+                    )}
+                    
+                    {/* Opção de Unir com Produto Existente */}
+                    <div className="border-t pt-3 mt-3">
+                      <div className="flex items-center gap-2 mb-2">
+                        <Checkbox 
+                          id="mergeWithExisting" 
+                          checked={mergeWithExisting} 
+                          onCheckedChange={async (checked) => {
+                            setMergeWithExisting(!!checked);
+                            if (checked && name) {
+                              // Buscar produtos similares (sem CX, CAIXA, etc)
+                              try {
+                                const allProducts = await listProducts({ codigoEmpresa: userProfile?.codigo_empresa });
+                                const cleanName = name.replace(/\b(CX|CAIXA|C\/|PCT|PACOTE)\b/gi, '').trim();
+                                const cleanWords = cleanName.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+                                const firstTwoWords = cleanWords.slice(0, 2).join(' ');
+                                
+                                const similar = allProducts.filter(p => {
+                                  if (p.id === product?.id) return false; // Não incluir o próprio produto
+                                  const pName = (p.name || '').replace(/\b(CX|CAIXA|C\/|PCT|PACOTE)\b/gi, '').trim();
+                                  const pWords = pName.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+                                  const pFirstTwoWords = pWords.slice(0, 2).join(' ');
+                                  
+                                  // Comparar nome completo OU primeiras 2 palavras
+                                  return pName.toLowerCase() === cleanName.toLowerCase() || 
+                                         (firstTwoWords && pFirstTwoWords === firstTwoWords);
+                                });
+                                setSimilarProducts(similar);
+                                if (similar.length > 0) {
+                                  setSelectedMergeProduct(similar[0].id);
+                                }
+                              } catch (err) {
+                                console.error('Erro ao buscar produtos similares:', err);
+                              }
+                            } else {
+                              setSimilarProducts([]);
+                              setSelectedMergeProduct(null);
+                            }
+                          }}
+                        />
+                        <Label htmlFor="mergeWithExisting" className="cursor-pointer text-sm">
+                          Unir com produto existente (somar estoque)
+                        </Label>
+                      </div>
+                      
+                      {mergeWithExisting && (
+                        <div className="ml-6 space-y-2">
+                          {similarProducts.length === 0 ? (
+                            <p className="text-xs text-text-muted">Nenhum produto similar encontrado</p>
+                          ) : (
+                            <>
+                              <Label className="text-xs">Selecione o produto para unir:</Label>
+                              <Select value={selectedMergeProduct || ''} onValueChange={setSelectedMergeProduct}>
+                                <SelectTrigger className="w-full text-sm">
+                                  <SelectValue placeholder="Escolha um produto" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {similarProducts.map(p => (
+                                    <SelectItem key={p.id} value={p.id}>
+                                      {p.name} - Estoque: {p.stock || 0} - R$ {Number(p.salePrice || p.price || 0).toFixed(2)}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                              <p className="text-xs text-amber-600 dark:text-amber-400">
+                                ⚠️ O estoque será somado e este produto será excluído
+                              </p>
+                            </>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    
+                    <div className="flex gap-2 pt-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => {
+                          setDismemberTotal('');
+                          setDismemberQty('');
+                          setMergeWithExisting(false);
+                          setSimilarProducts([]);
+                          setSelectedMergeProduct(null);
+                          setShowDismember(false);
+                        }}
+                        className="flex-1"
+                      >
+                        Cancelar Desmembramento
+                      </Button>
+                      <Button
+                        type="button"
+                        onClick={async () => {
+                          if (!dismemberTotal || !dismemberQty || Number(dismemberQty) <= 0) {
+                            toast({ title: 'Preencha os campos', description: 'Informe o valor total e a quantidade.', variant: 'warning' });
+                            return;
+                          }
+                          
+                          const unitPrice = currencyToNumber(dismemberTotal) / Number(dismemberQty);
+                          
+                          if (mergeWithExisting && selectedMergeProduct) {
+                            // Unir com produto existente
+                            try {
+                              const targetProduct = similarProducts.find(p => p.id === selectedMergeProduct);
+                              if (!targetProduct) {
+                                toast({ title: 'Erro', description: 'Produto selecionado não encontrado.', variant: 'destructive' });
+                                return;
+                              }
+                              
+                              // Somar estoques
+                              const newStock = Number(targetProduct.stock || 0) + Number(dismemberQty);
+                              
+                              // Atualizar produto alvo
+                              await updateProduct(targetProduct.id, { 
+                                stock: newStock,
+                                codigo_empresa: userProfile?.codigo_empresa 
+                              });
+                              
+                              // Excluir produto atual (CX)
+                              if (product?.id) {
+                                await deleteProduct(product.id);
+                              }
+                              
+                              toast({ 
+                                title: 'Produtos unidos!', 
+                                description: `Estoque de "${targetProduct.name}" atualizado para ${newStock}. Produto CX excluído.`, 
+                                variant: 'success' 
+                              });
+                              
+                              onOpenChange(false);
+                              onSave?.();
+                            } catch (err) {
+                              console.error('Erro ao unir produtos:', err);
+                              toast({ title: 'Erro ao unir produtos', description: err?.message || 'Tente novamente', variant: 'destructive' });
+                            }
+                          } else {
+                            // Aplicar desmembramento normal
+                            setSalePrice(unitPrice.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+                            setStock(dismemberQty);
+                            setDismemberTotal('');
+                            setDismemberQty('');
+                            setShowDismember(false);
+                            toast({ 
+                              title: 'Preço desmembrado!', 
+                              description: `Preço unitário: R$ ${unitPrice.toFixed(2)} | Estoque: ${dismemberQty}`, 
+                              variant: 'success' 
+                            });
+                          }
+                        }}
+                        className="flex-1 bg-amber-500 hover:bg-amber-400 text-black"
+                      >
+                        Aplicar
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              )}
             </TabsContent>
 
             <TabsContent value="impostos" className="space-y-4 mt-2">
@@ -926,6 +1127,22 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
           </Tabs>
         </form>
         <DialogFooter>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => {
+              if (!showDismember) {
+                // Preencher automaticamente com o preço de venda atual
+                if (salePrice && currencyToNumber(salePrice) > 0) {
+                  setDismemberTotal(salePrice);
+                }
+              }
+              setShowDismember(!showDismember);
+            }}
+            disabled={!editEnabled}
+          >
+            Desmembrar Preço
+          </Button>
           <DialogClose asChild>
             <Button type="button" variant="secondary">Cancelar</Button>
           </DialogClose>
