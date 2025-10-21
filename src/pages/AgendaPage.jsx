@@ -18,8 +18,11 @@ import { cn, getCourtColor } from '@/lib/utils';
 import { listarFinalizadoras } from '@/lib/store';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
+import { useAgenda } from '@/contexts/AgendaContext';
 import { Link, useLocation } from 'react-router-dom';
 import ClientFormModal from '@/components/clients/ClientFormModal';
+import PaymentModal from '@/components/agenda/PaymentModal';
+import EditParticipantModal from '@/components/agenda/EditParticipantModal';
 
 // Grade fixa de 30 em 30 minutos (constantes usadas por toda a página)
 const SLOT_MINUTES = 30;
@@ -151,6 +154,25 @@ const itemVariants = {
 function AgendaPage() {
   const { toast } = useToast();
   const location = useLocation();
+  
+  // Context da Agenda
+  const {
+    isPaymentModalOpen,
+    openPaymentModal,
+    closePaymentModal,
+    isEditParticipantModalOpen,
+    openEditParticipantModal,
+    closeEditParticipantModal,
+    editParticipantData,
+    editingBooking: editingBookingContext,
+    setEditingBooking: setEditingBookingContext,
+    participantsForm,
+    setParticipantsForm,
+    paymentTotal,
+    setPaymentTotal,
+    payMethods,
+    setPayMethods
+  } = useAgenda();
   // Debug toggle via localStorage: set localStorage.setItem('debug:agenda','1') to enable
   const debugOn = useMemo(() => {
     try { return typeof window !== 'undefined' && localStorage.getItem('debug:agenda') === '1'; } catch { return false; }
@@ -175,7 +197,7 @@ function AgendaPage() {
         s.startsWith('[Auto]') ||
         // Hide PaymentModal debug noise
         s.startsWith('[DEBUG-PaymentModal]') ||
-        s.startsWith('[PaymentModal]') ||
+        // s.startsWith('[PaymentModal]') || // TEMPORARIAMENTE DESABILITADO PARA DEBUG
         s.startsWith('🛡️ EditGuard')
       );
     };
@@ -243,7 +265,9 @@ function AgendaPage() {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [bookings, setBookings] = useState([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [editingBooking, setEditingBooking] = useState(null); // quando definido, modal entra em modo edição
+  // editingBooking agora vem do contexto, mas vou criar um alias local
+  const editingBooking = editingBookingContext;
+  const setEditingBooking = setEditingBookingContext;
   // Participantes por agendamento (carregado após buscar bookings do dia)
   const [participantsByAgendamento, setParticipantsByAgendamento] = useState({});
   // Controle de concorrência e limpeza segura
@@ -1273,15 +1297,14 @@ function AgendaPage() {
         if (lastParticipantsDateKeyRef.current !== dateKey) {
           setParticipantsByAgendamento({});
           try { if (participantsCacheKey) localStorage.setItem(participantsCacheKey, '{}'); } catch {}
-          lastParticipantsDateKeyRef.current = dateKey;
         }
-        dbg('Participants:skip empty ids'); pulseLog('parts:skip');
+        lastParticipantsDateKeyRef.current = dateKey;
         return;
       }
       const reqId = ++participantsReqIdRef.current;
       const { data, error } = await supabase
         .from('agendamento_participantes')
-        .select('id, agendamento_id, codigo_empresa, cliente_id, nome, valor_cota, status_pagamento, finalizadora_id, cliente:clientes!agendamento_participantes_cliente_id_fkey(nome)')
+        .select('id, agendamento_id, codigo_empresa, cliente_id, nome, valor_cota, status_pagamento, finalizadora_id, cliente:clientes!agendamento_participantes_cliente_id_fkey(nome, codigo)')
         .in('agendamento_id', ids);
       // Ignora respostas atrasadas
       if (participantsReqIdRef.current !== reqId) return;
@@ -1297,8 +1320,9 @@ function AgendaPage() {
         if (!map[k]) map[k] = [];
 
         const nomeResolvido = (Array.isArray(row.cliente) ? row.cliente[0]?.nome : row.cliente?.nome) || row.nome || '';
+        const codigoResolvido = (Array.isArray(row.cliente) ? row.cliente[0]?.codigo : row.cliente?.codigo) || null;
 
-        map[k].push({ ...row, nome: nomeResolvido });
+        map[k].push({ ...row, nome: nomeResolvido, codigo: codigoResolvido });
       }
       dbg('Participants:loaded', { bookings: ids.length, rows: (data || []).length }); pulseLog('parts:loaded', { rows: (data||[]).length });
       lastParticipantsDateKeyRef.current = dateKey;
@@ -1679,6 +1703,9 @@ function AgendaPage() {
   const AddBookingModal = () => {
     // ==== DIAGNOSTICS: lifecycle/mount tracking (logs removed) ====
     const mountIdRef = useRef(Math.random().toString(36).slice(2));
+    
+    // Pegar funções do contexto para sincronizar
+    const { setBookingForm, setLocalCustomers: setLocalCustomersContext } = useAgenda();
     // Janela dura para impedir quaisquer clears logo após concluir o picker
     const preventClearsUntilRef = useRef(0);
     // Modal session: id para escopar restauração à MESMA abertura do modal
@@ -1756,6 +1783,7 @@ function AgendaPage() {
       selectedClientsRef.current = Array.isArray(form.selectedClients) ? form.selectedClients : [];
       try { if ((selectedClientsRef.current || []).length > 0) userSelectedOnceRef.current = true; } catch {}
     }, [form.selectedClients]);
+    
     const [isCustomerPickerOpen, setIsCustomerPickerOpen] = useState(false);
     const [customerQuery, setCustomerQuery] = useState('');
     // Janela de bloqueio para ignorar fechamentos logo após retornar à aba
@@ -1856,10 +1884,9 @@ function AgendaPage() {
     // Ref para o input de busca (para focar após limpar)
     const customerQueryInputRef = useRef(null);
     // Participantes (apenas no modo edição): { cliente_id, nome, valor_cota, status_pagamento, finalizadora_id }
-    const [participantsForm, setParticipantsForm] = useState([]);
-    // Finalizadoras para seleção por participante
-    const [payMethods, setPayMethods] = useState([]);
-    const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
+    // participantsForm e payMethods agora vem do contexto
+    // payMethods já vem do contexto
+    // isPaymentModalOpen já vem do contexto
     const [isCancelConfirmOpen, setIsCancelConfirmOpen] = useState(false);
     const [clientsLoading, setClientsLoading] = useState(false);
     // Saving flags
@@ -2657,7 +2684,10 @@ function AgendaPage() {
         );
         const inicio = buildDate(form.date, s);
         const fim = buildDate(form.date, e);
-        let selNow = Array.isArray(selectedClientsRef.current) ? selectedClientsRef.current : [];
+        // Prioriza form.selectedClients (que é a fonte da verdade), depois tenta refs
+        let selNow = Array.isArray(form.selectedClients) && form.selectedClients.length > 0 
+          ? form.selectedClients 
+          : (Array.isArray(selectedClientsRef.current) ? selectedClientsRef.current : []);
         // Evita hidratação cruzada: apenas no modo edição tentamos recuperar de refs locais;
         // nunca restaurar de sessionStorage aqui.
         if ((!selNow || selNow.length === 0) && editingBooking?.id) {
@@ -2725,15 +2755,20 @@ function AgendaPage() {
             .eq('id', editingBooking.id);
           if (error) throw error;
           // Atualiza estado local (sem mexer em status quando ele mudou; será tratado abaixo)
-          setBookings((prev) => prev.map((b) => b.id === editingBooking.id ? ({
-            ...b,
+          // Garante que pegamos o nome do cliente corretamente
+          const customerName = primaryClient?.nome || primaryClient?.name || getCustomerName(primaryClient) || clientesArr[0] || editingBooking.customer;
+          const updatedBooking = {
+            ...editingBooking,
             court: form.court,
-            customer: primaryClient?.nome || b.customer,
+            customer: customerName,
             start: inicio,
             end: fim,
             modality: form.modality,
             ...(statusChanged ? {} : { status: baseUpdate.status ?? form.status }),
-          }) : b));
+          };
+          setBookings((prev) => prev.map((b) => b.id === editingBooking.id ? updatedBooking : b));
+          // Atualiza editingBooking no contexto para que os modais tenham dados atualizados
+          setEditingBooking(updatedBooking);
           // Se o status mudou, delega a atualização de status (e auto_disabled) para updateBookingStatus,
           // garantindo a exibição do modal de reativação quando aplicável.
           if (statusChanged) {
@@ -2824,7 +2859,7 @@ function AgendaPage() {
             codigo_empresa: userProfile.codigo_empresa,
             agendamento_id: data.id,
             cliente_id: c.id,
-            nome: c.nome, // ✅ CORREÇÃO: Inclui o nome do participante
+            nome: c.nome,
             valor_cota: 0,
             status_pagamento: 'Pendente',
           }));
@@ -2838,6 +2873,7 @@ function AgendaPage() {
                 agendamento_id: row.agendamento_id,
                 cliente_id: row.cliente_id,
                 nome: form.selectedClients.find(c => c.id === row.cliente_id)?.nome || '',
+                codigo: form.selectedClients.find(c => c.id === row.cliente_id)?.codigo || null,
                 valor_cota: row.valor_cota,
                 status_pagamento: row.status_pagamento
               }));
@@ -2972,7 +3008,7 @@ function AgendaPage() {
         const loadedParts = participantsByAgendamento[editingBooking.id] || [];
         const selectedFromParts = loadedParts
           .filter(p => p && p.cliente_id)
-          .map(p => ({ id: p.cliente_id, nome: p.nome }))
+          .map(p => ({ id: p.cliente_id, nome: p.nome, codigo: p.codigo }))
           // Evitar duplicidades por segurança
           .filter((v, i, a) => a.findIndex(x => x.id === v.id) === i);
         // Garante modalidade válida para a quadra do agendamento
@@ -2994,6 +3030,7 @@ function AgendaPage() {
           loadedParts.map(p => ({
             cliente_id: p.cliente_id,
             nome: p.nome,
+            codigo: p.codigo,
             valor_cota: (() => {
               const num = Number.isFinite(Number(p.valor_cota)) ? Number(p.valor_cota) : parseBRL(p.valor_cota);
               return maskBRL(String((Number.isFinite(num) ? num : 0).toFixed(2)));
@@ -3010,18 +3047,19 @@ function AgendaPage() {
             try {
               const { data, error } = await supabase
                 .from('agendamento_participantes')
-                .select(`cliente_id, valor_cota, status_pagamento, finalizadora_id, cliente:clientes!agendamento_participantes_cliente_id_fkey ( nome )`)
+                .select(`cliente_id, valor_cota, status_pagamento, finalizadora_id, cliente:clientes!agendamento_participantes_cliente_id_fkey ( nome, codigo )`)
                 .eq('codigo_empresa', userProfile.codigo_empresa)
                 .eq('agendamento_id', editingBooking.id);
               if (!error && Array.isArray(data)) {
                 const sel = data
                   .filter(p => p && p.cliente_id)
-                  .map(p => ({ id: p.cliente_id, nome: p.cliente?.nome || '' }))
-                  .filter((v, i, a) => a.findIndex(x => x.id === v.id) === i);
+                  .map(p => ({ id: p.cliente_id, nome: p.cliente?.nome || '', codigo: p.cliente?.codigo || null }));
+                  // Removido filtro de deduplicação para permitir clientes duplicados
                 setForm(f => ({ ...f, selectedClients: sel }));
                 setParticipantsForm(data.map(p => ({
                   cliente_id: p.cliente_id,
                   nome: p.cliente?.nome || '',
+                  codigo: p.cliente?.codigo || null,
                   valor_cota: (() => {
                     const num = Number.isFinite(Number(p.valor_cota)) ? Number(p.valor_cota) : parseBRL(p.valor_cota);
                     return maskBRL(String((Number.isFinite(num) ? num : 0).toFixed(2)));
@@ -3285,11 +3323,11 @@ function AgendaPage() {
     }, [isModalOpen, form.startMinutes, form.endMinutes, form.status, automation]);
 
     // ======================== Pagamentos: estado e helpers ========================
-    const [paymentTotal, setPaymentTotal] = useState('');
-    const participantsCount = useMemo(() => (form.selectedClients || []).length, [form.selectedClients]);
+    // paymentTotal e setPaymentTotal agora vem do contexto (via useAgenda no topo do componente)
+    // Usar participantsForm como fonte da verdade (inclui duplicados e substituições)
+    const participantsCount = useMemo(() => (participantsForm || []).length, [participantsForm]);
     const paymentSummary = useMemo(() => {
-      const values = (form.selectedClients || []).map(c => {
-        const pf = participantsForm.find(p => p.cliente_id === c.id);
+      const values = (participantsForm || []).map(pf => {
         const v = parseBRL(pf?.valor_cota);
         return Number.isFinite(v) ? v : 0;
       });
@@ -3297,15 +3335,14 @@ function AgendaPage() {
       const totalTargetParsed = parseBRL(paymentTotal);
       const totalTarget = Number.isFinite(totalTargetParsed) ? totalTargetParsed : 0;
       const diff = Number((totalTarget - totalAssigned).toFixed(2));
-      // contagem simples por status (Pago/Pendente)
+      // contagem simples por status (Pago/Pendente) - conta todos do participantsForm
       let paid = 0, pending = 0;
-      for (const c of (form.selectedClients || [])) {
-        const pf = participantsForm.find(p => p.cliente_id === c.id);
+      for (const pf of (participantsForm || [])) {
         const s = pf?.status_pagamento || 'Pendente';
         if (s === 'Pago') paid++; else pending++;
       }
       return { totalAssigned, totalTarget, diff, paid, pending };
-    }, [form.selectedClients, participantsForm, paymentTotal]);
+    }, [participantsForm, paymentTotal]);
 
     // Regra global: se qualquer participante cobrir o total do agendamento, todos ficam 'Pago'
     useEffect(() => {
@@ -3363,15 +3400,16 @@ function AgendaPage() {
   return (
     <>
       {/* Dialogo de reativação de automação (top-level) */}
-      <Dialog
-        open={!!reactivateAsk}
-        onOpenChange={(open) => {
-          if (!open && reactivateAsk) {
-            try { reactivateAsk.resolve(false); } catch {}
-            setReactivateAsk(null);
-          }
-        }}
-      >
+      {reactivateAsk && (
+        <Dialog
+          open={true}
+          onOpenChange={(open) => {
+            if (!open && reactivateAsk) {
+              try { reactivateAsk.resolve(false); } catch {}
+              setReactivateAsk(null);
+            }
+          }}
+        >
         <DialogContent onOpenAutoFocus={(e) => e.preventDefault()}>
           <DialogHeader>
             <DialogTitle>Reativar automação?</DialogTitle>
@@ -3401,12 +3439,14 @@ function AgendaPage() {
             </div>
           </DialogFooter>
         </DialogContent>
-      </Dialog>
+        </Dialog>
+      )}
 
       {/* Main Add/Edit Booking Modal (restaurado) */}
-      <Dialog
-        open={isModalOpen}
-        onOpenChange={(open) => {
+      {isModalOpen && (
+        <Dialog
+          open={true}
+          onOpenChange={(open) => {
           // Apenas trata fechamento aqui; abertura é feita por openBookingModal()
           if (!open) {
             // Bloqueia fechamento quando o seletor de clientes estiver aberto
@@ -3447,7 +3487,7 @@ function AgendaPage() {
             setIsModalOpen(false);
             setEditingBooking(null);
             setPrefill(null);
-            setIsPaymentModalOpen(false);
+            closePaymentModal();
             participantsPrefillOnceRef.current = false;
           } else {
             setIsModalOpen(true);
@@ -3561,7 +3601,7 @@ function AgendaPage() {
             <div className="space-y-4">
               {/* Clientes */}
               <div>
-                <Label className="font-bold">Clientes</Label>
+                <Label htmlFor="clientes-field" className="font-bold">Clientes</Label>
                 <div className="flex gap-2 mt-1">
                   {/* effective open fully controls visibility and ignores programmatic closes */}
                   <Popover
@@ -3696,7 +3736,7 @@ function AgendaPage() {
                           } else {
                             // Seleção vazia - limpa refs para evitar restauração futura
                             lastSelActionRef.current = 'outside:close:empty';
-                            // ✅ CORREÇÃO: Limpa lastNonEmptySelectionRef quando usuário limpou intencionalmente
+                            // CORREÇÃO: Limpa lastNonEmptySelectionRef quando usuário limpou intencionalmente
                             if (clearedByUserRef.current) {
                               lastNonEmptySelectionRef.current = [];
                               try { sessionStorage.removeItem(persistLastKey); } catch {}
@@ -3739,12 +3779,13 @@ function AgendaPage() {
                     >
                       <div className="space-y-2">
                         <div className="relative">
+                          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted" />
                           <Input
                             ref={customerQueryInputRef}
-                            placeholder="Buscar cliente..."
+                            placeholder="Buscar por código ou nome..."
                             value={customerQuery}
                             onChange={(e) => setCustomerQuery(e.target.value)}
-                            className="pr-10"
+                            className="pl-10 pr-10"
                           />
                           {customerQuery && (
                             <button
@@ -3791,6 +3832,7 @@ function AgendaPage() {
                           ).map((c) => {
                             const id = typeof c === 'object' ? c.id : null;
                             const nome = getCustomerName(c);
+                            const codigo = typeof c === 'object' ? c.codigo : null;
                             const nameKey = String(nome || '').toLowerCase();
                             const isSame = (sc) => (sc.id && id) ? (sc.id === id) : (String(sc.nome || '').toLowerCase() === nameKey);
                             const selected = (form.selectedClients || []).some(isSame);
@@ -3798,40 +3840,86 @@ function AgendaPage() {
                               <button
                                 key={id || nameKey}
                                 type="button"
-                                className="w-full text-left py-2 px-3 hover:bg-white/5 flex items-center justify-between"
+                                className={`w-full text-left py-3 px-4 flex items-center gap-3 transition-colors border-b border-border last:border-0 ${
+                                  selected ? 'bg-emerald-600/20 hover:bg-emerald-600/30' : 'hover:bg-surface-2'
+                                }`}
                                 onMouseDown={(e) => { e.stopPropagation(); }}
                                 role="option"
                                 aria-checked={selected}
                                 onClick={() => {
-                                  // Calcula próximo estado e aplica via helper para evitar esvaziamento indevido
-                                  const exists = (Array.isArray(selectedClientsRef.current) ? selectedClientsRef.current : []).some(isSame);
-                                  if (exists) {
-                                    const next = (Array.isArray(selectedClientsRef.current) ? selectedClientsRef.current : []).filter(x => (x.id && id) ? (x.id !== id) : (String(x.nome || '').toLowerCase() !== nameKey));
-                                    try { clearedByUserRef.current = next.length === 0; } catch {}
-                                    // Se o usuário removeu até zerar, limpar o marcador do primeiro selecionado
-                                    try { if (next.length === 0) firstSelectedIdRef.current = null; } catch {}
-                                    try { if (next.length > 0) { lastNonEmptySelectionRef.current = next; } } catch {}
-                                    try { selectedClientsRef.current = next; } catch {}
-                                    applySelectedClients('list:remove', next);
-                                  } else {
-                                    const novo = { id, nome };
-                                    const next = [...(Array.isArray(selectedClientsRef.current) ? selectedClientsRef.current : []), novo];
-                                    // Se é o primeiro desta sessão, fixar como primeiro para o rótulo
-                                    try { if ((selectedClientsRef.current || []).length === 0) firstSelectedIdRef.current = id || null; } catch {}
-                                    try { clearedByUserRef.current = false; } catch {}
-                                    try { if (next.length > 0) { lastNonEmptySelectionRef.current = next; } } catch {}
-                                    try { selectedClientsRef.current = next; } catch {}
-                                    applySelectedClients('list:add', next);
-                                  }
+                                  // Sempre adiciona, permitindo duplicados (mesmo comportamento do modal de pagamentos)
+                                  const novo = { id, nome, codigo };
+                                  const next = [...(Array.isArray(selectedClientsRef.current) ? selectedClientsRef.current : []), novo];
+                                  // Se é o primeiro desta sessão, fixar como primeiro para o rótulo
+                                  try { if ((selectedClientsRef.current || []).length === 0) firstSelectedIdRef.current = id || null; } catch {}
+                                  try { clearedByUserRef.current = false; } catch {}
+                                  try { if (next.length > 0) { lastNonEmptySelectionRef.current = next; } } catch {}
+                                  try { selectedClientsRef.current = next; } catch {}
+                                  applySelectedClients('list:add', next);
                                   // Garante que o picker permaneça aberto após a seleção
                                   customerPickerDesiredOpenRef.current = true;
                                   try { localStorage.setItem('agenda:customerPicker:desiredAt', String(Date.now())); } catch {}
                                 }}
                               >
-                                <span className={`truncate mr-2 ${selected ? 'text-text-muted' : ''}`}>{getCustomerLabel(c)}</span>
-                                {selected && (
-                                  <CheckCircle className={`w-4 h-4 ${statusConfig.confirmed.text}`} aria-label="Selecionado" />
-                                )}
+                                <div className="flex items-center gap-3 flex-1">
+                                  {codigo && (
+                                    <span className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-emerald-600/20 text-emerald-400 font-bold text-sm">
+                                      #{codigo}
+                                    </span>
+                                  )}
+                                  <span className="flex-1 font-medium truncate">{nome}</span>
+                                </div>
+                                {(() => {
+                                  const selectionCount = (form.selectedClients || []).filter(sc => isSame(sc)).length;
+                                  if (selectionCount > 0) {
+                                    return (
+                                      <div className="flex items-center gap-2">
+                                        <button
+                                          type="button"
+                                          className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-rose-600 hover:bg-rose-500 text-white text-base font-bold transition-colors"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            // Remover uma ocorrência do cliente
+                                            const current = Array.isArray(selectedClientsRef.current) ? selectedClientsRef.current : [];
+                                            const index = current.findIndex(sc => isSame(sc));
+                                            if (index !== -1) {
+                                              const next = [...current];
+                                              next.splice(index, 1);
+                                              try { clearedByUserRef.current = next.length === 0; } catch {}
+                                              try { if (next.length === 0) firstSelectedIdRef.current = null; } catch {}
+                                              try { if (next.length > 0) { lastNonEmptySelectionRef.current = next; } } catch {}
+                                              try { selectedClientsRef.current = next; } catch {}
+                                              applySelectedClients('list:remove-one', next);
+                                            }
+                                          }}
+                                        >
+                                          -
+                                        </button>
+                                        <span className="inline-flex items-center justify-center min-w-[32px] h-7 px-2 rounded-full bg-sky-600 text-white text-base font-bold">
+                                          {selectionCount}
+                                        </span>
+                                        <button
+                                          type="button"
+                                          className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white text-base font-bold transition-colors"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            // Adicionar uma ocorrência do cliente
+                                            const novo = { id, nome, codigo };
+                                            const next = [...(Array.isArray(selectedClientsRef.current) ? selectedClientsRef.current : []), novo];
+                                            try { if ((selectedClientsRef.current || []).length === 0) firstSelectedIdRef.current = id || null; } catch {}
+                                            try { clearedByUserRef.current = false; } catch {}
+                                            try { if (next.length > 0) { lastNonEmptySelectionRef.current = next; } } catch {}
+                                            try { selectedClientsRef.current = next; } catch {}
+                                            applySelectedClients('list:add-one', next);
+                                          }}
+                                        >
+                                          +
+                                        </button>
+                                      </div>
+                                    );
+                                  }
+                                  return null;
+                                })()}
                               </button>
                             );
                           })}
@@ -3958,7 +4046,7 @@ function AgendaPage() {
                   <Button
                     type="button"
                     onClick={() => {
-                      // ✅ PROTEÇÃO: Salva seleção atual antes de abrir modal de cadastro
+                      // PROTEÇÃO: Salva seleção atual antes de abrir modal de cadastro
                       try {
                         const current = Array.isArray(selectedClientsRef.current) ? selectedClientsRef.current : [];
                         if (current.length > 0) {
@@ -3982,9 +4070,10 @@ function AgendaPage() {
                 </div>
                 {chipsClients.length > 0 ? (
                   <div className="flex flex-wrap gap-2 mt-2">
-                    {chipsClients.map((c) => {
+                    {chipsClients.map((c, chipIdx) => {
                       const nameKey = String(c?.nome || '').toLowerCase();
-                      const key = c?.id || nameKey || Math.random().toString(36).slice(2);
+                      // Usar índice para permitir duplicados
+                      const key = `${c?.id || nameKey}-${chipIdx}`;
                       const token = c?.id || `__name:${nameKey}`;
                       return (
                         <span key={key} className="text-sm font-medium bg-white/5 border border-white/10 rounded px-2 py-1 flex items-center gap-2">
@@ -3995,10 +4084,11 @@ function AgendaPage() {
                             title="Remover cliente"
                             className="text-text-muted hover:text-red-400 p-1 rounded hover:bg-red-500/10"
                             onClick={() => {
-                              dbg('CustomerPicker:chip:remove', { token }); // keep chip-related log
-                              const next = (Array.isArray(selectedClientsRef.current) ? selectedClientsRef.current : []).filter((x) => (x?.id && c?.id) ? (x.id !== c.id) : (String(x?.nome || '').toLowerCase() !== nameKey));
+                              dbg('CustomerPicker:chip:remove', { token, chipIdx }); // keep chip-related log
+                              // Remover apenas este cliente específico pelo índice
+                              const next = (Array.isArray(selectedClientsRef.current) ? selectedClientsRef.current : []).filter((_, idx) => idx !== chipIdx);
                               try { clearedByUserRef.current = next.length === 0; } catch {}
-                              // ✅ CORREÇÃO: Sempre atualiza lastNonEmptySelectionRef, mesmo se vazio
+                              // CORREÇÃO: Sempre atualiza lastNonEmptySelectionRef, mesmo se vazio
                               try { 
                                 lastNonEmptySelectionRef.current = next; 
                                 // Se ficou vazio, também limpa do sessionStorage
@@ -4023,7 +4113,7 @@ function AgendaPage() {
 
               {/* Quadra */}
               <div>
-                <Label className="font-bold">Quadra</Label>
+                <Label htmlFor="quadra-select" className="font-bold">Quadra</Label>
                 <Select value={form.court} onValueChange={(v) => setForm((f) => ({ ...f, court: v }))}>
                   <SelectTrigger className="mt-1" onMouseDown={() => { if (effectiveCustomerPickerOpen) setTimeout(closeCustomerPicker, 0); }}>
                     <SelectValue>
@@ -4056,7 +4146,7 @@ function AgendaPage() {
 
               {/* Modalidade */}
               <div>
-                <Label className="font-bold">Modalidade</Label>
+                <Label htmlFor="modalidade-select" className="font-bold">Modalidade</Label>
                 <Select value={form.modality} onValueChange={(v) => setForm((f) => ({ ...f, modality: v }))}>
                   <SelectTrigger className="mt-1" onMouseDown={() => { if (effectiveCustomerPickerOpen) setTimeout(closeCustomerPicker, 0); }}><SelectValue /></SelectTrigger>
                   <SelectContent>
@@ -4072,7 +4162,7 @@ function AgendaPage() {
             <div className="space-y-4">
               {/* Status */}
               <div>
-                <Label className="font-bold">Status</Label>
+                <Label htmlFor="status-select" className="font-bold">Status</Label>
                 <Select value={form.status} onValueChange={(v) => setForm((f) => ({ ...f, status: v }))}>
                   <SelectTrigger className="mt-1" onMouseDown={() => { if (effectiveCustomerPickerOpen) setTimeout(closeCustomerPicker, 0); }}><SelectValue /></SelectTrigger>
                   <SelectContent>
@@ -4088,14 +4178,14 @@ function AgendaPage() {
                 </Select>
                 {nextAutomationMessage && (
                   <div className="mt-1.5 text-xs text-text-primary font-medium bg-brand/5 border border-brand/20 rounded px-2 py-1.5">
-                    ⏰ {nextAutomationMessage}
+                    {nextAutomationMessage}
                   </div>
                 )}
               </div>
 
               {/* Horário */}
               <div>
-                <Label className="font-bold">Horário</Label>
+                <Label htmlFor="horario-inicio" className="font-bold">Horário</Label>
                 <div className="flex items-center gap-2 mt-1">
                   <Select value={String(form.startMinutes)} onValueChange={(v) => setForm((f) => ({ ...f, startMinutes: Number(v) }))}>
                     <SelectTrigger className="w-32" aria-label="Hora início" onMouseDown={() => { if (effectiveCustomerPickerOpen) setTimeout(closeCustomerPicker, 0); }}><SelectValue /></SelectTrigger>
@@ -4168,7 +4258,7 @@ function AgendaPage() {
                       type="button"
                       variant="secondary"
                       className="bg-teal-600 hover:bg-teal-500 text-white border-teal-700 w-full sm:w-auto justify-center"
-                      onClick={() => { /* [DEBUG-PaymentModal] silenciado */ setIsPaymentModalOpen(true); }}
+                      onClick={() => { /* [DEBUG-PaymentModal] silenciado */ openPaymentModal(); }}
                     >
                       <DollarSign className="w-4 h-4 mr-2 opacity-90" /> Pagamentos
                     </Button>
@@ -4238,578 +4328,13 @@ function AgendaPage() {
             </div>
           </DialogFooter>
         </DialogContent>
-      </Dialog>
-
-      {/* Payment Modal */}
-      {editingBooking && (
-        <Dialog open={isPaymentModalOpen} onOpenChange={setIsPaymentModalOpen}>
-          <DialogContent
-            forceMount
-            className="sm:max-w-[960px] max-h-[90vh] overflow-y-auto"
-            onOpenAutoFocus={(e) => e.preventDefault()}
-            onInteractOutside={(e) => { e.preventDefault(); }}
-            onEscapeKeyDown={(e) => { e.preventDefault(); }}
-          >
-            <DialogHeader>
-              <DialogTitle>Registrar pagamento</DialogTitle>
-              <DialogDescription>Gerencie valores, divisão e status de pagamento dos participantes.</DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4">
-              {/* Total e ações essenciais */}
-              <div className="p-4 rounded-lg border border-border bg-gradient-to-br from-surface-2 to-surface shadow-md">
-                <div className="flex flex-col md:flex-row md:flex-wrap md:items-end gap-3">
-                  <div className="space-y-1 w-full md:w-auto">
-                    <Label className="font-bold">Valor total a receber</Label>
-                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-                      <Input
-                        type="text"
-                        inputMode="decimal"
-                        step="0.01"
-                        placeholder="0,00"
-                        value={maskBRL(paymentTotal)}
-                        onChange={(e) => setPaymentTotal(maskBRL(e.target.value))}
-                        className="w-full sm:max-w-[180px]"
-                      />
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        size="sm"
-                        className="bg-sky-600 hover:bg-sky-500 text-white w-full sm:w-auto"
-                        onClick={splitEqually}
-                        disabled={!paymentTotal || participantsCount === 0}
-                      >
-                        {(() => {
-                          const total = parseBRL(paymentTotal);
-                          const show = Number.isFinite(total) && participantsCount > 0;
-                          const per = show ? (total / participantsCount) : 0;
-                          return `Dividir igualmente${show ? ` (R$ ${per.toFixed(2)} p/ cada)` : ''}`;
-                        })()}
-                      </Button>
-                      <Button 
-                        type="button" 
-                        variant="ghost" 
-                        size="sm"
-                        className="border border-white/10 w-full sm:w-auto" 
-                        onClick={zeroAllValues} 
-                        disabled={participantsCount === 0}
-                      >Zerar valores</Button>
-                    </div>
-                  </div>
-                  <div className="ml-auto text-sm">
-                    <div className="flex flex-wrap gap-2">
-                      <span className="inline-flex items-center gap-1 px-2 py-1 rounded bg-white/5 border border-white/10">
-                        <span className="text-text-secondary">Participantes:</span>
-                        <strong>{participantsCount}</strong>
-                      </span>
-                      <span className="inline-flex items-center gap-1 px-2 py-1 rounded bg-white/5 border border-white/10">
-                        <span className="text-text-secondary">Atribuído:</span>
-                        <strong>R$ {paymentSummary.totalAssigned.toFixed(2)}</strong>
-                      </span>
-                      <span className="inline-flex items-center gap-1 px-2 py-1 rounded bg-white/5 border border-white/10">
-                        <span className="text-text-secondary">Alvo:</span>
-                        <strong>R$ {paymentSummary.totalTarget.toFixed(2)}</strong>
-                      </span>
-                      <span className="inline-flex items-center gap-1 px-2 py-1 rounded bg-white/5 border border-white/10">
-                        <span className="text-text-secondary">Diferença:</span>
-                        <strong className={paymentSummary.diff === 0 ? 'text-emerald-500' : (paymentSummary.diff > 0 ? 'text-amber-500' : 'text-rose-500')}>R$ {paymentSummary.diff.toFixed(2)}</strong>
-                      </span>
-                      <span className="inline-flex items-center gap-1 px-2 py-1 rounded bg-white/5 border border-white/10">
-                        <span className="text-text-secondary">Pago:</span>
-                        <strong>{paymentSummary.paid}</strong>
-                      </span>
-                      <span className="inline-flex items-center gap-1 px-2 py-1 rounded bg-white/5 border border-white/10">
-                        <span className="text-text-secondary">Pendente:</span>
-                        <strong>{paymentSummary.pending}</strong>
-                      </span>
-                    </div>
-                    {(() => {
-                      const pctRaw = paymentSummary.totalTarget > 0 ? (paymentSummary.totalAssigned / paymentSummary.totalTarget) * 100 : 0;
-                      // Usa o percentual real, sem "bump" artificial, e faz clamp entre 0 e 100
-                      const pct = Math.max(0, Math.min(100, pctRaw));
-                      // Apenas para a barra ficar visível quando >0% mas muito pequeno, sem alterar o texto
-                      const pctVisual = pct > 0 && pct < 1 ? 1 : pct;
-                      const barColor = paymentSummary.diff === 0 ? 'bg-emerald-500' : (paymentSummary.diff > 0 ? 'bg-amber-500' : 'bg-rose-500');
-                      return (
-                        <div className="mt-2 w-full min-w-[280px]">
-                          <div className="h-2 w-full rounded bg-white/10 overflow-hidden">
-                            <div className={`h-full ${barColor}`} style={{ width: `${pctVisual}%` }} />
-                          </div>
-                          <div className="mt-1 text-sm font-medium text-text-muted">{pct.toFixed(0)}% atribuído</div>
-                        </div>
-                      );
-                    })()}
-                  </div>
-                </div>
-              </div>
-              {/* Nota quando sem participantes */}
-              {(form.selectedClients || []).length === 0 && (
-                <div className="text-xs text-text-muted italic">Nenhum participante neste agendamento. Adicione participantes no campo "Clientes" do modal principal.</div>
-              )}
-
-              {(form.selectedClients || []).length > 0 && (
-                <>
-                {/* Busca por participante */}
-                <div className="flex items-center justify-between">
-                  <div className="relative w-full max-w-[320px]">
-                    <Input
-                      ref={paymentSearchRef}
-                      type="text"
-                      placeholder="Buscar participante..."
-                      value={paymentSearch}
-                      onChange={(e) => setPaymentSearch(e.target.value)}
-                      className="pr-16"
-                    />
-                    <button
-                      type="button"
-                      className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-amber-400 hover:text-amber-300"
-                      onClick={() => {
-                        setPaymentSearch('');
-                        try { paymentSearchRef.current?.focus(); } catch {}
-                      }}
-                    >limpar</button>
-                  </div>
-                </div>
-                {paymentWarning?.type === 'pending' && (
-                  <div role="alert" className="mb-2 rounded-md border border-amber-600/40 bg-amber-500/10 px-3 py-2 text-amber-200 flex items-start gap-3">
-                    <div className="mt-0.5">
-                      <AlertTriangle className="w-4 h-4 text-amber-300" />
-                    </div>
-                    <div className="flex-1 text-sm">
-                      <strong>Atenção:</strong> Existem <strong>{paymentWarning.count}</strong> participante(s) com status <strong>Pendente</strong>.
-                      <span className="ml-1">Marque como <strong>Pago</strong> antes de salvar.</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        className="text-xs px-2 py-1 rounded bg-white/10 hover:bg-white/15 border border-white/10"
-                        onClick={() => {
-                          const id = paymentWarning.firstPendingId;
-                          if (id) {
-                            setPaymentSelectedId(id);
-                            const el = document.getElementById(`payment-row-${id}`);
-                            if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                          }
-                        }}
-                      >Ver pendentes</button>
-                      <button
-                        type="button"
-                        className="text-xs px-2 py-1 rounded bg-amber-500/20 hover:bg-amber-500/30 border border-amber-600/40"
-                        onClick={() => setPaymentWarning(null)}
-                      >Entendi</button>
-                    </div>
-                  </div>
-                )}
-                <div className="border border-border rounded-md overflow-hidden">
-                  {/* Header da tabela - apenas desktop */}
-                  <div className="hidden md:grid grid-cols-12 items-center px-3 py-2 bg-surface-2 text-[11px] uppercase tracking-wide text-text-secondary">
-                    <div className="col-span-5">Participante</div>
-                    <div className="col-span-3">Finalizadora</div>
-                    <div className="col-span-2">Valor</div>
-                    <div className="col-span-1 flex items-center justify-between pr-2">
-                      <span>Status</span>
-                    </div>
-                    <div className="col-span-1 text-right">Ações</div>
-                  </div>
-                  <div className="divide-y divide-border max-h-[50vh] overflow-y-auto fx-scroll">
-                    {(() => {
-                      const q = paymentSearch.trim().toLowerCase();
-                      const filtered = (form.selectedClients || [])
-                        .filter((c) => !paymentHiddenIds.includes(c.id))
-                        .filter((c) => {
-                          if (!q) return true;
-                          return String(c?.nome || '').toLowerCase().includes(q);
-                        });
-                      if (filtered.length === 0) {
-                        return (
-                          <div className="px-3 py-4 text-sm text-text-muted">Nenhum participante com esse nome</div>
-                        );
-                      }
-                      return filtered.map((c) => {
-                      const found = participantsForm.find(p => p.cliente_id === c.id);
-                      // ✅ DEBUG: Adicionar console para diagnosticar
-                      if (!found) {
-                        console.warn('[PaymentModal] Cliente não encontrado em participantsForm:', {
-                          buscando_id: c.id,
-                          buscando_nome: c.nome,
-                          participantsForm_length: participantsForm.length,
-                          participantsForm_ids: participantsForm.map(p => ({ id: p.cliente_id, fin: p.finalizadora_id }))
-                        });
-                      } else {
-                        console.log('[PaymentModal] Cliente encontrado:', {
-                          cliente_id: c.id,
-                          finalizadora_id: found.finalizadora_id
-                        });
-                      }
-                      const pf = found || { cliente_id: c.id, nome: c.nome, valor_cota: '', status_pagamento: 'Pendente', finalizadora_id: payMethods[0]?.id ? String(payMethods[0].id) : null };
-                      return (
-                        <div
-                          key={c.id}
-                          id={`payment-row-${c.id}`}
-                          className={`${paymentWarning?.type === 'pending' && pf.status_pagamento !== 'Pago' ? 'bg-amber-500/5' : ''}`}
-                        >
-                          {/* Layout Mobile - Cards */}
-                          <div className="md:hidden p-3 space-y-3">
-                            {/* Nome do participante */}
-                            <div className="font-semibold text-base">{c.nome}</div>
-                            
-                            {/* Finalizadora (mobile) */}
-                            <div>
-                              <Label className="text-xs text-text-muted mb-1">Finalizadora</Label>
-                              <Select
-                                value={String(pf.finalizadora_id || payMethods[0]?.id || '')}
-                                onValueChange={(val) => {
-                                  setParticipantsForm(prev => {
-                                    // [DEBUG-PaymentModal] silenciado
-                                    const list = [...prev];
-                                    const idx = list.findIndex(p => p.cliente_id === c.id);
-                                    if (idx >= 0) list[idx] = { ...list[idx], finalizadora_id: val };
-                                    else list.push({ cliente_id: c.id, nome: c.nome, valor_cota: pf.valor_cota || '', status_pagamento: pf.status_pagamento || 'Pendente', finalizadora_id: val });
-                                    return list;
-                                  });
-                                }}
-                              >
-                                <SelectTrigger className="w-full h-10">
-                                  <SelectValue placeholder="Selecione" />
-                                </SelectTrigger>
-                                <SelectContent className="bg-surface border border-border">
-                                  {payMethods.map((m) => (
-                                    <SelectItem key={m.id} value={String(m.id)}>{m.nome || m.tipo || 'Outros'}</SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            
-                            {/* Valor e Status */}
-                            <div className="flex gap-2">
-                              <div className="flex-1">
-                                <Label className="text-xs text-text-muted mb-1">Valor</Label>
-                                <Input
-                                  type="text"
-                                  inputMode="decimal"
-                                  step="0.01"
-                                  placeholder="0,00"
-                                  value={maskBRL(pf.valor_cota)}
-                                  onChange={(e) => {
-                                    const masked = maskBRL(e.target.value);
-                                    const amount = parseBRL(masked);
-                                    const autoStatus = (Number.isFinite(amount) && amount > 0) ? 'Pago' : 'Pendente';
-                                    setParticipantsForm(prev => {
-                                    // [DEBUG-PaymentModal] silenciado
-                                      let list = [...prev];
-                                      const idx = list.findIndex(p => p.cliente_id === c.id);
-                                      if (idx >= 0) {
-                                        list[idx] = { ...list[idx], valor_cota: masked, status_pagamento: autoStatus };
-                                      } else {
-                                        list = [...list, { cliente_id: c.id, nome: c.nome, valor_cota: masked, status_pagamento: autoStatus }];
-                                      }
-                                      const totalTarget = parseBRL(paymentTotal);
-                                      if (Number.isFinite(totalTarget)) {
-                                        const anyCoversAll = parseBRL(masked) >= totalTarget;
-                                        if (anyCoversAll) {
-                                          list = list.map(p => ({ ...p, status_pagamento: 'Pago' }));
-                                          return list;
-                                        }
-                                      }
-                                      return list;
-                                    });
-                                  }}
-                                  className="text-sm"
-                                />
-                              </div>
-                              <div className="flex-1">
-                                <Label className="text-xs text-text-muted mb-1">Status</Label>
-                                <div
-                                  className={`flex items-center justify-center h-10 px-3 rounded text-sm font-medium border w-full select-none ${pf.status_pagamento === 'Pago' ? 'bg-emerald-600/20 text-emerald-400 border-emerald-700/40' : 'bg-amber-600/20 text-amber-400 border-amber-700/40'}`}
-                                >
-                                  {pf.status_pagamento === 'Pago' ? 'Pago' : 'Pendente'}
-                                </div>
-                              </div>
-                            </div>
-                            
-                            {/* Botão Remover */}
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              className="text-red-500 hover:text-red-400 w-full"
-                              onClick={() => {
-                                setPaymentHiddenIds((prev) => prev.includes(c.id) ? prev : [...prev, c.id]);
-                                setParticipantsForm(prev => prev.filter(p => p.cliente_id !== c.id));
-                              }}
-                            >
-                              Remover participante
-                            </Button>
-                          </div>
-                          
-                          {/* Layout Desktop - Tabela */}
-                          <div className="hidden md:grid grid-cols-12 items-center px-3 py-2">
-                            <div className="col-span-5 truncate text-[15px] font-medium">{c.nome}</div>
-                            {/* Finalizadora (desktop) */}
-                            <div className="col-span-3 pr-2">
-                              <Select
-                                value={String(pf.finalizadora_id || payMethods[0]?.id || '')}
-                                onValueChange={(val) => {
-                                  setParticipantsForm(prev => {
-                                    // [DEBUG-PaymentModal] silenciado
-                                    const list = [...prev];
-                                    const idx = list.findIndex(p => p.cliente_id === c.id);
-                                    if (idx >= 0) list[idx] = { ...list[idx], finalizadora_id: val };
-                                    else list.push({ cliente_id: c.id, nome: c.nome, valor_cota: pf.valor_cota || '', status_pagamento: pf.status_pagamento || 'Pendente', finalizadora_id: val });
-                                    return list;
-                                  });
-                                }}
-                              >
-                                <SelectTrigger className="h-8 text-sm max-w-[140px]">
-                                  <SelectValue placeholder="Selecione" />
-                                </SelectTrigger>
-                                <SelectContent className="bg-surface border border-border">
-                                  {payMethods.map((m) => (
-                                    <SelectItem key={m.id} value={String(m.id)}>{m.nome || m.tipo || 'Outros'}</SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            {/* Valor */}
-                            <div className="col-span-2 pr-2">
-                              <Input
-                                type="text"
-                                inputMode="decimal"
-                                step="0.01"
-                                placeholder="0,00"
-                                value={maskBRL(pf.valor_cota)}
-                                onChange={(e) => {
-                                  const masked = maskBRL(e.target.value);
-                                  const amount = parseBRL(masked);
-                                  const autoStatus = (Number.isFinite(amount) && amount > 0) ? 'Pago' : 'Pendente';
-                                  setParticipantsForm(prev => {
-                                    // [DEBUG-PaymentModal] silenciado
-                                    let list = [...prev];
-                                    const idx = list.findIndex(p => p.cliente_id === c.id);
-                                    if (idx >= 0) {
-                                      list[idx] = { ...list[idx], valor_cota: masked, status_pagamento: autoStatus };
-                                    } else {
-                                      list = [...list, { cliente_id: c.id, nome: c.nome, valor_cota: masked, status_pagamento: autoStatus }];
-                                    }
-                                    const totalTarget = parseBRL(paymentTotal);
-                                    if (Number.isFinite(totalTarget)) {
-                                      const anyCoversAll = parseBRL(masked) >= totalTarget; // participante atual cobre tudo
-                                      if (anyCoversAll) {
-                                        list = list.map(p => ({ ...p, status_pagamento: 'Pago' }));
-                                        return list;
-                                      }
-                                    }
-                                    return list;
-                                  });
-                                }}
-                                className="w-24 md:w-28 text-sm"
-                              />
-                            </div>
-                          <div className="col-span-1 pr-2">
-                            {/* Status automático, apenas leitura (derivado do valor_cota) */}
-                            <span
-                              className={`inline-flex items-center justify-center h-8 px-2 rounded text-sm font-medium border w-full select-none ${pf.status_pagamento === 'Pago' ? 'bg-emerald-600/20 text-emerald-400 border-emerald-700/40' : 'bg-amber-600/20 text-amber-400 border-amber-700/40'}`}
-                              title={pf.status_pagamento === 'Pago' ? 'Status automático: Pago (valor > 0)' : 'Status automático: Pendente (valor = 0)'}
-                            >
-                              {pf.status_pagamento === 'Pago' ? 'Pago' : 'Pendente'}
-                            </span>
-                            </div>
-                            <div className="col-span-1 text-right">
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                className="text-red-500 hover:text-red-400"
-                                onClick={() => {
-                                  setPaymentHiddenIds((prev) => prev.includes(c.id) ? prev : [...prev, c.id]);
-                                  setParticipantsForm(prev => prev.filter(p => p.cliente_id !== c.id));
-                                }}
-                              >
-                                Remover
-                              </Button>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    });
-                    })()}
-                  </div>
-                </div>
-                </>
-              )}
-
-              <DialogFooter className="gap-2">
-                <Button type="button" variant="ghost" className="border border-white/10" onClick={() => setIsPaymentModalOpen(false)}>Cancelar</Button>
-                <Button
-                  type="button"
-                  className="bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-60 disabled:cursor-not-allowed"
-                  disabled={isSavingPayments}
-                  onClick={async () => {
-                    const tClick = Date.now();
-                    try {
-                      const snap = {
-                        modalOpen: isPaymentModalOpen,
-                        isSavingPayments,
-                        bookingId: editingBooking?.id,
-                        company: userProfile?.codigo_empresa,
-                        participantsCount,
-                        selectedClientIds: (form?.selectedClients || []).map(c => c?.id),
-                        hiddenIds: [...(paymentHiddenIds || [])],
-                        paymentTotal,
-                      };
-                      if (isSavingPayments) {
-                        return;
-                      }
-                      setIsSavingPayments(true);
-                      const agendamentoId = editingBooking?.id;
-                      const codigo = userProfile?.codigo_empresa;
-                      if (!agendamentoId || !codigo) {
-                        toast({ title: 'Erro ao salvar pagamentos', description: 'Agendamento ou empresa indisponível.', variant: 'destructive' });
-                        return;
-                      }
-                      const t0 = Date.now();
-
-                      // Verificação: pendentes (somente notificação; não exibir banner bloqueante)
-                      let mapForm, effectiveSelected, pendingCount;
-                      try {
-                        mapForm = new Map((participantsForm || []).map(p => [p.cliente_id, p]));
-                        effectiveSelected = (form.selectedClients || []).filter(c => !paymentHiddenIds.includes(c.id));
-                        pendingCount = effectiveSelected.reduce((acc, c) => {
-                          const st = (mapForm.get(c.id)?.status_pagamento) || 'Pendente';
-                          return acc + (st !== 'Pago' ? 1 : 0);
-                        }, 0);
-                      } catch (calcErr) {
-                        toast({ title: 'Erro ao processar participantes', description: 'Tente novamente.', variant: 'destructive' });
-                        return;
-                      }
-
-                      const tDel0 = Date.now();
-                      const { error: delErr } = await supabase
-                        .from('agendamento_participantes')
-                        .delete()
-                        .eq('codigo_empresa', codigo)
-                        .eq('agendamento_id', agendamentoId);
-                      if (delErr) {
-                        console.error('[ParticipantsSave] Delete error', delErr);
-                        toast({ title: 'Erro ao salvar pagamentos', description: 'Falha ao limpar registros anteriores.', variant: 'destructive' });
-                        throw delErr;
-                      }
-                      
-                      const rows = effectiveSelected.map((c) => {
-                        const pf = participantsForm.find(p => p.cliente_id === c.id);
-                        const valor = parseBRL(pf?.valor_cota);
-                        const finId = pf?.finalizadora_id || (payMethods[0]?.id ? String(payMethods[0].id) : null);
-                        const row = {
-                          codigo_empresa: codigo,
-                          agendamento_id: agendamentoId,
-                          cliente_id: c.id,
-                          nome: c.nome,
-                          valor_cota: Number.isFinite(valor) ? valor : 0,
-                          status_pagamento: pf?.status_pagamento || 'Pendente',
-                          finalizadora_id: finId,
-                        };
-                        return row;
-                      });
-                      
-                      if (rows.length > 0) {
-                        const tIns0 = Date.now();
-                        const { data: inserted, error } = await supabase
-                          .from('agendamento_participantes')
-                          .insert(rows)
-                          .select();
-                        if (error) {
-                          // erro tratado com toast abaixo
-                          toast({ title: 'Erro ao salvar pagamentos', description: 'Falha ao inserir pagamentos.', variant: 'destructive' });
-                          throw error;
-                        }
-                        
-                      } else {
-                        // nenhum participante selecionado
-                        try { console.warn('[PaymentsSave] no rows to insert'); } catch {}
-                      }
-                      // Se houve remoções na UI (paymentHiddenIds), persistir também nos dados do agendamento (cliente_id e clientes)
-                      try {
-                        if ((paymentHiddenIds || []).length > 0) {
-                          const newSelected = effectiveSelected;
-                          const primary = newSelected[0] || null;
-                          const clientesArr = newSelected.map(c => c?.nome).filter(Boolean);
-                          const tUpd0 = Date.now();
-                          await supabase
-                            .from('agendamentos')
-                            .update({
-                              cliente_id: primary?.id ?? null,
-                              clientes: clientesArr,
-                            })
-                            .eq('codigo_empresa', codigo)
-                            .eq('id', agendamentoId);
-                          // Reflete imediatamente no formulário/modais
-                          setForm(f => ({ ...f, selectedClients: newSelected }));
-                          // Atualiza o cartão na agenda (nome do cliente primário)
-                          setBookings(prev => prev.map(b => b.id === agendamentoId ? {
-                            ...b,
-                            customer: primary?.nome || '',
-                          } : b));
-                        }
-                      } catch {}
-
-                      // Recarrega participantes deste agendamento para atualizar o indicador "pagos/total" na agenda
-                      try {
-                        const tRf0 = Date.now();
-                        const { data: freshParts, error: freshErr } = await supabase
-                          .from('agendamento_participantes')
-                          .select('id, agendamento_id, codigo_empresa, cliente_id, nome, valor_cota, status_pagamento, finalizadora_id')
-                          .eq('codigo_empresa', codigo)
-                          .eq('agendamento_id', agendamentoId);
-                        if (!freshErr) {
-                          setParticipantsByAgendamento((prev) => {
-                            const next = { ...prev, [agendamentoId]: freshParts || [] };
-                            try { if (participantsCacheKey) localStorage.setItem(participantsCacheKey, JSON.stringify(next)); } catch {}
-                            return next;
-                          });
-                        }
-                      } catch (rfErr) {
-                        // falha silenciosa; indicador pode não atualizar imediatamente
-                      }
-                      
-                      // Avalia total atribuído vs total alvo e pendências (notificações; salvamento não é bloqueado)
-                      const totalTargetParsed = parseBRL(paymentTotal);
-                      const totalTarget = Number.isFinite(totalTargetParsed) ? totalTargetParsed : 0;
-                      const totalAssigned = (form.selectedClients || []).reduce((sum, c) => {
-                        const pf = participantsForm.find(p => p.cliente_id === c.id);
-                        const v = parseBRL(pf?.valor_cota);
-                        return sum + (Number.isFinite(v) ? v : 0);
-                      }, 0);
-                      if (totalTarget > 0 && totalAssigned < totalTarget - 0.005) {
-                        toast({
-                          title: 'Pagamentos salvos',
-                          description: 'Total não alcançado.',
-                          variant: 'warning',
-                        });
-                      } else if (pendingCount > 0) {
-                        toast({
-                          title: 'Pagamentos salvos',
-                          description: `Pendentes: ${pendingCount}`,
-                          variant: 'warning',
-                        });
-                      } else {
-                        toast({ title: 'Pagamentos salvos', variant: 'success' });
-                      }
-                      setPaymentWarning(null);
-                      // Fecha o modal de pagamentos e, em seguida, o modal principal
-                      setIsPaymentModalOpen(false);
-                      setIsModalOpen(false);
-                    } catch (e) {
-                      toast({ title: 'Erro ao salvar pagamentos', description: 'Tente novamente.', variant: 'destructive' });
-                    } finally {
-                      setIsSavingPayments(false);
-                    }
-                  }}
-                >Salvar Pagamentos</Button>
-              </DialogFooter>
-            </div>
-          </DialogContent>
         </Dialog>
       )}
-          <ClientFormModal
+      
+      {/* Removido modal de pagamentos antigo - agora está em componente separado */}
+      
+      {isClientFormOpen && (
+        <ClientFormModal
             open={isClientFormOpen}
             onOpenChange={(open) => { setIsClientFormOpen(open); if (!open) setClientForModal(null); }}
             client={clientForModal}
@@ -4877,11 +4402,46 @@ function AgendaPage() {
                 
                 /* console cleaned: onSaved */
               }
+              
+              // Executar callback do PaymentModal se existir
+              if (window.__paymentModalCallback && typeof window.__paymentModalCallback === 'function') {
+                try {
+                  window.__paymentModalCallback();
+                  window.__paymentModalCallback = null;
+                } catch (e) {
+                  console.error('[PaymentModal][callback:ERROR]', e);
+                }
+              }
             } catch (e) {
               console.error('[CustomerPicker][onSaved:ERROR]', e);
             }
           }}
           />
+      )}
+      
+      {/* Modais de pagamento e edição de participantes - renderizados aqui para ter acesso ao form e localCustomers */}
+      {isPaymentModalOpen && (
+        <PaymentModal 
+          setIsModalOpen={setIsModalOpen}
+          setBookings={setBookings}
+          form={form}
+          setForm={setForm}
+          localCustomers={localCustomers}
+          onOpenClientModal={(callback) => {
+            setIsClientFormOpen(true);
+            // Armazenar callback para executar após salvar
+            window.__paymentModalCallback = callback;
+          }}
+        />
+      )}
+      
+      {isEditParticipantModalOpen && (
+        <EditParticipantModal 
+          form={form}
+          setForm={setForm}
+          localCustomers={localCustomers}
+        />
+      )}
           </>
           );
         };
@@ -5003,9 +4563,6 @@ function AgendaPage() {
 
   return (
     <>
-      {/* Payment Modal movido para AddBookingModal para manter escopo correto */}
-
-      {/* ClientFormModal já é renderizado dentro do AddBookingModal */}
       <motion.div variants={isModalOpen ? undefined : pageVariants} initial={isModalOpen ? false : "hidden"} animate={isModalOpen ? false : "visible"} className="h-full flex flex-col md:px-0">
 
         {/* Controls */}
@@ -5194,7 +4751,7 @@ function AgendaPage() {
                     </div>
                   </div>
                   <div className="space-y-1">
-                    <Label className="text-sm text-text-muted">Confirmar se faltar</Label>
+                    <Label htmlFor="autoconfirm-hours" className="text-sm text-text-muted">Confirmar se faltar</Label>
                     <div className="flex items-center gap-2">
                       <Select
                         value={String(Math.max(0, Math.round((automation.autoConfirmMinutesBefore || 0) / 60)))}
@@ -5680,7 +5237,9 @@ function AgendaPage() {
           );
         })()}
       </motion.div>
-      <AddBookingModal />
+      
+      {/* AddBookingModal - chamado como função */}
+      {AddBookingModal()}
     </>
   );
 }

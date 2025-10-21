@@ -5,6 +5,8 @@ import Sidebar from '@/components/layout/Sidebar';
 import Header from '@/components/layout/Header';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import { AlertsProvider } from '@/contexts/AlertsContext';
+import { ModalsProvider } from '@/contexts/ModalsContext';
+import { AgendaProvider } from '@/contexts/AgendaContext';
 import DashboardPage from '@/pages/DashboardPage';
 import AgendaPage from '@/pages/AgendaPage';
 import VendasPage from '@/pages/VendasPage';
@@ -35,8 +37,10 @@ function PrivateApp() {
   const isAgendaPage = location.pathname === '/agenda';
 
   return (
-    <AlertsProvider>
-      <div className="flex h-screen bg-background text-text-primary">
+    <ModalsProvider>
+      <AlertsProvider>
+        <AgendaProvider>
+          <div className="flex h-screen bg-background text-text-primary">
         <Helmet>
             <title>F7 Arena</title>
             <meta name="description" content="Software para gestão de quadras esportivas." />
@@ -64,9 +68,11 @@ function PrivateApp() {
             <Route path="/suporte" element={<SuportePage />} />
           </Routes>
         </main>
+        </div>
       </div>
-    </div>
-    </AlertsProvider>
+        </AgendaProvider>
+      </AlertsProvider>
+    </ModalsProvider>
   );
 }
 
