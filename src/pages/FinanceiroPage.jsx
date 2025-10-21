@@ -234,6 +234,64 @@ export default function FinanceiroPage() {
     }
   };
 
+  // Exportar Fechamentos de Caixa: PDF
+  const exportClosingsToPDF = async () => {
+    try {
+      const headers = ['Abertura', 'Fechamento', 'Saldo Inicial', 'Saldo Final', 'Valor Final (Dinheiro)', 'Diferença', 'Status'];
+      const rows = (history || []).map(h => [
+        h?.aberto_em ? new Date(h.aberto_em).toLocaleString('pt-BR') : '-',
+        h?.fechado_em ? new Date(h.fechado_em).toLocaleString('pt-BR') : '-',
+        fmtBRL(h?.saldo_inicial || 0),
+        h?.saldo_final != null ? fmtBRL(h.saldo_final) : fmtBRL(0),
+        (h?.valor_final_dinheiro != null) ? fmtBRL(h.valor_final_dinheiro) : '—',
+        (h?.diferenca_dinheiro != null) ? fmtBRL(h.diferenca_dinheiro) : '—',
+        String(h?.status || '').toUpperCase()
+      ]);
+      await exportToPDF('Fechamentos de Caixa', headers, rows, 'fechamentos_caixa');
+    } catch (e) {
+      toast({ title: 'Erro ao exportar PDF', description: e?.message || 'Tente novamente', variant: 'destructive' });
+    }
+  };
+
+  // Exportar Fechamentos de Caixa: CSV
+  const exportClosingsToCSV = () => {
+    try {
+      const sep = ';';
+      const headers = ['Abertura', 'Fechamento', 'Saldo Inicial', 'Saldo Final', 'Valor Final (Dinheiro)', 'Diferença', 'Status'];
+      const lines = [headers.join(sep)];
+      (history || []).forEach(h => {
+        const abertura = h?.aberto_em ? new Date(h.aberto_em).toLocaleString('pt-BR') : '-';
+        const fechamento = h?.fechado_em ? new Date(h.fechado_em).toLocaleString('pt-BR') : '-';
+        const sIni = (Number(h?.saldo_inicial || 0)).toFixed(2).replace('.', ',');
+        const sFin = (h?.saldo_final != null ? Number(h.saldo_final) : 0).toFixed(2).replace('.', ',');
+        const vFinal = (h?.valor_final_dinheiro != null ? Number(h.valor_final_dinheiro) : null);
+        const dif = (h?.diferenca_dinheiro != null ? Number(h.diferenca_dinheiro) : null);
+        const status = String(h?.status || '').toUpperCase();
+        lines.push([
+          abertura,
+          fechamento,
+          sIni,
+          sFin,
+          vFinal != null ? vFinal.toFixed(2).replace('.', ',') : '',
+          dif != null ? dif.toFixed(2).replace('.', ',') : '',
+          status
+        ].join(sep));
+      });
+      const blob = new Blob(['\ufeff' + lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `fechamentos_caixa_${new Date().toISOString().slice(0,10)}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast({ title: 'CSV baixado com sucesso!' });
+    } catch (e) {
+      toast({ title: 'Erro ao exportar CSV', description: e?.message || 'Tente novamente', variant: 'destructive' });
+    }
+  };
+
   const setPreset = (type) => {
     const now = new Date();
     const end = now.toISOString().slice(0, 10);
@@ -659,6 +717,12 @@ export default function FinanceiroPage() {
       
       // Histórico
       const hist = await listarFechamentosCaixa({ limit: 50, codigoEmpresa: codigo });
+      console.log('[FinanceiroPage][loadCaixa] Histórico recebido de listarFechamentosCaixa:', hist?.length, 'sessões');
+      if (hist && hist.length > 0) {
+        console.log('[FinanceiroPage][loadCaixa] Primeira sessão do histórico:', hist[0]);
+        const comValor = hist.filter(h => h.valor_final_dinheiro != null);
+        console.log('[FinanceiroPage][loadCaixa] Sessões com valor_final_dinheiro:', comValor.length, '/', hist.length);
+      }
       setHistory(hist || []);
     } catch (e) {
       toast({ title: 'Falha ao carregar caixa', description: e?.message, variant: 'destructive' });
@@ -1475,7 +1539,17 @@ export default function FinanceiroPage() {
           <TabsContent value="caixa" className="space-y-6 mt-6">
             {/* Histórico de Fechamentos */}
             <motion.div variants={itemVariants} className="fx-card p-4">
-              <h3 className="text-base font-bold mb-3">Fechamentos Anteriores</h3>
+              <div className="flex items-center justify-between mb-3 gap-2">
+                <h3 className="text-base font-bold">Fechamentos Anteriores</h3>
+                <div className="flex gap-2">
+                  <Button variant="outline" size="sm" onClick={exportClosingsToCSV}>
+                    <Download className="h-4 w-4 mr-2" /> CSV
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={exportClosingsToPDF}>
+                    <FileDown className="h-4 w-4 mr-2" /> PDF
+                  </Button>
+                </div>
+              </div>
               {history.length === 0 ? (
                 <div className="text-sm text-text-secondary">Nenhum fechamento encontrado.</div>
               ) : (
@@ -1488,11 +1562,20 @@ export default function FinanceiroPage() {
                           <TableHead>Aberto em</TableHead>
                           <TableHead>Fechado em</TableHead>
                           <TableHead className="text-right">Saldo Inicial</TableHead>
-                          <TableHead className="text-right">Saldo Final</TableHead>
+                          <TableHead className="text-right">Saldo Final (contado)</TableHead>
                           <TableHead>Status</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
+                        {(() => {
+                          console.log('[FinanceiroPage][Render] Renderizando histórico, total de sessões:', history.length);
+                          const comValor = history.filter(h => h.valor_final_dinheiro != null);
+                          console.log('[FinanceiroPage][Render] Sessões com valor_final_dinheiro no render:', comValor.length);
+                          if (history.length > 0) {
+                            console.log('[FinanceiroPage][Render] Primeira sessão no array history:', history[0]);
+                          }
+                          return null;
+                        })()}
                         {history.map((h) => (
                           <TableRow key={h.id} className="cursor-pointer hover:bg-surface-2" onClick={async () => {
                           setCaixaModalOpen(true);
@@ -1584,7 +1667,8 @@ export default function FinanceiroPage() {
                             if (codigo) qpDet = qpDet.eq('codigo_empresa', codigo);
                             const { data: pagamentosDet } = await qpDet;
                             console.log('[Caixa][Fechamento][Pays]', { count: (pagamentosDet||[]).length });
-                            setCaixaModalData({ resumo, movimentacoes, movimentosAgg, pagamentos: (pagamentosDet||[]), sessao: sessaoOut });
+                            const valorFinalContado = (resumoSnap && typeof resumoSnap.valor_final_dinheiro !== 'undefined') ? Number(resumoSnap.valor_final_dinheiro) : null;
+                            setCaixaModalData({ resumo, movimentacoes, movimentosAgg, pagamentos: (pagamentosDet||[]), sessao: sessaoOut, valorFinalContado });
                             const t1 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
                             const movCount = Array.isArray(movimentacoes) ? movimentacoes.length : 0;
                             const finCount = resumo && resumo.totalPorFinalizadora ? Object.keys(resumo.totalPorFinalizadora).length : 0;
@@ -1599,7 +1683,7 @@ export default function FinanceiroPage() {
                           <TableCell>{h.aberto_em ? new Date(h.aberto_em).toLocaleString('pt-BR') : '—'}</TableCell>
                           <TableCell>{h.fechado_em ? new Date(h.fechado_em).toLocaleString('pt-BR') : '—'}</TableCell>
                           <TableCell className="text-right">{fmtBRL(h.saldo_inicial)}</TableCell>
-                          <TableCell className="text-right">{fmtBRL(h.saldo_final)}</TableCell>
+                          <TableCell className="text-right">{h.valor_final_dinheiro != null ? fmtBRL(h.valor_final_dinheiro) : '—'}</TableCell>
                           <TableCell>{String(h.status || '').toLowerCase() === 'open' ? 'Aberto' : 'Fechado'}</TableCell>
                         </TableRow>
                       ))}
@@ -1647,7 +1731,8 @@ export default function FinanceiroPage() {
                           };
                           const movimentacoes = await listarMovimentacoesCaixa({ caixaSessaoId: h.id, codigoEmpresa: codigo });
                           const movimentosAgg = resumoSnap && resumoSnap.movimentos ? resumoSnap.movimentos : null;
-                          setCaixaModalData({ resumo, movimentacoes, movimentosAgg, sessao: sessaoOut, pagamentos: [] });
+                          const valorFinalContado = (resumoSnap && typeof resumoSnap.valor_final_dinheiro !== 'undefined') ? Number(resumoSnap.valor_final_dinheiro) : null;
+                          setCaixaModalData({ resumo, movimentacoes, movimentosAgg, sessao: sessaoOut, pagamentos: [], valorFinalContado });
                         } catch (e) {
                           console.error('[Caixa][Fechamento][Error]', e);
                           toast({ title: 'Erro ao carregar detalhes', description: e?.message, variant: 'destructive' });
@@ -1689,8 +1774,8 @@ export default function FinanceiroPage() {
                             <span className="font-semibold text-info">{fmtBRL(h.saldo_inicial)}</span>
                           </div>
                           <div className="flex justify-between">
-                            <span className="text-text-secondary">Saldo Final:</span>
-                            <span className="font-semibold text-success">{fmtBRL(h.saldo_final)}</span>
+                            <span className="text-text-secondary">Saldo Final (contado):</span>
+                            <span className="font-semibold text-success">{h.valor_final_dinheiro != null ? fmtBRL(h.valor_final_dinheiro) : '—'}</span>
                           </div>
                         </div>
                         <div className="mt-3 text-xs text-text-muted text-center">
@@ -2497,19 +2582,30 @@ export default function FinanceiroPage() {
                     <p className="text-2xl font-bold tabular-nums">{fmtBRL(caixaModalData.sessao?.saldo_inicial)}</p>
                   </div>
                   <div className="bg-surface-2 rounded-lg p-3 border border-border">
-                    <p className="text-xs text-text-secondary">Entradas</p>
+                    <p className="text-xs text-text-secondary">Total do Dia</p>
                     <p className="text-2xl font-bold text-success tabular-nums">{
                       (() => {
-                        const si = Number(caixaModalData.sessao?.saldo_inicial || 0);
-                        const sf = Number(caixaModalData.sessao?.saldo_final || 0);
-                        const ent = sf - si;
-                        return fmtBRL(ent);
+                        const entradas = Number(caixaModalData.resumo?.totalEntradas || 0);
+                        const mov = Array.isArray(caixaModalData.movimentacoes) ? caixaModalData.movimentacoes : [];
+                        let supr = 0, sang = 0, troco = 0, aj = 0;
+                        for (const m of mov) {
+                          const t = String(m?.tipo||'').toLowerCase();
+                          const v = Number(m?.valor||0);
+                          if (t==='suprimento') supr += v; else if (t==='sangria') sang += v; else if (t==='troco') troco += v; else if (t==='ajuste') aj += v;
+                        }
+                        const totalDia = entradas + supr + aj - sang - troco;
+                        return fmtBRL(totalDia);
                       })()
                     }</p>
                   </div>
                   <div className="bg-surface-2 rounded-lg p-3 border border-border">
-                    <p className="text-xs text-text-secondary">Saldo Final</p>
-                    <p className="text-2xl font-bold tabular-nums">{fmtBRL(caixaModalData.sessao?.saldo_final)}</p>
+                    <p className="text-xs text-text-secondary">Saldo Final (contado)</p>
+                    <p className="text-2xl font-bold tabular-nums">{
+                      (() => {
+                        const contado = (caixaModalData && typeof caixaModalData.valorFinalContado === 'number') ? caixaModalData.valorFinalContado : null;
+                        return (contado != null) ? fmtBRL(contado) : '—';
+                      })()
+                    }</p>
                   </div>
                 </div>
 

@@ -96,6 +96,10 @@ export default function FinalizadorasPage() {
     taxa_percentual: '',
     ativo: true
   });
+
+  // Modal de seleção de Forma de Pagamento (SEFAZ)
+  const [isSefazModalOpen, setIsSefazModalOpen] = useState(false);
+  const [sefazSearch, setSefazSearch] = useState('');
   
   // Modal de detalhes
   const [detailsModalOpen, setDetailsModalOpen] = useState(false);
@@ -671,32 +675,17 @@ export default function FinalizadorasPage() {
 
             <div className="space-y-2">
               <Label htmlFor="codigo_sefaz">Forma de Pagamento NF-e/NFC-e *</Label>
-              <Select 
-                value={formData.codigo_sefaz} 
-                onValueChange={(value) => {
-                  const sefaz = CODIGOS_SEFAZ.find(c => c.codigo === value);
-                  setFormData({ 
-                    ...formData, 
-                    codigo_sefaz: value,
-                    nome: formData.nome || sefaz?.nome || ''
-                  });
-                }}
+              <Button
+                type="button"
+                variant="outline"
+                className="justify-between w-full"
+                onClick={() => setIsSefazModalOpen(true)}
               >
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecione a forma de pagamento" />
-                </SelectTrigger>
-                <SelectContent 
-                  className="max-h-[300px] border-2 border-border bg-surface shadow-xl"
-                  position="popper"
-                  sideOffset={5}
-                >
-                  {CODIGOS_SEFAZ.map(sefaz => (
-                    <SelectItem key={sefaz.codigo} value={sefaz.codigo}>
-                      {sefaz.codigo} - {sefaz.nome}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                {formData.codigo_sefaz
+                  ? `${formData.codigo_sefaz} - ${(CODIGOS_SEFAZ.find(c => c.codigo === formData.codigo_sefaz)?.nome) || ''}`
+                  : 'Selecione a forma de pagamento'}
+              </Button>
+              <p className="text-xs text-text-muted">A lista abrirá em um modal com rolagem.</p>
             </div>
 
             <div className="space-y-2">
@@ -754,6 +743,51 @@ export default function FinalizadorasPage() {
               {saving ? 'Salvando...' : 'Salvar'}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal de Seleção SEFAZ */}
+      <Dialog open={isSefazModalOpen} onOpenChange={setIsSefazModalOpen}>
+        <DialogContent className="sm:max-w-[520px] w-[92vw]">
+          <DialogHeader>
+            <DialogTitle>Selecionar Forma de Pagamento (SEFAZ)</DialogTitle>
+            <DialogDescription>Busque por código ou nome</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <Input
+              placeholder="Ex.: 03, crédito, pix..."
+              value={sefazSearch}
+              onChange={(e) => setSefazSearch(e.target.value)}
+            />
+            <div className="max-h-[420px] overflow-auto fx-scroll rounded-md border border-border">
+              <ul className="divide-y divide-border">
+                {CODIGOS_SEFAZ
+                  .filter((c) => {
+                    const q = (sefazSearch || '').toLowerCase();
+                    if (!q) return true;
+                    return c.codigo.includes(q) || String(c.nome).toLowerCase().includes(q);
+                  })
+                  .map((c) => (
+                    <li key={c.codigo}>
+                      <button
+                        type="button"
+                        className={`w-full text-left px-3 py-2 hover:bg-surface-2 ${formData.codigo_sefaz === c.codigo ? 'bg-surface-2' : ''}`}
+                        onClick={() => {
+                          setFormData((prev) => ({
+                            ...prev,
+                            codigo_sefaz: c.codigo,
+                          }));
+                          setIsSefazModalOpen(false);
+                        }}
+                      >
+                        <span className="font-mono mr-2 text-text-secondary">{c.codigo}</span>
+                        <span>{c.nome}</span>
+                      </button>
+                    </li>
+                  ))}
+              </ul>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
 

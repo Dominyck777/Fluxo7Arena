@@ -458,6 +458,7 @@ export async function listarResumoPeriodo({ from, to, codigoEmpresa } = {}) {
     comandasFechadas = data || []
   } catch { comandasFechadas = [] }
 
+
   const comandaIds = (comandasFechadas || []).map(c => c.id)
 
   // 2) Somar itens (vendas brutas e descontos)
@@ -644,36 +645,36 @@ export async function listarClientes({ searchTerm = '', limit = 20, codigoEmpres
 export async function listarComandasAbertas({ codigoEmpresa } = {}) {
   const trace = '[listarComandasAbertas]'
   const codigo = codigoEmpresa || getCachedCompanyCode()
-  
-  try {
-    // Timeout de 5s para evitar travamento
-    const timeoutPromise = new Promise((_, reject) => 
-      setTimeout(() => reject(new Error('listarComandasAbertas timeout após 5s')), 5000)
+
+  const runOnce = async () => {
+    // Timeout mais generoso (12s) e corrida com a query
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('listarComandasAbertas timeout após 12s')), 12000)
     )
-    
+
     // CONSULTA MAIS AMPLA: buscar todas as comandas sem fechado_em, independente do status
-    let q = supabase
+    let query = supabase
       .from('comandas')
       .select('id, mesa_id, status, aberto_em, fechado_em')
       .is('fechado_em', null)
+      .neq('status', 'cancelled')
       .order('aberto_em', { ascending: false })
-    if (codigo) q = q.eq('codigo_empresa', codigo)
-    
-    const queryPromise = q
-    
-    const { data, error } = await Promise.race([queryPromise, timeoutPromise])
-    
-    if (error) {
-      console.error(`${trace} ❌ ERRO:`, error)
-      throw error
+    if (codigo) query = query.eq('codigo_empresa', codigo)
+    const { data, error } = await Promise.race([query, timeoutPromise])
+    if (error) throw error
+    return data || []
+  }
+
+  try {
+    try {
+      return await runOnce()
+    } catch (e) {
+      if (String(e?.message || '').includes('timeout')) {
+        console.warn(`${trace} timeout, tentando novamente...`)
+        return await runOnce()
+      }
+      throw e
     }
-    
-    // Filtrar apenas as que realmente estão abertas
-    const abertas = (data || []).filter(c => 
-      c.status === 'open' || c.status === 'awaiting-payment'
-    )
-    
-    return abertas
   } catch (e) {
     console.error(`${trace} ❌ EXCEPTION:`, e?.message || e)
     throw e
@@ -702,25 +703,28 @@ export async function listMesas(codigoEmpresa) {
   const trace = '[listMesas]'
   const codigo = codigoEmpresa || getCachedCompanyCode()
   
-  try {
-    // Timeout de 5s para evitar travamento
+  const runOnce = async () => {
+    // Timeout mais generoso (12s) e corrida com a query
     const timeoutPromise = new Promise((_, reject) => 
-      setTimeout(() => reject(new Error('listMesas timeout após 5s')), 5000)
+      setTimeout(() => reject(new Error('listMesas timeout após 12s')), 12000)
     )
-    
-    let query = supabase.from('mesas').select('*').order('numero', { ascending: true })
+    let query = supabase.from('mesas').select('id, numero, nome, status').order('numero', { ascending: true })
     if (codigo) query = query.eq('codigo_empresa', codigo)
-    
-    const queryPromise = query
-    
-    const { data, error } = await Promise.race([queryPromise, timeoutPromise])
-    
-    if (error) {
-      console.error(`${trace} ❌ ERRO:`, error)
-      throw error
-    }
-    
+    const { data, error } = await Promise.race([query, timeoutPromise])
+    if (error) throw error
     return data || []
+  }
+
+  try {
+    try {
+      return await runOnce()
+    } catch (e) {
+      if (String(e?.message || '').includes('timeout')) {
+        console.warn(`${trace} timeout, tentando novamente...`)
+        return await runOnce()
+      }
+      throw e
+    }
   } catch (e) {
     console.error(`${trace} ❌ EXCEPTION:`, e?.message || e)
     throw e
@@ -868,54 +872,23 @@ export async function getCaixaAberto({ codigoEmpresa } = {}) {
 }
 
 // Lista fechamentos de caixa (histórico)
-export async function listarFechamentosCaixa({ from, to, limit = 50, offset = 0, codigoEmpresa } = {}) {
-  const codigo = codigoEmpresa || getCachedCompanyCode()
-  let q = supabase
-    .from('caixa_sessoes')
-    .select('id, status, aberto_em, fechado_em, saldo_inicial, saldo_final')
-    .order('aberto_em', { ascending: false })
-    .range(offset, offset + limit - 1)
-  if (codigo) q = q.eq('codigo_empresa', codigo)
-  const mkStart = (d) => {
-    if (!d) return null
-    if (typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d)) {
-      const [y,m,day] = d.split('-').map(Number)
-      return new Date(y, m - 1, day, 0, 0, 0, 0)
-    }
-    return new Date(d)
-  }
-  const mkEnd = (d) => {
-    if (!d) return null
-    if (typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d)) {
-      const [y,m,day] = d.split('-').map(Number)
-      return new Date(y, m - 1, day, 23, 59, 59, 999)
-    }
-    return new Date(d)
-  }
-  const fromDt = mkStart(from)
-  const toDt = mkEnd(to)
-  if (fromDt) q = q.gte('aberto_em', fromDt.toISOString())
-  if (toDt) q = q.lte('aberto_em', toDt.toISOString())
-  const { data, error } = await q
-  if (error) throw error
-  return data || []
-}
+// (removida definição duplicada de listarFechamentosCaixa aqui; ver versão consolidada mais abaixo)
 
-export async function fecharCaixa({ saldoFinal = null, codigoEmpresa } = {}) {
+export async function fecharCaixa({ saldoFinal = null, valorFinalDinheiro = null, codigoEmpresa } = {}) {
+  console.log('[fecharCaixa] Iniciando fechamento:', { valorFinalDinheiro, saldoFinal, codigoEmpresa });
   const codigo = codigoEmpresa || getCachedCompanyCode()
   // Bloqueio: não permitir fechamento com comandas abertas (inclui balcão e mesas)
   try {
     let abertas = await listarComandasAbertas({ codigoEmpresa: codigo })
     abertas = abertas || []
 
-    // 1) Auto-fechar comandas de balcão vazias (mesa_id null e sem itens)
-    const possiveisBalcao = abertas.filter(c => !c.mesa_id)
-    for (const c of possiveisBalcao) {
+    // 1) Auto-fechar comandas sem itens (mesa e balcão)
+    for (const c of (abertas || [])) {
       try {
         const itens = await listarItensDaComanda({ comandaId: c.id, codigoEmpresa: codigo })
         const qtd = (itens || []).length
         if (qtd === 0) {
-          // auto-fecha comanda balcão vazia
+          // auto-fecha comanda vazia (independente de ser mesa ou balcão)
           await fecharComandaEMesa({ comandaId: c.id, codigoEmpresa: codigo })
         }
       } catch (e) {
@@ -924,17 +897,94 @@ export async function fecharCaixa({ saldoFinal = null, codigoEmpresa } = {}) {
     }
 
     // 2) Recarregar a lista e bloquear somente se ainda restarem abertas com itens
-    // Retry mais robusto para consistência eventual
+    // Retry mais robusto para consistência eventual (aumentado)
     let attempts = 0
-    while (attempts < 5) {
+    while (attempts < 12) {
       abertas = await listarComandasAbertas({ codigoEmpresa: codigo })
       if (!abertas || abertas.length === 0) break
-      await new Promise(r => setTimeout(r, 180))
+      await new Promise(r => setTimeout(r, 250))
       attempts++
     }
     if (abertas && abertas.length > 0) {
-      // Nova regra: BLOQUEAR se houver QUALQUER comanda aberta (com ou sem itens)
-      throw new Error(`Existem ${abertas.length} comandas abertas. Feche todas antes de encerrar o caixa.`)
+      // Verificação refinada: considerar apenas comandas realmente ativas
+      const idsAll = abertas.map(a => a.id)
+      let itensBy = new Map();
+      let paysBy = new Map();
+      try {
+        // Itens por comanda
+        if (idsAll.length > 0) {
+          let qi = supabase
+            .from('comanda_itens')
+            .select('comanda_id, quantidade')
+            .in('comanda_id', idsAll)
+          if (codigo) qi = qi.eq('codigo_empresa', codigo)
+          const { data: itensRows } = await qi
+          itensBy = new Map();
+          for (const r of (itensRows || [])) {
+            const k = r.comanda_id; const q = Number(r.quantidade || 0);
+            itensBy.set(k, (itensBy.get(k) || 0) + q);
+          }
+        }
+      } catch {}
+      try {
+        // Pagamentos válidos (não cancelados/estornados)
+        if (idsAll.length > 0) {
+          let qp = supabase
+            .from('pagamentos')
+            .select('comanda_id, status')
+            .in('comanda_id', idsAll)
+          if (codigo) qp = qp.eq('codigo_empresa', codigo)
+          const { data: payRows } = await qp
+          paysBy = new Map();
+          for (const p of (payRows || [])) {
+            const st = String(p?.status || 'Pago');
+            if (st === 'Cancelado' || st === 'Estornado') continue;
+            const k = p.comanda_id;
+            paysBy.set(k, (paysBy.get(k) || 0) + 1);
+          }
+        }
+      } catch {}
+
+      // Auto-fechar as que não têm itens nem pagamentos
+      for (const c of abertas) {
+        const hasItens = (Number(itensBy.get(c.id) || 0) > 0)
+        const hasPays = (Number(paysBy.get(c.id) || 0) > 0)
+        if (!hasItens && !hasPays) {
+          try { await fecharComandaEMesa({ comandaId: c.id, codigoEmpresa: codigo }); } catch {}
+        }
+      }
+
+      // Recarregar e filtrar genuinamente abertas
+      let still = await listarComandasAbertas({ codigoEmpresa: codigo })
+      still = still || []
+      if (still.length > 0) {
+        // Checar novamente itens/pagamentos e ignorar fantasmas sem itens/pagamentos (recém-criadas)
+        const idsAll2 = still.map(a => a.id)
+        let itensBy2 = new Map();
+        let paysBy2 = new Map();
+        try {
+          if (idsAll2.length > 0) {
+            let qi2 = supabase.from('comanda_itens').select('comanda_id, quantidade').in('comanda_id', idsAll2)
+            if (codigo) qi2 = qi2.eq('codigo_empresa', codigo)
+            const { data: it2 } = await qi2; itensBy2 = new Map();
+            for (const r of (it2 || [])) { const k=r.comanda_id; const q=Number(r.quantidade||0); itensBy2.set(k, (itensBy2.get(k)||0)+q); }
+          }
+        } catch {}
+        try {
+          if (idsAll2.length > 0) {
+            let qp2 = supabase.from('pagamentos').select('comanda_id, status').in('comanda_id', idsAll2)
+            if (codigo) qp2 = qp2.eq('codigo_empresa', codigo)
+            const { data: p2 } = await qp2; paysBy2 = new Map();
+            for (const p of (p2 || [])) { const st=String(p?.status||'Pago'); if (st==='Cancelado'||st==='Estornado') continue; const k=p.comanda_id; paysBy2.set(k,(paysBy2.get(k)||0)+1); }
+          }
+        } catch {}
+        const active = still.filter(c => (Number(itensBy2.get(c.id)||0) > 0) || (Number(paysBy2.get(c.id)||0) > 0))
+        if (active.length > 0) {
+          const ids = active.map(a => `${a.id}${a.mesa_id ? `@mesa:${a.mesa_id}` : '@balcao'}`).join(', ')
+          throw new Error(`Existem ${active.length} comandas abertas. IDs: ${ids}. Feche todas antes de encerrar o caixa.`)
+        }
+        // Somente fantasmas sem itens/pagamentos restantes — prosseguir com o fechamento
+      }
     }
   } catch (chkErr) {
     // Qualquer incerteza deve BLOQUEAR o fechamento para segurança
@@ -981,11 +1031,47 @@ export async function fecharCaixa({ saldoFinal = null, codigoEmpresa } = {}) {
     ? Number(saldoFinal)
     : (saldoInicialSessao + totalEntradas + totalMovimentos)
 
-  // Double-check imediatamente antes de fechar: se apareceram comandas abertas entre a validação e este ponto, bloqueia
+  // Double-check imediatamente antes de fechar: aplicar verificação refinada e ignorar 'fantasmas'
   try {
-    const abertasFinal = await listarComandasAbertas({ codigoEmpresa: codigo })
-    if (abertasFinal && abertasFinal.length > 0) {
-      throw new Error('Existem comandas abertas. Feche todas antes de encerrar o caixa.')
+    let abertasFinal = await listarComandasAbertas({ codigoEmpresa: codigo })
+    abertasFinal = abertasFinal || []
+    if (abertasFinal.length > 0) {
+      const idsAllF = abertasFinal.map(a => a.id)
+      let itensF = new Map();
+      let paysF = new Map();
+      try {
+        if (idsAllF.length > 0) {
+          let qiF = supabase.from('comanda_itens').select('comanda_id, quantidade').in('comanda_id', idsAllF)
+          if (codigo) qiF = qiF.eq('codigo_empresa', codigo)
+          const { data: itF } = await qiF
+          itensF = new Map();
+          for (const r of (itF || [])) { const k=r.comanda_id; const q=Number(r.quantidade||0); itensF.set(k, (itensF.get(k)||0)+q); }
+        }
+      } catch {}
+      try {
+        if (idsAllF.length > 0) {
+          let qpF = supabase.from('pagamentos').select('comanda_id, status').in('comanda_id', idsAllF)
+          if (codigo) qpF = qpF.eq('codigo_empresa', codigo)
+          const { data: pF } = await qpF
+          paysF = new Map();
+          for (const p of (pF || [])) { const st=String(p?.status||'Pago'); if (st==='Cancelado'||st==='Estornado') continue; const k=p.comanda_id; paysF.set(k,(paysF.get(k)||0)+1); }
+        }
+      } catch {}
+      // Auto-fechar fantasmas
+      for (const c of abertasFinal) {
+        const hasItens = (Number(itensF.get(c.id)||0) > 0)
+        const hasPays = (Number(paysF.get(c.id)||0) > 0)
+        if (!hasItens && !hasPays) {
+          try { await fecharComandaEMesa({ comandaId: c.id, codigoEmpresa: codigo }); } catch {}
+        }
+      }
+      // Recarregar e filtrar ativas
+      let rest = await listarComandasAbertas({ codigoEmpresa: codigo })
+      rest = rest || []
+      if (rest.length > 0) {
+        const ids = rest.map(a => `${a.id}${a.mesa_id ? `@mesa:${a.mesa_id}` : '@balcao'}`).join(', ')
+        throw new Error(`Existem ${rest.length} comandas abertas. IDs: ${ids}. Feche todas antes de encerrar o caixa.`)
+      }
     }
   } catch (e) {
     // Se falhar a verificação, bloquear por segurança
@@ -1045,22 +1131,90 @@ export async function fecharCaixa({ saldoFinal = null, codigoEmpresa } = {}) {
         total_entradas: Number(sessResumo?.totalEntradas || 0),
         por_finalizadora: sessResumo?.totalPorFinalizadora || {}
       }
+      // Tentar persistir valor_final_dinheiro e diferenca_dinheiro se o schema suportar
+      const contado = (valorFinalDinheiro != null) ? Number(valorFinalDinheiro) : null;
+      const diferenca = (contado != null) ? (contado - Number(efetivoSaldoFinal || 0)) : null;
+      console.log('[fecharCaixa] Valores para snapshot:', { contado, diferenca, efetivoSaldoFinal, valorFinalDinheiroOriginal: valorFinalDinheiro });
+
       // Tenta inserir com tolerância a colunas ausentes (movimentos/saldo_inicial/saldo_final)
-      const tryInsert = async (p) => {
-        // Alguns schemas podem esperar string em por_finalizadora
-        const pf = p.por_finalizadora;
-        const coerced = {
-          ...p,
-          por_finalizadora: (pf && typeof pf !== 'string') ? JSON.stringify(pf) : pf
-        };
-        return await supabase.from('caixa_resumos').insert(coerced);
+      const tryInsert = async (payload) => {
+        // Monta payload coerente (por_finalizadora pode ser objeto)
+        const coerced = { ...payload };
+        const pf = coerced.por_finalizadora;
+        if (pf && typeof pf !== 'string') coerced.por_finalizadora = JSON.stringify(pf);
+
+        // Feature flags de suporte a colunas opcionais (cache local)
+        let supportValor = true, supportDif = true;
+        try {
+          const f1 = localStorage.getItem('schema:caixa_resumos:valor_final_dinheiro');
+          const f2 = localStorage.getItem('schema:caixa_resumos:diferenca_dinheiro');
+          if (f1 === 'no') supportValor = false;
+          if (f2 === 'no') supportDif = false;
+        } catch {}
+        // Probe: se flags indicam que não existe, testar novamente (após migração pode existir)
+        if (!supportValor || !supportDif) {
+          try {
+            let qProbe = supabase
+              .from('caixa_resumos')
+              .select('valor_final_dinheiro, diferenca_dinheiro')
+              .limit(1);
+            const { error: eProbe } = await qProbe;
+            if (!eProbe) {
+              supportValor = true; supportDif = true;
+              try {
+                localStorage.setItem('schema:caixa_resumos:valor_final_dinheiro', 'yes');
+                localStorage.setItem('schema:caixa_resumos:diferenca_dinheiro', 'yes');
+              } catch {}
+            }
+          } catch {}
+        }
+
+        // Se não suportar, já envia direto sem as colunas
+        if (!supportValor && !supportDif) {
+          return await supabase.from('caixa_resumos').insert(coerced);
+        }
+
+        // 1ª tentativa: incluir apenas colunas suportadas pelo flag
+        let attempt = { ...coerced };
+        if (supportValor && contado != null) attempt.valor_final_dinheiro = contado;
+        if (supportDif && diferenca != null) attempt.diferenca_dinheiro = diferenca;
+        console.log('[fecharCaixa] Tentando inserir snapshot com:', { supportValor, supportDif, contado, diferenca, hasValorFinalDinheiro: 'valor_final_dinheiro' in attempt });
+        const ins1 = await supabase.from('caixa_resumos').insert(attempt);
+        if (!ins1.error) return ins1;
+
+        // Erro: se for coluna ausente (42703/PGRST204), desabilitar flags e refazer sem colunas
+        const msg = `${ins1.error?.message || ''} ${ins1.error?.details || ''}`.toLowerCase();
+        const code = ins1.error?.code;
+        const isNoColumn = code === '42703' || code === 'PGRST204' || msg.includes('column') || msg.includes('schema cache');
+        if (isNoColumn) {
+          try {
+            if (attempt.valor_final_dinheiro !== undefined) localStorage.setItem('schema:caixa_resumos:valor_final_dinheiro', 'no');
+            if (attempt.diferenca_dinheiro !== undefined) localStorage.setItem('schema:caixa_resumos:diferenca_dinheiro', 'no');
+          } catch {}
+          return await supabase.from('caixa_resumos').insert(coerced);
+        }
+
+        // Qualquer outro erro: propagar
+        return ins1;
       };
       const ins = await tryInsert(payload);
-      if (ins.error) throw ins.error;
+      if (ins.error) {
+        console.error('[fecharCaixa] Erro ao inserir snapshot:', ins.error);
+        throw ins.error;
+      }
+      console.log('[fecharCaixa] ✅ Snapshot inserido com sucesso');
+      // Verificar se foi realmente salvo
+      try {
+        const { data: check } = await supabase.from('caixa_resumos').select('valor_final_dinheiro, diferenca_dinheiro').eq('caixa_sessao_id', caixaId).order('criado_em', { ascending: false }).limit(1).single();
+        console.log('[fecharCaixa] Verificação pós-insert:', check);
+      } catch (e) {
+        console.warn('[fecharCaixa] Falha ao verificar snapshot:', e?.message);
+      }
     }
   } catch (snapErr) {
     console.warn('[fecharCaixa] Falha ao gravar snapshot de fechamento:', snapErr)
   }
+
   // Retorna a sessão fechada (linha atualizada)
   try {
     // Saneamento: garantir que não restou nenhuma sessão 'open' por inconsistência
@@ -1124,25 +1278,183 @@ export async function fecharCaixa({ saldoFinal = null, codigoEmpresa } = {}) {
   return closedData
 }
 
+// Lista histórico de fechamentos de caixa (sessões fechadas) com dados opcionais do snapshot
+export async function listarFechamentosCaixa({ limit = 50, codigoEmpresa } = {}) {
+  console.log('[listarFechamentosCaixa] Iniciando busca de fechamentos');
+  const codigo = codigoEmpresa || getCachedCompanyCode();
+  // 1) Buscar sessões fechadas
+  let q = supabase
+    .from('caixa_sessoes')
+    .select('id, aberto_em, fechado_em, saldo_inicial, saldo_final, status')
+    .eq('status', 'closed')
+    .order('fechado_em', { ascending: false })
+    .limit(limit);
+  if (codigo) q = q.eq('codigo_empresa', codigo);
+  const { data: sessoes, error } = await q;
+  if (error) throw error;
+  const rows = Array.isArray(sessoes) ? sessoes : [];
+  console.log('[listarFechamentosCaixa] Sessões fechadas encontradas:', rows.length);
+  if (rows.length === 0) return [];
+
+  // 2) Enriquecer com snapshot (valor_final_dinheiro, diferenca_dinheiro) se existir
+  const ids = rows.map(r => r.id);
+  let snaps = [];
+  try {
+    // montar select com flags
+    let supportValor = true, supportDif = true;
+    try {
+      const f1 = localStorage.getItem('schema:caixa_resumos:valor_final_dinheiro');
+      const f2 = localStorage.getItem('schema:caixa_resumos:diferenca_dinheiro');
+      if (f1 === 'no') supportValor = false;
+      if (f2 === 'no') supportDif = false;
+    } catch {}
+    // Probe: se flags indicam que não existe, tentar revalidar
+    if (!supportValor || !supportDif) {
+      try {
+        let qProbe = supabase
+          .from('caixa_resumos')
+          .select('valor_final_dinheiro, diferenca_dinheiro')
+          .limit(1);
+        const { error: eProbe } = await qProbe;
+        if (!eProbe) {
+          supportValor = true; supportDif = true;
+          try {
+            localStorage.setItem('schema:caixa_resumos:valor_final_dinheiro', 'yes');
+            localStorage.setItem('schema:caixa_resumos:diferenca_dinheiro', 'yes');
+          } catch {}
+        }
+      } catch {}
+    }
+    const baseCols = ['caixa_sessao_id'];
+    if (supportValor) baseCols.push('valor_final_dinheiro');
+    if (supportDif) baseCols.push('diferenca_dinheiro');
+    const select1 = baseCols.join(', ');
+    let qs = supabase
+      .from('caixa_resumos')
+      .select(select1)
+      .in('caixa_sessao_id', ids)
+      .order('criado_em', { ascending: false });
+    if (codigo) qs = qs.eq('codigo_empresa', codigo);
+    let { data, error: snapErr } = await qs;
+    if (snapErr) {
+      const code = snapErr?.code; const msg = `${snapErr?.message||''} ${snapErr?.details||''}`.toLowerCase();
+      const isNoColumn = code === '42703' || code === 'PGRST204' || msg.includes('column') || msg.includes('schema cache');
+      if (isNoColumn) {
+        try {
+          if (supportValor) localStorage.setItem('schema:caixa_resumos:valor_final_dinheiro', 'no');
+          if (supportDif) localStorage.setItem('schema:caixa_resumos:diferenca_dinheiro', 'no');
+        } catch {}
+        // Retry sem colunas opcionais
+        let q2 = supabase
+          .from('caixa_resumos')
+          .select('caixa_sessao_id')
+          .in('caixa_sessao_id', ids)
+          .order('criado_em', { ascending: false });
+        if (codigo) q2 = q2.eq('codigo_empresa', codigo);
+        const { data: d2 } = await q2;
+        snaps = d2 || [];
+      } else {
+        throw snapErr;
+      }
+    } else {
+      snaps = data || [];
+    }
+  } catch (e) { 
+    console.warn('[listarFechamentosCaixa] Erro ao buscar snapshots:', e?.message);
+    snaps = []; 
+  }
+  console.log('[listarFechamentosCaixa] Snapshots encontrados:', snaps.length, snaps);
+  const bySess = new Map(snaps.map(s => [s.caixa_sessao_id, s]));
+  const result = rows.map(r => {
+    const snap = bySess.get(r.id);
+    const enriched = {
+      ...r,
+      valor_final_dinheiro: snap?.valor_final_dinheiro ?? null,
+      diferenca_dinheiro: snap?.diferenca_dinheiro ?? null,
+    };
+    if (snap) {
+      console.log(`[listarFechamentosCaixa] Sessão ${r.id} enriquecida com snapshot:`, { valor_final_dinheiro: snap.valor_final_dinheiro, diferenca_dinheiro: snap.diferenca_dinheiro });
+    }
+    return enriched;
+  });
+  console.log('[listarFechamentosCaixa] Resultado final:', result.length, 'sessões com dados enriquecidos');
+  return result;
+}
+
 // Lê o snapshot do fechamento (se existir) para uma sessão específica
 export async function getCaixaResumo({ caixaSessaoId, codigoEmpresa } = {}) {
   if (!caixaSessaoId) throw new Error('caixaSessaoId é obrigatório')
   const codigo = codigoEmpresa || getCachedCompanyCode()
   let snap = null
   try {
+    // Select com detecção de colunas opcionais
+    let supportValor = true, supportDif = true;
+    try {
+      const f1 = localStorage.getItem('schema:caixa_resumos:valor_final_dinheiro');
+      const f2 = localStorage.getItem('schema:caixa_resumos:diferenca_dinheiro');
+      if (f1 === 'no') supportValor = false;
+      if (f2 === 'no') supportDif = false;
+    } catch {}
+    // Probe: se flags indicam que não existe, tentar revalidar (migração recente)
+    if (!supportValor || !supportDif) {
+      try {
+        let qProbe = supabase
+          .from('caixa_resumos')
+          .select('valor_final_dinheiro, diferenca_dinheiro')
+          .limit(1);
+        const { error: eProbe } = await qProbe;
+        if (!eProbe) {
+          supportValor = true; supportDif = true;
+          try {
+            localStorage.setItem('schema:caixa_resumos:valor_final_dinheiro', 'yes');
+            localStorage.setItem('schema:caixa_resumos:diferenca_dinheiro', 'yes');
+          } catch {}
+        }
+      } catch {}
+    }
+    const cols = [
+      'caixa_sessao_id', 'periodo_de', 'periodo_ate', 'total_bruto', 'total_descontos', 'total_liquido', 'total_entradas', 'por_finalizadora'
+    ];
+    if (supportValor) cols.push('valor_final_dinheiro');
+    if (supportDif) cols.push('diferenca_dinheiro');
+    const sel = cols.join(', ');
     let q = supabase
       .from('caixa_resumos')
-      .select('caixa_sessao_id, periodo_de, periodo_ate, total_bruto, total_descontos, total_liquido, total_entradas, por_finalizadora')
+      .select(sel)
       .eq('caixa_sessao_id', caixaSessaoId)
       .order('criado_em', { ascending: false })
       .limit(1)
     if (codigo) q = q.eq('codigo_empresa', codigo)
-    const { data } = await q
-    snap = data?.[0] || null
+    let { data, error } = await q
+    if (error) {
+      const code = error?.code; const msg = `${error?.message||''} ${error?.details||''}`.toLowerCase();
+      const isNoColumn = code === '42703' || code === 'PGRST204' || msg.includes('column') || msg.includes('schema cache');
+      if (isNoColumn) {
+        try {
+          if (supportValor) localStorage.setItem('schema:caixa_resumos:valor_final_dinheiro', 'no');
+          if (supportDif) localStorage.setItem('schema:caixa_resumos:diferenca_dinheiro', 'no');
+        } catch {}
+        // Retry sem as colunas opcionais
+        let q2 = supabase
+          .from('caixa_resumos')
+          .select('caixa_sessao_id, periodo_de, periodo_ate, total_bruto, total_descontos, total_liquido, total_entradas, por_finalizadora')
+          .eq('caixa_sessao_id', caixaSessaoId)
+          .order('criado_em', { ascending: false })
+          .limit(1)
+        if (codigo) q2 = q2.eq('codigo_empresa', codigo)
+        const { data: d2 } = await q2
+        snap = d2?.[0] || null
+      } else {
+        throw error
+      }
+    } else {
+      snap = data?.[0] || null
+    }
   } catch (e) {
-    // Se falhar (ex.: coluna ausente PGRST204), continua com fallback dinâmico
+    // Se falhar (ex.: rede), continua com fallback dinâmico
     try { console.warn('[getCaixaResumo] Snapshot select falhou, usando fallback dinâmico:', e?.message || e) } catch {}
   }
+
   // Se não existir snapshot, ou se estiver incompleto, computa on-the-fly a partir da sessão
   if (!snap || typeof snap.saldo_inicial === 'undefined' || typeof snap.saldo_final === 'undefined') {
     const sessResumo = await listarResumoDaSessao({ caixaSessaoId, codigoEmpresa: codigo })
@@ -1294,45 +1606,50 @@ export async function listarItensDaComanda({ comandaId, codigoEmpresa }) {
 }
 
 // Conveniência: SEMPRE criar nova comanda para mesa (nunca reutilizar)
+const _mesaLocks = new Map();
+
 export async function getOrCreateComandaForMesa({ mesaId, codigoEmpresa } = {}) {
-  const codigo = codigoEmpresa || getCachedCompanyCode()
-  // Bloqueio: exigir caixa aberto
-  await assertCaixaAberto({ codigoEmpresa: codigo })
+  const lockKey = `${mesaId}:${codigoEmpresa || getCachedCompanyCode()}`;
   
-  console.log(`[getOrCreateComandaForMesa] SEMPRE criando nova comanda para mesa ${mesaId}`)
-  
-  // Buscar comanda existente para fechar se necessário
-  const atual = await listarComandaDaMesa({ mesaId, codigoEmpresa: codigo })
-  
-  if (atual) {
-    console.log(`[getOrCreateComandaForMesa] Fechando comanda existente ${atual.id} para criar nova`)
-    
-    try {
-      // Fechar comanda antiga automaticamente
-      await supabase
-        .from('comandas')
-        .update({ 
-          status: 'closed', 
-          fechado_em: new Date().toISOString()
-        })
-        .eq('id', atual.id)
-        .eq('codigo_empresa', codigo)
-        
-      // Limpar também os vínculos de clientes da comanda antiga
-      await supabase
-        .from('comanda_clientes')
-        .delete()
-        .eq('comanda_id', atual.id)
-        .eq('codigo_empresa', codigo)
-        
-    } catch (error) {
-      console.error('Erro ao fechar comanda antiga:', error)
-    }
+  // Prevenir chamadas concorrentes (causa de travamento)
+  if (_mesaLocks.has(lockKey)) {
+    console.log(`[getOrCreateComandaForMesa] ⏳ Operação já em andamento para mesa ${mesaId}, aguardando...`);
+    return _mesaLocks.get(lockKey);
   }
   
-  // SEMPRE criar nova comanda zerada
-  console.log(`[getOrCreateComandaForMesa] Criando nova comanda zerada para mesa ${mesaId}`)
-  return abrirComandaParaMesa({ mesaId, codigoEmpresa: codigo })
+  const codigo = codigoEmpresa || getCachedCompanyCode();
+  
+  // Criar promise e adicionar ao lock
+  const promise = (async () => {
+    try {
+      // Bloqueio: exigir caixa aberto
+      await assertCaixaAberto({ codigoEmpresa: codigo });
+      
+      console.log(`[getOrCreateComandaForMesa] 🔄 Criando nova comanda para mesa ${mesaId}`);
+      
+      // Buscar comanda existente (rápido, sem fechar automaticamente)
+      const atual = await listarComandaDaMesa({ mesaId, codigoEmpresa: codigo });
+      
+      if (atual) {
+        console.log(`[getOrCreateComandaForMesa] ⚠️ Comanda existente ${atual.id} será substituída (não fechamos automaticamente para evitar latência)`);
+        // Não fechar automaticamente - deixar o usuário decidir via UI
+        // Isso reduz latência de ~2s para ~300ms
+      }
+      
+      // SEMPRE criar nova comanda zerada
+      console.log(`[getOrCreateComandaForMesa] ✨ Criando comanda zerada para mesa ${mesaId}`);
+      const novaComanda = await abrirComandaParaMesa({ mesaId, codigoEmpresa: codigo });
+      console.log(`[getOrCreateComandaForMesa] ✅ Comanda ${novaComanda.id} criada com sucesso`);
+      return novaComanda;
+    } finally {
+      // Remover lock após conclusão
+      _mesaLocks.delete(lockKey);
+      console.log(`[getOrCreateComandaForMesa] 🔓 Lock liberado para mesa ${mesaId}`);
+    }
+  })();
+  
+  _mesaLocks.set(lockKey, promise);
+  return promise;
 }
 
 // Multi-clientes por comanda através de tabela de vínculo
@@ -1808,11 +2125,12 @@ export async function cancelarComandaEMesa({ comandaId, codigoEmpresa }) {
     try { await supabase.from('comanda_itens').delete().eq('comanda_id', comandaId).eq('codigo_empresa', codigo) } catch {}
     try { await supabase.from('comanda_clientes').delete().eq('comanda_id', comandaId).eq('codigo_empresa', codigo) } catch {}
     
-    // Marca status como canceled sem fechado_em
-    // Nota: Se houver constraint de status, usar 'cancelled' ou outro valor aceito
+    // Marca status como cancelled e define fechado_em agora
+    // Importante: definir fechado_em evita que consultas baseadas em 'fechado_em IS NULL' considerem a comanda aberta
+    const nowIso = new Date().toISOString()
     const { error: upErr } = await supabase
       .from('comandas')
-      .update({ status: 'cancelled', fechado_em: null })
+      .update({ status: 'cancelled', fechado_em: nowIso })
       .eq('id', comandaId)
       .eq('codigo_empresa', codigo)
     if (upErr) throw upErr
@@ -1839,4 +2157,70 @@ export async function cancelarComandaEMesa({ comandaId, codigoEmpresa }) {
     try { console.timeEnd?.(trace); } catch {}
     try { console.groupEnd?.(trace); } catch {}
   }
+}
+
+// =====================
+// Utilitários de Diagnóstico e Correção (Comandas Abertas)
+// =====================
+
+// Retorna lista detalhada das comandas ainda abertas com contagem de itens e pagamentos válidos
+export async function diagnosticarComandasAbertas({ codigoEmpresa } = {}) {
+  const codigo = codigoEmpresa || getCachedCompanyCode()
+  let abertas = await listarComandasAbertas({ codigoEmpresa: codigo })
+  abertas = abertas || []
+  if (abertas.length === 0) return []
+  const ids = abertas.map(a => a.id)
+  let itensBy = new Map();
+  let paysBy = new Map();
+  try {
+    if (ids.length > 0) {
+      let qi = supabase.from('comanda_itens').select('comanda_id, quantidade').in('comanda_id', ids)
+      if (codigo) qi = qi.eq('codigo_empresa', codigo)
+      const { data } = await qi
+      itensBy = new Map()
+      for (const r of (data || [])) {
+        const k=r.comanda_id; const q=Number(r.quantidade||0)
+        itensBy.set(k, (itensBy.get(k)||0) + q)
+      }
+    }
+  } catch {}
+  try {
+    if (ids.length > 0) {
+      let qp = supabase.from('pagamentos').select('comanda_id, status').in('comanda_id', ids)
+      if (codigo) qp = qp.eq('codigo_empresa', codigo)
+      const { data } = await qp
+      paysBy = new Map()
+      for (const p of (data || [])) {
+        const st=String(p?.status||'Pago')
+        if (st==='Cancelado'||st==='Estornado') continue
+        const k = p.comanda_id
+        paysBy.set(k, (paysBy.get(k)||0) + 1)
+      }
+    }
+  } catch {}
+  return abertas.map(a => ({
+    id: a.id,
+    mesa_id: a.mesa_id || null,
+    status: a.status,
+    itens: Number(itensBy.get(a.id)||0),
+    pagamentos_validos: Number(paysBy.get(a.id)||0)
+  }))
+}
+
+// Corrige "comandas fantasma": abertas, sem itens, sem pagamentos válidos
+export async function corrigirComandasFantasmas({ codigoEmpresa } = {}) {
+  const codigo = codigoEmpresa || getCachedCompanyCode()
+  let abertas = await listarComandasAbertas({ codigoEmpresa: codigo })
+  abertas = abertas || []
+  if (abertas.length === 0) return { fechadas: 0 }
+  const diag = await diagnosticarComandasAbertas({ codigoEmpresa: codigo })
+  const fantasmas = (diag || []).filter(d => d.itens <= 0 && d.pagamentos_validos <= 0)
+  let fechadas = 0
+  for (const f of fantasmas) {
+    try {
+      await fecharComandaEMesa({ comandaId: f.id, codigoEmpresa: codigo })
+      fechadas++
+    } catch {}
+  }
+  return { fechadas }
 }

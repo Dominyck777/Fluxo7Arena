@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 
-import { motion } from 'framer-motion';
+// framer-motion removido para evitar piscadas e erros de runtime
 import { DragDropContext, Droppable, Draggable } from 'react-beautiful-dnd';
 import { Button } from '@/components/ui/button';
 import { useToast } from "@/components/ui/use-toast";
@@ -12,6 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger, } from "@/components/ui/alert-dialog"
 import { Label } from '@/components/ui/label';
+import { Skeleton } from '@/components/ui/skeleton';
 import { listMesas, ensureCaixaAberto, fecharCaixa, getOrCreateComandaForMesa, listarItensDaComanda, adicionarItem, atualizarQuantidadeItem, removerItem, listarFinalizadoras, registrarPagamento, fecharComandaEMesa, cancelarComandaEMesa, listarComandasAbertas, listarTotaisPorComanda, criarMesa, listarClientes, adicionarClientesAComanda, listarClientesDaComanda, getCaixaAberto, listarResumoSessaoCaixaAtual, criarMovimentacaoCaixa, listarMovimentacoesCaixa } from '@/lib/store';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
@@ -45,8 +46,7 @@ const statusConfig = {
   'awaiting-payment': { label: 'Pagamento', color: 'border-info/50 bg-info/10 text-info', icon: FileText },
 };
 
-const pageVariants = { hidden: { opacity: 0 }, visible: { opacity: 1, transition: { staggerChildren: 0.1 } } };
-const itemVariants = { hidden: { opacity: 0, y: 20 }, visible: { opacity: 1, y: 0, transition: { duration: 0.5 } } };
+// Animações removidas
 
 function VendasPage() {
   const { toast } = useToast();
@@ -101,6 +101,7 @@ function VendasPage() {
   const [isMobileView, setIsMobileView] = useState(() => {
     try { return typeof window !== 'undefined' && window.innerWidth <= 640; } catch { return false; }
   });
+  const [loadingItems, setLoadingItems] = useState(false);
   useEffect(() => {
     const update = () => {
       try { setIsMobileView(typeof window !== 'undefined' && window.innerWidth <= 640); } catch { setIsMobileView(false); }
@@ -112,12 +113,7 @@ function VendasPage() {
 
   // Evita movimentação do layout quando diálogos estão abertos (bloqueia scroll do fundo)
   const anyDialogOpen = isCreateMesaOpen || isOpenTableDialog || isOrderDetailsOpen || isCashierDetailsOpen || isPayOpen || openCashDialogOpen || isCounterModeOpen || isProductDetailsOpen || isMobileModalOpen || false;
-  // Props dinâmicos para evitar reanimações enquanto um modal está aberto
-  const pageVariantsActive = anyDialogOpen ? undefined : pageVariants;
-  const itemVariantsActive = anyDialogOpen ? undefined : itemVariants;
-  const prevOverflowRef = useRef(null);
-  const prevAnyOpenRef = useRef(false);
-  const prevPaddingRightRef = useRef('');
+  // Animações desativadas
   // Atualiza rapidamente o status do caixa (aberto/fechado)
   const refreshCashierStatus = useCallback(async () => {
     try {
@@ -127,43 +123,13 @@ function VendasPage() {
       setIsCashierOpen(false);
     }
   }, [userProfile?.codigo_empresa]);
-  useEffect(() => {
-    const originalOverflow = prevOverflowRef.current ?? document.body.style.overflow;
-    prevOverflowRef.current = originalOverflow;
-    if (anyDialogOpen && !prevAnyOpenRef.current) {
-      // Lock scroll and compensate for scrollbar width to avoid layout shift
-      document.body.style.overflow = 'hidden';
-      try {
-        const sw = window.innerWidth - document.documentElement.clientWidth;
-        if (sw > 0) {
-          prevPaddingRightRef.current = document.body.style.paddingRight || '';
-          document.body.style.paddingRight = `${sw}px`;
-        }
-      } catch {}
-      // Importante: não usar atributo 'inert' no root, pois isso bloqueia diálogos em portal
-      try { document.documentElement.classList.add('no-dialog-anim'); } catch {}
-    }
-    if (!anyDialogOpen && prevAnyOpenRef.current) {
-      // Restore scroll and padding
-      document.body.style.overflow = originalOverflow || '';
-      try { document.body.style.paddingRight = prevPaddingRightRef.current || ''; } catch {}
-      try { document.documentElement.classList.remove('no-dialog-anim'); } catch {}
-    }
-    prevAnyOpenRef.current = anyDialogOpen;
-    return () => {
-      // restore on page unmount
-      document.body.style.overflow = originalOverflow || '';
-      try { document.body.style.paddingRight = prevPaddingRightRef.current || ''; } catch {}
-      try { document.documentElement.classList.remove('no-dialog-anim'); } catch {}
-    };
-  }, [anyDialogOpen]);
+  // Removido: scroll lock manual que causava layout shift e piscadas.
 
   // Recarrega e mescla resumo do caixa com saldo_inicial e total de sangrias
   const reloadCashSummary = async () => {
     const codigoEmpresa = userProfile?.codigo_empresa || null;
     try {
       if (!codigoEmpresa) return;
-      setCashLoading(true);
       const [summary, sess] = await Promise.all([
         listarResumoSessaoCaixaAtual({ codigoEmpresa }).catch(() => null),
         getCaixaAberto({ codigoEmpresa }).catch(() => null),
@@ -192,27 +158,28 @@ function VendasPage() {
         sessaoId: sess.id,
         movimentacoes
       };
-      setCashSummary(merged);
+      React.startTransition(() => {
+        setCashSummary(merged);
+      });
     } catch {
-      setCashSummary(null);
+      React.startTransition(() => {
+        setCashSummary(null);
+      });
     } finally {
-      setCashLoading(false);
     }
   };
 
-  // Carregar resumo do caixa quando abrir o diálogo
+  // Carregar resumo do caixa quando abrir o diálogo (apenas 1 vez ao abrir)
+  const cashDetailsOpenedRef = useRef(false);
   useEffect(() => {
-    const loadSummary = async () => {
-      try {
-        if (!isCashierDetailsOpen) return;
-        await reloadCashSummary();
-      } catch {
-        // ignore
-      }
-    };
-    loadSummary();
+    if (isCashierDetailsOpen && !cashDetailsOpenedRef.current) {
+      cashDetailsOpenedRef.current = true;
+      reloadCashSummary().catch(() => {});
+    } else if (!isCashierDetailsOpen) {
+      cashDetailsOpenedRef.current = false;
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isCashierDetailsOpen, userProfile?.codigo_empresa]);
+  }, [isCashierDetailsOpen]);
 
   const mapStatus = (s) => {
     if (s === 'in_use') return 'in-use';
@@ -629,9 +596,9 @@ function VendasPage() {
   const handleSelectTable = async (table) => {
     if (isSelectingTable) return;
     setIsSelectingTable(true);
+    setLoadingItems(true);
     try {
       const previous = selectedTable;
-      setLoading(true);
       if (table.comandaId) {
         // VERIFICAR se a comanda ainda está ativa antes de carregar dados
         try {
@@ -642,15 +609,12 @@ function VendasPage() {
             .eq('codigo_empresa', userProfile?.codigo_empresa)
             .single();
             
-          if (error || !comandaAtual) {
-            setPendingTable(table);
-            setIsOpenTableDialog(true);
-            return;
-          }
-          
-          if (comandaAtual.fechado_em || comandaAtual.status === 'closed') {
-            setPendingTable(table);
-            setIsOpenTableDialog(true);
+          if (error || !comandaAtual || comandaAtual.fechado_em || comandaAtual.status === 'closed') {
+            setLoadingItems(false);
+            React.startTransition(() => {
+              setPendingTable(table);
+              setIsOpenTableDialog(true);
+            });
             return;
           }
           
@@ -668,25 +632,34 @@ function VendasPage() {
           }
           
           const enriched = { ...table, status: 'in-use', order, customer };
-          setSelectedTable(enriched);
-          setTables((prev) => prev.map((t) => (t.id === table.id ? enriched : t)));
+          React.startTransition(() => {
+            setSelectedTable(enriched);
+            setTables((prev) => prev.map((t) => (t.id === table.id ? enriched : t)));
+            setLoadingItems(false);
+          });
           
         } catch (err) {
           console.error(`[handleSelectTable] Erro ao verificar comanda:`, err);
-          setPendingTable(table);
-          setIsOpenTableDialog(true);
+          setLoadingItems(false);
+          React.startTransition(() => {
+            setPendingTable(table);
+            setIsOpenTableDialog(true);
+          });
         }
       } else {
         // não abrir automaticamente; solicitar abertura
-        setPendingTable(table);
-        setIsOpenTableDialog(true);
+        setLoadingItems(false);
+        React.startTransition(() => {
+          setPendingTable(table);
+          setIsOpenTableDialog(true);
+        });
       }
     } catch (e) {
+      setLoadingItems(false);
       toast({ title: 'Falha ao carregar comanda da mesa', description: e?.message || 'Tente novamente', variant: 'destructive' });
       // restaura seleção anterior em caso de erro
       setSelectedTable((prev) => prev || previous || null);
     } finally {
-      setLoading(false);
       setIsSelectingTable(false);
     }
   };
@@ -1127,17 +1100,42 @@ function VendasPage() {
     );
   };
 
-  const CashierDetailsDialog = () => {
+  const CashierDetailsDialog = React.memo(({ open, onOpenChange, cashSummary }) => {
     const fmt = (v) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(v || 0));
-    const saldoInicial = Number(cashSummary?.saldo_inicial ?? cashSummary?.saldoInicial ?? 0);
-    const porFinalizadora = cashSummary?.totalPorFinalizadora || cashSummary?.porFinalizadora || {};
-    const entradasInformadas = Number(cashSummary?.totalEntradas ?? cashSummary?.entradas ?? 0);
-    const entradasCalc = entradasInformadas > 0
-      ? entradasInformadas
-      : Object.values(porFinalizadora || {}).reduce((acc, v) => acc + Number(v || 0), 0);
-    const sangriaVal = Number(cashSummary?.sangria ?? cashSummary?.totalSangria ?? 0);
-    const saidas = Number(cashSummary?.totalSaidas ?? cashSummary?.saidas ?? sangriaVal);
-    const saldoAtual = Math.max(0, saldoInicial + entradasCalc - saidas);
+
+    // Mostrar skeleton apenas na primeira carga de cada abertura
+    const [showSkeleton, setShowSkeleton] = useState(true);
+    useEffect(() => {
+      if (open) {
+        setShowSkeleton(true);
+      } else {
+        setShowSkeleton(false);
+      }
+    }, [open]);
+
+    // Memoizar cálculos para evitar re-renders desnecessários
+    const cashData = useMemo(() => {
+      const saldoInicial = Number(cashSummary?.saldo_inicial ?? cashSummary?.saldoInicial ?? 0);
+      const porFinalizadora = cashSummary?.totalPorFinalizadora || cashSummary?.porFinalizadora || {};
+      const entradasInformadas = Number(cashSummary?.totalEntradas ?? cashSummary?.entradas ?? 0);
+      const entradasCalc = entradasInformadas > 0
+        ? entradasInformadas
+        : Object.values(porFinalizadora || {}).reduce((acc, v) => acc + Number(v || 0), 0);
+      const sangriaVal = Number(cashSummary?.sangria ?? cashSummary?.totalSangria ?? 0);
+      const saidas = Number(cashSummary?.totalSaidas ?? cashSummary?.saidas ?? sangriaVal);
+      const saldoAtual = Math.max(0, saldoInicial + entradasCalc - saidas);
+      return { saldoInicial, porFinalizadora, entradasInformadas, entradasCalc, sangriaVal, saidas, saldoAtual };
+    }, [cashSummary]);
+
+    // Ao receber um cashSummary válido na abertura, escondemos skeleton de forma estável
+    useEffect(() => {
+      if (open && cashSummary) {
+        const t = setTimeout(() => setShowSkeleton(false), 50);
+        return () => clearTimeout(t);
+      }
+    }, [open, cashSummary]);
+
+    const { porFinalizadora, sangriaVal } = cashData;
     const [isSangriaOpen, setIsSangriaOpen] = useState(false);
     const [sangriaValor, setSangriaValor] = useState('');
     const [sangriaObs, setSangriaObs] = useState('');
@@ -1165,9 +1163,11 @@ function VendasPage() {
       }
     };
     return (
-      <Dialog open={isCashierDetailsOpen} onOpenChange={setIsCashierDetailsOpen}>
+      <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent
+          forceMount
           className="sm:max-w-lg w-[92vw] max-h-[85vh] animate-none flex flex-col overflow-hidden"
+          onOpenAutoFocus={(e) => e.preventDefault()}
           onKeyDown={(e) => e.stopPropagation()}
           onKeyDownCapture={(e) => e.stopPropagation()}
           onPointerDownOutside={(e) => e.stopPropagation()}
@@ -1178,8 +1178,12 @@ function VendasPage() {
             <DialogDescription>Resumo da sessão atual do caixa.</DialogDescription>
           </DialogHeader>
           {/* Conteúdo resumido abaixo do header para evitar erros de marcação */}
-          {cashLoading ? (
-            <div className="text-sm text-text-muted px-3">Atualizando...</div>
+          {showSkeleton || !cashSummary ? (
+            <div className="px-4 space-y-3">
+              <Skeleton className="h-16 w-full" />
+              <Skeleton className="h-16 w-full" />
+              <Skeleton className="h-12 w-full" />
+            </div>
           ) : (
             <div className="px-1">
               {Object.keys(porFinalizadora).length === 0 ? (
@@ -1208,7 +1212,7 @@ function VendasPage() {
           <DialogFooter className="flex items-center justify-between gap-2">
             <div className="mr-auto" />
             <Button variant="destructive" onClick={() => setIsSangriaOpen(true)}>Registrar Sangria</Button>
-            <Button variant="secondary" onClick={() => setIsCashierDetailsOpen(false)}>Fechar</Button>
+            <Button variant="secondary" onClick={() => onOpenChange(false)}>Fechar</Button>
           </DialogFooter>
           <Dialog open={isSangriaOpen} onOpenChange={setIsSangriaOpen}>
             <DialogContent className="sm:max-w-sm w-[92vw] max-h-[85vh] animate-none" onKeyDown={(e) => e.stopPropagation()} onKeyDownCapture={(e) => e.stopPropagation()}>
@@ -1255,7 +1259,7 @@ function VendasPage() {
         </DialogContent>
       </Dialog>
     );
-  };
+  });
 
   const OrderDetailsDialog = () => {
     const tbl = selectedTable;
@@ -1305,10 +1309,24 @@ function VendasPage() {
 
   const OrderPanel = ({ table }) => {
     if (!table) return (
-      <div className="flex flex-col items-center justify-center h-full text-center text-text-muted">
-        <ShoppingBag size={48} className="mb-4" />
-        <h3 className="text-xl font-bold text-text-primary">Nenhuma mesa selecionada</h3>
-        <p>Clique em uma mesa para ver os detalhes da comanda.</p>
+      <div className="flex items-center justify-center h-full text-text-muted">
+        <div className="text-center">
+          <ShoppingBag className="mx-auto mb-4 h-12 w-12 opacity-50" />
+          <p>Selecione uma mesa para ver a comanda</p>
+        </div>
+      </div>
+    );
+    
+    if (loadingItems) return (
+      <div className="flex flex-col h-full p-4 space-y-3">
+        <Skeleton className="h-8 w-3/4" />
+        <Skeleton className="h-20 w-full" />
+        <Skeleton className="h-20 w-full" />
+        <Skeleton className="h-20 w-full" />
+        <div className="mt-auto space-y-2">
+          <Skeleton className="h-12 w-full" />
+          <Skeleton className="h-12 w-full" />
+        </div>
       </div>
     );
 
@@ -1498,9 +1516,11 @@ function VendasPage() {
           const next = exists ? prev.map(t => (t.id === newTable.id ? newTable : t)) : [...prev, newTable];
           return next.slice().sort((a, b) => Number(a.number) - Number(b.number));
         });
-        setSelectedTable(newTable);
+        React.startTransition(() => {
+          setSelectedTable(newTable);
+          setIsCreateMesaOpen(false);
+        });
         toast({ title: 'Mesa criada', description: `Mesa ${mesa.numero} adicionada`, variant: 'success' });
-        setIsCreateMesaOpen(false);
         setNumeroVal('');
         setNomeVal('');
       } catch (e) {
@@ -2975,8 +2995,8 @@ function VendasPage() {
     <>
       <ProductDetailsDialog />
       <CounterProductDetailsDialog />
-      <motion.div variants={pageVariantsActive} initial={false} animate={anyDialogOpen ? false : "visible"} layout={false} className="h-full flex flex-col">
-        <motion.div variants={itemVariantsActive} initial={false} animate={anyDialogOpen ? false : undefined} layout={false} className="flex items-center justify-between mb-2 md:mb-6 gap-2 md:gap-4 flex-wrap">
+      <div className="h-full flex flex-col">
+        <div className="flex items-center justify-between mb-2 md:mb-6 gap-2 md:gap-4 flex-wrap">
           <div className="w-full md:w-auto flex items-center gap-2 md:gap-3">
             <Tabs value="mesas" className="w-full md:w-auto flex-1" onValueChange={(v) => {
               if (v === 'mesas') navigate('/vendas');
@@ -3003,7 +3023,7 @@ function VendasPage() {
               <Plus className="mr-2 h-4 w-4" /> Nova Mesa
             </Button>
           </div>
-        </motion.div>
+        </div>
         {/* Removed persistent mobile hint about closing cashier to avoid noise */}
         {!isCashierOpen && openComandasCount > 0 && (
           <div className="md:hidden mb-3 text-[11px] text-warning flex items-center gap-2">
@@ -3014,7 +3034,7 @@ function VendasPage() {
         )}
         
         <div className="flex-1 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 overflow-hidden min-h-0">
-            <motion.div variants={itemVariantsActive} initial={false} animate={anyDialogOpen ? false : undefined} layout={false} className="lg:col-span-2 bg-surface rounded-lg border border-border p-4 md:p-6 overflow-y-auto thin-scroll min-h-0">
+            <div className="lg:col-span-2 bg-surface rounded-lg border border-border p-4 md:p-6 overflow-y-auto thin-scroll min-h-0">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-xl font-bold">Mapa de Mesas</h2>
                 {/* Mobile-only '+' button to create a new mesa */}
@@ -3065,10 +3085,10 @@ function VendasPage() {
                     </Droppable>
                 </DragDropContext>
               </div>
-            </motion.div>
+            </div>
 
             {/* Painel Lateral - Apenas Desktop */}
-            <motion.div variants={itemVariantsActive} initial={false} animate={anyDialogOpen ? false : undefined} layout={false} className="hidden md:flex bg-surface rounded-lg border border-border flex-col min-h-0">
+            <div className="hidden md:flex bg-surface rounded-lg border border-border flex-col min-h-0">
                 <Tabs defaultValue="order" className="flex flex-col h-full">
                     <TabsList className="grid w-full grid-cols-2 m-2">
                         <TabsTrigger value="order">Comanda</TabsTrigger>
@@ -3077,13 +3097,13 @@ function VendasPage() {
                     <TabsContent value="order" className="flex-1 overflow-hidden min-h-0"><OrderPanel table={selectedTable} /></TabsContent>
                     <TabsContent value="products" className="flex-1 overflow-hidden min-h-0"><ProductsPanel/></TabsContent>
                 </Tabs>
-            </motion.div>
+            </div>
         </div>
 
-      </motion.div>
+      </div>
       <MobileTableModal />
       <CounterModeModal />
-      <CashierDetailsDialog />
+      <CashierDetailsDialog open={isCashierDetailsOpen} onOpenChange={setIsCashierDetailsOpen} cashSummary={cashSummary} />
       <OrderDetailsDialog />
       <ManageClientsDialog />
       <OpenTableDialog />

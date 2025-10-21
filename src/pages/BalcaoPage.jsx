@@ -137,10 +137,12 @@ export default function BalcaoPage() {
       }
       
       let totalSangria = 0;
+      let totalSuprimento = 0;
       let movimentacoes = [];
       try {
         movimentacoes = await listarMovimentacoesCaixa({ caixaSessaoId: sess.id, codigoEmpresa });
-        totalSangria = (movimentacoes || []).filter(m => (m?.tipo || '') === 'sangria').reduce((acc, m) => acc + Number(m?.valor || 0), 0);
+        totalSangria = (movimentacoes || []).filter(m => String(m?.tipo || '').toLowerCase() === 'sangria').reduce((acc, m) => acc + Number(m?.valor || 0), 0);
+        totalSuprimento = (movimentacoes || []).filter(m => String(m?.tipo || '').toLowerCase() === 'suprimento').reduce((acc, m) => acc + Number(m?.valor || 0), 0);
       } catch {}
       
       // Sempre usar dados da sessão, mesmo sem vendas
@@ -149,6 +151,7 @@ export default function BalcaoPage() {
         totalPorFinalizadora: summary?.totalPorFinalizadora || summary?.porFinalizadora || {},
         totalEntradas: summary?.totalEntradas || summary?.entradas || 0,
         totalSangria,
+        totalSuprimento,
         totalSaidas: totalSangria,
         sessaoId: sess.id,
         movimentacoes
@@ -210,12 +213,65 @@ export default function BalcaoPage() {
     return () => { active = false; };
   }, [isPayOpen, selectedClientIds, comandaId, userProfile?.codigo_empresa]);
 
+  // ===== Helpers de Pagamento (base + taxa) =====
+  const parseBRL = (s) => { const d = String(s || '').replace(/\D/g, ''); return d ? Number(d) / 100 : 0; };
+  const formatBRL = (n) => new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
+  const getMethod = (methodId) => (payMethods || []).find(m => String(m.id) === String(methodId));
+  const linePct = (ln) => Number(getMethod(ln.methodId)?.taxa_percentual || 0);
+  // Retorna a base (sem taxa) considerando o estado atual do input (que pode ou não incluir taxa)
+  const lineBase = (ln) => {
+    const v = parseBRL(ln.value);
+    const pct = linePct(ln);
+    if (!ln.chargeFee || !pct) return v;
+    return v / (1 + (pct/100));
+  };
+  const lineFee = (ln) => {
+    const base = lineBase(ln);
+    const pct = linePct(ln);
+    if (!ln.chargeFee || !pct || base <= 0) return 0;
+    return base * (pct / 100);
+  };
+  const lineWithBase = (ln, base) => {
+    const pct = linePct(ln);
+    if (ln.chargeFee && pct > 0) {
+      const totalWithFee = base * (1 + pct/100);
+      return { ...ln, value: formatBRL(totalWithFee) };
+    }
+    return { ...ln, value: formatBRL(base) };
+  };
+  const sumBasePayments = () => (paymentLines || []).reduce((acc, ln) => acc + lineBase(ln), 0);
+  const sumFees = () => (paymentLines || []).reduce((acc, ln) => acc + lineFee(ln), 0);
+  const sumPayments = () => sumBasePayments() + sumFees();
+
+  // Auto-ajuste de centavos quando linhas mudam (tolerância 5 centavos)
+  useEffect(() => {
+    try {
+      if (!isPayOpen) return;
+      // total dos itens da comanda
+      let totalBase = 0;
+      try {
+        totalBase = (items || []).reduce((acc, it) => acc + Number(it.quantity||0)*Number(it.price||0), 0);
+      } catch {}
+      const baseSum = sumBasePayments();
+      const diff = totalBase - baseSum;
+      if (Math.abs(diff) > 0.009 && Math.abs(diff) <= 0.05 && Array.isArray(paymentLines) && paymentLines.length > 0) {
+        setPaymentLines(prev => prev.map((line, idx, arr) => {
+          if (idx !== arr.length - 1) return line;
+          const base = lineBase(line) + diff;
+          return lineWithBase(line, base);
+        }));
+      }
+    } catch {}
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paymentLines, isPayOpen]);
+
   // Confirmar pagamento no Balcão
   const confirmPay = async () => {
     try {
       if (!comandaId) { toast({ title: 'Nenhuma comanda aberta', description: 'Adicione itens para abrir uma comanda.', variant: 'warning' }); return; }
       const codigoEmpresa = userProfile?.codigo_empresa;
       if (!codigoEmpresa) { toast({ title: 'Empresa não definida', variant: 'destructive' }); return; }
+
       // validações de múltiplos pagamentos
       if (!Array.isArray(paymentLines) || paymentLines.length === 0) { toast({ title: 'Informe os pagamentos', description: 'Adicione pelo menos uma forma de pagamento.', variant: 'warning' }); return; }
       for (const ln of paymentLines) {
@@ -223,34 +279,28 @@ export default function BalcaoPage() {
         const digits = String(ln.value || '').replace(/\D/g, '');
         if (!digits) { toast({ title: 'Valor inválido', description: 'Informe valores maiores que zero.', variant: 'warning' }); return; }
       }
-      // Verificar total vs soma
+      // Verificar total vs soma (comparar BASE com total de itens)
       let total = 0;
       try {
         const itens = await listarItensDaComanda({ comandaId, codigoEmpresa });
         total = (itens || []).reduce((acc, it) => acc + Number(it.quantidade || 0) * Number(it.preco_unitario || 0), 0);
       } catch {}
-      const sum = (paymentLines || []).reduce((acc, ln) => acc + (Number(String(ln.value||'').replace(/\D/g, ''))/100 || 0), 0);
-      const diff = Math.abs(sum - total);
-      
+      const sumBase = sumBasePayments();
+      const diff = Math.abs(sumBase - total);
+
       // Se a diferença for apenas centavos (até 0.05), ajustar automaticamente na última linha
       if (diff > 0.009 && diff <= 0.05) {
-        const adjustment = total - sum;
-        setPaymentLines(prev => {
-          const lastIdx = prev.length - 1;
-          return prev.map((line, idx) => {
-            if (idx === lastIdx) {
-              const currentValue = Number(String(line.value || '').replace(/\D/g, '')) / 100;
-              const newValue = currentValue + adjustment;
-              const formatted = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(newValue);
-              return { ...line, value: formatted };
-            }
-            return line;
-          });
-        });
+        const adjustment = total - sumBase; // ajuste em BASE
+        setPaymentLines(prev => prev.map((line, idx, arr) => {
+          if (idx !== arr.length - 1) return line;
+          const base = lineBase(line) + adjustment;
+          return lineWithBase(line, base);
+        }));
+
         // Não retornar - continuar com o pagamento após ajuste
       } else if (diff > 0.05) {
         // Diferença maior que 5 centavos - mostrar erro
-        const remaining = total - sum;
+        const remaining = total - sumBase;
         if (remaining > 0) {
           toast({ title: 'Valor insuficiente', description: `Faltam R$ ${remaining.toFixed(2)} para fechar o total.`, variant: 'warning' });
         } else {
@@ -261,11 +311,12 @@ export default function BalcaoPage() {
       setPayLoading(true);
       await ensureCaixaAberto({ codigoEmpresa });
       for (const ln of paymentLines) {
-        const valor = Number(String(ln.value||'').replace(/\D/g, ''))/100 || 0;
+        const valor = parseBRL(ln.value); // já inclui taxa quando chargeFee=true
         const fin = payMethods.find(m => String(m.id) === String(ln.methodId));
         const metodo = fin?.nome || fin?.tipo || 'outros';
         await registrarPagamento({ comandaId, finalizadoraId: ln.methodId, metodo, valor, status: 'Pago', codigoEmpresa, clienteId: ln.clientId || null });
       }
+
       await fecharComandaEMesa({ comandaId, codigoEmpresa });
       // Limpeza de estado e cache
       setComandaId(null);
@@ -286,16 +337,8 @@ export default function BalcaoPage() {
     } finally { setPayLoading(false); }
   };
 
-  // Soma atual das linhas de pagamento (lendo strings em formato BRL)
-  const sumPayments = () => {
-    try {
-      return (paymentLines || []).reduce((acc, ln) => {
-        const digits = String(ln?.value || '').replace(/\D/g, '');
-        const v = digits ? Number(digits) / 100 : 0;
-        return acc + v;
-      }, 0);
-    } catch { return 0; }
-  };
+  // Soma total (base + taxas)
+  // sumPayments/sumFees já definidos nos helpers
 
   useEffect(() => {
     const loadSummary = async () => {
@@ -393,6 +436,8 @@ export default function BalcaoPage() {
   const CloseCashierDialog = () => {
     const [closingData, setClosingData] = useState({ loading: false, saldoInicial: 0, resumo: null });
     const [showMobileWarn, setShowMobileWarn] = useState(false);
+    const [contado, setContado] = useState('');
+    const [confirmStep, setConfirmStep] = useState(false); // false = revisão, true = confirmação
     const handlePrepareClose = async () => {
       try {
         setClosingData({ loading: true, saldoInicial: 0, resumo: null });
@@ -406,8 +451,10 @@ export default function BalcaoPage() {
     const totalPorFinalizadora = closingData?.resumo?.totalPorFinalizadora || {};
     const somaFinalizadoras = Object.values(totalPorFinalizadora).reduce((acc, v) => acc + Number(v || 0), 0);
     const totalCaixa = Number(closingData.saldoInicial || 0) + somaFinalizadoras;
+    const suprimentosDinheiro = Number(cashSummary?.totalSuprimento || 0);
+    const sangriasDinheiro = Number(cashSummary?.totalSangria || 0);
     return (
-      <AlertDialog>
+      <AlertDialog onOpenChange={(open) => { if (open) { setConfirmStep(false); handlePrepareClose(); } }}>
         <AlertDialogTrigger asChild>
           <Button
             variant="destructive"
@@ -416,11 +463,10 @@ export default function BalcaoPage() {
             className="h-9 rounded-md px-3 sm:h-10"
           >
             <Lock className="h-4 w-4" />
-            <span className="ml-2 md:hidden">Fechar</span>
-            <span className="ml-2 hidden md:inline">Fechar Caixa</span>
+            <span className="ml-2">Fechar Caixa</span>
           </Button>
         </AlertDialogTrigger>
-        <AlertDialogContent className="sm:max-w-[425px] w-[92vw] max-h-[85vh] animate-none" onKeyDown={(e) => e.stopPropagation()} onPointerDownOutside={(e) => { e.preventDefault(); e.stopPropagation(); }} onInteractOutside={(e) => { e.preventDefault(); e.stopPropagation(); }}>
+        <AlertDialogContent className="sm:max-w-[425px] animate-none" onKeyDown={(e) => e.stopPropagation()} onPointerDownOutside={(e) => { e.preventDefault(); e.stopPropagation(); }} onInteractOutside={(e) => { e.preventDefault(); e.stopPropagation(); }}>
           <AlertDialogHeader>
             <AlertDialogTitle>Fechar Caixa</AlertDialogTitle>
             <AlertDialogDescription>Confira os valores e confirme o fechamento do caixa. Esta ação é irreversível.</AlertDialogDescription>
@@ -435,64 +481,80 @@ export default function BalcaoPage() {
             <div className="py-4 text-text-muted">Carregando resumo…</div>
           ) : (
             <div className="py-4 space-y-2">
-              <div className="flex justify-between"><span className="text-text-secondary">Valor Inicial:</span> <span className="font-mono">R$ {Number(closingData.saldoInicial||0).toFixed(2)}</span></div>
-              {Object.keys(totalPorFinalizadora).length === 0 ? (
-                <div className="text-sm text-text-muted">Sem pagamentos nesta sessão.</div>
+              {!confirmStep ? (
+                <>
+                  <div className="text-xs font-medium text-text-muted uppercase tracking-wide mb-1">Resumo</div>
+                  <div className="flex justify-between"><span className="text-text-secondary">Valor Inicial</span> <span className="font-mono">R$ {Number(closingData.saldoInicial||0).toFixed(2)}</span></div>
+                  {Object.keys(totalPorFinalizadora).length === 0 ? (
+                    <div className="text-sm text-text-muted">Sem pagamentos nesta sessão.</div>
+                  ) : (
+                    <div className="space-y-1">
+                      {Object.entries(totalPorFinalizadora).map(([metodo, valor]) => (
+                        <div key={metodo} className="flex justify-between"><span className="text-text-secondary">{String(metodo)}</span> <span className="font-mono">R$ {Number(valor||0).toFixed(2)}</span></div>
+                      ))}
+                    </div>
+                  )}
+                  <div className="my-2 h-px bg-border" />
+                  <div className="text-xs font-medium text-text-muted uppercase tracking-wide mb-1">Conferência</div>
+                  <div className="flex justify-between"><span className="text-text-secondary">Suprimentos</span> <span className="font-mono">R$ {suprimentosDinheiro.toFixed(2)}</span></div>
+                  <div className="flex justify-between"><span className="text-text-secondary">Sangrias</span> <span className="font-mono">R$ {sangriasDinheiro.toFixed(2)}</span></div>
+                  <div className="flex justify-between font-medium text-base"><span className="text-text-secondary">Total em Caixa</span> <span className="font-mono text-success">R$ {Number(totalCaixa||0).toFixed(2)}</span></div>
+                </>
               ) : (
-                Object.entries(totalPorFinalizadora).map(([metodo, valor]) => (
-                  <div key={metodo} className="flex justify-between"><span className="text-text-secondary">{String(metodo)}:</span> <span className="font-mono">R$ {Number(valor||0).toFixed(2)}</span></div>
-                ))
+                <>
+                  {/* Mini-resumo no topo da etapa 2 */}
+                  <div className="space-y-1">
+                    <div className="flex justify-between"><span className="text-text-secondary">Valor Inicial</span> <span className="font-mono">R$ {Number(closingData.saldoInicial||0).toFixed(2)}</span></div>
+                    <div className="flex justify-between"><span className="text-text-secondary">Valor Final</span> <span className="font-mono">{(() => { const d=String(contado||'').replace(/\D/g,''); const v=d?Number(d)/100:0; return new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(v); })()}</span></div>
+                  </div>
+                  <div className="mt-2">
+                    <Label className="mb-1 block">Valor Final</Label>
+                    <Input type="text" inputMode="numeric" placeholder="0,00" value={contado}
+                      onChange={(e) => { const digits = (e.target.value || '').replace(/\D/g, ''); const cents = digits ? Number(digits) / 100 : 0; const formatted = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(cents); setContado(formatted); }}
+                      onKeyDown={(e) => { e.stopPropagation(); const allowed = ['Backspace','Delete','ArrowLeft','ArrowRight','Tab']; if (allowed.includes(e.key)) return; if (!/^[0-9]$/.test(e.key)) { e.preventDefault(); } }}
+                      onBeforeInput={(e) => { const data = e.data ?? ''; if (data && /\D/.test(data)) e.preventDefault(); }}
+                    />
+                  </div>
+                </>
               )}
-              <div className="flex justify-between font-bold text-lg"><span className="text-text-primary">Total em Caixa:</span> <span className="font-mono text-success">R$ {Number(totalCaixa||0).toFixed(2)}</span></div>
             </div>
           )}
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction onClick={async () => {
-              try {
-                try {
-                  const abertas = await listarComandasAbertas({ codigoEmpresa: userProfile?.codigo_empresa });
-                  // Nova regra: bloquear se houver QUALQUER comanda aberta
-                  if (Array.isArray(abertas) && abertas.length > 0) {
-                    if (isMobileView) {
-                      setShowMobileWarn(true);
-                      setMobileWarnMsg(`Existem ${abertas.length} comandas abertas. Feche todas antes de encerrar o caixa.`);
-                      // Mostra no próximo frame para evitar overlay
-                      if (typeof requestAnimationFrame === 'function') {
-                        requestAnimationFrame(() => setMobileWarnOpen(true));
-                      } else {
-                        setMobileWarnOpen(true);
+            {!confirmStep ? (
+              <>
+                <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                <Button onClick={() => setConfirmStep(true)}>Confirmar Fechamento</Button>
+              </>
+            ) : (
+              <>
+                <Button variant="outline" onClick={() => setConfirmStep(false)}>Voltar</Button>
+                <Button onClick={async () => {
+                  try {
+                    // Bloqueio se houver comandas abertas
+                    try {
+                      const abertas = await listarComandasAbertas({ codigoEmpresa: userProfile?.codigo_empresa });
+                      if (Array.isArray(abertas) && abertas.length > 0) {
+                        if (isMobileView) {
+                          setShowMobileWarn(true);
+                          toast({ title: 'Fechamento bloqueado', description: `Existem ${abertas.length} comandas abertas. Feche todas antes de encerrar o caixa.`, variant: 'warning' });
+                        } else {
+                          toast({ title: 'Fechamento bloqueado', description: `Existem ${abertas.length} comandas abertas. Feche todas antes de encerrar o caixa.`, variant: 'warning', duration: 2500 });
+                        }
+                        return;
                       }
-                      setTimeout(() => setMobileWarnOpen(false), 2600);
-                    } else {
-                      toast({
-                        title: 'Fechamento bloqueado',
-                        description: `Existem ${abertas.length} comandas abertas. Feche todas antes de encerrar o caixa.`,
-                        variant: 'warning',
-                        duration: 2500,
-                      });
-                    }
-                    return;
+                    } catch {}
+                    // Fechar caixa com valor final contado
+                    const digits = String(contado || '').replace(/\D/g, '');
+                    const valorFinal = digits ? Number(digits) / 100 : 0;
+                    await fecharCaixa({ codigoEmpresa: userProfile?.codigo_empresa, valorFinalDinheiro: valorFinal });
+                    setIsCashierOpen(false);
+                    toast({ title: 'Caixa fechado!', description: 'Fechamento registrado com sucesso.', variant: 'success' });
+                  } catch (e) {
+                    toast({ title: 'Falha ao fechar caixa', description: e?.message || 'Tente novamente', variant: 'destructive' });
                   }
-                } catch {}
-                await fecharCaixa({ codigoEmpresa: userProfile?.codigo_empresa });
-                setIsCashierOpen(false);
-                toast({ title: 'Caixa fechado!', description: 'O relatório de fechamento foi gerado.', variant: 'success' });
-              } catch (e) {
-                const msg = e?.message || 'Tente novamente';
-                if (isMobileView) {
-                  setMobileWarnMsg(msg.includes('Existem') ? msg : `Falha ao fechar caixa: ${msg}`);
-                  if (typeof requestAnimationFrame === 'function') {
-                    requestAnimationFrame(() => setMobileWarnOpen(true));
-                  } else {
-                    setMobileWarnOpen(true);
-                  }
-                  setTimeout(() => setMobileWarnOpen(false), 2600);
-                } else {
-                  toast({ title: 'Falha ao fechar caixa', description: msg, variant: 'destructive' });
-                }
-              }
-            }}>Confirmar Fechamento</AlertDialogAction>
+                }}>Fechar Caixa</Button>
+              </>
+            )}
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -502,6 +564,7 @@ export default function BalcaoPage() {
   const CashierDetailsDialog = () => {
     const fmt = (v) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(v || 0));
     const [isSangriaOpen, setIsSangriaOpen] = useState(false);
+    const [isSuprimentoOpen, setIsSuprimentoOpen] = useState(false);
     const [sangriaValor, setSangriaValor] = useState('');
     const [sangriaObs, setSangriaObs] = useState('');
     const [sangriaLoading, setSangriaLoading] = useState(false);
@@ -521,6 +584,26 @@ export default function BalcaoPage() {
       } catch (e) {
         toast({ title: 'Falha ao registrar sangria', description: e?.message || 'Tente novamente', variant: 'destructive' });
       } finally { setSangriaLoading(false); }
+    };
+    const [suprimentoValor, setSuprimentoValor] = useState('');
+    const [suprimentoObs, setSuprimentoObs] = useState('');
+    const [suprimentoLoading, setSuprimentoLoading] = useState(false);
+    const performSuprimento = async () => {
+      try {
+        setSuprimentoLoading(true);
+        const digits = String(suprimentoValor || '').replace(/\D/g, '');
+        const valor = digits ? Number(digits) / 100 : 0;
+        if (valor <= 0) { toast({ title: 'Valor inválido', description: 'Informe um valor positivo.', variant: 'warning' }); return; }
+        await ensureCaixaAberto({ codigoEmpresa: userProfile?.codigo_empresa });
+        await criarMovimentacaoCaixa({ tipo: 'suprimento', valor, observacao: suprimentoObs, codigoEmpresa: userProfile?.codigo_empresa });
+        setIsSuprimentoOpen(false);
+        setSuprimentoValor('');
+        setSuprimentoObs('');
+        await reloadCashSummary();
+        toast({ title: 'Suprimento registrado', variant: 'success' });
+      } catch (e) {
+        toast({ title: 'Falha ao registrar suprimento', description: e?.message || 'Tente novamente', variant: 'destructive' });
+      } finally { setSuprimentoLoading(false); }
     };
     return (
       <Dialog open={isCashierDetailsOpen} onOpenChange={setIsCashierDetailsOpen}>
@@ -569,16 +652,47 @@ export default function BalcaoPage() {
                     </ul>
                   )}
                   <div className="mt-2 rounded-md border border-border bg-surface px-3 py-2 flex items-center justify-between">
+                    <span className="text-sm text-text-secondary truncate pr-3">Suprimentos</span>
+                    <span className="text-sm font-semibold tabular-nums text-success">{fmt(cashSummary.totalSuprimento || 0)}</span>
+                  </div>
+                  <div className="mt-2 rounded-md border border-border bg-surface px-3 py-2 flex items-center justify-between">
                     <span className="text-sm text-text-secondary truncate pr-3">Sangrias</span>
-                    <span className="text-sm font-semibold tabular-nums text-danger">{fmt(cashSummary.totalSangria)}</span>
+                    <span className="text-sm font-semibold tabular-nums text-danger">{fmt(cashSummary.totalSangria || 0)}</span>
                   </div>
                 </div>
               </div>
               <DialogFooter className="flex items-center justify-between gap-2">
                 <div className="mr-auto" />
+                <Button variant="outline" onClick={() => setIsSuprimentoOpen(true)}>Registrar Suprimento</Button>
                 <Button variant="destructive" onClick={() => setIsSangriaOpen(true)}>Registrar Sangria</Button>
                 <Button variant="secondary" onClick={() => setIsCashierDetailsOpen(false)}>Fechar</Button>
               </DialogFooter>
+              <Dialog open={isSuprimentoOpen} onOpenChange={setIsSuprimentoOpen}>
+                <DialogContent className="sm:max-w-sm w-[92vw] max-h-[85vh] animate-none" onKeyDown={(e) => e.stopPropagation()}>
+                  <DialogHeader>
+                    <DialogTitle className="text-xl font-bold">Registrar Suprimento</DialogTitle>
+                    <DialogDescription>Informe o valor de entrada no caixa e, opcionalmente, uma observação.</DialogDescription>
+                  </DialogHeader>
+                  <div className="space-y-3">
+                    <div>
+                      <Label htmlFor="r-valor">Valor</Label>
+                      <Input id="r-valor" type="text" inputMode="numeric" autoComplete="off" placeholder="0,00" value={suprimentoValor}
+                        onChange={(e) => { const digits = (e.target.value || '').replace(/\D/g, ''); const cents = digits ? Number(digits) / 100 : 0; const formatted = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(cents); setSuprimentoValor(formatted); }}
+                        onKeyDown={(e) => { e.stopPropagation(); const allowed = ['Backspace','Delete','ArrowLeft','ArrowRight','Tab']; if (allowed.includes(e.key)) return; if (!/^[0-9]$/.test(e.key)) { e.preventDefault(); } }}
+                        onBeforeInput={(e) => { const data = e.data ?? ''; if (data && /\D/.test(data)) e.preventDefault(); }}
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="r-obs">Observação</Label>
+                      <Input id="r-obs" placeholder="Opcional" value={suprimentoObs} onChange={(e) => setSuprimentoObs(e.target.value)} />
+                    </div>
+                  </div>
+                  <DialogFooter>
+                    <Button variant="outline" onClick={() => setIsSuprimentoOpen(false)} disabled={suprimentoLoading}>Cancelar</Button>
+                    <Button onClick={performSuprimento} disabled={suprimentoLoading}>{suprimentoLoading ? 'Registrando...' : 'Confirmar'}</Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
               <Dialog open={isSangriaOpen} onOpenChange={setIsSangriaOpen}>
                 <DialogContent className="sm:max-w-sm w-[92vw] max-h-[85vh] animate-none" onKeyDown={(e) => e.stopPropagation()}>
                   <DialogHeader>
@@ -1088,22 +1202,24 @@ export default function BalcaoPage() {
         }).filter(Boolean);
       } catch { normalized = []; }
       setPayClients(normalized);
-      // inicia com uma linha vazia pré-selecionando a primeira finalizadora e o cliente principal
+      // Inicia primeira linha já respeitando taxa da finalizadora padrão
       const def = (fins && fins[0] && fins[0].id) ? fins[0].id : null;
       const mainClientId = (selectedClientIds && selectedClientIds.length > 0)
         ? selectedClientIds[0]
         : (normalized[0]?.id || null);
-      setPaymentLines([{ id: 1, clientId: mainClientId, methodId: def, value: '' }]);
-      setNextPayLineId(2);
-      // Auto-preencher total SEMPRE (independente de quantos clientes)
+      // Auto-preencher total base (itens) e aplicar taxa se houver
+      let totalBase = 0;
       try {
         const itens = await listarItensDaComanda({ comandaId, codigoEmpresa });
-        const total = (itens || []).reduce((acc, it) => acc + Number(it.quantidade || 0) * Number(it.preco_unitario || 0), 0);
-        if (total > 0) {
-          const formatted = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(total);
-          setPaymentLines([{ id: 1, clientId: mainClientId, methodId: def, value: formatted }]);
-        }
+        totalBase = (itens || []).reduce((acc, it) => acc + Number(it.quantidade || 0) * Number(it.preco_unitario || 0), 0);
       } catch {}
+      const fin0 = (fins || []).find(m => String(m.id) === String(def));
+      const pct0 = Number(fin0?.taxa_percentual || 0);
+      const charge0 = pct0 > 0;
+      const initialValue = charge0 ? (totalBase * (1 + pct0/100)) : totalBase;
+      const formattedInit = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(initialValue);
+      setPaymentLines([{ id: 1, clientId: mainClientId, methodId: def, value: formattedInit, chargeFee: charge0 }]);
+      setNextPayLineId(2);
       setIsPayOpen(true);
       setPayLoading(false);
       return;
@@ -1159,38 +1275,36 @@ export default function BalcaoPage() {
             <DialogTitle className="text-xl font-bold break-words" title={selectedProduct?.name || ''}>{selectedProduct?.name || 'Produto'}</DialogTitle>
             <DialogDescription>Detalhes do produto e ações rápidas.</DialogDescription>
           </DialogHeader>
-          {selectedProduct ? (
-            <div className="space-y-3 overflow-y-auto pr-1">
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-text-secondary">Preço</span>
+              <span className="text-sm font-semibold">{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(selectedProduct?.price ?? selectedProduct?.salePrice ?? 0))}</span>
+            </div>
+            {selectedProduct?.category ? (
               <div className="flex items-center justify-between">
-                <span className="text-sm text-text-secondary">Preço</span>
-                <span className="text-sm font-semibold">{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(selectedProduct.price ?? selectedProduct.salePrice ?? 0))}</span>
+                <span className="text-sm text-text-secondary">Categoria</span>
+                <span className="text-sm font-medium">{selectedProduct.category}</span>
               </div>
-              {selectedProduct.category ? (
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-text-secondary">Categoria</span>
-                  <span className="text-sm font-medium">{selectedProduct.category}</span>
-                </div>
-              ) : null}
-              <div className="grid grid-cols-3 gap-2 text-center">
-                {typeof selectedProduct.stock !== 'undefined' && (
-                  <div className="bg-surface-2 rounded-md p-3 border border-border">
-                    <div className="text-xs text-text-secondary">Estoque</div>
-                    <div className="text-base font-semibold">{selectedProduct.stock}</div>
-                  </div>
-                )}
-                {typeof selectedProduct.minStock !== 'undefined' && (
-                  <div className="bg-surface-2 rounded-md p-3 border border-border">
-                    <div className="text-xs text-text-secondary">Mínimo</div>
-                    <div className="text-base font-semibold">{selectedProduct.minStock}</div>
-                  </div>
-                )}
+            ) : null}
+            <div className="grid grid-cols-3 gap-2 text-center">
+              {typeof selectedProduct?.stock !== 'undefined' && (
                 <div className="bg-surface-2 rounded-md p-3 border border-border">
-                  <div className="text-xs text-text-secondary">Na Comanda</div>
-                  <div className="text-base font-semibold">x{qtyByProductId.get(selectedProduct.id) || 0}</div>
+                  <div className="text-xs text-text-secondary">Estoque</div>
+                  <div className="text-base font-semibold">{selectedProduct.stock}</div>
                 </div>
+              )}
+              {typeof selectedProduct?.minStock !== 'undefined' && (
+                <div className="bg-surface-2 rounded-md p-3 border border-border">
+                  <div className="text-xs text-text-secondary">Mínimo</div>
+                  <div className="text-base font-semibold">{selectedProduct.minStock}</div>
+                </div>
+              )}
+              <div className="bg-surface-2 rounded-md p-3 border border-border">
+                <div className="text-xs text-text-secondary">Na Comanda</div>
+                <div className="text-base font-semibold">x{qtyByProductId.get(selectedProduct?.id) || 0}</div>
               </div>
             </div>
-          ) : null}
+          </div>
           <DialogFooter className="flex items-center justify-between gap-2">
             <Button variant="ghost" size="sm" className="mr-auto inline-flex items-center gap-1" onClick={() => { if (selectedProduct) { navigate('/produtos', { state: { productId: selectedProduct.id, productName: selectedProduct.name } }); } }}>
               <FileText className="w-4 h-4" />
@@ -1316,7 +1430,7 @@ export default function BalcaoPage() {
                             {qty > 0 && (
                               <span className="inline-flex items-center justify-center text-[11px] px-1.5 py-0.5 rounded-full bg-brand/15 text-brand border border-brand/30 flex-shrink-0">x{qty}</span>
                             )}
-                            <span className="inline-flex items-center justify-center text-[11px] px-1.5 py-0.5 rounded-full bg-surface-2 text-text-secondary border border-border flex-shrink-0">
+                            <span className="inline-flex items-center justify-center text-[11px] px-1.5 py-0.5 rounded-full bg-surface text-text-secondary border border-border flex-shrink-0">
                               Qtd {remaining}
                             </span>
                           </div>
@@ -1448,11 +1562,16 @@ export default function BalcaoPage() {
                           }
                         }
                       }}>-</Button>
-                      <span className="w-7 text-center font-semibold text-sm">{it.quantity}</span>
+                      <span className="w-7 text-center font-semibold">
+                        {it.quantity}
+                      </span>
                       <Button size="icon" variant="outline" className="h-7 w-7" onClick={async (e) => {
                         e.stopPropagation();
                         const codigoEmpresa = userProfile?.codigo_empresa;
-                        if (!codigoEmpresa) { toast({ title: 'Empresa não definida', variant: 'destructive' }); return; }
+                        if (!codigoEmpresa) { 
+                          toast({ title: 'Empresa não definida', variant: 'destructive' }); 
+                          return; 
+                        }
                         const next = Number(it.quantity || 1) + 1;
                         // Otimista: atualiza UI primeiro
                         setItems(prev => prev.map(n => n.id === it.id ? { ...n, quantity: next } : n));
@@ -1532,7 +1651,7 @@ export default function BalcaoPage() {
                 // PERMITIR selecionar o mesmo cliente múltiplas vezes - não filtrar por usados
                 const remaining = (payClients || []).filter(c => String(c.id) !== String(primary?.id || ''));
                 return (
-                <div key={ln.id} className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-center">
+                <div key={ln.id} className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-start">
                   {/* Remove button aligned to the LEFT */}
                   <div className="sm:col-span-1 flex sm:justify-start">
                     {paymentLines.length > 1 && idx > 0 && (
@@ -1543,18 +1662,14 @@ export default function BalcaoPage() {
                         className="h-8 w-8"
                         onClick={() => {
                           setPaymentLines(prev => {
-                            const newLines = prev.filter(x => x.id !== ln.id);
-                            if (newLines.length === 0) return [];
-                            
-                            // Redistribuir valores automaticamente
-                            const totalValue = total > 0 ? total : 0;
-                            const perLine = Math.floor((totalValue / newLines.length) * 100) / 100;
-                            const remainder = totalValue - (perLine * newLines.length);
-                            
-                            return newLines.map((line, i) => {
-                              const value = i === newLines.length - 1 ? perLine + remainder : perLine;
-                              const formatted = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
-                              return { ...line, value: formatted };
+                            const remain = prev.filter(x => x.id !== ln.id);
+                            if (remain.length === 0) return [];
+                            const totalBase = (items || []).reduce((acc, it) => acc + Number(it.quantity||0)*Number(it.price||0), 0);
+                            const basePer = Math.floor((totalBase / remain.length) * 100) / 100; // Arredondar para baixo
+                            const baseRemainder = totalBase - (basePer * remain.length); // Calcular resto
+                            return remain.map((line, i) => {
+                              const base = i === remain.length - 1 ? basePer + baseRemainder : basePer;
+                              return lineWithBase(line, base);
                             });
                           });
                         }}
@@ -1583,20 +1698,62 @@ export default function BalcaoPage() {
                     </div>
                   )}
                   <div className="sm:col-span-4">
-                    <Select value={ln.methodId || ''} onValueChange={(v) => setPaymentLines(prev => prev.map(x => x.id === ln.id ? { ...x, methodId: v } : x))}>
-                      <SelectTrigger className="w-full truncate"><SelectValue placeholder="Forma de pagamento" /></SelectTrigger>
+                    <Select value={ln.methodId || ''} onValueChange={(v) => setPaymentLines(prev => prev.map(x => {
+                      if (x.id !== ln.id) return x;
+                      const fin = getMethod(v);
+                      const pct = Number(fin?.taxa_percentual || 0);
+                      if (pct > 0) {
+                        const base = lineBase(x);
+                        const totalWithFee = base * (1 + pct/100);
+                        return { ...x, methodId: v, chargeFee: true, value: formatBRL(totalWithFee) };
+                      } else {
+                        const base = lineBase(x);
+                        return { ...x, methodId: v, chargeFee: false, value: formatBRL(base) };
+                      }
+                    }))}>
+                      <SelectTrigger className="w-full h-9 truncate"><SelectValue placeholder="Forma de pagamento" /></SelectTrigger>
                       <SelectContent>
                         {(payMethods || []).map(m => (
                           <SelectItem key={m.id} value={m.id}>{m.nome}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
+                    {(() => {
+                      const pct = linePct(ln);
+                      if (!pct) return null;
+                      const fee = lineFee(ln);
+                      return (
+                        <div className="mt-1 flex items-center justify-between w-full">
+                          <label className="flex items-center gap-2 text-xs">
+                            <input
+                              aria-label={`Cobrar taxa (${pct.toFixed(2)}%)`}
+                              type="checkbox"
+                              className="h-4 w-4 accent-black checked:accent-amber-500"
+                              checked={!!ln.chargeFee}
+                              onChange={(e) => setPaymentLines(prev => prev.map(x => {
+                                if (x.id !== ln.id) return x;
+                                const base = lineBase(x);
+                                if (e.target.checked) {
+                                  const totalWithFee = base * (1 + pct/100);
+                                  return { ...x, chargeFee: true, value: formatBRL(totalWithFee) };
+                                } else {
+                                  return { ...x, chargeFee: false, value: formatBRL(base) };
+                                }
+                              }))}
+                            />
+                            <span>{`Taxa (${pct.toFixed(2)}%)`}</span>
+                          </label>
+                          <span className="text-[11px] text-text-secondary">R$ {fee.toFixed(2)}</span>
+                        </div>
+                      );
+                    })()}
                   </div>
                   <div className="sm:col-span-3">
                     <Input
                       placeholder="0,00"
                       inputMode="numeric"
                       value={ln.value}
+                      className="h-9"
                       onChange={(e) => {
                         const digits = (e.target.value || '').replace(/\D/g, '');
                         const cents = digits ? Number(digits) / 100 : 0;
@@ -1627,18 +1784,17 @@ export default function BalcaoPage() {
                       const used = new Set(prev.map(x => x.clientId).filter(Boolean));
                       const candidates = (pool || []).filter(id => !used.has(id));
                       const clientPick = candidates[0] || pool[0] || '';
-                      const newLines = [...prev, { id: nextPayLineId, clientId: clientPick, methodId: (payMethods[0]?.id || ''), value: '' }];
-                      
-                      // Distribuir valor total automaticamente entre todas as linhas
-                      const totalValue = total > 0 ? total : 0;
-                      const perLine = Math.floor((totalValue / newLines.length) * 100) / 100; // Arredondar para baixo
-                      const remainder = totalValue - (perLine * newLines.length); // Calcular resto
-                      
+                      const defMethod = (payMethods[0]?.id || '');
+                      const fin = getMethod(defMethod);
+                      const hasPct = Number(fin?.taxa_percentual || 0) > 0;
+                      const newLines = [...prev, { id: nextPayLineId, clientId: clientPick, methodId: defMethod, value: '', chargeFee: hasPct }];
+                      // Distribuir BASE
+                      const totalBase = (items || []).reduce((acc, it) => acc + Number(it.quantity||0)*Number(it.price||0), 0);
+                      const basePer = Math.floor((totalBase / newLines.length) * 100) / 100;
+                      const baseRemainder = totalBase - (basePer * newLines.length);
                       return newLines.map((line, idx) => {
-                        // Adicionar o resto na última linha para fechar exato
-                        const value = idx === newLines.length - 1 ? perLine + remainder : perLine;
-                        const formatted = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
-                        return { ...line, value: formatted };
+                        const base = idx === newLines.length - 1 ? basePer + baseRemainder : basePer;
+                        return lineWithBase(line, base);
                       });
                     });
                     setNextPayLineId((n) => n + 1);
@@ -1647,14 +1803,9 @@ export default function BalcaoPage() {
                   Adicionar forma
                 </Button>
               </div>
-              <div className="text-sm text-text-secondary flex justify-between">
-                <span>Soma</span>
-                <span>R$ {sumPayments().toFixed(2)}</span>
-              </div>
-              <div className="text-sm font-semibold flex justify-between">
-                <span>Restante</span>
-                <span className={Math.abs(total - sumPayments()) < 0.005 ? 'text-success' : 'text-warning'}>R$ {(total - sumPayments()).toFixed(2)}</span>
-              </div>
+              <div className="text-sm text-text-secondary flex justify-between"><span>Soma</span><span>R$ {sumPayments().toFixed(2)}</span></div>
+              <div className="text-sm text-text-secondary flex justify-between"><span>Taxas</span><span>R$ {sumFees().toFixed(2)}</span></div>
+              <div className="text-sm font-semibold flex justify-between"><span>Restante</span><span className={Math.abs(((items || []).reduce((acc, it) => acc + Number(it.quantity||0)*Number(it.price||0), 0)) - sumBasePayments()) < 0.005 ? 'text-success' : 'text-warning'}>R$ {((((items || []).reduce((acc, it) => acc + Number(it.quantity||0)*Number(it.price||0), 0)) - sumBasePayments()).toFixed(2))}</span></div>
             </div>
           </div>
           <DialogFooter>
