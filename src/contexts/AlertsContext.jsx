@@ -69,7 +69,7 @@ export const AlertsProvider = ({ children }) => {
             tipo: 'pagamento',
             icone: 'DollarSign',
             cor: 'warning',
-            mensagem: `${participantesPendentes.length} pagamento${participantesPendentes.length > 1 ? 's' : ''} pendente${participantesPendentes.length > 1 ? 's' : ''} em agendamentos de hoje`,
+            mensagem: `${participantesPendentes.length} pagamento${participantesPendentes.length > 1 ? 's' : ''} pendente${participantesPendentes.length > 1 ? 's' : ''} em agendamentos`,
             link: '/agenda'
           });
         }

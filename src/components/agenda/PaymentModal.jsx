@@ -4,11 +4,12 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { AlertTriangle, Edit, Search, X, Check } from 'lucide-react';
+import { AlertTriangle, Edit, Search, X, Check, Download } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import { supabase } from '@/lib/supabase';
 import { useAgenda } from '@/contexts/AgendaContext';
 import { useAuth } from '@/contexts/AuthContext';
+import { toPng } from 'html-to-image';
 
 // Helpers de moeda BRL
 const maskBRL = (raw) => {
@@ -358,6 +359,62 @@ export default function PaymentModal({
     }
   }, [isAddParticipantOpen]);
   
+  // Ref para o elemento que será convertido em imagem
+  const relatorioRef = useRef(null);
+
+  // Função para baixar relatório como imagem
+  const baixarRelatorioImagem = async () => {
+    try {
+      if (!relatorioRef.current) {
+        throw new Error('Elemento do relatório não encontrado');
+      }
+
+      toast({
+        title: 'Gerando imagem...',
+        description: 'Aguarde um momento.',
+      });
+
+      // Tornar o elemento visível temporariamente
+      const elemento = relatorioRef.current;
+      elemento.style.left = '0';
+      elemento.style.top = '0';
+      elemento.style.zIndex = '9999';
+
+      // Aguardar um pouco para garantir que o elemento foi renderizado
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      const dataUrl = await toPng(elemento, {
+        quality: 1,
+        pixelRatio: 2,
+        backgroundColor: '#1a1a1a',
+      });
+
+      // Ocultar o elemento novamente
+      elemento.style.left = '-9999px';
+      elemento.style.top = '-9999px';
+      elemento.style.zIndex = '-1';
+
+      // Criar link para download
+      const link = document.createElement('a');
+      link.download = `relatorio-pagamento-${editingBooking?.code || 'agendamento'}.png`;
+      link.href = dataUrl;
+      link.click();
+
+      toast({
+        title: 'Imagem baixada!',
+        description: 'O relatório foi salvo como imagem.',
+        variant: 'success'
+      });
+    } catch (error) {
+      console.error('Erro ao gerar imagem:', error);
+      toast({
+        title: 'Erro ao gerar imagem',
+        description: error?.message || 'Não foi possível gerar a imagem.',
+        variant: 'destructive'
+      });
+    }
+  };
+  
   if (!isPaymentModalOpen) return null;
   
   return (
@@ -388,11 +445,26 @@ export default function PaymentModal({
           e.preventDefault();
         }}
       >
-        <DialogHeader>
-          <DialogTitle>Registrar pagamento</DialogTitle>
-          <DialogDescription>
-            Gerencie valores, divisão e status de pagamento dos participantes.
-          </DialogDescription>
+        <DialogHeader className="relative pb-4">
+          <div className="flex flex-col sm:flex-row items-start justify-between gap-3 sm:gap-4">
+            <div className="flex-1 w-full sm:w-auto">
+              <DialogTitle>Registrar pagamento</DialogTitle>
+              <DialogDescription>
+                Gerencie valores, divisão e status de pagamento dos participantes.
+              </DialogDescription>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={baixarRelatorioImagem}
+              className="flex-shrink-0 gap-2 w-full sm:w-auto mt-2 sm:mt-0"
+              title="Baixar relatório como imagem"
+            >
+              <Download className="w-4 h-4" />
+              <span>Baixar Relatório</span>
+            </Button>
+          </div>
         </DialogHeader>
         
         <div className="space-y-3 sm:space-y-6">
@@ -875,6 +947,90 @@ export default function PaymentModal({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+
+    {/* Elemento oculto para gerar imagem do relatório */}
+    <div 
+      ref={relatorioRef}
+      style={{
+        position: 'fixed',
+        left: '-9999px',
+        top: '-9999px',
+        width: '1000px',
+        padding: '60px',
+        backgroundColor: '#1a1a1a',
+        color: '#ffffff',
+        fontFamily: 'Arial, sans-serif',
+      }}
+    >
+      <div style={{ marginBottom: '50px', textAlign: 'center', borderBottom: '5px solid #4ade80', paddingBottom: '30px' }}>
+        <h1 style={{ fontSize: '48px', fontWeight: 'bold', color: '#4ade80', margin: 0, letterSpacing: '2px' }}>
+          RELATÓRIO DE PAGAMENTOS
+        </h1>
+      </div>
+
+      <div style={{ marginBottom: '45px', backgroundColor: '#2a2a2a', padding: '35px', borderRadius: '12px', borderLeft: '6px solid #3b82f6' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '25px', fontSize: '20px' }}>
+          <div>
+            <span style={{ color: '#9ca3af', fontSize: '20px' }}>📅 Data:</span>
+            <strong style={{ marginLeft: '15px', fontSize: '24px' }}>
+              {editingBooking?.start ? new Date(editingBooking.start).toLocaleDateString('pt-BR') : ''}
+            </strong>
+          </div>
+          <div>
+            <span style={{ color: '#9ca3af', fontSize: '20px' }}>🕐 Horário:</span>
+            <strong style={{ marginLeft: '15px', fontSize: '24px' }}>
+              {editingBooking?.start && editingBooking?.end 
+                ? `${new Date(editingBooking.start).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} - ${new Date(editingBooking.end).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`
+                : ''}
+            </strong>
+          </div>
+          <div>
+            <span style={{ color: '#9ca3af', fontSize: '20px' }}>🏐 Quadra:</span>
+            <strong style={{ marginLeft: '15px', fontSize: '24px' }}>{editingBooking?.court || ''}</strong>
+          </div>
+          <div>
+            <span style={{ color: '#9ca3af', fontSize: '20px' }}>🎯 Modalidade:</span>
+            <strong style={{ marginLeft: '15px', fontSize: '24px' }}>{editingBooking?.modality || ''}</strong>
+          </div>
+          <div>
+            <span style={{ color: '#9ca3af', fontSize: '20px' }}>📋 Código:</span>
+            <strong style={{ marginLeft: '15px', fontSize: '24px' }}>#{editingBooking?.code || ''}</strong>
+          </div>
+          <div>
+            <span style={{ color: '#9ca3af', fontSize: '20px' }}>💰 Valor Total:</span>
+            <strong style={{ marginLeft: '15px', color: '#4ade80', fontSize: '26px' }}>R$ {maskBRL(paymentTotal || 0)}</strong>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ marginBottom: '45px' }}>
+        <h2 style={{ fontSize: '32px', fontWeight: 'bold', color: '#4ade80', marginBottom: '25px', borderBottom: '4px solid #374151', paddingBottom: '15px' }}>
+          PARTICIPANTES
+        </h2>
+        {(localParticipantsForm || [])
+          .filter((_, idx) => !(paymentHiddenIndexes || []).includes(idx))
+          .map((p, index) => (
+            <div key={index} style={{ marginBottom: '30px', backgroundColor: '#2a2a2a', padding: '28px', borderRadius: '12px', borderLeft: p.status_pagamento === 'Pago' ? '6px solid #4ade80' : '6px solid #fbbf24' }}>
+              <div style={{ fontSize: '26px', fontWeight: 'bold', marginBottom: '15px', color: p.status_pagamento === 'Pago' ? '#4ade80' : '#fbbf24' }}>
+                {index + 1}. {p.nome || 'Sem nome'}
+              </div>
+              <div style={{ fontSize: '20px', color: '#e5e7eb', lineHeight: '2.2' }}>
+                <div><span style={{ color: '#9ca3af' }}>Código:</span> <strong style={{ marginLeft: '12px', fontSize: '22px' }}>{p.codigo || 'N/A'}</strong></div>
+                <div><span style={{ color: '#9ca3af' }}>Valor:</span> <strong style={{ marginLeft: '12px', color: '#4ade80', fontSize: '22px' }}>R$ {maskBRL(p.valor_cota || 0)}</strong></div>
+                <div><span style={{ color: '#9ca3af' }}>Status:</span> <strong style={{ marginLeft: '12px', fontSize: '22px' }}>{p.status_pagamento === 'Pago' ? '✅' : '⏳'} {p.status_pagamento || 'Pendente'}</strong></div>
+                <div><span style={{ color: '#9ca3af' }}>Finalizadora:</span> <strong style={{ marginLeft: '12px', fontSize: '22px' }}>{payMethods.find(m => String(m.id) === String(p.finalizadora_id))?.nome || 'Não definido'}</strong></div>
+                {p.pago_em && (
+                  <div><span style={{ color: '#9ca3af' }}>Pago em:</span> <strong style={{ marginLeft: '12px', fontSize: '22px' }}>{new Date(p.pago_em).toLocaleString('pt-BR')}</strong></div>
+                )}
+              </div>
+            </div>
+          ))}
+      </div>
+
+      <div style={{ marginTop: '45px', textAlign: 'center', fontSize: '18px', color: '#9ca3af', borderTop: '4px solid #374151', paddingTop: '25px' }}>
+        Gerado em: {new Date().toLocaleString('pt-BR')}
+      </div>
+    </div>
     
     {/* Dialog para adicionar participante */}
     <Dialog open={isAddParticipantOpen} onOpenChange={setIsAddParticipantOpen}>
@@ -966,10 +1122,11 @@ export default function PaymentModal({
                 const selectionCount = selectedParticipants.filter(p => p.id === cliente.id).length;
                 
                 return (
-                  <button
+                  <div
                     key={cliente.id}
-                    type="button"
-                    className={`w-full px-4 py-3 text-left transition-all border-b border-border last:border-0 flex items-center gap-3 ${
+                    role="button"
+                    tabIndex={0}
+                    className={`w-full px-4 py-3 text-left transition-all border-b border-border last:border-0 flex items-center gap-3 cursor-pointer ${
                       isConsumidorFinal
                         ? 'bg-gradient-to-r from-amber-500/5 to-transparent hover:from-amber-500/10 border-l-2 border-l-amber-500/40'
                         : selectionCount > 0 
@@ -979,11 +1136,15 @@ export default function PaymentModal({
                     onClick={() => {
                       // Adicionar timestamp único para permitir duplicados
                       const participantWithTimestamp = { ...cliente, timestamp: Date.now() };
-                      
-                      setSelectedParticipants(prev => {
-                        // Sempre adiciona, mesmo se já existir (permite duplicados)
-                        return [...prev, participantWithTimestamp];
-                      });
+                      setSelectedParticipants(prev => [...prev, participantWithTimestamp]);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        // Adicionar timestamp único para permitir duplicados
+                        const participantWithTimestamp = { ...cliente, timestamp: Date.now() };
+                        setSelectedParticipants(prev => [...prev, participantWithTimestamp]);
+                      }
                     }}
                   >
                     <div className="flex items-center gap-3 flex-1">
@@ -1048,7 +1209,7 @@ export default function PaymentModal({
                         </button>
                       </div>
                     )}
-                  </button>
+                  </div>
                 );
               });
             })()}
