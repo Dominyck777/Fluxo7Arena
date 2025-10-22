@@ -1,16 +1,26 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { format, startOfDay, endOfDay } from 'date-fns';
+import { useLocation } from 'react-router-dom';
 
 const AlertsContext = createContext();
 
 export const AlertsProvider = ({ children }) => {
   const { userProfile } = useAuth();
+  const location = useLocation();
   const [alerts, setAlerts] = useState([]);
   const [showModal, setShowModal] = useState(false);
   const [showBalloon, setShowBalloon] = useState(false);
   const [loading, setLoading] = useState(false);
+  const previousPathnameRef = useRef(location.pathname);
+  
+  // Função para verificar se há modais abertos (evita recarregar alertas durante interações)
+  const hasOpenModals = useCallback(() => {
+    // Verifica se há algum dialog/modal aberto no DOM
+    const dialogs = document.querySelectorAll('[role="dialog"]');
+    return dialogs.length > 0;
+  }, []);
 
   // Função para carregar alertas
   const loadAlerts = useCallback(async () => {
@@ -47,32 +57,37 @@ export const AlertsProvider = ({ children }) => {
         });
       }
       
-      // 2. Pagamentos pendentes em agendamentos de hoje
-      const { data: agendamentosHoje } = await supabase
-        .from('agendamentos')
-        .select('id')
+      // 2. Pagamentos pendentes em agendamentos (incluindo passados)
+      // Buscar todos os participantes pendentes
+      const { data: participantesPendentes } = await supabase
+        .from('agendamento_participantes')
+        .select('id, agendamento_id')
         .eq('codigo_empresa', codigo)
-        .gte('inicio', inicioHoje)
-        .lte('inicio', fimHoje);
+        .eq('status_pagamento', 'Pendente');
       
-      if (agendamentosHoje && agendamentosHoje.length > 0) {
-        const idsAgendHoje = agendamentosHoje.map(a => a.id);
-        const { data: participantesPendentes } = await supabase
-          .from('agendamento_participantes')
-          .select('id')
-          .eq('codigo_empresa', codigo)
-          .in('agendamento_id', idsAgendHoje)
-          .eq('status_pagamento', 'Pendente');
+      if (participantesPendentes && participantesPendentes.length > 0) {
+        // Buscar o agendamento mais antigo com pagamento pendente
+        const agendamentoIds = [...new Set(participantesPendentes.map(p => p.agendamento_id))];
+        const { data: agendamentos } = await supabase
+          .from('agendamentos')
+          .select('id, inicio')
+          .in('id', agendamentoIds)
+          .order('inicio', { ascending: true })
+          .limit(1);
         
-        if (participantesPendentes && participantesPendentes.length > 0) {
-          alertasList.push({
-            tipo: 'pagamento',
-            icone: 'DollarSign',
-            cor: 'warning',
-            mensagem: `${participantesPendentes.length} pagamento${participantesPendentes.length > 1 ? 's' : ''} pendente${participantesPendentes.length > 1 ? 's' : ''} em agendamentos`,
-            link: '/agenda'
-          });
-        }
+        // Pegar a data do primeiro agendamento com pendência
+        const primeiroAgendamento = agendamentos?.[0];
+        const dataAgendamento = primeiroAgendamento 
+          ? format(new Date(primeiroAgendamento.inicio), 'yyyy-MM-dd')
+          : format(hoje, 'yyyy-MM-dd');
+        
+        alertasList.push({
+          tipo: 'pagamento',
+          icone: 'DollarSign',
+          cor: 'warning',
+          mensagem: `${participantesPendentes.length} pagamento${participantesPendentes.length > 1 ? 's' : ''} pendente${participantesPendentes.length > 1 ? 's' : ''} em agendamentos`,
+          link: `/agenda?date=${dataAgendamento}`
+        });
       }
       
       // 3. Comandas abertas há muito tempo (> 3 horas)
@@ -231,6 +246,64 @@ export const AlertsProvider = ({ children }) => {
       return () => clearInterval(interval);
     }
   }, [userProfile?.codigo_empresa, loadAlerts]);
+
+  // Recarregar alertas quando a aba voltar a ficar visível ou ganhar foco
+  useEffect(() => {
+    if (!userProfile?.codigo_empresa) return;
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        // Não recarregar se há modais abertos
+        if (hasOpenModals()) {
+          console.log('[AlertsContext] Aba voltou a ficar visível, mas há modais abertos - ignorando recarga');
+          return;
+        }
+        console.log('[AlertsContext] Aba voltou a ficar visível - recarregando alertas');
+        loadAlerts();
+      }
+    };
+
+    const handleFocus = () => {
+      // Não recarregar se há modais abertos
+      if (hasOpenModals()) {
+        console.log('[AlertsContext] Janela ganhou foco, mas há modais abertos - ignorando recarga');
+        return;
+      }
+      console.log('[AlertsContext] Janela ganhou foco - recarregando alertas');
+      loadAlerts();
+    };
+
+    // Listener para mudança de visibilidade da aba
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    // Listener para quando a janela ganha foco
+    window.addEventListener('focus', handleFocus);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, [userProfile?.codigo_empresa, loadAlerts, hasOpenModals]);
+
+  // Recarregar alertas quando mudar de rota (página) na aplicação
+  useEffect(() => {
+    if (userProfile?.codigo_empresa) {
+      // Verificar se o pathname realmente mudou (ignora mudanças de query params)
+      if (previousPathnameRef.current === location.pathname) {
+        return;
+      }
+      
+      // Atualizar pathname anterior
+      previousPathnameRef.current = location.pathname;
+      
+      // Não recarregar se há modais abertos
+      if (hasOpenModals()) {
+        console.log('[AlertsContext] Mudança de rota detectada, mas há modais abertos - ignorando recarga');
+        return;
+      }
+      console.log('[AlertsContext] Mudança de rota detectada - recarregando alertas');
+      loadAlerts();
+    }
+  }, [location.pathname, userProfile?.codigo_empresa, loadAlerts, hasOpenModals]);
 
   return (
     <AlertsContext.Provider value={{ 

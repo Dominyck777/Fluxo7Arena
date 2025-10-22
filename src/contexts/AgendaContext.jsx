@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback, useRef } from 'react';
+import React, { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react';
 
 const AgendaContext = createContext();
 
@@ -42,41 +42,45 @@ export const AgendaProvider = ({ children }) => {
     protectedUntil: 0
   });
   
+  // Ref para detectar mudanças de visibilidade
+  const lastVisibilityChangeRef = useRef(0);
+  
   // Função para proteger o modal de pagamentos por um tempo
   const protectPaymentModal = useCallback((durationMs = 500) => {
     modalProtectionRef.current = {
       isProtected: true,
       protectedUntil: Date.now() + durationMs
     };
-    console.log(`🛡️ [AgendaContext] Modal de pagamentos protegido por ${durationMs}ms`);
     
     // Desproteger após o tempo
     setTimeout(() => {
       modalProtectionRef.current.isProtected = false;
-      console.log('✅ [AgendaContext] Proteção do modal de pagamentos removida');
     }, durationMs);
   }, []);
   
   // Abrir modal de pagamentos
   const openPaymentModal = useCallback(() => {
-    console.log('💳 [AgendaContext] Abrindo modal de pagamentos');
     setIsPaymentModalOpen(true);
   }, []);
   
   // Fechar modal de pagamentos (com proteção)
   const closePaymentModal = useCallback(() => {
     if (modalProtectionRef.current.isProtected && Date.now() < modalProtectionRef.current.protectedUntil) {
-      console.log('🛑 [AgendaContext] Fechamento bloqueado - modal protegido');
       return false;
     }
-    console.log('💳 [AgendaContext] Fechando modal de pagamentos');
+    
+    // Bloquear fechamento se aconteceu logo após mudança de visibilidade (500ms)
+    const timeSinceVisibilityChange = Date.now() - lastVisibilityChangeRef.current;
+    if (timeSinceVisibilityChange < 500) {
+      return false;
+    }
+    
     setIsPaymentModalOpen(false);
     return true;
   }, []);
   
   // Abrir modal de edição de participante
   const openEditParticipantModal = useCallback((participantId, participantName) => {
-    console.log('✏️ [AgendaContext] Abrindo modal de edição:', { participantId, participantName });
     setEditParticipantData({ participantId, participantName });
     setIsEditParticipantModalOpen(true);
     
@@ -86,13 +90,31 @@ export const AgendaProvider = ({ children }) => {
   
   // Fechar modal de edição de participante
   const closeEditParticipantModal = useCallback(() => {
-    console.log('✏️ [AgendaContext] Fechando modal de edição');
     setIsEditParticipantModalOpen(false);
     setEditParticipantData({ participantId: null, participantName: '' });
     
     // Proteger modal de pagamentos ao fechar
     protectPaymentModal(500);
   }, [protectPaymentModal]);
+  
+  // Listener para rastrear mudanças de visibilidade
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      lastVisibilityChangeRef.current = Date.now();
+    };
+    
+    const handleFocus = () => {
+      lastVisibilityChangeRef.current = Date.now();
+    };
+    
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', handleFocus);
+    
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, []);
   
   const value = {
     // Estados dos modais

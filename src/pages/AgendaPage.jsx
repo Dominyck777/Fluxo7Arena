@@ -19,7 +19,7 @@ import { listarFinalizadoras } from '@/lib/store';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
 import { useAgenda } from '@/contexts/AgendaContext';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import ClientFormModal from '@/components/clients/ClientFormModal';
 import PaymentModal from '@/components/agenda/PaymentModal';
 import EditParticipantModal from '@/components/agenda/EditParticipantModal';
@@ -269,7 +269,27 @@ function AgendaPage() {
     dbg('PulseStart', { tag, timeoutMs });
   }, [debugOn, pulseDump, dbg]);
   const { userProfile, authReady, company } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [currentDate, setCurrentDate] = useState(new Date());
+  
+  // Ler parâmetro date da URL ao carregar
+  useEffect(() => {
+    const dateParam = searchParams.get('date');
+    if (dateParam) {
+      try {
+        // Adicionar 'T00:00:00' para evitar problemas de timezone
+        const parsedDate = new Date(dateParam + 'T00:00:00');
+        if (!isNaN(parsedDate.getTime())) {
+          setCurrentDate(parsedDate);
+          // Remover o parâmetro da URL após aplicar
+          searchParams.delete('date');
+          setSearchParams(searchParams, { replace: true });
+        }
+      } catch (e) {
+        console.error('[AgendaPage] Erro ao parsear date da URL:', e);
+      }
+    }
+  }, [searchParams, setSearchParams]);
   const [bookings, setBookings] = useState([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   // Estados para agendamento fixo/recorrente
@@ -1391,8 +1411,9 @@ function AgendaPage() {
       if (!dbCourts || dbCourts.length === 0) setCourtsLoading(true);
       const { data, error } = await supabase
         .from('quadras')
-        .select('id, nome, modalidades, hora_inicio, hora_fim, valor, codigo_empresa')
+        .select('id, nome, modalidades, hora_inicio, hora_fim, valor, codigo_empresa, status')
         .eq('codigo_empresa', userProfile.codigo_empresa)
+        .eq('status', 'Ativa')  // Filtrar apenas quadras ativas
         .order('nome', { ascending: true });
       if (error) {
         toast({ title: 'Erro ao carregar quadras', description: error.message });
@@ -2626,6 +2647,10 @@ function AgendaPage() {
           try { userSelectedOnceRef.current = false; } catch {}
           try { preventClearsUntilRef.current = 0; } catch {}
           try { selectionLockUntilRef.current = 0; } catch {}
+          
+          // Resetar estado de agendamento recorrente
+          setIsRecorrente(false);
+          setQuantidadeSemanas(4);
           try { suppressPickerCloseRef.current = 0; } catch {}
           try { customerPickerIntentRef.current = null; } catch {}
           try { customerPickerDesiredOpenRef.current = false; } catch {}
@@ -3634,11 +3659,22 @@ function AgendaPage() {
               };
               console.warn('[CustomerPicker][DIALOG:allow-close]', dump);
             } catch {}
+            
+            // Não fechar o modal se o modal de pagamentos estiver aberto
+            if (isPaymentModalOpen) {
+              console.log('[Dialog] Tentativa de fechar modal principal bloqueada - modal de pagamentos está aberto');
+              return;
+            }
+            
             setIsModalOpen(false);
             setEditingBooking(null);
             setPrefill(null);
             closePaymentModal();
             participantsPrefillOnceRef.current = false;
+            
+            // Resetar estado de agendamento recorrente
+            setIsRecorrente(false);
+            setQuantidadeSemanas(4);
           } else {
             setIsModalOpen(true);
           }

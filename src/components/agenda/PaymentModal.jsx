@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -70,16 +71,33 @@ export default function PaymentModal({
   // Refs
   const paymentSearchRef = useRef(null);
   const initializedRef = useRef(false);
+  const loadingTimeoutRef = useRef(null);
   
   // Helper para pegar finalizadora padrão (menor código)
   const getDefaultPayMethod = useCallback(() => {
-    if (!payMethods || payMethods.length === 0) return null;
-    // Ordenar por código e pegar o primeiro
+    console.log('[PaymentModal] getDefaultPayMethod - payMethods:', payMethods);
+    
+    if (!payMethods || payMethods.length === 0) {
+      console.log('[PaymentModal] getDefaultPayMethod - Nenhuma finalizadora disponível');
+      return null;
+    }
+    
+    // Tentar encontrar finalizadora com codigo_interno = '01'
+    const fin01 = payMethods.find(m => String(m.codigo_interno) === '01');
+    console.log('[PaymentModal] getDefaultPayMethod - Finalizadora 01:', fin01);
+    
+    if (fin01) {
+      console.log('[PaymentModal] getDefaultPayMethod - Retornando finalizadora 01:', fin01);
+      return fin01;
+    }
+    
+    // Se não encontrar, ordenar por código e pegar o primeiro
     const sorted = [...payMethods].sort((a, b) => {
       const codigoA = Number(a.codigo_interno || 999999);
       const codigoB = Number(b.codigo_interno || 999999);
       return codigoA - codigoB;
     });
+    console.log('[PaymentModal] getDefaultPayMethod - Retornando primeira finalizadora:', sorted[0]);
     return sorted[0];
   }, [payMethods]);
   
@@ -394,12 +412,54 @@ export default function PaymentModal({
   // Sincronizar estado local com contexto ao abrir modal
   useEffect(() => {
     if (isPaymentModalOpen) {
-      // Só inicializar na PRIMEIRA abertura do modal
-      if (!initializedRef.current) {
+      // Timeout para detectar se finalizadoras não carregam (3 segundos)
+      loadingTimeoutRef.current = setTimeout(() => {
+        if (!initializedRef.current && (!payMethods || payMethods.length === 0)) {
+          // Inicializar mesmo sem finalizadoras após timeout
+          console.log('[PaymentModal] Timeout: inicializando sem finalizadoras');
+          
+          const sourceData = (form?.selectedClients || []).map(c => {
+            let codigo = c.codigo;
+            if (!codigo && localCustomers && Array.isArray(localCustomers)) {
+              const clienteCompleto = localCustomers.find(lc => lc.id === c.id);
+              codigo = clienteCompleto?.codigo || null;
+            }
+            return {
+              cliente_id: c.id,
+              nome: c.nome,
+              codigo: codigo,
+              valor_cota: '',
+              status_pagamento: 'Pendente',
+              finalizadora_id: null,
+              aplicar_taxa: false
+            };
+          });
+          
+          setLocalParticipantsForm(sourceData);
+          initializedRef.current = true;
+        }
+      }, 3000);
+      
+      // Só inicializar na PRIMEIRA abertura do modal E quando houver finalizadoras
+      if (!initializedRef.current && payMethods && payMethods.length > 0) {
+        // Limpar timeout se finalizadoras carregaram
+        if (loadingTimeoutRef.current) {
+          clearTimeout(loadingTimeoutRef.current);
+          loadingTimeoutRef.current = null;
+        }
+        
+        console.log('[PaymentModal] Inicializando modal pela primeira vez');
+        
         // Pegar finalizadora padrão uma vez
         const defaultMethod = getDefaultPayMethod();
         const defaultFinalizadoraId = defaultMethod?.id ? String(defaultMethod.id) : null;
         const defaultAplicarTaxa = Number(defaultMethod?.taxa_percentual || 0) > 0;
+        
+        console.log('[PaymentModal] Finalizadora padrão:', {
+          defaultMethod,
+          defaultFinalizadoraId,
+          defaultAplicarTaxa
+        });
         
         // Inicializar estado local a partir do contexto (ou form.selectedClients se vazio)
         const sourceData = (participantsForm && participantsForm.length > 0) 
@@ -421,6 +481,8 @@ export default function PaymentModal({
               };
             });
         
+        console.log('[PaymentModal] sourceData:', sourceData);
+        
         // Atualizar códigos faltantes e garantir finalizadora padrão
         const withCodes = sourceData.map(p => {
           let codigo = p.codigo;
@@ -436,6 +498,12 @@ export default function PaymentModal({
             finalizadoraId = defaultMethod?.id ? String(defaultMethod.id) : null;
           }
           
+          console.log('[PaymentModal] Processando participante:', {
+            nome: p.nome,
+            finalizadora_original: p.finalizadora_id,
+            finalizadora_final: finalizadoraId
+          });
+          
           return { 
             ...p, 
             codigo: codigo || p.codigo,
@@ -443,17 +511,32 @@ export default function PaymentModal({
           };
         });
         
+        console.log('[PaymentModal] withCodes final:', withCodes);
+        
         setLocalParticipantsForm(withCodes);
         initializedRef.current = true;
+        
+        console.log('[PaymentModal] Inicialização completa');
       }
     } else {
       // Ao fechar, resetar estado local E flag de inicialização
+      if (loadingTimeoutRef.current) {
+        clearTimeout(loadingTimeoutRef.current);
+        loadingTimeoutRef.current = null;
+      }
       setPaymentSearch('');
       setPaymentWarning(null);
       setPaymentHiddenIndexes([]);
       setLocalParticipantsForm([]);
       initializedRef.current = false;
     }
+    
+    // Cleanup do timeout ao desmontar
+    return () => {
+      if (loadingTimeoutRef.current) {
+        clearTimeout(loadingTimeoutRef.current);
+      }
+    };
   }, [isPaymentModalOpen, payMethods, getDefaultPayMethod, participantsForm, form?.selectedClients, localCustomers]);
   
   // Callback para EditParticipantModal atualizar participantes localmente
@@ -591,20 +674,13 @@ export default function PaymentModal({
     }
   };
   
-  if (!isPaymentModalOpen) return null;
-  
   return (
     <>
     <Dialog 
       open={isPaymentModalOpen} 
       onOpenChange={(open) => {
+        // Permitir fechar apenas quando explicitamente solicitado (botão X, ESC, etc)
         if (!open) {
-          // Ao cancelar, mostrar toast e fechar - o estado local será descartado
-          toast({
-            title: 'Alterações não salvas',
-            description: 'As modificações feitas não foram salvas.',
-            variant: 'default',
-          });
           closePaymentModal();
         }
       }}
@@ -614,13 +690,52 @@ export default function PaymentModal({
         className="w-[95vw] sm:max-w-[1100px] max-h-[90vh] overflow-y-auto"
         onOpenAutoFocus={(e) => e.preventDefault()}
         onInteractOutside={(e) => { 
-          e.preventDefault();
-          e.stopPropagation();
+          // Permitir fechar clicando fora
+          closePaymentModal();
         }}
         onEscapeKeyDown={(e) => { 
+          // ESC já é tratado pelo useEffect de atalhos
           e.preventDefault();
         }}
       >
+        {/* Mostrar loading/aviso se finalizadoras ainda não carregaram */}
+        {(!payMethods || payMethods.length === 0) ? (
+          !initializedRef.current ? (
+            <div className="p-8 flex flex-col items-center justify-center gap-4">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-500"></div>
+              <p className="text-sm text-text-muted">Carregando formas de pagamento...</p>
+            </div>
+          ) : (
+            <div className="p-8 flex flex-col items-center justify-center gap-4">
+              <AlertTriangle className="w-12 h-12 text-amber-500" />
+              <div className="text-center space-y-2">
+                <p className="font-semibold text-amber-500">Nenhuma forma de pagamento cadastrada</p>
+                <p className="text-sm text-text-muted">
+                  Cadastre pelo menos uma finalizadora para gerenciar pagamentos.
+                </p>
+              </div>
+              <div className="flex gap-2 mt-4">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={closePaymentModal}
+                >
+                  Fechar
+                </Button>
+                <Link to="/finalizadoras">
+                  <Button
+                    type="button"
+                    className="bg-emerald-600 hover:bg-emerald-500 text-white"
+                    onClick={closePaymentModal}
+                  >
+                    Cadastrar Finalizadora
+                  </Button>
+                </Link>
+              </div>
+            </div>
+          )
+        ) : (
+          <>
         <DialogHeader className="relative pb-4">
           <div className="flex flex-col sm:flex-row items-start justify-between gap-3 sm:gap-4">
             <div className="flex-1 w-full sm:w-auto">
@@ -1312,6 +1427,8 @@ export default function PaymentModal({
             <kbd className="hidden sm:inline ml-2 px-2 py-1 text-sm font-mono bg-emerald-700/50 rounded border border-emerald-500/30">↵</kbd>
           </Button>
         </DialogFooter>
+          </>
+        )}
       </DialogContent>
     </Dialog>
 
