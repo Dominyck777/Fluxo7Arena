@@ -412,16 +412,39 @@ export default function FinanceiroPage() {
         }, 0);
         setReceitaComandas(totalComandas);
 
-        // Agendamentos: soma de valor_pago na view, filtrando por período (inicio) e status_pagamento = 'Pago'
+        // Agendamentos: buscar agendamentos no período e somar participantes pagos
         let qa = supabase
-          .from('v_agendamentos_detalhado')
-          .select('valor_pago')
-          .eq('codigo_empresa', codigo)
-          .eq('status_pagamento', 'Pago');
+          .from('agendamentos')
+          .select('id')
+          .eq('codigo_empresa', codigo);
         if (fromISO) qa = qa.gte('inicio', fromISO);
         if (toISO) qa = qa.lte('inicio', toISO);
-        const { data: agRows } = await qa;
-        const totalAg = (agRows || []).reduce((acc, r) => acc + Number(r.valor_pago || 0), 0);
+        const { data: agendamentos } = await qa;
+        
+        let totalAg = 0;
+        if (agendamentos && agendamentos.length > 0) {
+          const agendamentoIds = agendamentos.map(a => a.id);
+          const { data: participantes } = await supabase
+            .from('agendamento_participantes')
+            .select('valor_cota, aplicar_taxa, finalizadoras!agp_finalizadora_id_fkey(taxa_percentual)')
+            .eq('codigo_empresa', codigo)
+            .in('agendamento_id', agendamentoIds)
+            .eq('status_pagamento', 'Pago');
+          
+          totalAg = (participantes || []).reduce((acc, p) => {
+            let valor = Number(p.valor_cota || 0);
+            
+            // Se taxa foi aplicada, remover a taxa do valor
+            if (p.aplicar_taxa === true) {
+              const taxa = Number(p.finalizadoras?.taxa_percentual || 0);
+              if (taxa > 0) {
+                valor = valor / (1 + taxa / 100);
+              }
+            }
+            
+            return acc + valor;
+          }, 0);
+        }
         setReceitaAgendamentos(totalAg);
         console.debug('[Financeiro][VisaoGeral] Receitas por origem:', { totalComandas, totalAg });
       } catch (e) {

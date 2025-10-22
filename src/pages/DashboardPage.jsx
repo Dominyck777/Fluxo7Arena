@@ -348,13 +348,25 @@ function DashboardPage() {
           const agendamentoIds = agendamentosHoje.map(a => a.id);
           const { data: participantesPagos } = await supabase
             .from('agendamento_participantes')
-            .select('valor_cota, status_pagamento')
+            .select('valor_cota, status_pagamento, aplicar_taxa, finalizadora_id, finalizadoras!agp_finalizadora_id_fkey(taxa_percentual)')
             .eq('codigo_empresa', codigo)
             .in('agendamento_id', agendamentoIds)
             .eq('status_pagamento', 'Pago');
           
           totalAgendamentos = (participantesPagos || [])
-            .reduce((sum, p) => sum + Number(p.valor_cota || 0), 0);
+            .reduce((sum, p) => {
+              let valor = Number(p.valor_cota || 0);
+              
+              // Se taxa foi aplicada, remover a taxa do valor
+              if (p.aplicar_taxa === true) {
+                const taxa = Number(p.finalizadoras?.taxa_percentual || 0);
+                if (taxa > 0) {
+                  valor = valor / (1 + taxa / 100);
+                }
+              }
+              
+              return sum + valor;
+            }, 0);
         }
         
         const totalHoje = totalComandas + totalAgendamentos;

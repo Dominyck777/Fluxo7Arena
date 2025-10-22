@@ -545,7 +545,7 @@ export async function listarResumoPeriodo({ from, to, codigoEmpresa } = {}) {
       // Buscar participantes pagos desses agendamentos
       let qp = supabase
         .from('agendamento_participantes')
-        .select('valor_cota, status_pagamento, finalizadora_id, finalizadoras!agp_finalizadora_id_fkey(nome)')
+        .select('valor_cota, status_pagamento, finalizadora_id, aplicar_taxa, finalizadoras!agp_finalizadora_id_fkey(nome, taxa_percentual)')
         .in('agendamento_id', agendamentoIds)
         .eq('status_pagamento', 'Pago')
       if (codigo) qp = qp.eq('codigo_empresa', codigo)
@@ -561,7 +561,18 @@ export async function listarResumoPeriodo({ from, to, codigoEmpresa } = {}) {
       
       for (const part of (participantes || [])) {
         const key = part.finalizadoras?.nome || 'Outros'
-        const v = Number(part.valor_cota || 0)
+        let v = Number(part.valor_cota || 0)
+        
+        // Se taxa foi aplicada, remover a taxa do valor para obter o valor real recebido
+        if (part.aplicar_taxa === true) {
+          const taxa = Number(part.finalizadoras?.taxa_percentual || 0)
+          if (taxa > 0) {
+            // Valor original = valor_cota / (1 + taxa/100)
+            v = v / (1 + taxa / 100)
+            console.log(`${trace} 💰 Participante com taxa: valor_cota=${part.valor_cota}, taxa=${taxa}%, valor_real=${v.toFixed(2)}`)
+          }
+        }
+        
         porFinalizadora[key] = (porFinalizadora[key] || 0) + v
         totalEntradas += v
       }
