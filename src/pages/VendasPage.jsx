@@ -18,7 +18,7 @@ import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
 
 import { listProducts } from '@/lib/products';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 
 // Mock Data
 const initialTablesData = [
@@ -102,6 +102,8 @@ function VendasPage() {
     try { return typeof window !== 'undefined' && window.innerWidth <= 640; } catch { return false; }
   });
   const [loadingItems, setLoadingItems] = useState(false);
+  const location = useLocation();
+  const firstAvailableId = useMemo(() => (tables || []).find(t => t.status === 'available')?.id || null, [tables]);
   // Evita movimentação do layout quando diálogos estão abertos (bloqueia scroll do fundo)
   const anyDialogOpen = isCreateMesaOpen || isOpenTableDialog || isOrderDetailsOpen || isCashierDetailsOpen || isPayOpen || openCashDialogOpen || isCounterModeOpen || isProductDetailsOpen || isMobileModalOpen || false;
 
@@ -125,19 +127,25 @@ function VendasPage() {
         if (['input','textarea','select'].includes(tag) || e.target?.isContentEditable) return;
         if (e.repeat) return;
 
-        // F1: Selecionar mesa mais próxima e abrir (OpenTableDialog)
+        // F1: Selecionar 1ª mesa disponível e abrir (OpenTableDialog)
         if (e.key === 'F1') {
           e.preventDefault();
           try {
-            if (!selectedTable && Array.isArray(tables) && tables.length > 0) {
+            const avail = (tables || []).filter(t => t.status === 'available');
+            if (avail.length > 0) {
+              setSelectedTable(avail[0]);
+              // Pre-selecionar mesa para o diálogo
+              setPendingTable?.(avail[0]);
+            } else if (!selectedTable && Array.isArray(tables) && tables.length > 0) {
               setSelectedTable(tables[0]);
+              setPendingTable?.(tables[0]);
             }
           } catch {}
           setIsOpenTableDialog(true);
           return;
         }
-        // F4: Fechar comanda (abrir PayDialog)
-        if (e.key === 'F4') {
+        // F2: Fechar comanda (abrir PayDialog)
+        if (e.key === 'F2') {
           e.preventDefault();
           if (selectedTable?.comandaId) {
             await openPayDialog();
@@ -146,18 +154,7 @@ function VendasPage() {
           }
           return;
         }
-        // F2: Focar busca de produtos
-        if (e.key === 'F2') {
-          e.preventDefault();
-          try { document.getElementById('products-search')?.focus(); } catch {}
-          return;
-        }
-        // B: Ir para Balcão (rota)
-        if (String(e.key).toLowerCase() === 'b') {
-          e.preventDefault();
-          navigate('/balcao');
-          return;
-        }
+        // B e H agora são globais (movidos para App.jsx)
         // F10: Abrir Caixa
         if (e.key === 'F10') {
           e.preventDefault();
@@ -734,6 +731,7 @@ function VendasPage() {
     const Icon = config.icon;
     const total = calculateTotal(table.order);
     const customerDisplay = formatClientDisplay(table.customer);
+    const isFirstAvailable = table.status === 'available' && table.id === firstAvailableId;
 
     const displayTotal = (table.status === 'in-use' || table.status === 'awaiting-payment')
       ? (total > 0 ? total : Number(table.totalHint || 0))
@@ -770,8 +768,13 @@ function VendasPage() {
         </div>
         <div className="flex items-center gap-2 mb-2">
           <Icon className="w-5 h-5 text-text-secondary" />
-          <span className="text-lg font-semibold text-text-primary truncate flex-1">{table.name ? table.name : `Mesa ${table.number}`}</span>
-          <span className={cn("text-[11px] font-medium px-2 py-0.5 rounded-full border", badgeClass)}>
+          <div className="flex items-center gap-2 flex-1 min-w-0">
+            <span className="text-lg font-semibold text-text-primary truncate">{table.name ? table.name : `Mesa ${table.number}`}</span>
+            {isFirstAvailable && (
+              <kbd className="hidden sm:inline px-2 py-1 text-xs font-bold font-mono text-gray-400 bg-transparent border border-gray-300/50 rounded">F1</kbd>
+            )}
+          </div>
+          <span className={cn("text-[11px] font-medium px-2 py-0.5 rounded-full border flex-shrink-0", badgeClass)}>
             {config.label}
           </span>
         </div>
@@ -1279,7 +1282,9 @@ function VendasPage() {
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => setIsPayOpen(false)} disabled={payLoading}>Cancelar</Button>
-            <Button type="button" onClick={confirmPay} disabled={!((paymentLines && paymentLines.length > 0) && !payLoading)}>{payLoading ? 'Processando...' : 'Confirmar Pagamento'}</Button>
+            <Button type="button" onClick={confirmPay} disabled={!((paymentLines && paymentLines.length > 0) && !payLoading)}>
+              {payLoading ? 'Processando...' : 'Confirmar Pagamento'}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1486,6 +1491,7 @@ function VendasPage() {
             <Button variant="secondary" onClick={() => setIsOrderDetailsOpen(false)}>Fechar</Button>
             <Button onClick={async () => { setIsOrderDetailsOpen(false); await openPayDialog(); }} disabled={!tbl || (items.length === 0)}>
               <DollarSign className="mr-2 h-4 w-4" /> Fechar Conta
+              <kbd className="ml-2 px-2 py-1 text-xs font-bold font-mono text-white bg-amber-600 border border-amber-700 rounded shadow-sm">F2</kbd>
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1663,7 +1669,10 @@ function VendasPage() {
               <span>Total</span>
               <span>R$ {total.toFixed(2)}</span>
             </div>
-            <Button size="lg" className="w-full" onClick={openPayDialog}><DollarSign className="mr-2" /> Fechar Conta</Button>
+            <Button size="lg" className="w-full" onClick={openPayDialog}>
+              <DollarSign className="mr-2" /> Fechar Conta
+              <kbd className="ml-2 px-2 py-1 text-xs font-bold font-mono text-white bg-amber-600 border border-amber-700 rounded shadow-sm">F2</kbd>
+            </Button>
           </div>
         </div>
         <PayDialog />
@@ -1839,7 +1848,7 @@ function VendasPage() {
        <div className="p-4 border-b border-border">
           <div className="relative">
              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted" />
-             <Input placeholder="Buscar produto..." className="pl-9" value={productSearch} onChange={(e) => setProductSearch(e.target.value)} onKeyDown={(e) => e.stopPropagation()} />
+             <Input id="products-search" placeholder="Buscar produto..." className="pl-9" value={productSearch} onChange={(e) => setProductSearch(e.target.value)} onKeyDown={(e) => e.stopPropagation()} />
           </div>
        </div>
        <div className="flex-1 overflow-y-auto p-4 thin-scroll">
@@ -2596,6 +2605,9 @@ function VendasPage() {
             <Unlock className="h-4 w-4" />
             <span className="ml-2 md:hidden">Abrir</span>
             <span className="ml-2 hidden md:inline">Abrir Caixa</span>
+            {!isCashierOpen && (
+              <kbd className="ml-2 px-2 py-1 text-xs font-bold font-mono text-white bg-emerald-700 border border-emerald-800 rounded shadow-sm">F10</kbd>
+            )}
           </Button>
       </AlertDialogTrigger>
        <AlertDialogContent 
@@ -3098,11 +3110,16 @@ function VendasPage() {
                 <div className="flex items-center justify-between">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1">
-                      <h3 className="font-bold text-base truncate">
-                        {table.name || `Mesa ${table.number}`}
-                      </h3>
+                      <div className="flex items-center gap-2 flex-1 min-w-0">
+                        <h3 className="font-bold text-base truncate">
+                          {table.name || `Mesa ${table.number}`}
+                        </h3>
+                        {table.status === 'available' && table.id === firstAvailableId && (
+                          <kbd className="px-2 py-1 text-xs font-bold font-mono text-gray-400 bg-transparent border border-gray-300/50 rounded flex-shrink-0">F1</kbd>
+                        )}
+                      </div>
                       <span className={cn(
-                        "text-xs px-2 py-0.5 rounded-full border font-medium",
+                        "text-xs px-2 py-0.5 rounded-full border font-medium flex-shrink-0",
                         getStatusColor(table.status)
                       )}>
                         {getStatusLabel(table.status)}
@@ -3263,9 +3280,9 @@ function VendasPage() {
               if (v === 'historico') navigate('/historico');
             }}>
               <TabsList className="!grid w-full grid-cols-3">
-                <TabsTrigger value="mesas" className="text-xs sm:text-sm">Mesas</TabsTrigger>
-                <TabsTrigger value="balcao" className="text-xs sm:text-sm">Balcão</TabsTrigger>
-                <TabsTrigger value="historico" className="text-xs sm:text-sm">Histórico</TabsTrigger>
+                <TabsTrigger value="mesas" className="text-xs sm:text-sm" title="Pressione B para alternar">Mesas</TabsTrigger>
+                <TabsTrigger value="balcao" className="text-xs sm:text-sm" title="Pressione B para alternar">Balcão</TabsTrigger>
+                <TabsTrigger value="historico" className="text-xs sm:text-sm" title="Pressione H para ir ao histórico">Histórico</TabsTrigger>
               </TabsList>
             </Tabs>
           </div>
@@ -3276,6 +3293,7 @@ function VendasPage() {
               <Banknote className="h-4 w-4" />
               <span className="ml-2 md:hidden">Detalhes</span>
               <span className="ml-2 hidden md:inline">Detalhes do Caixa</span>
+              <kbd className="ml-2 px-2 py-1 text-xs font-bold font-mono text-gray-400 bg-transparent border border-gray-300/50 rounded">F11</kbd>
             </Button>
             <div className="hidden md:block w-px h-6 bg-border mx-1"></div>
             <Button onClick={() => setIsCreateMesaOpen(true)} className="hidden md:flex" size="sm">
