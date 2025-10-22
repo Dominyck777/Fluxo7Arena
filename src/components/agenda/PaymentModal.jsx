@@ -684,11 +684,11 @@ export default function PaymentModal({
             </div>
             
             {/* Botões compactos */}
-            <div className="flex gap-2 justify-center">
+            <div className="flex flex-col gap-2">
               <Button
                 type="button"
                 size="sm"
-                className="bg-sky-600 hover:bg-sky-500 text-white text-xs h-8 px-3 flex-shrink-0"
+                className="bg-sky-600 hover:bg-sky-500 text-white text-xs h-8 px-3"
                 onClick={splitEqually}
                 disabled={!paymentTotal || participantsCount === 0}
               >
@@ -701,16 +701,28 @@ export default function PaymentModal({
                   return 'Dividir';
                 })()}
               </Button>
-              <Button 
-                type="button" 
-                variant="ghost" 
-                size="sm"
-                className="border border-white/10 text-xs h-8 px-4 flex-shrink-0" 
-                onClick={zeroAllValues} 
-                disabled={participantsCount === 0}
-              >
-                Zerar
-              </Button>
+              <div className="flex gap-2">
+                <Button 
+                  type="button" 
+                  variant="ghost" 
+                  size="sm"
+                  className="border border-amber-500/30 text-amber-400 hover:bg-amber-500/10 text-xs h-8 px-3 flex-1" 
+                  onClick={aplicarTaxaEmTodos} 
+                  disabled={participantsCount === 0}
+                >
+                  Aplicar taxas
+                </Button>
+                <Button 
+                  type="button" 
+                  variant="ghost" 
+                  size="sm"
+                  className="border border-white/10 text-xs h-8 px-3 flex-1" 
+                  onClick={zeroAllValues} 
+                  disabled={participantsCount === 0}
+                >
+                  Zerar
+                </Button>
+              </div>
             </div>
           </div>
           
@@ -996,13 +1008,14 @@ export default function PaymentModal({
                                   
                                   return (
                                     <label 
-                                      className={`flex items-center gap-1 mt-1 text-[10px] ${
+                                      className={`flex items-center gap-1.5 mt-1 text-[11px] ${
                                         temValor ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'
                                       }`} 
                                       title={temValor ? `Taxa de ${taxa.toFixed(2)}%` : 'Informe o valor primeiro'}
                                     >
                                       <input
                                         type="checkbox"
+                                        className="w-4 h-4"
                                         checked={!!pf.aplicar_taxa}
                                         disabled={!temValor}
                                         onChange={(e) => {
@@ -1038,9 +1051,6 @@ export default function PaymentModal({
                                             return list;
                                           });
                                         }}
-                                        className={`w-3 h-3 rounded border border-amber-500 checked:bg-amber-500 checked:border-amber-500 ${
-                                          temValor ? 'cursor-pointer' : 'cursor-not-allowed'
-                                        }`}
                                         style={{ accentColor: '#f59e0b' }}
                                       />
                                       <span className="text-amber-500 font-medium">Taxa ({taxa.toFixed(2)}%)</span>
