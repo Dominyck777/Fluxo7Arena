@@ -102,6 +102,9 @@ function VendasPage() {
     try { return typeof window !== 'undefined' && window.innerWidth <= 640; } catch { return false; }
   });
   const [loadingItems, setLoadingItems] = useState(false);
+  // Evita movimentação do layout quando diálogos estão abertos (bloqueia scroll do fundo)
+  const anyDialogOpen = isCreateMesaOpen || isOpenTableDialog || isOrderDetailsOpen || isCashierDetailsOpen || isPayOpen || openCashDialogOpen || isCounterModeOpen || isProductDetailsOpen || isMobileModalOpen || false;
+
   useEffect(() => {
     const update = () => {
       try { setIsMobileView(typeof window !== 'undefined' && window.innerWidth <= 640); } catch { setIsMobileView(false); }
@@ -111,8 +114,69 @@ function VendasPage() {
     return () => window.removeEventListener('resize', update);
   }, []);
 
-  // Evita movimentação do layout quando diálogos estão abertos (bloqueia scroll do fundo)
-  const anyDialogOpen = isCreateMesaOpen || isOpenTableDialog || isOrderDetailsOpen || isCashierDetailsOpen || isPayOpen || openCashDialogOpen || isCounterModeOpen || isProductDetailsOpen || isMobileModalOpen || false;
+  // ======= Hotkeys =======
+  useEffect(() => {
+    const handler = async (e) => {
+      try {
+        // Ignorar quando um dialog está aberto
+        if (anyDialogOpen) return;
+        // Ignorar quando digitando em campos de texto
+        const tag = String(e.target?.tagName || '').toLowerCase();
+        if (['input','textarea','select'].includes(tag) || e.target?.isContentEditable) return;
+        if (e.repeat) return;
+
+        // F1: Selecionar mesa mais próxima e abrir (OpenTableDialog)
+        if (e.key === 'F1') {
+          e.preventDefault();
+          try {
+            if (!selectedTable && Array.isArray(tables) && tables.length > 0) {
+              setSelectedTable(tables[0]);
+            }
+          } catch {}
+          setIsOpenTableDialog(true);
+          return;
+        }
+        // F4: Fechar comanda (abrir PayDialog)
+        if (e.key === 'F4') {
+          e.preventDefault();
+          if (selectedTable?.comandaId) {
+            await openPayDialog();
+          } else {
+            toast({ title: 'Nenhuma comanda selecionada', description: 'Selecione uma mesa com comanda aberta antes de fechar.', variant: 'warning' });
+          }
+          return;
+        }
+        // F2: Focar busca de produtos
+        if (e.key === 'F2') {
+          e.preventDefault();
+          try { document.getElementById('products-search')?.focus(); } catch {}
+          return;
+        }
+        // B: Ir para Balcão (rota)
+        if (String(e.key).toLowerCase() === 'b') {
+          e.preventDefault();
+          navigate('/balcao');
+          return;
+        }
+        // F10: Abrir Caixa
+        if (e.key === 'F10') {
+          e.preventDefault();
+          setOpenCashDialogOpen(true);
+          return;
+        }
+        // F11: Detalhes do Caixa (evitar F12 que abre DevTools)
+        if (e.key === 'F11') {
+          e.preventDefault();
+          setIsCashierDetailsOpen(true);
+          return;
+        }
+      } catch {}
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [anyDialogOpen, selectedTable?.comandaId, tables]);
+
+  // (moved) anyDialogOpen declarado acima
   // Animações desativadas
   // Atualiza rapidamente o status do caixa (aberto/fechado)
   const refreshCashierStatus = useCallback(async () => {
@@ -885,6 +949,29 @@ function VendasPage() {
       return () => { active = false; };
     }, [isPayOpen]);
 
+    // Quando finalizadoras chegarem e alguma linha estiver sem methodId, aplicar padrão e recalcular
+    useEffect(() => {
+      if (!isPayOpen) return;
+      if (!Array.isArray(payMethods) || payMethods.length === 0) return;
+      setPaymentLines(prev => {
+        if (!Array.isArray(prev) || prev.length === 0) return prev;
+        const def = (payMethods && payMethods[0] && payMethods[0].id) ? payMethods[0].id : null;
+        if (!def) return prev;
+        let changed = false;
+        const next = prev.map(x => {
+          if (!x.methodId) {
+            changed = true;
+            const lnNew = { ...x, methodId: def };
+            const t = taxaForLine(lnNew);
+            const shown = (lnNew.chargeFee !== false) ? (Number(lnNew.baseValue || 0) * (1 + t)) : Number(lnNew.baseValue || 0);
+            return { ...lnNew, value: formatBRL(shown) };
+          }
+          return x;
+        });
+        return changed ? next : prev;
+      });
+    }, [isPayOpen, payMethods]);
+
     const confirmPay = async () => {
       try {
         if (!selectedTable?.comandaId) return;
@@ -1147,7 +1234,7 @@ function VendasPage() {
               })}
               <div>
                 <Button type="button" variant="secondary" size="sm" className="pointer-events-auto"
-                  onClick={(e) => { e.stopPropagation();
+                  onPointerUp={(e) => { e.preventDefault(); e.stopPropagation();
                   setPaymentLines(prev => {
                     // PERMITIR selecionar o mesmo cliente múltiplas vezes
                     const pick = (payClients[0]?.id) || '';
@@ -1170,24 +1257,6 @@ function VendasPage() {
                   });
                   setNextPayLineId(n => n + 1);
                 }}
-                  onTouchEnd={(e) => { e.preventDefault(); e.stopPropagation();
-                    setPaymentLines(prev => {
-                      const pick = (payClients[0]?.id) || '';
-                      const defMethod = (payMethods && payMethods[0] && payMethods[0].id) ? payMethods[0].id : null;
-                      const newLines = [...prev, { id: nextPayLineId, clientId: pick, methodId: defMethod, value: '', chargeFee: true }];
-                      const totalValue = total > 0 ? total : 0;
-                      const perLine = Math.floor((totalValue / newLines.length) * 100) / 100;
-                      const remainder = totalValue - (perLine * newLines.length);
-                      return newLines.map((line, idx) => {
-                        const value = idx === newLines.length - 1 ? perLine + remainder : perLine;
-                        const t = taxaForLine(line);
-                        const charge = line.chargeFee !== false;
-                        const base = charge && t > 0 ? (value / (1 + t)) : value;
-                        return { ...line, baseValue: base, value: formatBRL(value) };
-                      });
-                    });
-                    setNextPayLineId(n => n + 1);
-                  }}
                 >Adicionar forma</Button>
               </div>
               {(() => {

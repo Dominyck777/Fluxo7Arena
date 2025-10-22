@@ -819,19 +819,23 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
                       Divida o valor total pela quantidade de unidades
                     </p>
                     <div className="grid grid-cols-4 items-center gap-4">
-                      <Label className="text-right text-sm">Valor Total (R$)</Label>
-                      <Input 
-                        inputMode="numeric" 
-                        placeholder="0,00" 
-                        value={dismemberTotal ? `R$ ${dismemberTotal}` : ''} 
-                        onChange={(e)=> setDismemberTotal(formatCurrencyBR(e.target.value))} 
-                        className="col-span-3" 
-                      />
+                      <Label className="text-right text-sm">Valor Total</Label>
+                      <div className="col-span-3 flex items-center gap-2">
+                        <span className="text-sm text-text-secondary">R$</span>
+                        <Input 
+                          inputMode="numeric" 
+                          placeholder="0,00" 
+                          value={dismemberTotal || ''} 
+                          onChange={(e)=> setDismemberTotal(formatCurrencyBR(e.target.value))} 
+                          className="flex-1" 
+                        />
+                      </div>
                     </div>
                     <div className="grid grid-cols-4 items-center gap-4">
                       <Label className="text-right text-sm">Quantidade</Label>
                       <Input 
-                        type="number" 
+                        type="text"
+                        inputMode="numeric"
                         placeholder="0" 
                         value={dismemberQty} 
                         onChange={(e)=> setDismemberQty(e.target.value.replace(/[^0-9]/g, ''))} 
@@ -877,7 +881,8 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
                             if (checked && name) {
                               // Buscar produtos similares (sem CX, CAIXA, etc)
                               try {
-                                const allProducts = await listProducts({ codigoEmpresa: userProfile?.codigo_empresa });
+                                const allProducts = await listProducts({ codigoEmpresa: userProfile?.codigo_empresa, search: firstTwoWords });
+
                                 const cleanName = name.replace(/\b(CX|CAIXA|C\/|PCT|PACOTE|UN|UNIDADE)\b/gi, '').trim();
                                 const cleanWords = cleanName.toLowerCase().split(/\s+/).filter(w => w.length > 1);
                                 const firstTwoWords = cleanWords.slice(0, 2).join(' ');
@@ -960,7 +965,7 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
                       <Button
                         type="button"
                         variant="outline"
-                        onClick={() => {
+                        onPointerUp={() => {
                           setDismemberTotal('');
                           setDismemberQty('');
                           setMergeWithExisting(false);
@@ -976,7 +981,7 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
                       </Button>
                       <Button
                         type="button"
-                        onClick={async () => {
+                        onPointerUp={async () => {
                           if (!dismemberTotal || !dismemberQty || Number(dismemberQty) <= 0) {
                             toast({ title: 'Preencha os campos', description: 'Informe o valor total e a quantidade.', variant: 'warning' });
                             return;
