@@ -7,7 +7,7 @@
   "display": "standalone",
   "background_color": "#0a0a0a",
   "theme_color": "#FFAA33",
-  "orientation": "any",
+  "orientation": "portrait",
   "categories": ["business", "productivity", "sports"],
   "prefer_related_applications": false,
   "icons": [

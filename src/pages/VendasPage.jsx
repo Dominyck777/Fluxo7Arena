@@ -771,7 +771,7 @@ function VendasPage() {
           <div className="flex items-center gap-2 flex-1 min-w-0">
             <span className="text-lg font-semibold text-text-primary truncate">{table.name ? table.name : `Mesa ${table.number}`}</span>
             {isFirstAvailable && (
-              <kbd className="hidden sm:inline px-2 py-1 text-xs font-bold font-mono text-gray-400 bg-transparent border border-gray-300/50 rounded">F1</kbd>
+              <kbd className="hidden md:inline px-2 py-1 text-xs font-bold font-mono text-gray-400 bg-transparent border border-gray-300/50 rounded">F1</kbd>
             )}
           </div>
           <span className={cn("text-[11px] font-medium px-2 py-0.5 rounded-full border flex-shrink-0", badgeClass)}>
@@ -1491,7 +1491,7 @@ function VendasPage() {
             <Button variant="secondary" onClick={() => setIsOrderDetailsOpen(false)}>Fechar</Button>
             <Button onClick={async () => { setIsOrderDetailsOpen(false); await openPayDialog(); }} disabled={!tbl || (items.length === 0)}>
               <DollarSign className="mr-2 h-4 w-4" /> Fechar Conta
-              <kbd className="ml-2 px-2 py-1 text-xs font-bold font-mono text-white bg-amber-600 border border-amber-700 rounded shadow-sm">F2</kbd>
+              <kbd className="ml-2 hidden md:inline px-2 py-1 text-xs font-bold font-mono text-white bg-amber-600 border border-amber-700 rounded shadow-sm">F2</kbd>
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1671,7 +1671,7 @@ function VendasPage() {
             </div>
             <Button size="lg" className="w-full" onClick={openPayDialog}>
               <DollarSign className="mr-2" /> Fechar Conta
-              <kbd className="ml-2 px-2 py-1 text-xs font-bold font-mono text-white bg-amber-600 border border-amber-700 rounded shadow-sm">F2</kbd>
+              <kbd className="ml-2 hidden md:inline px-2 py-1 text-xs font-bold font-mono text-white bg-amber-600 border border-amber-700 rounded shadow-sm">F2</kbd>
             </Button>
           </div>
         </div>
@@ -2606,7 +2606,7 @@ function VendasPage() {
             <span className="ml-2 md:hidden">Abrir</span>
             <span className="ml-2 hidden md:inline">Abrir Caixa</span>
             {!isCashierOpen && (
-              <kbd className="ml-2 px-2 py-1 text-xs font-bold font-mono text-white bg-emerald-700 border border-emerald-800 rounded shadow-sm">F10</kbd>
+              <kbd className="ml-2 hidden md:inline px-2 py-1 text-xs font-bold font-mono text-white bg-emerald-700 border border-emerald-800 rounded shadow-sm">F10</kbd>
             )}
           </Button>
       </AlertDialogTrigger>
@@ -3115,7 +3115,7 @@ function VendasPage() {
                           {table.name || `Mesa ${table.number}`}
                         </h3>
                         {table.status === 'available' && table.id === firstAvailableId && (
-                          <kbd className="px-2 py-1 text-xs font-bold font-mono text-gray-400 bg-transparent border border-gray-300/50 rounded flex-shrink-0">F1</kbd>
+                          <kbd className="hidden md:inline px-2 py-1 text-xs font-bold font-mono text-gray-400 bg-transparent border border-gray-300/50 rounded flex-shrink-0">F1</kbd>
                         )}
                       </div>
                       <span className={cn(
@@ -3293,7 +3293,7 @@ function VendasPage() {
               <Banknote className="h-4 w-4" />
               <span className="ml-2 md:hidden">Detalhes</span>
               <span className="ml-2 hidden md:inline">Detalhes do Caixa</span>
-              <kbd className="ml-2 px-2 py-1 text-xs font-bold font-mono text-gray-400 bg-transparent border border-gray-300/50 rounded">F11</kbd>
+              <kbd className="ml-2 hidden md:inline px-2 py-1 text-xs font-bold font-mono text-gray-400 bg-transparent border border-gray-300/50 rounded">F11</kbd>
             </Button>
             <div className="hidden md:block w-px h-6 bg-border mx-1"></div>
             <Button onClick={() => setIsCreateMesaOpen(true)} className="hidden md:flex" size="sm">
