@@ -43,15 +43,18 @@ export default function XMLImportModal({ open, onOpenChange, products, codigoEmp
 
       setParsedData(parsed);
       
-      // Buscar TODOS os produtos do banco para validação precisa
+      // Buscar TODOS os produtos do banco para validação precisa (incluindo inativos)
       let allProducts = products;
       try {
         // listProducts aceita 'search' (não 'searchTerm') e não usa 'limit'
         const fullList = await listProducts({ 
           search: '', 
-          codigoEmpresa 
+          codigoEmpresa,
+          includeInactive: true  // IMPORTANTE: incluir inativos para evitar duplicação
         });
         allProducts = fullList || products;
+        console.log('[XMLImport] Produtos carregados para validação:', allProducts.length);
+        console.log('[XMLImport] Nomes dos produtos:', allProducts.map(p => p.name));
       } catch (err) {
         console.warn('[XMLImport] Não foi possível carregar lista completa, usando cache:', err);
       }
@@ -120,14 +123,24 @@ export default function XMLImportModal({ open, onOpenChange, products, codigoEmp
               // Buscar produto existente novamente (pode ter sido criado entre a validação e agora)
               const existingProducts = await listProducts({ 
                 search: item.xml.nome, 
-                codigoEmpresa 
+                codigoEmpresa,
+                includeInactive: true
               });
               
-              const found = existingProducts.find(p => 
-                p.name?.toLowerCase() === item.xml.nome?.toLowerCase() ||
-                p.barcode === item.xml.ean ||
-                p.code === item.xml.codigo
-              );
+              const found = existingProducts.find(p => {
+                const nomeMatch = (p.name || '').toLowerCase().trim() === (item.xml.nome || '').toLowerCase().trim();
+                const unidadeMatch = (p.unit || '').toUpperCase().trim() === (item.xml.unidade || '').toUpperCase().trim();
+                const eanMatch = (p.barcode || '') === (item.xml.ean || '');
+                const codeMatch = (p.code || '') === (item.xml.codigo || '');
+
+                const result = (nomeMatch && unidadeMatch) || (eanMatch && unidadeMatch) || (codeMatch && unidadeMatch);
+                if (!result && (eanMatch || codeMatch) && !unidadeMatch) {
+                  console.log('[XMLImport] Encontrado mesmo EAN/Código porém unidade diferente. NÃO unir:', {
+                    nomeSistema: p.name, unidadeSistema: p.unit, nomeXML: item.xml.nome, unidadeXML: item.xml.unidade, ean: item.xml.ean, codigo: item.xml.codigo
+                  });
+                }
+                return result;
+              });
               
               if (found && Number(item.xml.quantidade) > 0) {
                 await adjustProductStock({
@@ -137,9 +150,29 @@ export default function XMLImportModal({ open, onOpenChange, products, codigoEmp
                 });
                 results.updated++;
                 results.details.push({ produto: item.xml.nome, acao: 'Já existe - Estoque atualizado', status: 'success' });
+              } else if (!found) {
+                // Com a nova constraint (nome+unidade), pode ter dado 409 por outro motivo. Tentar criar novamente.
+                try {
+                  console.log('[XMLImport] Duplicate report mas não encontrou por nome+unidade/EAN+unidade/código+unidade. Tentando criar novo produto.');
+                  const productDataRetry = convertXMLProductToSystemFormat(item.xml, codigoEmpresa);
+                  if (productDataRetry.salePrice != null && productDataRetry.price == null) {
+                    productDataRetry.price = productDataRetry.salePrice;
+                  }
+                  const qtyXmlRetry = Number(item.xml.quantidade) || 0;
+                  productDataRetry.stock = qtyXmlRetry;
+                  productDataRetry.initialStock = qtyXmlRetry;
+                  productDataRetry.currentStock = qtyXmlRetry;
+                  await createProduct(productDataRetry, { codigoEmpresa });
+                  results.created++;
+                  results.details.push({ produto: item.xml.nome, acao: 'Criado após checagem', status: 'success' });
+                } catch (e2) {
+                  console.warn('[XMLImport] Falhou ao criar após duplicate:', e2);
+                  results.skipped++;
+                  results.details.push({ produto: item.xml.nome, acao: 'Falha ao criar após duplicate', status: 'warning' });
+                }
               } else {
                 results.skipped++;
-                results.details.push({ produto: item.xml.nome, acao: 'Já existe - Ignorado', status: 'warning' });
+                results.details.push({ produto: item.xml.nome, acao: 'Sem quantidade para ajustar', status: 'warning' });
               }
             } else {
               throw createError;

@@ -37,12 +37,23 @@ export async function listarFinalizadoras({ somenteAtivas = true, codigoEmpresa 
   let q = supabase
     .from('finalizadoras')
     .select('*')
+    .order('codigo_interno', { ascending: true, nullsFirst: false })
     .order('nome', { ascending: true })
   if (codigo) q = q.eq('codigo_empresa', codigo)
   if (somenteAtivas) q = q.eq('ativo', true)
   const { data, error } = await q
   if (error) throw error
-  return data || []
+  const rows = data || []
+  // Garantir ordenação por código (numérico) mesmo se a coluna for texto
+  rows.sort((a, b) => {
+    const ca = parseInt(a?.codigo_interno) || 0;
+    const cb = parseInt(b?.codigo_interno) || 0;
+    if (ca !== cb) return ca - cb;
+    const na = (a?.nome || '').toLowerCase();
+    const nb = (b?.nome || '').toLowerCase();
+    return na.localeCompare(nb);
+  });
+  return rows
 }
 
 export async function criarFinalizadora(payload, codigoEmpresa) {
@@ -806,6 +817,14 @@ export async function ensureCaixaAberto({ saldoInicial = 0, codigoEmpresa } = {}
       const now = new Date()
       const isAnotherDay = aberto.toDateString() !== now.toDateString()
       if (isAnotherDay) {
+        // Guard: não fechar automaticamente se houver comandas abertas
+        try {
+          const abertasCmd = await listarComandasAbertas({ codigoEmpresa: codigo })
+          if (Array.isArray(abertasCmd) && abertasCmd.length > 0) {
+            console.warn('[ensureCaixaAberto] Sessão de dia anterior detectada, mas há comandas abertas. Não fechar automaticamente.')
+            return sess
+          }
+        } catch {}
         const fechadoAgora = now.toISOString()
         // Recalcular entradas e movimentos da sessão antiga
         let entradas = 0; let movTotal = 0

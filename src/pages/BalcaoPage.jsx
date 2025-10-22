@@ -673,7 +673,7 @@ export default function BalcaoPage() {
                     <DialogTitle className="text-xl font-bold">Registrar Suprimento</DialogTitle>
                     <DialogDescription>Informe o valor de entrada no caixa e, opcionalmente, uma observação.</DialogDescription>
                   </DialogHeader>
-                  <div className="space-y-3">
+                  <div className="flex-1 flex flex-col space-y-3">
                     <div>
                       <Label htmlFor="r-valor">Valor</Label>
                       <Input id="r-valor" type="text" inputMode="numeric" autoComplete="off" placeholder="0,00" value={suprimentoValor}
@@ -1622,7 +1622,7 @@ export default function BalcaoPage() {
       </div>
 
       <Dialog open={isPayOpen} onOpenChange={setIsPayOpen}>
-        <DialogContent className="sm:max-w-xl w-[92vw] max-h-[85vh] flex flex-col overflow-hidden animate-none" onKeyDown={(e) => e.stopPropagation()}>
+        <DialogContent className="sm:max-w-xl w-[92vw] max-h-[90vh] flex flex-col overflow-hidden animate-none" onKeyDown={(e) => e.stopPropagation()}>
           <DialogHeader>
             <DialogTitle className="text-2xl font-bold">Fechar Conta</DialogTitle>
             <DialogDescription>Divida o pagamento entre clientes e várias finalizadoras, se necessário.</DialogDescription>
@@ -1632,7 +1632,7 @@ export default function BalcaoPage() {
               <span>Total</span>
               <span>R$ {total.toFixed(2)}</span>
             </div>
-            <div className="flex-1 space-y-2 overflow-y-auto thin-scroll pr-1 max-h-[60vh]">
+            <div className="flex-1 space-y-2 overflow-y-auto thin-scroll pr-1">
               <Label className="block">Pagamentos</Label>
               {/** Helper para resolver nome do cliente em qualquer cenário */}
               {(() => null)()}
@@ -1731,28 +1731,30 @@ export default function BalcaoPage() {
                       const pct = linePct(ln);
                       if (!pct) return null;
                       const fee = lineFee(ln);
+                      const active = !!ln.chargeFee;
                       return (
-                        <div className="mt-1 flex items-center justify-between w-full">
-                          <label className="flex items-center gap-2 text-xs">
-                            <input
-                              aria-label={`Cobrar taxa (${pct.toFixed(2)}%)`}
-                              type="checkbox"
-                              className="h-4 w-4 accent-black checked:accent-amber-500"
-                              checked={!!ln.chargeFee}
-                              onChange={(e) => setPaymentLines(prev => prev.map(x => {
-                                if (x.id !== ln.id) return x;
-                                const base = lineBase(x);
-                                if (e.target.checked) {
-                                  const totalWithFee = base * (1 + pct/100);
-                                  return { ...x, chargeFee: true, value: formatBRL(totalWithFee) };
-                                } else {
-                                  return { ...x, chargeFee: false, value: formatBRL(base) };
-                                }
-                              }))}
-                            />
-                            <span>{`Taxa (${pct.toFixed(2)}%)`}</span>
-                          </label>
-                          <span className="text-[11px] text-text-secondary">R$ {fee.toFixed(2)}</span>
+                        <div className="mt-1">
+                          <button
+                            type="button"
+                            onClick={() => setPaymentLines(prev => prev.map(x => {
+                              if (x.id !== ln.id) return x;
+                              const base = lineBase(x);
+                              if (!active) {
+                                const totalWithFee = base * (1 + pct/100);
+                                return { ...x, chargeFee: true, value: formatBRL(totalWithFee) };
+                              }
+                              return { ...x, chargeFee: false, value: formatBRL(base) };
+                            }))}
+                            className={[
+                              "inline-flex items-center gap-2 px-3 py-1 rounded-sm text-xs font-medium border transition-colors",
+                              active ? "bg-black text-amber-400 border-amber-500" : "bg-surface text-text-secondary border-border hover:border-border-hover"
+                            ].join(' ')}
+                            title={active ? 'Desmarcar taxa' : 'Cobrar taxa'}
+                          >
+                            <span className={["inline-block h-3 w-3 rounded-sm border",
+                              active ? "bg-amber-500 border-amber-400" : "bg-transparent border-border"].join(' ')} />
+                            <span>Taxa R$ {fee.toFixed(2)}</span>
+                          </button>
                         </div>
                       );
                     })()}
@@ -1812,9 +1814,20 @@ export default function BalcaoPage() {
                   Adicionar forma
                 </Button>
               </div>
-              <div className="text-sm text-text-secondary flex justify-between"><span>Soma</span><span>R$ {sumPayments().toFixed(2)}</span></div>
-              <div className="text-sm text-text-secondary flex justify-between"><span>Taxas</span><span>R$ {sumFees().toFixed(2)}</span></div>
-              <div className="text-sm font-semibold flex justify-between"><span>Restante</span><span className={Math.abs(((items || []).reduce((acc, it) => acc + Number(it.quantity||0)*Number(it.price||0), 0)) - sumBasePayments()) < 0.005 ? 'text-success' : 'text-warning'}>R$ {((((items || []).reduce((acc, it) => acc + Number(it.quantity||0)*Number(it.price||0), 0)) - sumBasePayments()).toFixed(2))}</span></div>
+              {(() => {
+                const somaExibida = sumPayments();
+                const feeSum = sumFees();
+                const totalBase = (items || []).reduce((acc, it) => acc + Number(it.quantity||0)*Number(it.price||0), 0);
+                const esperado = totalBase + feeSum;
+                const restante = esperado - somaExibida;
+                return (
+                  <>
+                    <div className="text-sm text-text-secondary flex justify-between"><span>Soma</span><span>R$ {somaExibida.toFixed(2)}</span></div>
+                    <div className="text-sm text-text-secondary flex justify-between"><span>Taxas</span><span>R$ {feeSum.toFixed(2)}</span></div>
+                    <div className="text-sm font-semibold flex justify-between"><span>Restante</span><span className={Math.abs(restante) < 0.005 ? 'text-success' : 'text-warning'}>R$ {restante.toFixed(2)}</span></div>
+                  </>
+                );
+              })()}
             </div>
           </div>
           <DialogFooter>

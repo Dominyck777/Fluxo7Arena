@@ -317,17 +317,13 @@ export async function listProducts(options = {}) {
     let q = supabase
       .from('produtos')
       .select('*')
+      .eq('codigo_empresa', codigoEmpresa)
       .order('nome', { ascending: true })
       .abortSignal(signal)
-    if (codigoEmpresa) {
-      q = q.eq('codigo_empresa', codigoEmpresa)
-    }
+    // Filtrar por status (se includeInactive = false, exclui inativos)
     if (!includeInactive) {
-      console.log('[products.api] Aplicando filtro de ativos...')
-      // Excluir produtos com status='inactive' OU ativo=false
+      // status != 'inactive' AND (ativo IS NULL OR ativo = true)
       q = q.neq('status', 'inactive')
-      // Incluir produtos onde ativo=true OU ativo=null (produtos antigos)
-      // Excluir apenas onde ativo=false explicitamente
       q = q.or('ativo.is.null,ativo.eq.true')
       console.log('[products.api] Filtro aplicado: status != inactive AND (ativo IS NULL OR ativo = true)')
     }
@@ -348,6 +344,7 @@ export async function listProducts(options = {}) {
   // eslint-disable-next-line no-console
   console.log('[products.api] listProducts RETORNOU:', mapped.length, 'produtos');
   console.log('[products.api] includeInactive:', includeInactive);
+  console.log('[products.api] Produtos:', mapped.map(p => ({ id: p.id, name: p.name, code: p.code })));
   // Log produtos sem código
   const semCodigo = mapped.filter(p => !p.code || p.code.trim() === '');
   console.log('[products.api] Produtos SEM código:', semCodigo.length);
@@ -387,16 +384,16 @@ export async function createProduct(product, options = {}) {
     // Tenta localizar um produto inativo com o mesmo código e liberar o código
     // eslint-disable-next-line no-console
     console.warn('[products.api] createProduct: duplicate code, trying to free code from inactive product')
-    const { data: found, error: findErr } = await withTimeout((signal) =>
+    const { data: foundArr, error: findErr } = await withTimeout((signal) =>
       supabase
         .from('produtos')
         .select('id,status')
         .eq('codigo_produto', payload.codigo_produto)
         .eq('status', 'inactive')
         .limit(1)
-        .single()
         .abortSignal(signal)
     , 15000, 'Timeout find duplicate product (15s)')
+    const found = Array.isArray(foundArr) && foundArr.length > 0 ? foundArr[0] : null
     if (!findErr && found && found.status === 'inactive') {
       // Libera o código do produto inativo
       const { error: clearErr } = await withTimeout((signal) =>
@@ -410,6 +407,14 @@ export async function createProduct(product, options = {}) {
         // Tenta inserir novamente
         ({ data, error } = await tryInsert())
       }
+    } else {
+      // Nenhum inativo com o mesmo código: tentar inserir sem código para evitar conflito
+      // Muitos bancos permitem múltiplos NULLs em unique; além disso, pode haver trigger de auto-código
+      const originalCode = payload.codigo_produto
+      payload.codigo_produto = null
+      // eslint-disable-next-line no-console
+      console.warn('[products.api] createProduct: no inactive found for duplicate code, retrying with codigo_produto = null (original:', originalCode, ')')
+      ;({ data, error } = await tryInsert())
     }
   }
   if (error) {

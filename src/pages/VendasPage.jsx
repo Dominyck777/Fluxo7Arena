@@ -774,6 +774,12 @@ function VendasPage() {
     const isMobile = typeof window !== 'undefined' && window.innerWidth <= 640;
 
     const parseBRL = (s) => { const d = String(s || '').replace(/\D/g, ''); return d ? Number(d) / 100 : 0; };
+    const formatBRL = (n) => new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Math.max(0, Number(n) || 0));
+    const taxaForLine = (ln) => {
+      const fin = (payMethods || []).find(m => String(m.id) === String(ln.methodId));
+      const raw = (fin && fin.taxa_percentual != null) ? Number(fin.taxa_percentual) : 0;
+      return Number.isFinite(raw) ? (raw / 100) : 0;
+    };
     const sumPayments = () => (paymentLines || []).reduce((acc, ln) => acc + parseBRL(ln.value), 0);
 
     const focusNextValue = (currentEl, currentId) => {
@@ -806,7 +812,7 @@ function VendasPage() {
           const pick = (payClients[0]?.id) || '';
           const defMethod = (payMethods && payMethods[0] && payMethods[0].id) ? payMethods[0].id : null;
           const newId = nextPayLineId;
-          const nextState = [...prev, { id: newId, clientId: pick, methodId: defMethod, value: '' }];
+          const nextState = [...prev, { id: newId, clientId: pick, methodId: defMethod, value: '', chargeFee: true }];
           
           // agenda foco após render
           setNextPayLineId(n => n + 1);
@@ -839,6 +845,7 @@ function VendasPage() {
           if (!active) return;
           setPayClients(normalized);
           // criar linha base
+          // garante método padrão mesmo se payMethods chegar após a abertura
           let defMethod = (payMethods && payMethods[0] && payMethods[0].id) ? payMethods[0].id : null;
           let primaryId = (normalized[0]?.id) || null;
           let initialValue = '';
@@ -850,14 +857,18 @@ function VendasPage() {
               initialValue = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(total);
             }
           } catch {}
-          setPaymentLines([{ id: 1, clientId: primaryId, methodId: defMethod, value: initialValue }]);
+          const base = parseBRL(initialValue);
+          const ln0 = { id: 1, clientId: primaryId, methodId: defMethod, baseValue: base, chargeFee: true };
+          const t0 = taxaForLine(ln0);
+          const shown = ln0.chargeFee ? (base * (1 + t0)) : base;
+          setPaymentLines([{ ...ln0, value: formatBRL(shown) }]);
           setNextPayLineId(2);
         } catch {}
       };
       boot();
       return () => { active = false; };
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [isPayOpen, selectedTable?.comandaId]);
+      // inclui payMethods para rehidratar linha base quando finalizadoras carregarem
+    }, [isPayOpen, selectedTable?.comandaId, payMethods]);
 
     useEffect(() => {
       let active = true;
@@ -888,22 +899,31 @@ function VendasPage() {
           if (parseBRL(ln.value) <= 0) { toast({ title: 'Valor inválido', description: 'Informe valores maiores que zero.', variant: 'warning' }); return; }
         }
         const effTotal = total > 0 ? total : 0;
-        const totalSum = sumPayments();
-        const diff = Math.abs(totalSum - effTotal);
+        // Soma exibida (linhas já incluem taxa se ativa)
+        const totalSum = (paymentLines || []).reduce((acc, ln) => acc + parseBRL(ln.value), 0);
+        // Fee esperado baseado na baseValue
+        const feeSum = (paymentLines || []).reduce((acc, ln) => {
+          const base = Number(ln.baseValue || 0);
+          const t = taxaForLine(ln);
+          return acc + ((ln.chargeFee !== false && t > 0) ? (base * t) : 0);
+        }, 0);
+        // Esperado = total de itens + taxas cobradas do cliente
+        const expected = effTotal + feeSum;
+        const diff = Math.abs(totalSum - expected);
         
         // Se a diferença for apenas centavos (até 0.05), ajustar automaticamente na última linha
         if (diff > 0.009 && diff <= 0.05) {
-          const adjustment = effTotal - totalSum;
+          const adjustment = expected - totalSum;
           setPaymentLines(prev => {
             const lastIdx = prev.length - 1;
             return prev.map((line, idx) => {
-              if (idx === lastIdx) {
-                const currentValue = parseBRL(line.value);
-                const newValue = currentValue + adjustment;
-                const formatted = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(newValue);
-                return { ...line, value: formatted };
-              }
-              return line;
+              if (idx !== lastIdx) return line;
+              const currDisp = parseBRL(line.value);
+              const newDisp = Math.max(0, currDisp + adjustment);
+              const t = taxaForLine(line);
+              const charge = line.chargeFee !== false;
+              const newBase = charge && t > 0 ? (newDisp / (1 + t)) : newDisp;
+              return { ...line, baseValue: newBase, value: formatBRL(newDisp) };
             });
           });
           // Não retornar - continuar com o pagamento após ajuste
@@ -928,7 +948,7 @@ function VendasPage() {
         setPayLoading(true);
         await ensureCaixaAberto({ codigoEmpresa: userProfile?.codigo_empresa });
         for (const ln of paymentLines) {
-          const v = parseBRL(ln.value);
+          const v = parseBRL(ln.value); // já reflete a taxa (se ativa) devido aos ajustes de valor
           const fin = payMethods.find(m => String(m.id) === String(ln.methodId));
           const metodo = fin?.nome || fin?.tipo || 'outros';
           await registrarPagamento({ comandaId: selectedTable.comandaId, finalizadoraId: ln.methodId, metodo, valor: v, status: 'Pago', codigoEmpresa, clienteId: ln.clientId || null });
@@ -1006,8 +1026,11 @@ function VendasPage() {
                             
                             return newLines.map((line, i) => {
                               const value = i === newLines.length - 1 ? perLine + remainder : perLine;
-                              const formatted = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
-                              return { ...line, value: formatted };
+                              const lnTmp = { ...line };
+                              const t = taxaForLine(lnTmp);
+                              const charge = lnTmp.chargeFee !== false; // default true
+                              const base = charge && t > 0 ? (value / (1 + t)) : value;
+                              return { ...lnTmp, baseValue: base, value: formatBRL(value) };
                             });
                           });
                         }}>×</Button>
@@ -1033,7 +1056,16 @@ function VendasPage() {
                       </div>
                     )}
                     <div className="sm:col-span-4">
-                      <Select value={ln.methodId || ''} onValueChange={(v) => setPaymentLines(prev => prev.map(x => x.id === ln.id ? { ...x, methodId: v } : x))}>
+                      <Select value={ln.methodId || ''} onValueChange={(v) => {
+                        setPaymentLines(prev => prev.map(x => {
+                          if (x.id !== ln.id) return x;
+                          const newId = v;
+                          const lnNew = { ...x, methodId: newId };
+                          const t = taxaForLine(lnNew);
+                          const shown = (lnNew.chargeFee !== false) ? (Number(lnNew.baseValue || 0) * (1 + t)) : Number(lnNew.baseValue || 0);
+                          return { ...lnNew, value: formatBRL(shown) };
+                        }));
+                      }}>
                         <SelectTrigger className="w-full truncate"><SelectValue placeholder="Forma de pagamento" /></SelectTrigger>
                         <SelectContent>
                           {(payMethods || []).map(m => (<SelectItem key={m.id} value={m.id}>{m.nome}</SelectItem>))}
@@ -1048,9 +1080,16 @@ function VendasPage() {
                         }}
                         onChange={(e) => {
                           const digits = (e.target.value || '').replace(/\D/g, '');
-                          const cents = digits ? Number(digits) / 100 : 0;
-                          const formatted = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(cents);
-                          setPaymentLines(prev => prev.map(x => x.id === ln.id ? { ...x, value: formatted } : x));
+                          const entered = digits ? Number(digits) / 100 : 0;
+                          setPaymentLines(prev => prev.map(x => {
+                            if (x.id !== ln.id) return x;
+                            const t = taxaForLine(x);
+                            // Se taxa ativa, o valor digitado é o total cobrado; base = entered/(1+t)
+                            // Se taxa inativa, valor digitado é a base
+                            const base = (x.chargeFee !== false && t > 0) ? (entered / (1 + t)) : entered;
+                            const shown = (x.chargeFee !== false) ? (base * (1 + t)) : base;
+                            return { ...x, baseValue: base, value: formatBRL(shown) };
+                          }));
                         }}
                         onKeyDown={(e) => {
                           e.stopPropagation();
@@ -1062,16 +1101,58 @@ function VendasPage() {
                         onBeforeInput={(e) => { const data = e.data ?? ''; if (data && /\D/.test(data)) e.preventDefault(); }}
                       />
                     </div>
+                    {/* Checkbox visual para cobrar taxa (preto com detalhes amarelos quando ativo) */}
+                    <div className="sm:col-span-12 -mt-1 pl-1">
+                      {(() => {
+                        const tPct = taxaForLine(ln); // 0..1
+                        const taxa = tPct * 100;
+                        const active = ln.chargeFee !== false; // default: true
+                        const base = ln.baseValue != null ? Number(ln.baseValue) : (() => {
+                          const raw = (ln.value || '').toString();
+                          const digits = raw.replace(/\D/g, '');
+                          const disp = digits ? Number(digits) / 100 : 0;
+                          return active && tPct > 0 ? (disp / (1 + tPct)) : disp;
+                        })();
+                        if (!taxa || taxa <= 0 || !Number.isFinite(base) || base <= 0) return null;
+                        const fee = active ? (base * tPct) : 0;
+                        return (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setPaymentLines(prev => prev.map(x => {
+                                if (x.id !== ln.id) return x;
+                                const t = taxaForLine(x);
+                                const wasActive = x.chargeFee !== false;
+                                // Usa baseValue para derivar o exibido
+                                const base = x.baseValue != null ? Number(x.baseValue) : parseBRL(x.value);
+                                const shown = (!wasActive ? (base * (1 + t)) : base);
+                                return { ...x, chargeFee: !wasActive, baseValue: base, value: formatBRL(shown) };
+                              }));
+                            }}
+                            className={[
+                              "inline-flex items-center gap-2 px-3 py-1 rounded-sm text-xs font-medium border transition-colors",
+                              active ? "bg-black text-amber-400 border-amber-500" : "bg-surface text-text-secondary border-border hover:border-border-hover"
+                            ].join(' ')}
+                            title={active ? 'Desmarcar taxa' : 'Cobrar taxa'}
+                          >
+                            <span className={["inline-block h-3 w-3 rounded-sm border",
+                              active ? "bg-amber-500 border-amber-400" : "bg-transparent border-border"].join(' ')} />
+                            <span>Taxa R$ {fee.toFixed(2)}</span>
+                          </button>
+                        );
+                      })()}
+                    </div>
                   </div>
                 );
               })}
               <div>
-                <Button type="button" variant="secondary" size="sm" onClick={() => {
+                <Button type="button" variant="secondary" size="sm" className="pointer-events-auto"
+                  onClick={(e) => { e.stopPropagation();
                   setPaymentLines(prev => {
                     // PERMITIR selecionar o mesmo cliente múltiplas vezes
                     const pick = (payClients[0]?.id) || '';
                     const defMethod = (payMethods && payMethods[0] && payMethods[0].id) ? payMethods[0].id : null;
-                    const newLines = [...prev, { id: nextPayLineId, clientId: pick, methodId: defMethod, value: '' }];
+                    const newLines = [...prev, { id: nextPayLineId, clientId: pick, methodId: defMethod, value: '', chargeFee: true }];
                     
                     // Distribuir valor total automaticamente entre todas as linhas
                     const totalValue = total > 0 ? total : 0;
@@ -1081,15 +1162,50 @@ function VendasPage() {
                     return newLines.map((line, idx) => {
                       // Adicionar o resto na última linha para fechar exato
                       const value = idx === newLines.length - 1 ? perLine + remainder : perLine;
-                      const formatted = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
-                      return { ...line, value: formatted };
+                      const t = taxaForLine(line);
+                      const charge = line.chargeFee !== false; // default true
+                      const base = charge && t > 0 ? (value / (1 + t)) : value;
+                      return { ...line, baseValue: base, value: formatBRL(value) };
                     });
                   });
                   setNextPayLineId(n => n + 1);
-                }}>Adicionar forma</Button>
+                }}
+                  onTouchEnd={(e) => { e.preventDefault(); e.stopPropagation();
+                    setPaymentLines(prev => {
+                      const pick = (payClients[0]?.id) || '';
+                      const defMethod = (payMethods && payMethods[0] && payMethods[0].id) ? payMethods[0].id : null;
+                      const newLines = [...prev, { id: nextPayLineId, clientId: pick, methodId: defMethod, value: '', chargeFee: true }];
+                      const totalValue = total > 0 ? total : 0;
+                      const perLine = Math.floor((totalValue / newLines.length) * 100) / 100;
+                      const remainder = totalValue - (perLine * newLines.length);
+                      return newLines.map((line, idx) => {
+                        const value = idx === newLines.length - 1 ? perLine + remainder : perLine;
+                        const t = taxaForLine(line);
+                        const charge = line.chargeFee !== false;
+                        const base = charge && t > 0 ? (value / (1 + t)) : value;
+                        return { ...line, baseValue: base, value: formatBRL(value) };
+                      });
+                    });
+                    setNextPayLineId(n => n + 1);
+                  }}
+                >Adicionar forma</Button>
               </div>
-              <div className="text-sm text-text-secondary flex justify-between"><span>Soma</span><span>R$ {sumPayments().toFixed(2)}</span></div>
-              <div className="text-sm font-semibold flex justify-between"><span>Restante</span><span className={Math.abs(total - sumPayments()) < 0.005 ? 'text-success' : 'text-warning'}>R$ {(total - sumPayments()).toFixed(2)}</span></div>
+              {(() => {
+                const somaExibida = sumPayments();
+                const feeSum = (paymentLines || []).reduce((acc, ln) => {
+                  const base = Number(ln.baseValue || 0);
+                  const t = taxaForLine(ln);
+                  return acc + ((ln.chargeFee !== false && t > 0) ? (base * t) : 0);
+                }, 0);
+                const esperado = (total > 0 ? total : 0) + feeSum;
+                const restante = esperado - somaExibida;
+                return (
+                  <>
+                    <div className="text-sm text-text-secondary flex justify-between"><span>Soma</span><span>R$ {somaExibida.toFixed(2)}</span></div>
+                    <div className="text-sm font-semibold flex justify-between"><span>Restante</span><span className={Math.abs(restante) < 0.005 ? 'text-success' : 'text-warning'}>R$ {restante.toFixed(2)}</span></div>
+                  </>
+                );
+              })()}
             </div>
           </div>
           <DialogFooter>
@@ -1587,27 +1703,43 @@ function VendasPage() {
         return;
       }
       const price = Number(prod.salePrice ?? prod.price ?? 0);
-      // Consolidar: se já existe item deste produto, incrementa quantidade
-      let itens = await listarItensDaComanda({ comandaId: selectedTable.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
-      const same = (itens || []).find(it => it.produto_id === prod.id);
-      if (same) {
-        await atualizarQuantidadeItem({ itemId: same.id, quantidade: Number(same.quantidade || 0) + 1, codigoEmpresa: userProfile?.codigo_empresa });
+      // 1) Otimista: atualiza UI imediatamente para evitar latência no mobile
+      setSelectedTable((prev) => {
+        const order = Array.isArray(prev?.order) ? [...prev.order] : [];
+        const idx = order.findIndex(it => it.productId === prod.id);
+        if (idx >= 0) {
+          const it = order[idx];
+          order[idx] = { ...it, quantity: Number(it.quantity || 1) + 1 };
+        } else {
+          order.push({ id: `tmp-${Date.now()}`, productId: prod.id, name: prod.name, price, quantity: 1 });
+        }
+        const updated = { ...prev, order };
+        setTables((prevTables) => prevTables.map(t => (prev && t.id === prev.id ? updated : t)));
+        return updated;
+      });
+
+      // 2) Persistência real no backend
+      const existing = (selectedTable?.order || []).find(it => it.productId === prod.id);
+      if (existing) {
+        await atualizarQuantidadeItem({ itemId: existing.id, quantidade: Number(existing.quantity || 1) + 1, codigoEmpresa: userProfile?.codigo_empresa });
       } else {
-        await adicionarItem({
-          comandaId: selectedTable.comandaId,
-          produtoId: prod.id,
-          descricao: prod.name,
-          quantidade: 1,
-          precoUnitario: price,
-          codigoEmpresa: userProfile?.codigo_empresa,
-        });
+        await adicionarItem({ comandaId: selectedTable.comandaId, produtoId: prod.id, descricao: prod.name, quantidade: 1, precoUnitario: price, codigoEmpresa: userProfile?.codigo_empresa });
       }
-      // Reload items
-      itens = await listarItensDaComanda({ comandaId: selectedTable.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
-      const order = (itens || []).map((it) => ({ id: it.id, productId: it.produto_id, name: it.descricao || 'Item', price: Number(it.preco_unitario || 0), quantity: Number(it.quantidade || 1) }));
-      const updated = { ...selectedTable, order };
-      setSelectedTable(updated);
-      setTables((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
+
+      // 3) Recarregar em background para sincronizar ids/quantidades corretas
+      setTimeout(async () => {
+        try {
+          const itens = await listarItensDaComanda({ comandaId: selectedTable.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
+          const order = (itens || []).map((it) => ({ id: it.id, productId: it.produto_id, name: it.descricao || 'Item', price: Number(it.preco_unitario || 0), quantity: Number(it.quantidade || 1) }));
+          setSelectedTable((prev) => {
+            if (!prev) return prev;
+            const updated = { ...prev, order };
+            setTables((prevTables) => prevTables.map(t => (t.id === updated.id ? updated : t)));
+            return updated;
+          });
+        } catch {}
+      }, 0);
+
       toast({ title: 'Produto adicionado', description: prod.name, variant: 'success' });
     } catch (e) {
       toast({ title: 'Falha ao adicionar produto', description: e?.message || 'Tente novamente', variant: 'destructive' });
@@ -1632,7 +1764,7 @@ function VendasPage() {
       if (!q) return true;
       return (p.name || '').toLowerCase().includes(q) || String(p.code || '').toLowerCase().includes(q);
     });
-  
+
     return (
     <div className="flex flex-col h-full">
        <div className="p-4 border-b border-border">
@@ -1673,7 +1805,10 @@ function VendasPage() {
                           <span className="inline-flex items-center justify-center text-[10px] sm:text-[11px] px-1.5 py-0.5 rounded-full bg-surface-2 text-text-secondary border border-border flex-shrink-0">Qtd {remaining}</span>
                         </div>
                       </div>
-                      <Button size="icon" className="flex-shrink-0 bg-amber-500 hover:bg-amber-400 text-black border border-amber-500/60" onClick={(e) => { e.preventDefault(); e.stopPropagation(); addProductToComanda(prod); }} aria-label={`Adicionar ${prod.name}`}>
+                      <Button size="icon" className="flex-shrink-0 bg-amber-500 hover:bg-amber-400 text-black border border-amber-500/60"
+                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); addProductToComanda(prod); }}
+                      onTouchEnd={(e) => { e.preventDefault(); e.stopPropagation(); addProductToComanda(prod); }}
+                      aria-label={`Adicionar ${prod.name}`}>
                         <Plus size={16} />
                       </Button>
                     </li>

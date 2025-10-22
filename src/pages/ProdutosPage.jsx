@@ -15,7 +15,7 @@ import { Calendar } from "@/components/ui/calendar";
 import { format, parseISO } from "date-fns";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Checkbox } from '@/components/ui/checkbox';
-import { listProducts, createProduct, updateProduct, deleteProduct, listCategories, createCategory, removeCategory, getMostSoldProductsToday, getSoldProductsByPeriod } from '@/lib/products';
+import { listProducts, createProduct, updateProduct, deleteProduct, listCategories, createCategory, removeCategory, getMostSoldProductsToday, getSoldProductsByPeriod, adjustProductStock } from '@/lib/products';
 import { useAuth } from '@/contexts/AuthContext';
 import XMLImportModal from '@/components/XMLImportModal';
 
@@ -221,7 +221,7 @@ const StatCard = ({ icon, title, value, subtitle, color, onClick, isActive }) =>
     );
 };
 
-function ProductFormModal({ open, onOpenChange, product, onSave, categories, onCreateCategory, suggestedCode }) {
+function ProductFormModal({ open, onOpenChange, product, onSave, categories, onCreateCategory, suggestedCode, onRefreshProducts }) {
   const { toast } = useToast();
   const { userProfile } = useAuth();
   const [activeTab, setActiveTab] = useState('dados');
@@ -304,6 +304,9 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
   const [mergeWithExisting, setMergeWithExisting] = useState(false);
   const [similarProducts, setSimilarProducts] = useState([]);
   const [selectedMergeProduct, setSelectedMergeProduct] = useState(null);
+  // Novo: permitir escolher preço unitário final e decidir se atualiza o preço do produto destino na união
+  const [overrideUnitPrice, setOverrideUnitPrice] = useState(''); // string formatada BR
+  const [updateTargetPrice, setUpdateTargetPrice] = useState(false);
   
 
   const formatCurrencyBR = (value) => {
@@ -417,6 +420,13 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
     if (!product && suggestedCode && !code) {
       setCode(suggestedCode);
     }
+    // Limpar estados do desmembramento ao trocar de produto
+    setShowDismember(false);
+    setDismemberTotal('');
+    setDismemberQty('');
+    setMergeWithExisting(false);
+    setSimilarProducts([]);
+    setSelectedMergeProduct(null);
   }, [product, open]);
 
   // Auto-cálculos: custo e margem
@@ -782,6 +792,26 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
               </div>
               
               {/* Desmembrar Preço */}
+              <div className="border-t pt-3 mt-4">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    if (!showDismember) {
+                      // Preencher automaticamente com o preço de venda atual
+                      if (salePrice && currencyToNumber(salePrice) > 0) {
+                        setDismemberTotal(salePrice);
+                      }
+                    }
+                    setShowDismember(!showDismember);
+                  }}
+                  disabled={!editEnabled}
+                  className="bg-amber-500 hover:bg-amber-400 text-black"
+                >
+                  {showDismember ? 'Fechar Desmembramento' : 'Desmembrar Preço'}
+                </Button>
+              </div>
+              
               {showDismember && (
                 <div className="border-t pt-3 mt-4">
                   <div className="p-4 bg-surface border border-border rounded-md space-y-3">
@@ -811,10 +841,28 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
                     
                     {dismemberTotal && dismemberQty && Number(dismemberQty) > 0 && (
                       <div className="bg-success/10 border border-success/30 p-3 rounded">
-                        <p className="text-sm font-medium mb-1 text-text-secondary">Preço Unitário:</p>
-                        <p className="text-xl font-bold text-success">
-                          R$ {(currencyToNumber(dismemberTotal) / Number(dismemberQty)).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </p>
+                        <div className="grid grid-cols-4 items-center gap-4">
+                          <Label className="text-right text-sm">Preço Unitário</Label>
+                          <Input
+                            className="col-span-3"
+                            placeholder="0,00"
+                            value={(() => {
+                              const base = (currencyToNumber(dismemberTotal) / Number(dismemberQty));
+                              const manual = currencyToNumber(overrideUnitPrice);
+                              const show = manual > 0 ? manual : base;
+                              return show.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                            })()}
+                            inputMode="numeric"
+                            onChange={(e) => setOverrideUnitPrice(formatCurrencyBR(e.target.value))}
+                            onKeyDown={(e) => {
+                              e.stopPropagation();
+                              const allowed = ['Backspace','Delete','ArrowLeft','ArrowRight','Tab'];
+                              if (allowed.includes(e.key)) return;
+                              if (!/^[0-9]$/.test(e.key)) { e.preventDefault(); }
+                            }}
+                            onBeforeInput={(e) => { const data = e.data ?? ''; if (data && /\D/.test(data)) e.preventDefault(); }}
+                          />
+                        </div>
                       </div>
                     )}
                     
@@ -830,20 +878,32 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
                               // Buscar produtos similares (sem CX, CAIXA, etc)
                               try {
                                 const allProducts = await listProducts({ codigoEmpresa: userProfile?.codigo_empresa });
-                                const cleanName = name.replace(/\b(CX|CAIXA|C\/|PCT|PACOTE)\b/gi, '').trim();
-                                const cleanWords = cleanName.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+                                const cleanName = name.replace(/\b(CX|CAIXA|C\/|PCT|PACOTE|UN|UNIDADE)\b/gi, '').trim();
+                                const cleanWords = cleanName.toLowerCase().split(/\s+/).filter(w => w.length > 1);
                                 const firstTwoWords = cleanWords.slice(0, 2).join(' ');
+                                
+                                console.log('[Desmembrar] Buscando similares para:', name);
+                                console.log('[Desmembrar] Nome limpo:', cleanName);
+                                console.log('[Desmembrar] Primeiras 2 palavras:', firstTwoWords);
                                 
                                 const similar = allProducts.filter(p => {
                                   if (p.id === product?.id) return false; // Não incluir o próprio produto
-                                  const pName = (p.name || '').replace(/\b(CX|CAIXA|C\/|PCT|PACOTE)\b/gi, '').trim();
-                                  const pWords = pName.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+                                  const pName = (p.name || '').replace(/\b(CX|CAIXA|C\/|PCT|PACOTE|UN|UNIDADE)\b/gi, '').trim();
+                                  const pWords = pName.toLowerCase().split(/\s+/).filter(w => w.length > 1);
                                   const pFirstTwoWords = pWords.slice(0, 2).join(' ');
                                   
                                   // Comparar nome completo OU primeiras 2 palavras
-                                  return pName.toLowerCase() === cleanName.toLowerCase() || 
+                                  const match = pName.toLowerCase() === cleanName.toLowerCase() || 
                                          (firstTwoWords && pFirstTwoWords === firstTwoWords);
+                                  
+                                  if (match) {
+                                    console.log('[Desmembrar] Match encontrado:', p.name, '| Limpo:', pName, '| 2 palavras:', pFirstTwoWords);
+                                  }
+                                  
+                                  return match;
                                 });
+                                
+                                console.log('[Desmembrar] Total de produtos similares:', similar.length);
                                 setSimilarProducts(similar);
                                 if (similar.length > 0) {
                                   setSelectedMergeProduct(similar[0].id);
@@ -859,6 +919,9 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
                         />
                         <Label htmlFor="mergeWithExisting" className="cursor-pointer text-sm">
                           Unir com produto existente (somar estoque)
+                          <span className="block text-[11px] text-text-muted">
+                            O produto atual será INATIVADO e o produto selecionado abaixo será PRESERVADO (estoque somado)
+                          </span>
                         </Label>
                       </div>
                       
@@ -868,7 +931,7 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
                             <p className="text-xs text-text-muted">Nenhum produto similar encontrado</p>
                           ) : (
                             <>
-                              <Label className="text-xs">Selecione o produto para unir:</Label>
+                              <Label className="text-xs">Produto destino (será preservado):</Label>
                               <Select value={selectedMergeProduct || ''} onValueChange={setSelectedMergeProduct}>
                                 <SelectTrigger className="w-full text-sm">
                                   <SelectValue placeholder="Escolha um produto" />
@@ -881,14 +944,17 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
                                   ))}
                                 </SelectContent>
                               </Select>
-                              <p className="text-xs text-amber-600 dark:text-amber-400">
-                                ⚠️ O estoque será somado e este produto será excluído
-                              </p>
+                              <div className="flex items-center gap-2 mt-1">
+                                <Checkbox id="updateTargetPrice" checked={updateTargetPrice} onCheckedChange={(v) => setUpdateTargetPrice(!!v)} />
+                                <Label htmlFor="updateTargetPrice" className="cursor-pointer text-xs">Atualizar preço do produto destino com o preço unitário informado</Label>
+                              </div>
+                              <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">⚠️ O estoque será somado e este produto será excluído</p>
                             </>
                           )}
                         </div>
                       )}
                     </div>
+                    
                     
                     <div className="flex gap-2 pt-2">
                       <Button
@@ -900,6 +966,8 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
                           setMergeWithExisting(false);
                           setSimilarProducts([]);
                           setSelectedMergeProduct(null);
+                          setOverrideUnitPrice('');
+                          setUpdateTargetPrice(false);
                           setShowDismember(false);
                         }}
                         className="flex-1"
@@ -914,7 +982,9 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
                             return;
                           }
                           
-                          const unitPrice = currencyToNumber(dismemberTotal) / Number(dismemberQty);
+                          const baseUnitPrice = currencyToNumber(dismemberTotal) / Number(dismemberQty);
+                          const override = currencyToNumber(overrideUnitPrice);
+                          const finalUnitPrice = (override > 0 ? override : baseUnitPrice);
                           
                           if (mergeWithExisting && selectedMergeProduct) {
                             // Unir com produto existente
@@ -924,43 +994,64 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
                                 toast({ title: 'Erro', description: 'Produto selecionado não encontrado.', variant: 'destructive' });
                                 return;
                               }
+                              if (product?.id && selectedMergeProduct === product.id) {
+                                toast({ title: 'Seleção inválida', description: 'O produto destino deve ser diferente do produto atual.', variant: 'warning' });
+                                return;
+                              }
                               
-                              // Somar estoques
-                              const newStock = Number(targetProduct.stock || 0) + Number(dismemberQty);
-                              
-                              // Atualizar produto alvo
-                              await updateProduct(targetProduct.id, { 
-                                stock: newStock,
-                                codigo_empresa: userProfile?.codigo_empresa 
-                              });
+                              // 1) Ajuste de estoque com operação atômica (evita sobrescrever estoque por engano)
+                              const delta = Number(dismemberQty);
+                              let adj;
+                              try {
+                                adj = await adjustProductStock({ productId: targetProduct.id, delta, codigoEmpresa: userProfile?.codigo_empresa });
+                              } catch (e) {
+                                console.error('[Merge] Falha ao ajustar estoque de destino', e);
+                                throw e;
+                              }
+                              const newStock = Number(adj?.stock ?? (Number(targetProduct.stock || 0) + delta));
+                              // 2) Atualiza preço opcionalmente sem perder o estoque ajustado
+                              if (updateTargetPrice) {
+                                const priceUpdate = { ...targetProduct, stock: newStock, salePrice: finalUnitPrice, price: finalUnitPrice };
+                                await updateProduct(targetProduct.id, priceUpdate);
+                              }
+                              // Logs para depuração
+                              console.log('[Merge] Fonte (inativar):', { id: product?.id, name: product?.name, code: product?.code });
+                              console.log('[Merge] Destino (preservar):', { id: targetProduct.id, name: targetProduct.name, code: targetProduct.code, newStock, updateTargetPrice, finalUnitPrice });
                               
                               // Excluir produto atual (CX)
                               if (product?.id) {
                                 await deleteProduct(product.id);
                               }
                               
+                              const srcCode = product?.code ? `(${product.code})` : '';
+                              const dstCode = targetProduct?.code ? `(${targetProduct.code})` : '';
                               toast({ 
                                 title: 'Produtos unidos!', 
-                                description: `Estoque de "${targetProduct.name}" atualizado para ${newStock}. Produto CX excluído.`, 
+                                description: `Destino ${dstCode} ${targetProduct.name}: estoque = ${newStock}${updateTargetPrice ? ` | preço = R$ ${finalUnitPrice.toFixed(2)}` : ''}. Fonte ${srcCode} ${product?.name} inativado.`, 
                                 variant: 'success' 
                               });
                               
                               onOpenChange(false);
-                              onSave?.();
+                              // Atualiza a lista imediatamente no pai, se disponível
+                              try { typeof onRefreshProducts === 'function' && onRefreshProducts(); } catch {}
+                              // Não chamar onSave() sem payload: isso quebra handleSaveProduct.
+                              // O refetch será feito pelo usuário após fechar ou em ações subsequentes.
                             } catch (err) {
                               console.error('Erro ao unir produtos:', err);
                               toast({ title: 'Erro ao unir produtos', description: err?.message || 'Tente novamente', variant: 'destructive' });
                             }
                           } else {
                             // Aplicar desmembramento normal
-                            setSalePrice(unitPrice.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+                            setSalePrice(finalUnitPrice.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
                             setStock(dismemberQty);
                             setDismemberTotal('');
                             setDismemberQty('');
+                            setOverrideUnitPrice('');
+                            setUpdateTargetPrice(false);
                             setShowDismember(false);
                             toast({ 
                               title: 'Preço desmembrado!', 
-                              description: `Preço unitário: R$ ${unitPrice.toFixed(2)} | Estoque: ${dismemberQty}`, 
+                              description: `Preço unitário: R$ ${finalUnitPrice.toFixed(2)} | Estoque: ${dismemberQty}`, 
                               variant: 'success' 
                             });
                           }
@@ -1127,22 +1218,6 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
           </Tabs>
         </form>
         <DialogFooter>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => {
-              if (!showDismember) {
-                // Preencher automaticamente com o preço de venda atual
-                if (salePrice && currencyToNumber(salePrice) > 0) {
-                  setDismemberTotal(salePrice);
-                }
-              }
-              setShowDismember(!showDismember);
-            }}
-            disabled={!editEnabled}
-          >
-            Desmembrar Preço
-          </Button>
           <DialogClose asChild>
             <Button type="button" variant="secondary">Cancelar</Button>
           </DialogClose>
@@ -1613,6 +1688,10 @@ function ProdutosPage() {
       try {
         // eslint-disable-next-line no-console
         console.log('[Produtos] handleSaveProduct', payload);
+        if (!payload || typeof payload !== 'object') {
+          console.warn('[Produtos] handleSaveProduct chamado sem payload válido. Ignorando.');
+          return;
+        }
         // Geração automática de código se vazio: próximo sequencial de 4 dígitos
         if (!payload.code) {
           const numericCodes = products
