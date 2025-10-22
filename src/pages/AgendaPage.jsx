@@ -276,6 +276,7 @@ function AgendaPage() {
   const [isRecorrente, setIsRecorrente] = useState(false);
   const [quantidadeSemanas, setQuantidadeSemanas] = useState(4);
   const [showRecorrenteConfirm, setShowRecorrenteConfirm] = useState(false);
+  const [showAllParticipants, setShowAllParticipants] = useState(false);
   // editingBooking agora vem do contexto, mas vou criar um alias local
   const editingBooking = editingBookingContext;
   const setEditingBooking = setEditingBookingContext;
@@ -1315,7 +1316,7 @@ function AgendaPage() {
       const reqId = ++participantsReqIdRef.current;
       const { data, error } = await supabase
         .from('agendamento_participantes')
-        .select('id, agendamento_id, codigo_empresa, cliente_id, nome, valor_cota, status_pagamento, finalizadora_id, cliente:clientes!agendamento_participantes_cliente_id_fkey(nome, codigo)')
+        .select('id, agendamento_id, codigo_empresa, cliente_id, nome, valor_cota, status_pagamento, finalizadora_id, aplicar_taxa, cliente:clientes!agendamento_participantes_cliente_id_fkey(nome, codigo)')
         .in('agendamento_id', ids);
       // Ignora respostas atrasadas
       if (participantsReqIdRef.current !== reqId) return;
@@ -3135,6 +3136,7 @@ function AgendaPage() {
             })(),
             status_pagamento: p.status_pagamento || 'Pendente',
             finalizadora_id: p.finalizadora_id ? String(p.finalizadora_id) : null,
+            aplicar_taxa: p.aplicar_taxa || false,
           }))
         );
         // Seleciona primeiro participante por padrão
@@ -3145,7 +3147,7 @@ function AgendaPage() {
             try {
               const { data, error } = await supabase
                 .from('agendamento_participantes')
-                .select(`cliente_id, valor_cota, status_pagamento, finalizadora_id, cliente:clientes!agendamento_participantes_cliente_id_fkey ( nome, codigo )`)
+                .select(`cliente_id, valor_cota, status_pagamento, finalizadora_id, aplicar_taxa, cliente:clientes!agendamento_participantes_cliente_id_fkey ( nome, codigo )`)
                 .eq('codigo_empresa', userProfile.codigo_empresa)
                 .eq('agendamento_id', editingBooking.id);
               if (!error && Array.isArray(data)) {
@@ -3164,6 +3166,7 @@ function AgendaPage() {
                   })(),
                   status_pagamento: p.status_pagamento || 'Pendente',
                   finalizadora_id: p.finalizadora_id ? String(p.finalizadora_id) : null,
+                  aplicar_taxa: p.aplicar_taxa || false,
                 })));
                 setPaymentSelectedId(sel[0]?.id || null);
               }
@@ -3263,12 +3266,58 @@ function AgendaPage() {
             })(),
             status_pagamento: p.status_pagamento || 'Pendente',
             finalizadora_id: p.finalizadora_id || null, // ✅ CORREÇÃO: Preserva a finalizadora salva
+            aplicar_taxa: p.aplicar_taxa || false,
           }))
         );
         setPaymentSelectedId(selectedFromParts[0]?.id || null);
         participantsPrefillOnceRef.current = true;
       }
     }, [isModalOpen, editingBooking, participantsByAgendamento]);
+
+    // Atalhos de teclado para modal de agendamento
+    useEffect(() => {
+      const handleKeyDown = (e) => {
+        // Apenas se modal principal estiver aberto
+        if (!isModalOpen) return;
+        
+        // NÃO processar atalhos se modal de pagamentos estiver aberto
+        if (isPaymentModalOpen) return;
+        
+        // ESC para fechar modal
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          setIsModalOpen(false);
+        }
+        
+        // Enter para salvar (apenas se não estiver em um input de texto ou textarea)
+        if (e.key === 'Enter' && !['INPUT', 'TEXTAREA'].includes(e.target.tagName)) {
+          e.preventDefault();
+          if (!pendingSaveRef.current && !completedSaveRef.current) {
+            pendingSaveRef.current = true;
+            completedSaveRef.current = false;
+            saveBookingOnce().catch(() => {});
+          }
+        }
+        
+        // Atalhos apenas para modo de edição
+        if (!editingBooking) return;
+        
+        // F3 para cancelar agendamento
+        if (e.key === 'F3') {
+          e.preventDefault();
+          setIsCancelConfirmOpen(true);
+        }
+        
+        // F4 para abrir modal de pagamentos
+        if (e.key === 'F4') {
+          e.preventDefault();
+          openPaymentModal();
+        }
+      };
+
+      window.addEventListener('keydown', handleKeyDown);
+      return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [isModalOpen, editingBooking, isPaymentModalOpen, openPaymentModal, setIsCancelConfirmOpen, saveBookingOnce, pendingSaveRef, completedSaveRef, setIsModalOpen]);
 
     // Limites da quadra selecionada
     const courtBounds = useMemo(() => {
@@ -4394,15 +4443,30 @@ function AgendaPage() {
                           Repetir por quantas semanas?
                         </Label>
                         <div className="flex items-center gap-3 mt-1.5">
-                          <Input
-                            id="quantidade-semanas"
-                            type="number"
-                            min={2}
-                            max={12}
-                            value={quantidadeSemanas}
-                            onChange={(e) => setQuantidadeSemanas(Math.max(2, Math.min(12, parseInt(e.target.value) || 2)))}
-                            className="w-24"
-                          />
+                          <div className="flex items-center border border-border rounded-md bg-surface-2">
+                            <button
+                              type="button"
+                              onClick={() => setQuantidadeSemanas(prev => Math.max(2, (prev || 2) - 1))}
+                              className="px-3 py-2 hover:bg-surface-3 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                              disabled={quantidadeSemanas <= 2}
+                            >
+                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" />
+                              </svg>
+                            </button>
+                            <div className="px-4 py-2 min-w-[60px] text-center font-semibold border-x border-border">
+                              {quantidadeSemanas}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setQuantidadeSemanas(prev => (prev || 2) + 1)}
+                              className="px-3 py-2 hover:bg-surface-3 transition-colors"
+                            >
+                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                              </svg>
+                            </button>
+                          </div>
                           <span className="text-sm text-text-secondary">
                             semanas ({quantidadeSemanas} agendamentos)
                           </span>
@@ -4410,7 +4474,7 @@ function AgendaPage() {
                       </div>
 
                       {/* Preview das datas que serão criadas */}
-                      {form.date && (
+                      {form.date && quantidadeSemanas >= 2 && (
                         <div className="bg-slate-800/50 border border-slate-700 rounded-lg p-3">
                           <p className="text-xs font-semibold text-slate-300 mb-2 uppercase tracking-wide">Datas que serão criadas:</p>
                           <div className="flex flex-wrap gap-2">
@@ -4470,6 +4534,7 @@ function AgendaPage() {
                     >
                       <XCircle className="w-4 h-4 mr-2 opacity-90" /> 
                       Cancelar agendamento
+                      <kbd className="hidden sm:inline ml-2 px-2 py-1 text-sm font-mono bg-red-700/50 rounded border border-red-500/30">F3</kbd>
                     </Button>
                     <Button
                       type="button"
@@ -4477,7 +4542,10 @@ function AgendaPage() {
                       className="bg-teal-600 hover:bg-teal-500 text-white border-teal-700 w-full sm:w-auto justify-center"
                       onClick={() => { /* [DEBUG-PaymentModal] silenciado */ openPaymentModal(); }}
                     >
-                      <DollarSign className="w-4 h-4 mr-2 opacity-90" /> Pagamentos
+                      <DollarSign className="w-4 h-4 mr-2 opacity-90" /> 
+                      <span className="hidden sm:inline">Gerenciar Pagamentos</span>
+                      <span className="sm:hidden">Pagamentos</span>
+                      <kbd className="hidden sm:inline ml-2 px-2 py-1 text-sm font-mono bg-teal-700/50 rounded border border-teal-500/30">F4</kbd>
                     </Button>
                   </div>
                   <AlertDialog open={isCancelConfirmOpen} onOpenChange={setIsCancelConfirmOpen}>
@@ -4520,6 +4588,7 @@ function AgendaPage() {
                   onClick={() => setIsModalOpen(false)}
                 >
                   Fechar
+                  <kbd className="hidden sm:inline ml-2 px-2 py-1 text-sm font-mono bg-white/10 rounded border border-white/20">Esc</kbd>
                 </Button>
                 <Button
                   type="button"
@@ -4547,6 +4616,7 @@ function AgendaPage() {
                   }}
                 >
                   Salvar
+                  <kbd className="hidden sm:inline ml-2 px-2 py-1 text-sm font-mono bg-emerald-700/50 rounded border border-emerald-500/30">↵</kbd>
                 </Button>
               </div>
             </div>
@@ -4557,7 +4627,7 @@ function AgendaPage() {
 
       {/* Modal de Confirmação para Agendamento Recorrente */}
       <AlertDialog open={showRecorrenteConfirm} onOpenChange={setShowRecorrenteConfirm}>
-        <AlertDialogContent className="max-w-2xl">
+        <AlertDialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <AlertDialogHeader>
             <AlertDialogTitle className="flex items-center gap-3 text-xl">
               <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-orange-600/20 border border-orange-600/40">
@@ -4569,7 +4639,7 @@ function AgendaPage() {
             </AlertDialogTitle>
             <AlertDialogDescription className="space-y-4 mt-4">
               {/* Preview das datas no modal */}
-              {form.date && (
+              {form.date && quantidadeSemanas >= 2 && (
                 <div className="bg-slate-800/50 border border-slate-700 rounded-lg p-3">
                   <p className="text-xs font-semibold text-slate-300 mb-2 uppercase tracking-wide">📅 Datas que serão criadas:</p>
                   <div className="grid grid-cols-2 gap-2">
@@ -4608,11 +4678,33 @@ function AgendaPage() {
                   </div>
                   <div className="flex items-start justify-between py-2">
                     <span className="text-sm text-slate-400">Participantes</span>
-                    <span className="font-semibold text-white text-right max-w-xs">
-                      {form.selectedClients?.length > 0 
-                        ? form.selectedClients.map(c => c.nome).join(', ')
-                        : 'Nenhum participante'}
-                    </span>
+                    <div className="text-right max-w-xs">
+                      {form.selectedClients?.length > 0 ? (
+                        <div className="font-semibold text-white">
+                          {showAllParticipants 
+                            ? form.selectedClients.map(c => c.nome).join(', ')
+                            : form.selectedClients.slice(0, 3).map(c => c.nome).join(', ')
+                          }
+                          {!showAllParticipants && form.selectedClients.length > 3 && (
+                            <span className="text-slate-400"> +{form.selectedClients.length - 3}</span>
+                          )}
+                          {form.selectedClients.length > 3 && (
+                            <>
+                              {' '}
+                              <button
+                                type="button"
+                                onClick={() => setShowAllParticipants(!showAllParticipants)}
+                                className="text-xs text-blue-400 hover:text-blue-300 underline inline"
+                              >
+                                {showAllParticipants ? 'Ver menos' : 'Ver todos'}
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="font-semibold text-white">Nenhum participante</span>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -4636,7 +4728,10 @@ function AgendaPage() {
           </AlertDialogHeader>
           <AlertDialogFooter className="gap-2">
             <AlertDialogCancel 
-              onClick={() => setShowRecorrenteConfirm(false)}
+              onClick={() => {
+                setShowRecorrenteConfirm(false);
+                setShowAllParticipants(false);
+              }}
               className="border-slate-600 hover:bg-slate-800"
             >
               Cancelar e Revisar
@@ -4645,6 +4740,7 @@ function AgendaPage() {
               className="bg-emerald-700 hover:bg-emerald-600 text-white font-semibold"
               onClick={async () => {
                 setShowRecorrenteConfirm(false);
+                setShowAllParticipants(false);
                 pendingSaveRef.current = true;
                 completedSaveRef.current = false;
                 await saveBookingOnce();

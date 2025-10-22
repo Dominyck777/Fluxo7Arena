@@ -71,6 +71,18 @@ export default function PaymentModal({
   const paymentSearchRef = useRef(null);
   const initializedRef = useRef(false);
   
+  // Helper para pegar finalizadora padrão (menor código)
+  const getDefaultPayMethod = useCallback(() => {
+    if (!payMethods || payMethods.length === 0) return null;
+    // Ordenar por código e pegar o primeiro
+    const sorted = [...payMethods].sort((a, b) => {
+      const codigoA = Number(a.codigo_interno || 999999);
+      const codigoB = Number(b.codigo_interno || 999999);
+      return codigoA - codigoB;
+    });
+    return sorted[0];
+  }, [payMethods]);
+  
   // Computações
   const participantsCount = useMemo(() => {
     const allParticipants = localParticipantsForm || [];
@@ -87,6 +99,7 @@ export default function PaymentModal({
     let totalAssigned = 0;
     let paid = 0;
     let pending = 0;
+    let temTaxaAplicada = false;
     
     visible.forEach(pf => {
       const valor = parseBRL(pf?.valor_cota);
@@ -95,11 +108,17 @@ export default function PaymentModal({
       const status = pf?.status_pagamento || 'Pendente';
       if (status === 'Pago') paid++;
       else pending++;
+      
+      // Verificar se algum participante tem taxa aplicada
+      if (pf?.aplicar_taxa === true) {
+        temTaxaAplicada = true;
+      }
     });
     
-    const diff = Number.isFinite(totalTarget) ? (totalAssigned - totalTarget) : 0;
+    // Se houver taxa aplicada, não mostrar diferença
+    const diff = temTaxaAplicada ? 0 : (Number.isFinite(totalTarget) ? (totalAssigned - totalTarget) : 0);
     
-    return { totalTarget, totalAssigned, diff, paid, pending };
+    return { totalTarget, totalAssigned, diff, paid, pending, temTaxaAplicada };
   }, [localParticipantsForm, paymentHiddenIndexes, paymentTotal]);
   
   // Funções
@@ -130,7 +149,43 @@ export default function PaymentModal({
       const newList = [...prev];
       newList.forEach((p, idx) => {
         if (!hidden.includes(idx)) {
-          newList[idx] = { ...newList[idx], valor_cota: '', status_pagamento: 'Pendente' };
+          newList[idx] = { 
+            ...newList[idx], 
+            valor_cota: '', 
+            status_pagamento: 'Pendente',
+            aplicar_taxa: false  // Desmarcar checkbox ao zerar
+          };
+        }
+      });
+      return newList;
+    });
+  };
+  
+  const aplicarTaxaEmTodos = () => {
+    const hidden = paymentHiddenIndexes || [];
+    
+    setLocalParticipantsForm(prev => {
+      const newList = [...prev];
+      newList.forEach((p, idx) => {
+        if (!hidden.includes(idx)) {
+          const valorAtual = parseBRL(p.valor_cota);
+          const temValor = valorAtual > 0;
+          
+          // Só aplicar taxa se tiver valor e finalizadora com taxa
+          if (temValor) {
+            const finalizadora = payMethods.find(m => String(m.id) === String(p.finalizadora_id));
+            const taxa = Number(finalizadora?.taxa_percentual || 0);
+            
+            if (taxa > 0 && !p.aplicar_taxa) {
+              // Aplicar taxa: valor atual * (1 + taxa/100)
+              const novoValor = valorAtual * (1 + taxa / 100);
+              newList[idx] = { 
+                ...newList[idx], 
+                aplicar_taxa: true,
+                valor_cota: maskBRL(novoValor.toFixed(2))
+              };
+            }
+          }
         }
       });
       return newList;
@@ -192,7 +247,8 @@ export default function PaymentModal({
       // Preparar novos registros baseados em participantsForm (permite duplicados)
       const rows = effectiveParticipants.map((p) => {
         const valor = parseBRL(p.valor_cota);
-        const finId = p.finalizadora_id || (payMethods[0]?.id ? String(payMethods[0].id) : null);
+        const defaultMethod = getDefaultPayMethod();
+        const finId = p.finalizadora_id || (defaultMethod?.id ? String(defaultMethod.id) : null);
         
         return {
           codigo_empresa: codigo,
@@ -202,12 +258,13 @@ export default function PaymentModal({
           valor_cota: Number.isFinite(valor) ? valor : 0,
           status_pagamento: p.status_pagamento || 'Pendente',
           finalizadora_id: finId,
+          aplicar_taxa: p.aplicar_taxa || false,
         };
       });
       
       // Inserir novos registros
       if (rows.length > 0) {
-        const { error } = await supabase
+        const { data, error } = await supabase
           .from('agendamento_participantes')
           .insert(rows)
           .select();
@@ -283,11 +340,67 @@ export default function PaymentModal({
     }
   };
   
+  // Atalhos de teclado para modal de pagamentos
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (!isPaymentModalOpen) return;
+      
+      // NÃO processar atalhos se modal de adicionar participante estiver aberto
+      if (isAddParticipantOpen) return;
+      
+      // ESC para fechar modal
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        closePaymentModal();
+      }
+      
+      // Enter para salvar (apenas se não estiver em um input de texto ou textarea)
+      if (e.key === 'Enter' && !['INPUT', 'TEXTAREA'].includes(e.target.tagName)) {
+        e.preventDefault();
+        if (!isSavingPayments) {
+          handleSavePayments();
+        }
+      }
+      
+      // F8 para dividir igualmente
+      if (e.key === 'F8') {
+        e.preventDefault();
+        if (paymentTotal && participantsCount > 0) {
+          splitEqually();
+        }
+      }
+      
+      // F9 para aplicar taxas
+      if (e.key === 'F9') {
+        e.preventDefault();
+        if (participantsCount > 0) {
+          aplicarTaxaEmTodos();
+        }
+      }
+      
+      // F10 para zerar valores
+      if (e.key === 'F10') {
+        e.preventDefault();
+        if (participantsCount > 0) {
+          zeroAllValues();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isPaymentModalOpen, isAddParticipantOpen, paymentTotal, participantsCount, splitEqually, aplicarTaxaEmTodos, zeroAllValues, isSavingPayments, handleSavePayments, closePaymentModal]);
+  
   // Sincronizar estado local com contexto ao abrir modal
   useEffect(() => {
     if (isPaymentModalOpen) {
       // Só inicializar na PRIMEIRA abertura do modal
       if (!initializedRef.current) {
+        // Pegar finalizadora padrão uma vez
+        const defaultMethod = getDefaultPayMethod();
+        const defaultFinalizadoraId = defaultMethod?.id ? String(defaultMethod.id) : null;
+        const defaultAplicarTaxa = Number(defaultMethod?.taxa_percentual || 0) > 0;
+        
         // Inicializar estado local a partir do contexto (ou form.selectedClients se vazio)
         const sourceData = (participantsForm && participantsForm.length > 0) 
           ? participantsForm 
@@ -303,19 +416,31 @@ export default function PaymentModal({
                 codigo: codigo,
                 valor_cota: '',
                 status_pagamento: 'Pendente',
-                finalizadora_id: payMethods[0]?.id ? String(payMethods[0].id) : null
+                finalizadora_id: defaultFinalizadoraId,
+                aplicar_taxa: defaultAplicarTaxa
               };
             });
         
-        // Atualizar códigos faltantes
+        // Atualizar códigos faltantes e garantir finalizadora padrão
         const withCodes = sourceData.map(p => {
-          if (p.codigo) return p;
-          let codigo = null;
-          if (localCustomers && Array.isArray(localCustomers)) {
+          let codigo = p.codigo;
+          if (!codigo && localCustomers && Array.isArray(localCustomers)) {
             const clienteCompleto = localCustomers.find(lc => lc.id === p.cliente_id);
             codigo = clienteCompleto?.codigo || null;
           }
-          return codigo ? { ...p, codigo } : p;
+          
+          // Garantir que tenha finalizadora_id (usar padrão se vazio)
+          let finalizadoraId = p.finalizadora_id;
+          if (!finalizadoraId) {
+            const defaultMethod = getDefaultPayMethod();
+            finalizadoraId = defaultMethod?.id ? String(defaultMethod.id) : null;
+          }
+          
+          return { 
+            ...p, 
+            codigo: codigo || p.codigo,
+            finalizadora_id: finalizadoraId
+          };
         });
         
         setLocalParticipantsForm(withCodes);
@@ -329,7 +454,7 @@ export default function PaymentModal({
       setLocalParticipantsForm([]);
       initializedRef.current = false;
     }
-  }, [isPaymentModalOpen]);
+  }, [isPaymentModalOpen, payMethods, getDefaultPayMethod, participantsForm, form?.selectedClients, localCustomers]);
   
   // Callback para EditParticipantModal atualizar participantes localmente
   const handleParticipantChange = useCallback((updatedParticipants) => {
@@ -358,6 +483,57 @@ export default function PaymentModal({
       setAddParticipantSearch('');
     }
   }, [isAddParticipantOpen]);
+  
+  // Atalhos de teclado para modal de adicionar participante
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (!isAddParticipantOpen) return;
+      
+      // ESC para fechar modal
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setIsAddParticipantOpen(false);
+        setAddParticipantSearch('');
+        setSelectedParticipants([]);
+      }
+      
+      // Enter para adicionar participantes (apenas se não estiver em um input)
+      if (e.key === 'Enter' && e.target.tagName !== 'INPUT' && selectedParticipants.length > 0) {
+        e.preventDefault();
+        // Adicionar todos os participantes selecionados
+        const newParticipants = selectedParticipants.map(cliente => ({
+          cliente_id: cliente.id,
+          nome: cliente.nome,
+          codigo: cliente.codigo,
+          valor_cota: '',
+          status_pagamento: 'Pendente',
+          finalizadora_id: (() => {
+            const defaultMethod = getDefaultPayMethod();
+            return defaultMethod?.id ? String(defaultMethod.id) : null;
+          })(),
+          aplicar_taxa: (() => {
+            const defaultMethod = getDefaultPayMethod();
+            return Number(defaultMethod?.taxa_percentual || 0) > 0;
+          })()
+        }));
+        
+        setLocalParticipantsForm(prev => [...prev, ...newParticipants]);
+        
+        toast({
+          title: 'Participantes adicionados',
+          description: `${selectedParticipants.length} ${selectedParticipants.length === 1 ? 'participante foi adicionado' : 'participantes foram adicionados'} aos pagamentos.`,
+          variant: 'success',
+        });
+        
+        setIsAddParticipantOpen(false);
+        setSelectedParticipants([]);
+        setAddParticipantSearch('');
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isAddParticipantOpen, selectedParticipants, getDefaultPayMethod, setLocalParticipantsForm, toast, setAddParticipantSearch, setIsAddParticipantOpen, setSelectedParticipants]);
   
   // Ref para o elemento que será convertido em imagem
   const relatorioRef = useRef(null);
@@ -435,7 +611,7 @@ export default function PaymentModal({
     >
       <DialogContent
         forceMount
-        className="w-[95vw] sm:max-w-[960px] max-h-[90vh] overflow-y-auto"
+        className="w-[95vw] sm:max-w-[1100px] max-h-[90vh] overflow-y-auto"
         onOpenAutoFocus={(e) => e.preventDefault()}
         onInteractOutside={(e) => { 
           e.preventDefault();
@@ -592,12 +768,12 @@ export default function PaymentModal({
                 </div>
                 
                 {/* Botões de ação */}
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-col sm:flex-row gap-2">
                   <Button
                     type="button"
                     variant="secondary"
                     size="sm"
-                    className="bg-sky-600 hover:bg-sky-500 text-white"
+                    className="bg-sky-600 hover:bg-sky-500 text-white flex-shrink-0"
                     onClick={splitEqually}
                     disabled={!paymentTotal || participantsCount === 0}
                   >
@@ -605,21 +781,45 @@ export default function PaymentModal({
                       const total = parseBRL(paymentTotal);
                       if (Number.isFinite(total) && participantsCount > 0) {
                         const perPerson = total / participantsCount;
-                        return `Dividir igualmente (${maskBRL(String(perPerson.toFixed(2)))} cada)`;
+                        return (
+                          <>
+                            Dividir igualmente ({maskBRL(String(perPerson.toFixed(2)))} cada)
+                            <kbd className="hidden sm:inline ml-2 px-2 py-1 text-sm font-mono bg-sky-700/50 rounded border border-sky-500/30">F8</kbd>
+                          </>
+                        );
                       }
-                      return 'Dividir igualmente';
+                      return (
+                        <>
+                          Dividir igualmente
+                          <kbd className="hidden sm:inline ml-2 px-2 py-1 text-sm font-mono bg-sky-700/50 rounded border border-sky-500/30">F8</kbd>
+                        </>
+                      );
                     })()}
                   </Button>
-                  <Button 
-                    type="button" 
-                    variant="ghost" 
-                    size="sm"
-                    className="border border-white/10" 
-                    onClick={zeroAllValues} 
-                    disabled={participantsCount === 0}
-                  >
-                    Zerar valores
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button 
+                      type="button" 
+                      variant="ghost" 
+                      size="sm"
+                      className="border border-amber-500/30 text-amber-400 hover:bg-amber-500/10 flex-1 sm:flex-initial whitespace-nowrap" 
+                      onClick={aplicarTaxaEmTodos} 
+                      disabled={participantsCount === 0}
+                    >
+                      Aplicar taxas
+                      <kbd className="hidden sm:inline ml-2 px-2 py-1 text-sm font-mono bg-amber-700/50 rounded border border-amber-500/30">F9</kbd>
+                    </Button>
+                    <Button 
+                      type="button" 
+                      variant="ghost" 
+                      size="sm"
+                      className="border border-white/10 flex-1 sm:flex-initial" 
+                      onClick={zeroAllValues} 
+                      disabled={participantsCount === 0}
+                    >
+                      Zerar
+                      <kbd className="hidden sm:inline ml-2 px-2 py-1 text-sm font-mono bg-white/10 rounded border border-white/20">F10</kbd>
+                    </Button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -761,7 +961,13 @@ export default function PaymentModal({
                                     setLocalParticipantsForm(prev => {
                                       const list = [...prev];
                                       if (originalIdx >= 0 && originalIdx < list.length) {
-                                        list[originalIdx] = { ...list[originalIdx], finalizadora_id: val };
+                                        const finalizadora = payMethods.find(m => String(m.id) === String(val));
+                                        const temTaxa = Number(finalizadora?.taxa_percentual || 0) > 0;
+                                        list[originalIdx] = { 
+                                          ...list[originalIdx], 
+                                          finalizadora_id: val,
+                                          aplicar_taxa: temTaxa ? (list[originalIdx].aplicar_taxa ?? true) : false
+                                        };
                                       }
                                       return list;
                                     });
@@ -778,13 +984,76 @@ export default function PaymentModal({
                                     ))}
                                   </SelectContent>
                                 </Select>
+                                
+                                {/* Checkbox de Taxa - Mobile */}
+                                {(() => {
+                                  const finalizadora = payMethods.find(m => String(m.id) === String(pf.finalizadora_id));
+                                  const taxa = Number(finalizadora?.taxa_percentual || 0);
+                                  if (taxa <= 0) return <div className="h-4 mt-1"></div>; // Espaço vazio para manter layout
+                                  
+                                  const valorAtual = parseBRL(pf.valor_cota);
+                                  const temValor = valorAtual > 0;
+                                  
+                                  return (
+                                    <label 
+                                      className={`flex items-center gap-1 mt-1 text-[10px] ${
+                                        temValor ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'
+                                      }`} 
+                                      title={temValor ? `Taxa de ${taxa.toFixed(2)}%` : 'Informe o valor primeiro'}
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        checked={!!pf.aplicar_taxa}
+                                        disabled={!temValor}
+                                        onChange={(e) => {
+                                          if (!temValor) {
+                                            toast({
+                                              title: 'Valor necessário',
+                                              description: 'Informe o valor antes de aplicar a taxa.',
+                                              variant: 'destructive'
+                                            });
+                                            return;
+                                          }
+                                          
+                                          setLocalParticipantsForm(prev => {
+                                            const list = [...prev];
+                                            if (originalIdx >= 0 && originalIdx < list.length) {
+                                              const aplicar = e.target.checked;
+                                              let novoValor = valorAtual;
+                                              
+                                              if (aplicar) {
+                                                // Aplicar taxa: valor atual * (1 + taxa/100)
+                                                novoValor = valorAtual * (1 + taxa / 100);
+                                              } else {
+                                                // Remover taxa: valor atual / (1 + taxa/100)
+                                                novoValor = valorAtual / (1 + taxa / 100);
+                                              }
+                                              
+                                              list[originalIdx] = { 
+                                                ...list[originalIdx], 
+                                                aplicar_taxa: aplicar,
+                                                valor_cota: maskBRL(novoValor.toFixed(2))
+                                              };
+                                            }
+                                            return list;
+                                          });
+                                        }}
+                                        className={`w-3 h-3 rounded border border-amber-500 checked:bg-amber-500 checked:border-amber-500 ${
+                                          temValor ? 'cursor-pointer' : 'cursor-not-allowed'
+                                        }`}
+                                        style={{ accentColor: '#f59e0b' }}
+                                      />
+                                      <span className="text-amber-500 font-medium">Taxa ({taxa.toFixed(2)}%)</span>
+                                    </label>
+                                  );
+                                })()}
                               </div>
-                              <div>
+                              <div className="isolate">
                                 <Label className="text-[10px] text-text-muted">Valor</Label>
                                 <Input
                                   type="text"
                                   inputMode="decimal"
-                                  placeholder="0,00"
+                                  placeholder="R$ 0,00"
                                   value={maskBRL(pf.valor_cota)}
                                   onChange={(e) => {
                                     const masked = maskBRL(e.target.value);
@@ -794,12 +1063,18 @@ export default function PaymentModal({
                                     setLocalParticipantsForm(prev => {
                                       const list = [...prev];
                                       if (originalIdx >= 0 && originalIdx < list.length) {
-                                        list[originalIdx] = { ...list[originalIdx], valor_cota: masked, status_pagamento: autoStatus };
+                                        list[originalIdx] = { 
+                                          ...list[originalIdx], 
+                                          valor_cota: masked, 
+                                          status_pagamento: autoStatus,
+                                          // Desmarcar taxa se valor for zerado
+                                          aplicar_taxa: (masked === '' || amount <= 0) ? false : list[originalIdx].aplicar_taxa
+                                        };
                                       }
                                       return list;
                                     });
                                   }}
-                                  className="h-8 text-xs"
+                                  className="h-8 text-xs text-text-primary placeholder:text-slate-400 bg-surface-2 border-border hover:border-border-hover focus:border-brand focus:ring-2 focus:ring-brand/20"
                                 />
                               </div>
                             </div>
@@ -843,54 +1118,135 @@ export default function PaymentModal({
                               </div>
                             </div>
                             
-                            {/* Finalizadora */}
-                            <Select
-                              value={String(pf.finalizadora_id || '')}
-                              onValueChange={(val) => {
-                                setLocalParticipantsForm(prev => {
-                                  const list = [...prev];
-                                  // Usar o índice original para atualizar
-                                  if (originalIdx >= 0 && originalIdx < list.length) {
-                                    list[originalIdx] = { ...list[originalIdx], finalizadora_id: val };
-                                  }
-                                  return list;
-                                });
-                              }}
-                            >
-                              <SelectTrigger className="w-[140px]">
-                                <SelectValue placeholder="Selecione" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {payMethods.map((m) => (
-                                  <SelectItem key={m.id} value={String(m.id)}>
-                                    {m.nome || m.tipo || 'Outros'}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
+                            {/* Container isolado para Finalizadora + Checkbox */}
+                            <div className="flex items-center gap-2 min-w-[240px] isolate">
+                              <Select
+                                value={String(pf.finalizadora_id || '')}
+                                onValueChange={(val) => {
+                                  setLocalParticipantsForm(prev => {
+                                    const list = [...prev];
+                                    // Usar o índice original para atualizar
+                                    if (originalIdx >= 0 && originalIdx < list.length) {
+                                      const finalizadora = payMethods.find(m => String(m.id) === String(val));
+                                      const temTaxa = Number(finalizadora?.taxa_percentual || 0) > 0;
+                                      list[originalIdx] = { 
+                                        ...list[originalIdx], 
+                                        finalizadora_id: val,
+                                        aplicar_taxa: temTaxa ? (list[originalIdx].aplicar_taxa ?? true) : false
+                                      };
+                                    }
+                                    return list;
+                                  });
+                                }}
+                              >
+                                <SelectTrigger className="w-[140px] flex-shrink-0">
+                                  <SelectValue placeholder="Selecione" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {payMethods.map((m) => (
+                                    <SelectItem key={m.id} value={String(m.id)}>
+                                      {m.nome || m.tipo || 'Outros'}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                              
+                              {/* Checkbox de Taxa */}
+                              <div className="flex-1 min-w-0 isolate">
+                                {(() => {
+                                  const finalizadora = payMethods.find(m => String(m.id) === String(pf.finalizadora_id));
+                                  const taxa = Number(finalizadora?.taxa_percentual || 0);
+                                  if (taxa <= 0) return <div className="h-5"></div>; // Espaço vazio para manter layout
+                                  
+                                  const valorAtual = parseBRL(pf.valor_cota);
+                                  const temValor = valorAtual > 0;
+                                  
+                                  return (
+                                    <label 
+                                      className={`flex items-center gap-1.5 text-xs transition-colors ${
+                                        temValor ? 'cursor-pointer hover:text-text-primary' : 'cursor-not-allowed opacity-50'
+                                      }`} 
+                                      title={temValor ? `Taxa de ${taxa.toFixed(2)}%` : 'Informe o valor primeiro'}
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        checked={!!pf.aplicar_taxa}
+                                        disabled={!temValor}
+                                        onChange={(e) => {
+                                          if (!temValor) {
+                                            toast({
+                                              title: 'Valor necessário',
+                                              description: 'Informe o valor antes de aplicar a taxa.',
+                                              variant: 'destructive'
+                                            });
+                                            return;
+                                          }
+                                          
+                                          setLocalParticipantsForm(prev => {
+                                            const list = [...prev];
+                                            if (originalIdx >= 0 && originalIdx < list.length) {
+                                              const aplicar = e.target.checked;
+                                              let novoValor = valorAtual;
+                                              
+                                              if (aplicar) {
+                                                // Aplicar taxa: valor atual * (1 + taxa/100)
+                                                novoValor = valorAtual * (1 + taxa / 100);
+                                              } else {
+                                                // Remover taxa: valor atual / (1 + taxa/100)
+                                                novoValor = valorAtual / (1 + taxa / 100);
+                                              }
+                                              
+                                              list[originalIdx] = { 
+                                                ...list[originalIdx], 
+                                                aplicar_taxa: aplicar,
+                                                valor_cota: maskBRL(novoValor.toFixed(2))
+                                              };
+                                            }
+                                            return list;
+                                          });
+                                        }}
+                                        className={`w-4 h-4 rounded border-2 border-amber-500 checked:bg-amber-500 checked:border-amber-500 focus:ring-2 focus:ring-amber-500 focus:ring-offset-1 ${
+                                          temValor ? 'cursor-pointer' : 'cursor-not-allowed'
+                                        }`}
+                                        style={{ accentColor: '#f59e0b' }}
+                                      />
+                                      <span className="whitespace-nowrap text-amber-500 font-medium">Taxa ({taxa.toFixed(2)}%)</span>
+                                    </label>
+                                  );
+                                })()}
+                              </div>
+                            </div>
                             
-                            {/* Valor */}
-                            <Input
-                              type="text"
-                              inputMode="decimal"
-                              placeholder="0,00"
-                              value={maskBRL(pf.valor_cota)}
-                              onChange={(e) => {
-                                const masked = maskBRL(e.target.value);
-                                const amount = parseBRL(masked);
-                                const autoStatus = (Number.isFinite(amount) && amount > 0) ? 'Pago' : 'Pendente';
-                                
-                                setLocalParticipantsForm(prev => {
-                                  const list = [...prev];
-                                  // Usar o índice original para atualizar
-                                  if (originalIdx >= 0 && originalIdx < list.length) {
-                                    list[originalIdx] = { ...list[originalIdx], valor_cota: masked, status_pagamento: autoStatus };
-                                  }
-                                  return list;
-                                });
-                              }}
-                              className="w-28"
-                            />
+                            {/* Container isolado para Valor */}
+                            <div className="isolate">
+                              <Input
+                                type="text"
+                                inputMode="decimal"
+                                placeholder="R$ 0,00"
+                                value={maskBRL(pf.valor_cota)}
+                                onChange={(e) => {
+                                  const masked = maskBRL(e.target.value);
+                                  const amount = parseBRL(masked);
+                                  const autoStatus = (Number.isFinite(amount) && amount > 0) ? 'Pago' : 'Pendente';
+                                  
+                                  setLocalParticipantsForm(prev => {
+                                    const list = [...prev];
+                                    // Usar o índice original para atualizar
+                                    if (originalIdx >= 0 && originalIdx < list.length) {
+                                      list[originalIdx] = { 
+                                        ...list[originalIdx], 
+                                        valor_cota: masked, 
+                                        status_pagamento: autoStatus,
+                                        // Desmarcar taxa se valor for zerado
+                                        aplicar_taxa: (masked === '' || amount <= 0) ? false : list[originalIdx].aplicar_taxa
+                                      };
+                                    }
+                                    return list;
+                                  });
+                                }}
+                                className="w-28 text-text-primary placeholder:text-slate-400 bg-surface-2 border-border hover:border-border-hover focus:border-brand focus:ring-2 focus:ring-brand/20"
+                              />
+                            </div>
                             
                             {/* Status */}
                             <span
@@ -935,6 +1291,7 @@ export default function PaymentModal({
             onClick={closePaymentModal}
           >
             Cancelar
+            <kbd className="hidden sm:inline ml-2 px-2 py-1 text-sm font-mono bg-white/10 rounded border border-white/20">Esc</kbd>
           </Button>
           <Button
             type="button"
@@ -943,6 +1300,7 @@ export default function PaymentModal({
             onClick={handleSavePayments}
           >
             Salvar Pagamentos
+            <kbd className="hidden sm:inline ml-2 px-2 py-1 text-sm font-mono bg-emerald-700/50 rounded border border-emerald-500/30">↵</kbd>
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -1236,6 +1594,7 @@ export default function PaymentModal({
               }}
             >
               Cancelar
+              <kbd className="hidden sm:inline ml-2 px-2 py-1 text-sm font-mono bg-white/10 rounded border border-white/20">Esc</kbd>
             </Button>
             <Button
               type="button"
@@ -1249,7 +1608,14 @@ export default function PaymentModal({
                   codigo: cliente.codigo,
                   valor_cota: '',
                   status_pagamento: 'Pendente',
-                  finalizadora_id: payMethods[0]?.id ? String(payMethods[0].id) : null
+                  finalizadora_id: (() => {
+                    const defaultMethod = getDefaultPayMethod();
+                    return defaultMethod?.id ? String(defaultMethod.id) : null;
+                  })(),
+                  aplicar_taxa: (() => {
+                    const defaultMethod = getDefaultPayMethod();
+                    return Number(defaultMethod?.taxa_percentual || 0) > 0;
+                  })()
                 }));
                 
                 setLocalParticipantsForm(prev => [...prev, ...newParticipants]);
@@ -1266,6 +1632,7 @@ export default function PaymentModal({
               }}
             >
               Confirmar ({selectedParticipants.length})
+              <kbd className="hidden sm:inline ml-2 px-2 py-1 text-sm font-mono bg-emerald-700/50 rounded border border-emerald-500/30">↵</kbd>
             </Button>
           </div>
         </DialogFooter>
