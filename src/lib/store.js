@@ -647,9 +647,9 @@ export async function listarComandasAbertas({ codigoEmpresa } = {}) {
   const codigo = codigoEmpresa || getCachedCompanyCode()
 
   const runOnce = async () => {
-    // Timeout mais generoso (12s) e corrida com a query
+    // Timeout de 30s para conexões lentas
     const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('listarComandasAbertas timeout após 12s')), 12000)
+      setTimeout(() => reject(new Error('listarComandasAbertas timeout após 30s')), 30000)
     )
 
     // CONSULTA MAIS AMPLA: buscar todas as comandas sem fechado_em, independente do status
@@ -659,6 +659,7 @@ export async function listarComandasAbertas({ codigoEmpresa } = {}) {
       .is('fechado_em', null)
       .neq('status', 'cancelled')
       .order('aberto_em', { ascending: false })
+      .limit(500)
     if (codigo) query = query.eq('codigo_empresa', codigo)
     const { data, error } = await Promise.race([query, timeoutPromise])
     if (error) throw error
@@ -670,14 +671,15 @@ export async function listarComandasAbertas({ codigoEmpresa } = {}) {
       return await runOnce()
     } catch (e) {
       if (String(e?.message || '').includes('timeout')) {
-        console.warn(`${trace} timeout, tentando novamente...`)
-        return await runOnce()
+        console.warn(`${trace} timeout na primeira tentativa, retornando array vazio`)
+        return []
       }
       throw e
     }
   } catch (e) {
     console.error(`${trace} ❌ EXCEPTION:`, e?.message || e)
-    throw e
+    // Retorna array vazio em vez de propagar erro
+    return []
   }
 }
 
@@ -704,11 +706,11 @@ export async function listMesas(codigoEmpresa) {
   const codigo = codigoEmpresa || getCachedCompanyCode()
   
   const runOnce = async () => {
-    // Timeout mais generoso (12s) e corrida com a query
+    // Timeout de 30s para conexões lentas
     const timeoutPromise = new Promise((_, reject) => 
-      setTimeout(() => reject(new Error('listMesas timeout após 12s')), 12000)
+      setTimeout(() => reject(new Error('listMesas timeout após 30s')), 30000)
     )
-    let query = supabase.from('mesas').select('id, numero, nome, status').order('numero', { ascending: true })
+    let query = supabase.from('mesas').select('id, numero, nome, status').order('numero', { ascending: true }).limit(200)
     if (codigo) query = query.eq('codigo_empresa', codigo)
     const { data, error } = await Promise.race([query, timeoutPromise])
     if (error) throw error
@@ -720,14 +722,15 @@ export async function listMesas(codigoEmpresa) {
       return await runOnce()
     } catch (e) {
       if (String(e?.message || '').includes('timeout')) {
-        console.warn(`${trace} timeout, tentando novamente...`)
-        return await runOnce()
+        console.warn(`${trace} timeout na primeira tentativa, retornando array vazio`)
+        return []
       }
       throw e
     }
   } catch (e) {
     console.error(`${trace} ❌ EXCEPTION:`, e?.message || e)
-    throw e
+    // Retorna array vazio em vez de propagar erro
+    return []
   }
 }
 
@@ -877,10 +880,44 @@ export async function getCaixaAberto({ codigoEmpresa } = {}) {
 export async function fecharCaixa({ saldoFinal = null, valorFinalDinheiro = null, codigoEmpresa } = {}) {
   console.log('[fecharCaixa] Iniciando fechamento:', { valorFinalDinheiro, saldoFinal, codigoEmpresa });
   const codigo = codigoEmpresa || getCachedCompanyCode()
+  
+  // LIMPEZA PREVENTIVA: Corrigir comandas com status inconsistente (cancelled mas sem fechado_em)
+  try {
+    console.log('[fecharCaixa] 🧹 Limpeza preventiva: corrigindo comandas inconsistentes...');
+    const { data: inconsistentes } = await supabase
+      .from('comandas')
+      .select('id, status, fechado_em')
+      .eq('codigo_empresa', codigo)
+      .is('fechado_em', null)
+      .neq('status', 'open')
+      .neq('status', 'awaiting-payment');
+    
+    if (inconsistentes && inconsistentes.length > 0) {
+      console.log(`[fecharCaixa] 🔧 Encontradas ${inconsistentes.length} comandas inconsistentes, corrigindo...`);
+      const nowIso = new Date().toISOString();
+      for (const cmd of inconsistentes) {
+        try {
+          await supabase
+            .from('comandas')
+            .update({ fechado_em: nowIso })
+            .eq('id', cmd.id)
+            .eq('codigo_empresa', codigo);
+          console.log(`[fecharCaixa] ✅ Comanda ${cmd.id} (status: ${cmd.status}) corrigida`);
+        } catch {}
+      }
+    } else {
+      console.log('[fecharCaixa] ✅ Nenhuma comanda inconsistente encontrada');
+    }
+  } catch (e) {
+    console.warn('[fecharCaixa] ⚠️ Erro na limpeza preventiva:', e?.message);
+  }
+  
   // Bloqueio: não permitir fechamento com comandas abertas (inclui balcão e mesas)
   try {
     let abertas = await listarComandasAbertas({ codigoEmpresa: codigo })
     abertas = abertas || []
+    
+    console.log(`[fecharCaixa] 📊 Comandas abertas encontradas: ${abertas.length}`, abertas.map(a => ({ id: a.id, status: a.status, mesa: a.mesa_id })))
 
     // 1) Auto-fechar comandas sem itens (mesa e balcão)
     for (const c of (abertas || [])) {
@@ -1279,8 +1316,8 @@ export async function fecharCaixa({ saldoFinal = null, valorFinalDinheiro = null
 }
 
 // Lista histórico de fechamentos de caixa (sessões fechadas) com dados opcionais do snapshot
-export async function listarFechamentosCaixa({ limit = 50, codigoEmpresa } = {}) {
-  console.log('[listarFechamentosCaixa] Iniciando busca de fechamentos');
+export async function listarFechamentosCaixa({ from, to, limit = 50, codigoEmpresa } = {}) {
+  console.log('[listarFechamentosCaixa] Iniciando busca de fechamentos', { from, to, limit });
   const codigo = codigoEmpresa || getCachedCompanyCode();
   // 1) Buscar sessões fechadas
   let q = supabase
@@ -1290,6 +1327,9 @@ export async function listarFechamentosCaixa({ limit = 50, codigoEmpresa } = {})
     .order('fechado_em', { ascending: false })
     .limit(limit);
   if (codigo) q = q.eq('codigo_empresa', codigo);
+  // Filtro de período
+  if (from) q = q.gte('fechado_em', `${from}T00:00:00`);
+  if (to) q = q.lte('fechado_em', `${to}T23:59:59`);
   const { data: sessoes, error } = await q;
   if (error) throw error;
   const rows = Array.isArray(sessoes) ? sessoes : [];
@@ -1627,13 +1667,46 @@ export async function getOrCreateComandaForMesa({ mesaId, codigoEmpresa } = {}) 
       
       console.log(`[getOrCreateComandaForMesa] 🔄 Criando nova comanda para mesa ${mesaId}`);
       
-      // Buscar comanda existente (rápido, sem fechar automaticamente)
+      // Buscar comanda existente e FECHAR automaticamente se estiver vazia
       const atual = await listarComandaDaMesa({ mesaId, codigoEmpresa: codigo });
       
       if (atual) {
-        console.log(`[getOrCreateComandaForMesa] ⚠️ Comanda existente ${atual.id} será substituída (não fechamos automaticamente para evitar latência)`);
-        // Não fechar automaticamente - deixar o usuário decidir via UI
-        // Isso reduz latência de ~2s para ~300ms
+        console.log(`[getOrCreateComandaForMesa] ⚠️ Comanda existente ${atual.id} encontrada, verificando se está vazia...`);
+        
+        // Verificar se tem itens ou pagamentos
+        let temItens = false;
+        let temPagamentos = false;
+        
+        try {
+          const itens = await listarItensDaComanda({ comandaId: atual.id, codigoEmpresa: codigo });
+          temItens = (itens || []).length > 0;
+        } catch {}
+        
+        try {
+          const { data: pays } = await supabase
+            .from('pagamentos')
+            .select('id, status')
+            .eq('comanda_id', atual.id)
+            .eq('codigo_empresa', codigo);
+          const paysValidos = (pays || []).filter(p => {
+            const st = String(p?.status || 'Pago');
+            return st !== 'Cancelado' && st !== 'Estornado';
+          });
+          temPagamentos = paysValidos.length > 0;
+        } catch {}
+        
+        // Se estiver vazia (sem itens e sem pagamentos), fechar automaticamente
+        if (!temItens && !temPagamentos) {
+          console.log(`[getOrCreateComandaForMesa] 🗑️ Comanda ${atual.id} está vazia, fechando automaticamente...`);
+          try {
+            await fecharComandaEMesa({ comandaId: atual.id, codigoEmpresa: codigo });
+            console.log(`[getOrCreateComandaForMesa] ✅ Comanda ${atual.id} fechada com sucesso`);
+          } catch (e) {
+            console.warn(`[getOrCreateComandaForMesa] ⚠️ Erro ao fechar comanda ${atual.id}:`, e?.message);
+          }
+        } else {
+          console.log(`[getOrCreateComandaForMesa] ⚠️ Comanda ${atual.id} tem dados (itens: ${temItens}, pagamentos: ${temPagamentos}), não será fechada automaticamente`);
+        }
       }
       
       // SEMPRE criar nova comanda zerada

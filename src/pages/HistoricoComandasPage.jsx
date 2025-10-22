@@ -275,7 +275,7 @@ export default function HistoricoComandasPage() {
   // Mostrar todas (sem filtro de data)
   const [showAll, setShowAll] = useState(false);
   
-  // Exportar CSV
+  // Exportar CSV - Comandas
   const exportarCSV = async () => {
     try {
       toast({ title: 'Gerando CSV...', description: 'Aguarde enquanto preparamos o arquivo', variant: 'default' });
@@ -347,6 +347,59 @@ export default function HistoricoComandasPage() {
       document.body.removeChild(link);
       
       toast({ title: 'CSV exportado!', description: `${csvData.length} comandas exportadas`, variant: 'success' });
+    } catch (error) {
+      console.error('Erro ao exportar CSV:', error);
+      toast({ title: 'Erro ao exportar', description: error.message, variant: 'destructive' });
+    }
+  };
+
+  // Exportar CSV - Fechamentos de Caixa
+  const exportarFechamentosCSV = async () => {
+    try {
+      toast({ title: 'Gerando CSV...', description: 'Aguarde enquanto preparamos o arquivo', variant: 'default' });
+      
+      if (!rows || rows.length === 0) {
+        toast({ title: 'Nenhum dado para exportar', variant: 'warning' });
+        return;
+      }
+      
+      // Montar dados para CSV
+      const csvData = rows.map(sess => {
+        const statusLabel = sess.status === 'open' ? 'Aberto' : sess.status === 'closed' ? 'Fechado' : sess.status;
+        
+        return {
+          'Data Abertura': sess.aberto_em ? new Date(sess.aberto_em).toLocaleString('pt-BR') : '-',
+          'Data Fechamento': sess.fechado_em ? new Date(sess.fechado_em).toLocaleString('pt-BR') : '-',
+          'Status': statusLabel,
+          'Saldo Inicial (R$)': Number(sess.saldo_inicial || 0).toFixed(2),
+          'Saldo Final (R$)': Number(sess.saldo_final || 0).toFixed(2),
+          'Valor Contado (R$)': sess.valor_final_dinheiro ? Number(sess.valor_final_dinheiro).toFixed(2) : '-',
+          'Diferença (R$)': sess.diferenca_dinheiro ? Number(sess.diferenca_dinheiro).toFixed(2) : '-'
+        };
+      });
+      
+      // Converter para CSV
+      const headers = Object.keys(csvData[0]);
+      const csvContent = [
+        headers.join(';'),
+        ...csvData.map(row => headers.map(h => {
+          const value = row[h] || '';
+          return `"${String(value).replace(/"/g, '""')}"`;
+        }).join(';'))
+      ].join('\n');
+      
+      // Download
+      const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      const url = URL.createObjectURL(blob);
+      link.setAttribute('href', url);
+      link.setAttribute('download', `fechamentos_caixa_${new Date().toISOString().slice(0,10)}.csv`);
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      toast({ title: 'CSV exportado!', description: `${csvData.length} fechamentos exportados`, variant: 'success' });
     } catch (error) {
       console.error('Erro ao exportar CSV:', error);
       toast({ title: 'Erro ao exportar', description: error.message, variant: 'destructive' });
@@ -702,6 +755,11 @@ export default function HistoricoComandasPage() {
                 <Download className="h-4 w-4" />
               </Button>
             )}
+            {tab === 'fechamentos' && (
+              <Button type="button" size="icon" variant="outline" className="h-9 w-9 sm:hidden" onClick={exportarFechamentosCSV} title="Exportar">
+                <Download className="h-4 w-4" />
+              </Button>
+            )}
           </div>
           {/* Desktop tabs */}
           <div className="hidden sm:flex items-center gap-2 sm:gap-3 ml-auto">
@@ -746,6 +804,12 @@ export default function HistoricoComandasPage() {
               </button>
               <div className="text-sm text-text-secondary whitespace-nowrap ml-auto">Total: <span className="font-semibold text-text-primary">R$ {totals.sum.toFixed(2)}</span></div>
             </>
+          )}
+          {tab === 'fechamentos' && (
+            <Button variant="outline" size="sm" className="hidden sm:inline-flex" onClick={exportarFechamentosCSV}>
+              <Download className="mr-1 h-3 w-3" />
+              Exportar
+            </Button>
           )}
         </div>
       </motion.div>

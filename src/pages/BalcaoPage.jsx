@@ -508,7 +508,7 @@ export default function BalcaoPage() {
                     <div className="flex justify-between"><span className="text-text-secondary">Valor Final</span> <span className="font-mono">{(() => { const d=String(contado||'').replace(/\D/g,''); const v=d?Number(d)/100:0; return new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(v); })()}</span></div>
                   </div>
                   <div className="mt-2">
-                    <Label className="mb-1 block">Valor Final</Label>
+                    <Label className="mb-1 block">Saldo Final (opcional)</Label>
                     <Input type="text" inputMode="numeric" placeholder="0,00" value={contado}
                       onChange={(e) => { const digits = (e.target.value || '').replace(/\D/g, ''); const cents = digits ? Number(digits) / 100 : 0; const formatted = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(cents); setContado(formatted); }}
                       onKeyDown={(e) => { e.stopPropagation(); const allowed = ['Backspace','Delete','ArrowLeft','ArrowRight','Tab']; if (allowed.includes(e.key)) return; if (!/^[0-9]$/.test(e.key)) { e.preventDefault(); } }}
@@ -997,10 +997,19 @@ export default function BalcaoPage() {
         // Ordenar por código
         const sorted = (rows || []).slice().sort((a, b) => Number(a?.codigo || 0) - Number(b?.codigo || 0));
         setClients(sorted);
+        
+        // Se não houver clientes selecionados e o modal acabou de abrir, selecionar cliente Consumidor (cod 0) automaticamente
+        if (isClientWizardOpen && (!selectedClientIds || selectedClientIds.length === 0)) {
+          const consumidor = sorted?.find(c => c?.codigo === 0);
+          if (consumidor) {
+            setSelectedClientIds([consumidor.id]);
+            try { localStorage.setItem(LS_KEY.pendingClientIds, JSON.stringify([consumidor.id])); } catch {}
+          }
+        }
       } catch { if (active) setClients([]); }
     }, 250);
     return () => { active = false; clearTimeout(t); };
-  }, [clientSearch]);
+  }, [clientSearch, isClientWizardOpen]);
 
   const total = useMemo(() => items.reduce((acc, it) => acc + Number(it.price || 0) * Number(it.quantity || 0), 0), [items]);
   // Mapa de quantidades por produto para exibir badge na lista de produtos
@@ -1828,7 +1837,7 @@ export default function BalcaoPage() {
               <div className="flex items-center gap-2 justify-between">
                 <div className="relative flex-1">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted" />
-                  <Input placeholder="Nome, e-mail, telefone ou código" className="pl-9" value={clientSearch} onChange={(e) => setClientSearch(e.target.value)} />
+                  <Input placeholder="Nome, e-mail, telefone ou código" className="pl-9" value={clientSearch} onChange={(e) => setClientSearch(e.target.value)} onKeyDown={(e) => e.stopPropagation()} />
                 </div>
                 <Button type="button" size="icon" title="Cadastrar cliente" className="ml-2 bg-brand text-black hover:bg-brand/90 border border-brand" onClick={() => { window.location.href = '/clientes'; }}>
                   <Plus className="h-4 w-4" />
@@ -1841,7 +1850,7 @@ export default function BalcaoPage() {
                     return (
                       <li
                         key={c.id}
-                        className={`p-2 flex items-center justify-between cursor-pointer hover:bg-surface-2 ${isSelected ? 'bg-surface-2' : ''}`}
+                        className={`p-2 flex items-center justify-between cursor-pointer hover:bg-surface-2 ${c?.codigo === 0 ? 'bg-warning/10 border-l-4 border-warning' : ''} ${isSelected ? 'bg-surface-2' : ''}`}
                         onClick={() => {
                           setSelectedClientIds(prev => {
                             const set = new Set(prev || []);
@@ -1853,7 +1862,10 @@ export default function BalcaoPage() {
                         }}
                       >
                         <div>
-                          <div className="font-medium">{(c.codigo != null ? String(c.codigo) + ' - ' : '')}{c.nome}</div>
+                          <div className="font-medium">
+                            {(c.codigo != null ? String(c.codigo) + ' - ' : '')}{c.nome}
+                            {c?.codigo === 0 && <span className="ml-2 text-xs text-warning">(Padrão)</span>}
+                          </div>
                         </div>
                         <CheckCircle size={16} className={isSelected ? 'text-success' : 'text-text-muted opacity-40'} />
                       </li>

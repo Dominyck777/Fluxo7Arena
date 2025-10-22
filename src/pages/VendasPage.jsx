@@ -335,21 +335,22 @@ function VendasPage() {
   }, [authReady, userProfile?.codigo_empresa, refreshCashierStatus]);
 
   // Auto-recover: se houver comandas abertas mas o caixa parece fechado, tenta reabrir silenciosamente (uma vez)
-  useEffect(() => {
-    const tryAuto = async () => {
-      if (autoReopenTriedRef.current) return;
-      if (openComandasCount > 0 && !isCashierOpen) {
-        autoReopenTriedRef.current = true;
-        try {
-          await ensureCaixaAberto({ codigoEmpresa: userProfile?.codigo_empresa });
-          await refreshCashierStatus();
-        } catch {
-          // se falhar, deixamos o banner com botão de reabrir
-        }
-      }
-    };
-    tryAuto();
-  }, [openComandasCount, isCashierOpen, refreshCashierStatus, userProfile?.codigo_empresa]);
+  // DESABILITADO: causava reabertura automática logo após fechar o caixa
+  // useEffect(() => {
+  //   const tryAuto = async () => {
+  //     if (autoReopenTriedRef.current) return;
+  //     if (openComandasCount > 0 && !isCashierOpen) {
+  //       autoReopenTriedRef.current = true;
+  //       try {
+  //         await ensureCaixaAberto({ codigoEmpresa: userProfile?.codigo_empresa });
+  //         await refreshCashierStatus();
+  //       } catch {
+  //         // se falhar, deixamos o banner com botão de reabrir
+  //       }
+  //     }
+  //   };
+  //   tryAuto();
+  // }, [openComandasCount, isCashierOpen, refreshCashierStatus, userProfile?.codigo_empresa]);
 
   // Quantidade de comandas abertas (independente do caixa) – usado para auto-recover e UI
   useEffect(() => {
@@ -2409,8 +2410,10 @@ function VendasPage() {
   const CloseCashierDialog = () => {
     const [closingData, setClosingData] = useState({ loading: false, saldoInicial: 0, resumo: null });
     const [isCloseCashOpen, setIsCloseCashOpen] = useState(false);
+    const [showConfirmClose, setShowConfirmClose] = useState(false);
     const [showMobileWarn, setShowMobileWarn] = useState(false);
     const [closing, setClosing] = useState(false);
+    const [valorContadoDinheiro, setValorContadoDinheiro] = useState('');
     const handlePrepareClose = async () => {
       try {
         setClosingData({ loading: true, saldoInicial: 0, resumo: null });
@@ -2426,6 +2429,7 @@ function VendasPage() {
     const totalCaixa = Number(closingData.saldoInicial || 0) + somaFinalizadoras; // sem saídas por enquanto
 
     return (
+      <>
       <AlertDialog open={isCloseCashOpen} onOpenChange={(open) => { setIsCloseCashOpen(open); if (open) handlePrepareClose(); }}>
         <AlertDialogTrigger asChild>
           <Button variant="destructive" size="sm" disabled={!isCashierOpen} onClick={() => setIsCloseCashOpen(true)} className="px-3">
@@ -2470,48 +2474,86 @@ function VendasPage() {
           )}
           <AlertDialogFooter>
             <AlertDialogCancel onClick={() => setIsCloseCashOpen(false)} disabled={closing}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={() => {
+              setShowConfirmClose(true);
+            }} disabled={closing}>Continuar</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <AlertDialog open={showConfirmClose} onOpenChange={(open) => { if (!closing) setShowConfirmClose(open); }}>
+        <AlertDialogContent
+          className="sm:max-w-[425px] w-[92vw] max-h-[85vh] animate-none"
+          onOpenAutoFocus={(e) => e.preventDefault()}
+          onEscapeKeyDown={(e) => { if (!closing) e.preventDefault(); }}
+          onKeyDown={(e) => e.stopPropagation()}
+          onKeyDownCapture={(e) => e.stopPropagation()}
+          onPointerDownOutside={(e) => { if (!closing) { e.preventDefault(); e.stopPropagation(); } }}
+          onInteractOutside={(e) => { if (!closing) { e.preventDefault(); e.stopPropagation(); } }}
+        >
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirmar Fechamento do Caixa</AlertDialogTitle>
+            <AlertDialogDescription>Informe o saldo final para finalizar o fechamento.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="py-4">
+            <Label htmlFor="valor-contado-final" className="text-sm font-medium text-text-primary mb-2 block">
+              Saldo Final (opcional)
+            </Label>
+            <input
+              id="valor-contado-final"
+              type="text"
+              placeholder="R$ 0,00"
+              value={valorContadoDinheiro}
+              onChange={(e) => {
+                let v = e.target.value.replace(/\D/g, '');
+                if (v.length > 0) {
+                  v = (Number(v) / 100).toFixed(2);
+                  v = v.replace('.', ',');
+                  v = 'R$ ' + v;
+                }
+                setValorContadoDinheiro(v);
+              }}
+              className="w-full px-3 py-2 border border-input rounded-md bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+            />
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => {
+              setShowConfirmClose(false);
+            }} disabled={closing}>Voltar</AlertDialogCancel>
             <AlertDialogAction onClick={async () => {
               try {
                 if (closing) return;
                 setClosing(true);
-                // Pré-checagem: bloquear se houver comandas abertas
-                try {
-                  const abertas = await listarComandasAbertas({ codigoEmpresa: userProfile?.codigo_empresa });
-                  if (Array.isArray(abertas) && abertas.length > 0) {
-                    if (isMobileView) {
-                      // Fechar diálogo e exibir banner (mobile) no próximo frame para não ficar atrás do overlay
-                      setMobileWarnMsg(`Existem ${abertas.length} comandas abertas. Feche todas antes de encerrar o caixa.`);
-                      try { setIsCloseCashOpen(false); } catch {}
-                      if (typeof requestAnimationFrame === 'function') {
-                        requestAnimationFrame(() => { setMobileWarnOpen(true); });
-                      } else {
-                        setMobileWarnOpen(true);
-                      }
-                      setTimeout(() => setMobileWarnOpen(false), 2600);
-                    } else {
-                      // Desktop: toast padrão e manter diálogo
-                      toast({
-                        title: 'Fechamento bloqueado',
-                        description: `Existem ${abertas.length} comandas abertas. Feche todas antes de encerrar o caixa.`,
-                        variant: 'warning',
-                        duration: 2500,
-                      });
-                    }
-                    return;
-                  }
-                } catch {}
-                await fecharCaixa({ codigoEmpresa: userProfile?.codigo_empresa });
+                // Passar o saldo final calculado e o valor contado em dinheiro para a função fecharCaixa
+                const saldoFinalCalculado = Number(closingData.saldoInicial || 0) + somaFinalizadoras;
+                const valorFinalDinheiro = valorContadoDinheiro ? Number(valorContadoDinheiro.replace(/[^0-9,]/g, '').replace(',', '.')) : null;
+                await fecharCaixa({ 
+                  saldoFinal: saldoFinalCalculado, 
+                  valorFinalDinheiro: valorFinalDinheiro,
+                  codigoEmpresa: userProfile?.codigo_empresa 
+                });
                 // Considera fechado ao concluir a operação e atualiza UI imediatamente
                 setIsCashierOpen(false);
                 // Evita condições de corrida de portal/unmount no mobile: fecha no próximo frame e só então mostra toast
                 if (typeof requestAnimationFrame === 'function') {
                   requestAnimationFrame(() => {
+                    setShowConfirmClose(false);
                     setIsCloseCashOpen(false);
-                    toast({ title: 'Caixa fechado!', description: 'O relatório de fechamento foi gerado.' });
+                    setValorContadoDinheiro('');
+                    toast({ 
+                      title: 'Caixa fechado!', 
+                      description: `Saldo final: R$ ${saldoFinalCalculado.toFixed(2)}`,
+                      duration: 4000
+                    });
                   });
                 } else {
+                  setShowConfirmClose(false);
                   setIsCloseCashOpen(false);
-                  toast({ title: 'Caixa fechado!', description: 'O relatório de fechamento foi gerado.' });
+                  setValorContadoDinheiro('');
+                  toast({ 
+                    title: 'Caixa fechado!', 
+                    description: `Saldo final: R$ ${saldoFinalCalculado.toFixed(2)}`,
+                    duration: 4000
+                  });
                 }
                 // Sincroniza status em background sem bloquear a UI
                 setTimeout(async () => {
@@ -2522,7 +2564,7 @@ function VendasPage() {
                 const msg = e?.message || 'Tente novamente';
                 if (isMobileView) {
                   setMobileWarnMsg(msg.includes('Existem') ? msg : `Falha ao fechar caixa: ${msg}`);
-                  try { setIsCloseCashOpen(false); } catch {}
+                  try { setShowConfirmClose(false); setIsCloseCashOpen(false); } catch {}
                   if (typeof requestAnimationFrame === 'function') {
                     requestAnimationFrame(() => { setMobileWarnOpen(true); });
                   } else {
@@ -2538,7 +2580,8 @@ function VendasPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    )
+      </>
+    );
   };
 
   const ManageClientsDialog = () => {
@@ -2560,6 +2603,14 @@ function VendasPage() {
           const vincs = await listarClientesDaComanda({ comandaId: selectedTable.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
           const clientIds = (vincs || []).map(v => v?.cliente_id ?? v?.clientes?.id).filter(Boolean);
           if (!active) return;
+          // Se não houver clientes vinculados, adicionar cliente Consumidor (cod 0) automaticamente
+          if (clientIds.length === 0) {
+            const rows = await listarClientes({ searchTerm: '', limit: 50 });
+            const consumidor = rows?.find(c => c?.codigo === 0);
+            if (consumidor) {
+              clientIds.push(consumidor.id);
+            }
+          }
           setLocalLinked(clientIds);
           initialLinkedRef.current = clientIds;
           setPendingChanges(new Set());
@@ -2735,6 +2786,7 @@ function VendasPage() {
                         key={client.id}
                         className={cn(
                           "p-3 cursor-pointer transition-colors flex items-center justify-between",
+                          client?.codigo === 0 ? "bg-warning/10 border-l-4 border-warning" : "",
                           isLinked ? "bg-success/5 hover:bg-success/10" : "hover:bg-surface-2"
                         )}
                         onClick={(e) => {
@@ -2745,7 +2797,10 @@ function VendasPage() {
                         style={{ userSelect: 'none', WebkitUserSelect: 'none' }}
                       >
                         <div className="flex-1 min-w-0">
-                          <div className="font-medium truncate">{`${client?.codigo ? `${client.codigo} - ` : ''}${client?.nome || ''}`}</div>
+                          <div className="font-medium truncate">
+                            {`${client?.codigo ? `${client.codigo} - ` : ''}${client?.nome || ''}`}
+                            {client?.codigo === 0 && <span className="ml-2 text-xs text-warning">(Padrão)</span>}
+                          </div>
                           {client.telefone && (
                             <div className="text-xs text-text-muted">{client.telefone}</div>
                           )}
