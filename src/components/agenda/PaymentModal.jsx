@@ -845,8 +845,8 @@ export default function PaymentModal({
           ) : (
             <>
               {/* Busca e ações */}
-              <div className="flex items-center justify-between gap-3 flex-wrap">
-                <div className="relative w-full max-w-[320px]">
+              <div className="flex items-center gap-2 flex-wrap">
+                <div className="relative flex-1 min-w-0">
                   <Input
                     ref={paymentSearchRef}
                     type="text"
@@ -867,16 +867,15 @@ export default function PaymentModal({
                   </button>
                 </div>
                 
-                <div className="flex items-center gap-2 ml-auto">
-                  <Button
-                    type="button"
-                    size="sm"
-                    className="bg-amber-500 hover:bg-amber-400 text-black shadow-md"
-                    onClick={() => setIsAddParticipantOpen(true)}
-                  >
-                    Adicionar participante +
-                  </Button>
-                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  className="bg-amber-500 hover:bg-amber-400 text-black shadow-md flex-shrink-0"
+                  onClick={() => setIsAddParticipantOpen(true)}
+                >
+                  <span className="hidden sm:inline">Adicionar participante +</span>
+                  <span className="sm:hidden">Participante +</span>
+                </Button>
               </div>
               
               {/* Warning */}
