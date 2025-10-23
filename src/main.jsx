@@ -10,6 +10,13 @@ import { registerServiceWorker } from '@/registerSW';
 // Registrar Service Worker para PWA
 registerServiceWorker();
 
+// Bloquear rotação de tela em modo portrait (apenas para mobile)
+if (window.screen?.orientation?.lock) {
+  window.screen.orientation.lock('portrait').catch((err) => {
+    console.log('[Orientation] Lock não suportado ou já bloqueado:', err.message);
+  });
+}
+
 // Capturar evento de instalação PWA globalmente (antes do React montar)
 // Nota: preventDefault() bloqueia o banner automático do navegador, permitindo controle manual
 window.addEventListener('beforeinstallprompt', (e) => {

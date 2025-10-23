@@ -307,38 +307,81 @@ function getTextContent(parent, tagName) {
  * @returns {Object|null} Produto existente ou null
  */
 export function findExistingProduct(produtoXML, produtosExistentes) {
-  // Busca por EAN (mais confiável)
+  // Normaliza unidade do XML
+  const unidadeXML = produtoXML.unidade?.toUpperCase().trim() || '';
+
+  // Busca por EAN (somente se UNIDADE também bater)
   if (produtoXML.ean && produtoXML.ean !== 'SEM GTIN') {
-    const byEan = produtosExistentes.find(p => p.barcode === produtoXML.ean);
+    const byEan = produtosExistentes.find(p => {
+      const unidadeProd = p.unit?.toUpperCase().trim() || '';
+      return p.barcode === produtoXML.ean && unidadeProd === unidadeXML;
+    });
     if (byEan) return byEan;
+    const eanOnly = produtosExistentes.find(p => p.barcode === produtoXML.ean);
+    if (eanOnly) {
+      console.log('[xmlParser] EAN igual mas unidade diferente (não considerar o mesmo produto):', {
+        ean: produtoXML.ean,
+        unidadeXML,
+        unidadeSistema: (eanOnly.unit || '').toUpperCase()
+      });
+    }
   }
   
-  // Busca por código
+  // Busca por código (somente se UNIDADE também bater)
   if (produtoXML.codigo) {
-    const byCode = produtosExistentes.find(p => p.code === produtoXML.codigo);
+    const byCode = produtosExistentes.find(p => {
+      const unidadeProd = p.unit?.toUpperCase().trim() || '';
+      return p.code === produtoXML.codigo && unidadeProd === unidadeXML;
+    });
     if (byCode) return byCode;
+    const codeOnly = produtosExistentes.find(p => p.code === produtoXML.codigo);
+    if (codeOnly) {
+      console.log('[xmlParser] Código igual mas unidade diferente (não considerar o mesmo produto):', {
+        codigo: produtoXML.codigo,
+        unidadeXML,
+        unidadeSistema: (codeOnly.unit || '').toUpperCase()
+      });
+    }
   }
   
-  // Busca por nome EXATO (case insensitive)
+  // Busca APENAS por nome EXATO + UNIDADE (case insensitive)
+  // Removida a busca por similaridade para evitar falsos positivos
   const nomeXML = produtoXML.nome?.toLowerCase().trim() || '';
+  // unidadeXML já calculada acima
+  
   if (nomeXML) {
     const byExactName = produtosExistentes.find(p => {
       const nomeProd = p.name?.toLowerCase().trim() || '';
-      return nomeProd === nomeXML;
+      const unidadeProd = p.unit?.toUpperCase().trim() || '';
+      
+      // Nome deve ser EXATO E unidade deve ser IGUAL
+      const nomeMatch = nomeProd === nomeXML;
+      const unidadeMatch = unidadeProd === unidadeXML;
+      const isMatch = nomeMatch && unidadeMatch;
+      
+      if (nomeMatch && !unidadeMatch) {
+        console.log('[xmlParser] Nome igual mas UNIDADE diferente - NÃO é o mesmo produto:');
+        console.log('  Nome XML:', nomeXML, '| Unidade XML:', unidadeXML);
+        console.log('  Nome Sistema:', nomeProd, '| Unidade Sistema:', unidadeProd);
+      }
+      
+      if (isMatch) {
+        console.log('[xmlParser] MATCH ENCONTRADO (nome + unidade):');
+        console.log('  XML:', nomeXML, '| Unidade:', unidadeXML);
+        console.log('  Sistema:', nomeProd, '| Unidade:', unidadeProd);
+        console.log('  Produto:', p);
+      }
+      return isMatch;
     });
-    if (byExactName) return byExactName;
+    if (byExactName) {
+      console.log('[xmlParser] Produto existente encontrado por nome + unidade:', byExactName.name, byExactName.unit);
+      return byExactName;
+    }
   }
   
-  // Busca por nome similar (85% de similaridade - mais rigoroso)
-  const byName = produtosExistentes.find(p => {
-    const similarity = calculateSimilarity(
-      p.name?.toLowerCase() || '',
-      produtoXML.nome?.toLowerCase() || ''
-    );
-    return similarity > 0.85;
-  });
-  
-  return byName || null;
+  console.log('[xmlParser] Nenhum produto encontrado para:', nomeXML, '| Unidade:', unidadeXML);
+  // Não buscar por similaridade - apenas nome exato + unidade
+  return null;
 }
 
 /**

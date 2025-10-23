@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Routes, Route, useLocation, Navigate } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { Routes, Route, useLocation, Navigate, useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import Sidebar from '@/components/layout/Sidebar';
 import Header from '@/components/layout/Header';
@@ -34,7 +34,43 @@ function PrivateApp() {
     setSidebarVisible((v) => !v);
   };
   const location = useLocation();
+  const navigate = useNavigate();
   const isAgendaPage = location.pathname === '/agenda';
+
+  // Hotkeys globais (B e H) - funcionam em qualquer página
+  useEffect(() => {
+    const handler = (e) => {
+      // Ignorar quando digitando em campos de texto
+      const tag = String(e.target?.tagName || '').toLowerCase();
+      if (['input','textarea','select'].includes(tag) || e.target?.isContentEditable) return;
+      if (e.repeat) return;
+
+      // B: Alternar entre Mesas (/vendas) e Balcão (/balcao)
+      if (String(e.key).toLowerCase() === 'b') {
+        e.preventDefault();
+        const path = String(location?.pathname || '').toLowerCase();
+        console.log('[Global Hotkey B] Current path:', path);
+        if (path.includes('balcao')) {
+          console.log('[Global Hotkey B] Navigating to /vendas');
+          navigate('/vendas');
+        } else {
+          console.log('[Global Hotkey B] Navigating to /balcao');
+          navigate('/balcao');
+        }
+        return;
+      }
+
+      // H: Ir para Histórico
+      if (String(e.key).toLowerCase() === 'h') {
+        e.preventDefault();
+        navigate('/historico');
+        return;
+      }
+    };
+    
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [location, navigate]);
 
   return (
     <ModalsProvider>
