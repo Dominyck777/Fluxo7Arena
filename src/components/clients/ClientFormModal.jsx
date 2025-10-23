@@ -320,12 +320,24 @@ function ClientFormModal({ open, onOpenChange, client, onSaved }) {
         onOpenChange?.(false);
       }, 50);
     } catch (err) {
-      // Mensagem amigável quando colunas não existirem ainda no BD
+      // Tratamento de erros específicos
       const raw = (err?.message || '').toLowerCase();
-      const hint = raw.includes('column') && raw.includes('does not exist')
-        ? 'Seu banco pode não estar migrado para os novos campos. Atualize o schema conforme estrutura_bd.'
-        : err.message;
-      toast({ title: 'Erro ao salvar cliente', description: hint, variant: 'destructive' });
+      const code = err?.code || '';
+      
+      let title = 'Erro ao salvar cliente';
+      let hint = err.message;
+      
+      // Erro de código duplicado
+      if (code === '23505' || (raw.includes('duplicate key') && raw.includes('uq_clientes_empresa_codigo'))) {
+        title = 'Código já cadastrado';
+        hint = 'Já existe um cliente com este código na sua empresa. Deixe o campo código em branco para gerar automaticamente ou escolha outro número.';
+      }
+      // Erro de coluna não existente (schema desatualizado)
+      else if (raw.includes('column') && raw.includes('does not exist')) {
+        hint = 'Seu banco pode não estar migrado para os novos campos. Atualize o schema conforme estrutura_bd.';
+      }
+      
+      toast({ title, description: hint, variant: 'destructive' });
     }
   };
 
