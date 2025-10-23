@@ -95,9 +95,10 @@ export const AlertsProvider = ({ children }) => {
       tres_horas_atras.setHours(tres_horas_atras.getHours() - 3);
       const { data: comandasAntigas } = await supabase
         .from('comandas')
-        .select('id, aberto_em')
+        .select('id, aberto_em, status')
         .eq('codigo_empresa', codigo)
         .eq('status', 'open')
+        .is('fechado_em', null)
         .lte('aberto_em', tres_horas_atras.toISOString());
       
       if (comandasAntigas && comandasAntigas.length > 0) {
