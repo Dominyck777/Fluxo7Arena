@@ -224,6 +224,12 @@ function ClientFormModal({ open, onOpenChange, client, onSaved }) {
 
   const handleSave = async (e) => {
     e?.preventDefault?.();
+    
+    // Proteger modal de pagamentos ANTES de salvar (se existir)
+    if (window.__protectPaymentModal) {
+      window.__protectPaymentModal(5000);
+    }
+    
     try {
       // Validações mínimas
       if (!form.nome || form.nome.trim().length < 2) {
@@ -587,7 +593,13 @@ function ClientFormModal({ open, onOpenChange, client, onSaved }) {
         </form>
         <DialogFooter className="flex flex-col sm:flex-row gap-2 sm:gap-0">
           <DialogClose asChild>
-            <Button type="button" variant="secondary" className="w-full sm:w-auto">Cancelar</Button>
+            <Button 
+              type="button" 
+              variant="secondary" 
+              className="w-full sm:w-auto"
+            >
+              Cancelar
+            </Button>
           </DialogClose>
           <Button type="submit" onClick={handleSave} className="w-full sm:w-auto">Salvar Cliente</Button>
         </DialogFooter>

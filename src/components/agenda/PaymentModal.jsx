@@ -41,19 +41,34 @@ export default function PaymentModal({
   const { toast } = useToast();
   const { userProfile } = useAuth();
   
-  // Context
-  const {
-    isPaymentModalOpen,
+  const { 
+    isPaymentModalOpen, 
     closePaymentModal,
     editingBooking,
+    paymentTotal,
     participantsForm,
     setParticipantsForm,
-    paymentTotal,
-    setPaymentTotal,
     payMethods,
     openEditParticipantModal,
     protectPaymentModal
   } = useAgenda();
+  
+  // Expor protectPaymentModal globalmente para uso em callbacks (imediatamente)
+  window.__protectPaymentModal = protectPaymentModal;
+  
+  // Garantir que o body permita scroll quando modal está aberto
+  useEffect(() => {
+    if (isPaymentModalOpen) {
+      // Forçar body a permitir scroll
+      document.body.style.overflow = 'auto';
+      document.body.style.pointerEvents = 'auto';
+    }
+    return () => {
+      // Limpar ao desmontar
+      document.body.style.overflow = '';
+      document.body.style.pointerEvents = '';
+    };
+  }, [isPaymentModalOpen]);
   
   // Estados locais
   const [paymentSearch, setPaymentSearch] = useState('');
@@ -70,35 +85,24 @@ export default function PaymentModal({
   
   // Refs
   const paymentSearchRef = useRef(null);
-  const initializedRef = useRef(false);
+  const initializedRef = useRef(null); // Armazena timestamp de inicialização
   const loadingTimeoutRef = useRef(null);
   
   // Helper para pegar finalizadora padrão (menor código)
   const getDefaultPayMethod = useCallback(() => {
-    console.log('[PaymentModal] getDefaultPayMethod - payMethods:', payMethods);
-    
     if (!payMethods || payMethods.length === 0) {
-      console.log('[PaymentModal] getDefaultPayMethod - Nenhuma finalizadora disponível');
       return null;
     }
     
-    // Tentar encontrar finalizadora com codigo_interno = '01'
-    const fin01 = payMethods.find(m => String(m.codigo_interno) === '01');
-    console.log('[PaymentModal] getDefaultPayMethod - Finalizadora 01:', fin01);
+    // Priorizar finalizadora com codigo_interno = '01'
+    const finalizadora01 = payMethods.find(m => m.codigo_interno === '01');
     
-    if (fin01) {
-      console.log('[PaymentModal] getDefaultPayMethod - Retornando finalizadora 01:', fin01);
-      return fin01;
+    if (finalizadora01) {
+      return finalizadora01;
     }
     
-    // Se não encontrar, ordenar por código e pegar o primeiro
-    const sorted = [...payMethods].sort((a, b) => {
-      const codigoA = Number(a.codigo_interno || 999999);
-      const codigoB = Number(b.codigo_interno || 999999);
-      return codigoA - codigoB;
-    });
-    console.log('[PaymentModal] getDefaultPayMethod - Retornando primeira finalizadora:', sorted[0]);
-    return sorted[0];
+    // Se não encontrar '01', retorna a primeira
+    return payMethods[0];
   }, [payMethods]);
   
   // Computações
@@ -120,24 +124,30 @@ export default function PaymentModal({
     let temTaxaAplicada = false;
     
     visible.forEach(pf => {
-      const valor = parseBRL(pf?.valor_cota);
+      let valor = parseBRL(pf?.valor_cota);
+      
+      // Se tem taxa aplicada, descontar a taxa para o cálculo da diferença
+      if (pf?.aplicar_taxa === true && Number.isFinite(valor)) {
+        const finalizadora = payMethods.find(m => String(m.id) === String(pf.finalizadora_id));
+        const taxa = Number(finalizadora?.taxa_percentual || 0);
+        if (taxa > 0) {
+          // Remover a taxa do valor para calcular o valor líquido
+          valor = valor / (1 + taxa / 100);
+          temTaxaAplicada = true;
+        }
+      }
+      
       if (Number.isFinite(valor)) totalAssigned += valor;
       
       const status = pf?.status_pagamento || 'Pendente';
       if (status === 'Pago') paid++;
       else pending++;
-      
-      // Verificar se algum participante tem taxa aplicada
-      if (pf?.aplicar_taxa === true) {
-        temTaxaAplicada = true;
-      }
     });
     
-    // Se houver taxa aplicada, não mostrar diferença
-    const diff = temTaxaAplicada ? 0 : (Number.isFinite(totalTarget) ? (totalAssigned - totalTarget) : 0);
+    const diff = Number.isFinite(totalTarget) ? (totalAssigned - totalTarget) : 0;
     
     return { totalTarget, totalAssigned, diff, paid, pending, temTaxaAplicada };
-  }, [localParticipantsForm, paymentHiddenIndexes, paymentTotal]);
+  }, [localParticipantsForm, paymentHiddenIndexes, paymentTotal, payMethods]);
   
   // Funções
   const splitEqually = () => {
@@ -210,9 +220,9 @@ export default function PaymentModal({
     });
   };
   
-  const handleEditParticipant = (participantId, participantName) => {
-    console.log('🔄 [PaymentModal] Abrindo modal de edição:', { participantId, participantName });
-    openEditParticipantModal(participantId, participantName);
+  const handleEditParticipant = (participantIndex, participantName) => {
+    // Passar o índice do participante na lista, não o cliente_id
+    openEditParticipantModal(participantIndex, participantName);
   };
   
   const handleSavePayments = async () => {
@@ -301,7 +311,7 @@ export default function PaymentModal({
       const newSelectedClients = effectiveParticipants.map(p => ({
         id: p.cliente_id,
         nome: p.nome,
-        codigo: p.codigo || null
+        codigo: p.codigo !== null && p.codigo !== undefined ? p.codigo : null
       }));
       
       const primary = newSelectedClients[0] || null;
@@ -334,7 +344,7 @@ export default function PaymentModal({
       if (pendingCount > 0) {
         toast({
           title: 'Pagamentos salvos',
-          description: `Pendentes: ${pendingCount}`,
+          description: `${pendingCount} ${pendingCount === 1 ? 'pendente' : 'pendentes'}`,
           variant: 'warning',
         });
       } else {
@@ -416,13 +426,12 @@ export default function PaymentModal({
       loadingTimeoutRef.current = setTimeout(() => {
         if (!initializedRef.current && (!payMethods || payMethods.length === 0)) {
           // Inicializar mesmo sem finalizadoras após timeout
-          console.log('[PaymentModal] Timeout: inicializando sem finalizadoras');
           
           const sourceData = (form?.selectedClients || []).map(c => {
             let codigo = c.codigo;
-            if (!codigo && localCustomers && Array.isArray(localCustomers)) {
+            if ((codigo === null || codigo === undefined) && localCustomers && Array.isArray(localCustomers)) {
               const clienteCompleto = localCustomers.find(lc => lc.id === c.id);
-              codigo = clienteCompleto?.codigo || null;
+              codigo = clienteCompleto?.codigo !== null && clienteCompleto?.codigo !== undefined ? clienteCompleto.codigo : null;
             }
             return {
               cliente_id: c.id,
@@ -436,7 +445,7 @@ export default function PaymentModal({
           });
           
           setLocalParticipantsForm(sourceData);
-          initializedRef.current = true;
+          initializedRef.current = Date.now();
         }
       }, 3000);
       
@@ -448,47 +457,39 @@ export default function PaymentModal({
           loadingTimeoutRef.current = null;
         }
         
-        console.log('[PaymentModal] Inicializando modal pela primeira vez');
-        
-        // Pegar finalizadora padrão uma vez
-        const defaultMethod = getDefaultPayMethod();
-        const defaultFinalizadoraId = defaultMethod?.id ? String(defaultMethod.id) : null;
-        const defaultAplicarTaxa = Number(defaultMethod?.taxa_percentual || 0) > 0;
-        
-        console.log('[PaymentModal] Finalizadora padrão:', {
-          defaultMethod,
-          defaultFinalizadoraId,
-          defaultAplicarTaxa
-        });
+        const { defaultMethod, defaultFinalizadoraId, defaultAplicarTaxa } = (() => { 
+          const defaultMethod = getDefaultPayMethod();
+          const defaultFinalizadoraId = defaultMethod?.id ? String(defaultMethod.id) : null;
+          const defaultAplicarTaxa = Number(defaultMethod?.taxa_percentual || 0) > 0;
+          return { defaultMethod, defaultFinalizadoraId, defaultAplicarTaxa };
+        })();
         
         // Inicializar estado local a partir do contexto (ou form.selectedClients se vazio)
         const sourceData = (participantsForm && participantsForm.length > 0) 
           ? participantsForm 
           : (form?.selectedClients || []).map(c => {
-              let codigo = c.codigo;
-              if (!codigo && localCustomers && Array.isArray(localCustomers)) {
-                const clienteCompleto = localCustomers.find(lc => lc.id === c.id);
-                codigo = clienteCompleto?.codigo || null;
-              }
-              return {
-                cliente_id: c.id,
-                nome: c.nome,
-                codigo: codigo,
-                valor_cota: '',
-                status_pagamento: 'Pendente',
-                finalizadora_id: defaultFinalizadoraId,
-                aplicar_taxa: defaultAplicarTaxa
-              };
-            });
-        
-        console.log('[PaymentModal] sourceData:', sourceData);
+            let codigo = c.codigo;
+            if ((codigo === null || codigo === undefined) && localCustomers && Array.isArray(localCustomers)) {
+              const clienteCompleto = localCustomers.find(lc => lc.id === c.id);
+              codigo = clienteCompleto?.codigo !== null && clienteCompleto?.codigo !== undefined ? clienteCompleto.codigo : null;
+            }
+            return {
+              cliente_id: c.id,
+              nome: c.nome,
+              codigo: codigo,
+              valor_cota: '',
+              status_pagamento: 'Pendente',
+              finalizadora_id: defaultFinalizadoraId,
+              aplicar_taxa: defaultAplicarTaxa
+            };
+          });
         
         // Atualizar códigos faltantes e garantir finalizadora padrão
         const withCodes = sourceData.map(p => {
           let codigo = p.codigo;
-          if (!codigo && localCustomers && Array.isArray(localCustomers)) {
+          if ((codigo === null || codigo === undefined) && localCustomers && Array.isArray(localCustomers)) {
             const clienteCompleto = localCustomers.find(lc => lc.id === p.cliente_id);
-            codigo = clienteCompleto?.codigo || null;
+            codigo = clienteCompleto?.codigo !== null && clienteCompleto?.codigo !== undefined ? clienteCompleto.codigo : null;
           }
           
           // Garantir que tenha finalizadora_id (usar padrão se vazio)
@@ -498,25 +499,15 @@ export default function PaymentModal({
             finalizadoraId = defaultMethod?.id ? String(defaultMethod.id) : null;
           }
           
-          console.log('[PaymentModal] Processando participante:', {
-            nome: p.nome,
-            finalizadora_original: p.finalizadora_id,
-            finalizadora_final: finalizadoraId
-          });
-          
           return { 
             ...p, 
-            codigo: codigo || p.codigo,
+            codigo: (codigo !== null && codigo !== undefined) ? codigo : p.codigo,
             finalizadora_id: finalizadoraId
           };
         });
         
-        console.log('[PaymentModal] withCodes final:', withCodes);
-        
         setLocalParticipantsForm(withCodes);
-        initializedRef.current = true;
-        
-        console.log('[PaymentModal] Inicialização completa');
+        initializedRef.current = Date.now();
       }
     } else {
       // Ao fechar, resetar estado local E flag de inicialização
@@ -528,7 +519,7 @@ export default function PaymentModal({
       setPaymentWarning(null);
       setPaymentHiddenIndexes([]);
       setLocalParticipantsForm([]);
-      initializedRef.current = false;
+      initializedRef.current = null;
     }
     
     // Cleanup do timeout ao desmontar
@@ -677,9 +668,8 @@ export default function PaymentModal({
   return (
     <>
     <Dialog 
-      open={isPaymentModalOpen} 
+      open={isPaymentModalOpen}
       onOpenChange={(open) => {
-        // Permitir fechar apenas quando explicitamente solicitado (botão X, ESC, etc)
         if (!open) {
           closePaymentModal();
         }
@@ -687,9 +677,21 @@ export default function PaymentModal({
     >
       <DialogContent
         forceMount
-        className="w-[95vw] sm:max-w-[1100px] max-h-[90vh] overflow-y-auto"
+        className="w-[95vw] sm:max-w-[1100px] max-h-[90vh] overflow-y-scroll"
         onOpenAutoFocus={(e) => e.preventDefault()}
         onInteractOutside={(e) => { 
+          // Prevenir fechamento se modal de adicionar participante estiver aberto
+          if (isAddParticipantOpen) {
+            e.preventDefault();
+            return;
+          }
+          
+          // Prevenir fechamento nos primeiros 500ms após abrir (falsos positivos)
+          if (initializedRef.current && Date.now() - initializedRef.current < 500) {
+            e.preventDefault();
+            return;
+          }
+          
           // Permitir fechar clicando fora
           closePaymentModal();
         }}
@@ -701,19 +703,30 @@ export default function PaymentModal({
         {/* Mostrar loading/aviso se finalizadoras ainda não carregaram */}
         {(!payMethods || payMethods.length === 0) ? (
           !initializedRef.current ? (
-            <div className="p-8 flex flex-col items-center justify-center gap-4">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-500"></div>
-              <p className="text-sm text-text-muted">Carregando formas de pagamento...</p>
-            </div>
-          ) : (
-            <div className="p-8 flex flex-col items-center justify-center gap-4">
-              <AlertTriangle className="w-12 h-12 text-amber-500" />
-              <div className="text-center space-y-2">
-                <p className="font-semibold text-amber-500">Nenhuma forma de pagamento cadastrada</p>
-                <p className="text-sm text-text-muted">
-                  Cadastre pelo menos uma finalizadora para gerenciar pagamentos.
-                </p>
+            <>
+              <DialogHeader className="sr-only">
+                <DialogTitle>Carregando</DialogTitle>
+                <DialogDescription>Carregando formas de pagamento</DialogDescription>
+              </DialogHeader>
+              <div className="p-8 flex flex-col items-center justify-center gap-4">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-500"></div>
+                <p className="text-sm text-text-muted">Carregando formas de pagamento...</p>
               </div>
+            </>
+          ) : (
+            <>
+              <DialogHeader className="sr-only">
+                <DialogTitle>Aviso</DialogTitle>
+                <DialogDescription>Nenhuma forma de pagamento cadastrada</DialogDescription>
+              </DialogHeader>
+              <div className="p-8 flex flex-col items-center justify-center gap-4">
+                <AlertTriangle className="w-12 h-12 text-amber-500" />
+                <div className="text-center space-y-2">
+                  <p className="font-semibold text-amber-500">Nenhuma forma de pagamento cadastrada</p>
+                  <p className="text-sm text-text-muted">
+                    Cadastre pelo menos uma finalizadora para gerenciar pagamentos.
+                  </p>
+                </div>
               <div className="flex gap-2 mt-4">
                 <Button
                   type="button"
@@ -733,6 +746,7 @@ export default function PaymentModal({
                 </Link>
               </div>
             </div>
+            </>
           )
         ) : (
           <>
@@ -986,7 +1000,12 @@ export default function PaymentModal({
                   type="button"
                   size="sm"
                   className="bg-amber-500 hover:bg-amber-400 text-black shadow-md flex-shrink-0"
-                  onClick={() => setIsAddParticipantOpen(true)}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    protectPaymentModal(2000); // Proteger por 2 segundos
+                    setIsAddParticipantOpen(true);
+                  }}
                 >
                   <span className="hidden sm:inline">Adicionar participante +</span>
                   <span className="sm:hidden">Participante +</span>
@@ -1012,7 +1031,7 @@ export default function PaymentModal({
               
               {/* Tabela de participantes */}
               <div className="border border-border rounded-md overflow-hidden">
-                <div className="divide-y divide-border max-h-[50vh] overflow-y-auto">
+                <div className="divide-y divide-border max-h-[50vh] overflow-y-scroll">
                   {(() => {
                     const q = paymentSearch.trim().toLowerCase();
                     const hidden = paymentHiddenIndexes || [];
@@ -1043,7 +1062,7 @@ export default function PaymentModal({
                             {/* Header com nome e ações */}
                             <div className="flex items-center justify-between gap-2">
                               <div className="flex items-center gap-2 min-w-0 flex-1">
-                                {pf.codigo && (
+                                {(pf.codigo !== null && pf.codigo !== undefined) && (
                                   <span className={`text-xs font-bold rounded px-1.5 py-0.5 shrink-0 ${
                                     pf.status_pagamento === 'Pago' 
                                       ? 'text-emerald-400 bg-emerald-600/20 border border-emerald-700/40' 
@@ -1058,7 +1077,7 @@ export default function PaymentModal({
                                 <button
                                   type="button"
                                   className="p-1 text-text-secondary hover:text-brand transition-colors"
-                                  onClick={() => handleEditParticipant(pf.cliente_id, pf.nome)}
+                                  onClick={() => handleEditParticipant(originalIdx, pf.nome)}
                                   title="Trocar"
                                 >
                                   <Edit className="w-4 h-4" />
@@ -1118,7 +1137,7 @@ export default function PaymentModal({
                                   if (taxa <= 0) return <div className="h-4 mt-1"></div>; // Espaço vazio para manter layout
                                   
                                   const valorAtual = parseBRL(pf.valor_cota);
-                                  const temValor = valorAtual > 0;
+                                  const temValor = Number.isFinite(valorAtual) && valorAtual > 0;
                                   
                                   return (
                                     <label 
@@ -1149,10 +1168,10 @@ export default function PaymentModal({
                                               let novoValor = valorAtual;
                                               
                                               if (aplicar) {
-                                                // Aplicar taxa: valor atual * (1 + taxa/100)
+                                                // Adicionar taxa ao valor (cliente paga mais)
                                                 novoValor = valorAtual * (1 + taxa / 100);
                                               } else {
-                                                // Remover taxa: valor atual / (1 + taxa/100)
+                                                // Remover taxa do valor (voltar ao valor base)
                                                 novoValor = valorAtual / (1 + taxa / 100);
                                               }
                                               
@@ -1221,7 +1240,7 @@ export default function PaymentModal({
                           <div className="hidden sm:flex items-center gap-3">
                             <div className="flex-1">
                               <div className="flex items-center gap-2">
-                                {pf.codigo && (
+                                {(pf.codigo !== null && pf.codigo !== undefined) && (
                                   <span className={`text-sm font-bold rounded-md px-2.5 py-1 shadow-sm ${
                                     pf.status_pagamento === 'Pago' 
                                       ? 'text-emerald-400 bg-emerald-600/20 border border-emerald-700/40' 
@@ -1234,7 +1253,7 @@ export default function PaymentModal({
                                 <button
                                   type="button"
                                   className="p-1 text-text-secondary hover:text-brand transition-colors"
-                                  onClick={() => handleEditParticipant(pf.cliente_id, pf.nome)}
+                                  onClick={() => handleEditParticipant(originalIdx, pf.nome)}
                                   title="Trocar participante"
                                 >
                                   <Edit className="w-5 h-5" />
@@ -1313,10 +1332,10 @@ export default function PaymentModal({
                                               let novoValor = valorAtual;
                                               
                                               if (aplicar) {
-                                                // Aplicar taxa: valor atual * (1 + taxa/100)
+                                                // Adicionar taxa ao valor (cliente paga mais)
                                                 novoValor = valorAtual * (1 + taxa / 100);
                                               } else {
-                                                // Remover taxa: valor atual / (1 + taxa/100)
+                                                // Remover taxa do valor (voltar ao valor base)
                                                 novoValor = valorAtual / (1 + taxa / 100);
                                               }
                                               
@@ -1517,8 +1536,24 @@ export default function PaymentModal({
     </div>
     
     {/* Dialog para adicionar participante */}
-    <Dialog open={isAddParticipantOpen} onOpenChange={setIsAddParticipantOpen}>
-      <DialogContent className="sm:max-w-[500px]">
+    <Dialog 
+      open={isAddParticipantOpen}
+      onOpenChange={(open) => {
+        if (!open) {
+          setSelectedParticipants([]);
+          setAddParticipantSearch('');
+        }
+        setIsAddParticipantOpen(open);
+      }}
+    >
+      <DialogContent 
+        className="sm:max-w-[500px]"
+        onInteractOutside={(e) => {
+          e.preventDefault();
+          protectPaymentModal(2000);
+          setIsAddParticipantOpen(false);
+        }}
+      >
         <DialogHeader>
           <DialogTitle>Adicionar Participante</DialogTitle>
           <DialogDescription>
@@ -1553,6 +1588,9 @@ export default function PaymentModal({
               className="bg-amber-500 hover:bg-amber-400 text-black shadow-md"
               onClick={() => {
                 if (onOpenClientModal) {
+                  // Proteger modal de pagamentos por 15 segundos (tempo para abrir e cancelar modal de cliente)
+                  protectPaymentModal(15000);
+                  
                   // Passar callback para reabrir o modal após salvar
                   onOpenClientModal(() => {
                     // Callback executado após salvar o cliente
@@ -1605,6 +1643,7 @@ export default function PaymentModal({
                 const isConsumidorFinal = cliente?.is_consumidor_final === true;
                 const selectionCount = selectedParticipants.filter(p => p.id === cliente.id).length;
                 
+                
                 return (
                   <div
                     key={cliente.id}
@@ -1617,7 +1656,9 @@ export default function PaymentModal({
                           ? 'bg-emerald-600/20 hover:bg-emerald-600/30' 
                           : 'hover:bg-surface-2'
                     }`}
-                    onClick={() => {
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
                       // Adicionar timestamp único para permitir duplicados
                       const participantWithTimestamp = { ...cliente, timestamp: Date.now() };
                       setSelectedParticipants(prev => [...prev, participantWithTimestamp]);
@@ -1632,15 +1673,18 @@ export default function PaymentModal({
                     }}
                   >
                     <div className="flex items-center gap-3 flex-1">
-                      {cliente.codigo !== null && cliente.codigo !== undefined && (
-                        <span className={`inline-flex items-center justify-center w-10 h-10 rounded-full font-bold text-sm transition-colors ${
-                          isConsumidorFinal 
-                            ? 'bg-amber-500/15 text-amber-300/90 ring-1 ring-amber-500/20' 
-                            : 'bg-emerald-600/20 text-emerald-400'
-                        }`}>
-                          #{cliente.codigo}
-                        </span>
-                      )}
+                      {(() => {
+                        const shouldShow = cliente.codigo !== null && cliente.codigo !== undefined;
+                        return shouldShow ? (
+                          <span className={`inline-flex items-center justify-center w-10 h-10 rounded-full font-bold text-sm transition-colors ${
+                            isConsumidorFinal 
+                              ? 'bg-amber-500/15 text-amber-300/90 ring-1 ring-amber-500/20' 
+                              : 'bg-emerald-600/20 text-emerald-400'
+                          }`}>
+                            #{cliente.codigo}
+                          </span>
+                        ) : null;
+                      })()}
                       <div className="flex-1 flex flex-col gap-1">
                         <span className={`font-medium ${isConsumidorFinal ? 'text-amber-100/90' : ''}`}>
                           {cliente.nome}
@@ -1661,6 +1705,7 @@ export default function PaymentModal({
                           type="button"
                           className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-rose-600 hover:bg-rose-500 text-white text-base font-bold transition-colors"
                           onClick={(e) => {
+                            e.preventDefault();
                             e.stopPropagation();
                             // Remover uma ocorrência do cliente
                             setSelectedParticipants(prev => {
@@ -1683,6 +1728,7 @@ export default function PaymentModal({
                           type="button"
                           className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white text-base font-bold transition-colors"
                           onClick={(e) => {
+                            e.preventDefault();
                             e.stopPropagation();
                             // Adicionar uma ocorrência do cliente
                             const participantWithTimestamp = { ...cliente, timestamp: Date.now() };
@@ -1713,7 +1759,10 @@ export default function PaymentModal({
               type="button"
               variant="ghost"
               className="border border-border"
-              onClick={() => {
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                protectPaymentModal(1000); // Proteger modal de pagamentos
                 setIsAddParticipantOpen(false);
                 setAddParticipantSearch('');
                 setSelectedParticipants([]);
@@ -1726,7 +1775,14 @@ export default function PaymentModal({
               type="button"
               className="bg-emerald-600 hover:bg-emerald-500 text-white"
               disabled={selectedParticipants.length === 0}
-              onClick={() => {
+              onClick={(e) => {
+                console.log('[AddParticipant] Botão Salvar clicado');
+                e.preventDefault();
+                e.stopPropagation();
+                console.log('[AddParticipant] Protegendo modal de pagamentos (3000ms)');
+                protectPaymentModal(3000); // Proteger modal de pagamentos por mais tempo
+                
+                console.log('[AddParticipant] Adicionando participantes:', selectedParticipants.length);
                 // Adicionar todos os participantes selecionados
                 const newParticipants = selectedParticipants.map(cliente => ({
                   cliente_id: cliente.id,
@@ -1746,15 +1802,18 @@ export default function PaymentModal({
                 
                 setLocalParticipantsForm(prev => [...prev, ...newParticipants]);
                 
+                console.log('[AddParticipant] Mostrando toast');
                 toast({
                   title: 'Participantes adicionados',
                   description: `${selectedParticipants.length} ${selectedParticipants.length === 1 ? 'participante foi adicionado' : 'participantes foram adicionados'} aos pagamentos.`,
                   variant: 'success',
                 });
                 
+                console.log('[AddParticipant] Fechando modal de adicionar participante');
                 setIsAddParticipantOpen(false);
                 setAddParticipantSearch('');
                 setSelectedParticipants([]);
+                console.log('[AddParticipant] Concluído');
               }}
             >
               Confirmar ({selectedParticipants.length})

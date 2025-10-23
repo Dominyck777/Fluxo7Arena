@@ -45,16 +45,24 @@ export const AgendaProvider = ({ children }) => {
   // Ref para detectar mudanças de visibilidade
   const lastVisibilityChangeRef = useRef(0);
   
-  // Função para proteger o modal de pagamentos por um tempo
-  const protectPaymentModal = useCallback((durationMs = 500) => {
-    modalProtectionRef.current = {
-      isProtected: true,
-      protectedUntil: Date.now() + durationMs
-    };
+  // Função para proteger modal de pagamentos de fechamento acidental
+  const protectPaymentModal = useCallback((durationMs = 2000) => {
+    const newProtectionUntil = Date.now() + durationMs;
     
-    // Desproteger após o tempo
+    // Só atualizar se a nova proteção for mais longa que a atual
+    if (newProtectionUntil > modalProtectionRef.current.protectedUntil) {
+      modalProtectionRef.current.isProtected = true;
+      modalProtectionRef.current.protectedUntil = newProtectionUntil;
+    } else {
+      return;
+    }
+    
+    // Desproteger após o tempo APENAS se nenhuma proteção mais longa foi ativada
     setTimeout(() => {
-      modalProtectionRef.current.isProtected = false;
+      const now = Date.now();
+      if (now >= modalProtectionRef.current.protectedUntil) {
+        modalProtectionRef.current.isProtected = false;
+      }
     }, durationMs);
   }, []);
   
@@ -65,7 +73,9 @@ export const AgendaProvider = ({ children }) => {
   
   // Fechar modal de pagamentos (com proteção)
   const closePaymentModal = useCallback(() => {
-    if (modalProtectionRef.current.isProtected && Date.now() < modalProtectionRef.current.protectedUntil) {
+    const now = Date.now();
+    
+    if (modalProtectionRef.current.isProtected && now < modalProtectionRef.current.protectedUntil) {
       return false;
     }
     
@@ -83,9 +93,7 @@ export const AgendaProvider = ({ children }) => {
   const openEditParticipantModal = useCallback((participantId, participantName) => {
     setEditParticipantData({ participantId, participantName });
     setIsEditParticipantModalOpen(true);
-    
-    // Proteger modal de pagamentos
-    protectPaymentModal(1000); // Protege por 1 segundo
+    protectPaymentModal(3000);
   }, [protectPaymentModal]);
   
   // Fechar modal de edição de participante
@@ -93,9 +101,11 @@ export const AgendaProvider = ({ children }) => {
     setIsEditParticipantModalOpen(false);
     setEditParticipantData({ participantId: null, participantName: '' });
     
-    // Proteger modal de pagamentos ao fechar
-    protectPaymentModal(500);
-  }, [protectPaymentModal]);
+    // Desproteger modal de pagamentos após 500ms
+    setTimeout(() => {
+      modalProtectionRef.current.isProtected = false;
+    }, 500);
+  }, []);
   
   // Listener para rastrear mudanças de visibilidade
   useEffect(() => {

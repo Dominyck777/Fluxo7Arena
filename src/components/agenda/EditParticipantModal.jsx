@@ -34,21 +34,22 @@ export default function EditParticipantModal({
   
   // Função para substituir participante
   const handleSelectParticipant = (cliente) => {
-    if (cliente.id === editParticipantData.participantId) {
+    const oldIndex = editParticipantData.participantId; // Agora é o índice
+    
+    // Verificar se é o mesmo cliente na mesma posição
+    if (participantsForm[oldIndex]?.cliente_id === cliente.id) {
       return; // Já é o participante atual
     }
     
     console.log('🔄 [EditParticipantModal] Substituindo participante:', {
       de: editParticipantData.participantName,
       para: cliente.nome,
-      id_de: editParticipantData.participantId,
+      indice: oldIndex,
       id_para: cliente.id
     });
     
-    // Pegar dados de pagamento do participante antigo
-    const oldPaymentData = participantsForm.find(
-      p => p.cliente_id === editParticipantData.participantId
-    );
+    // Pegar dados de pagamento do participante antigo usando índice
+    const oldPaymentData = participantsForm[oldIndex];
     
     // NÃO atualizar form.selectedClients aqui - isso será feito ao salvar pagamentos
     // Apenas atualizar participantsForm (estado temporário do modal de pagamentos)
@@ -58,11 +59,8 @@ export default function EditParticipantModal({
     if (setParticipantsForm.updateLocal && setParticipantsForm.getLocal) {
       // PaymentModal está aberto - atualizar estado local
       const localParticipants = setParticipantsForm.getLocal();
-      const oldIndex = localParticipants.findIndex(
-        p => p.cliente_id === editParticipantData.participantId
-      );
       
-      if (oldIndex >= 0) {
+      if (oldIndex >= 0 && oldIndex < localParticipants.length) {
         const newParticipant = {
           cliente_id: cliente.id,
           nome: cliente.nome,
@@ -70,7 +68,8 @@ export default function EditParticipantModal({
           valor_cota: oldPaymentData?.valor_cota || '',
           status_pagamento: oldPaymentData?.status_pagamento || 'Pendente',
           finalizadora_id: oldPaymentData?.finalizadora_id || 
-            (payMethods[0]?.id ? String(payMethods[0].id) : null)
+            (payMethods[0]?.id ? String(payMethods[0].id) : null),
+          aplicar_taxa: oldPaymentData?.aplicar_taxa || false
         };
         
         const newList = [...localParticipants];
@@ -80,11 +79,7 @@ export default function EditParticipantModal({
     } else {
       // PaymentModal não está aberto - atualizar contexto normalmente
       setParticipantsForm(prev => {
-        const oldIndex = prev.findIndex(
-          p => p.cliente_id === editParticipantData.participantId
-        );
-        
-        if (oldIndex === -1) return prev;
+        if (oldIndex < 0 || oldIndex >= prev.length) return prev;
         
         const newParticipant = {
           cliente_id: cliente.id,
@@ -93,7 +88,8 @@ export default function EditParticipantModal({
           valor_cota: oldPaymentData?.valor_cota || '',
           status_pagamento: oldPaymentData?.status_pagamento || 'Pendente',
           finalizadora_id: oldPaymentData?.finalizadora_id || 
-            (payMethods[0]?.id ? String(payMethods[0].id) : null)
+            (payMethods[0]?.id ? String(payMethods[0].id) : null),
+          aplicar_taxa: oldPaymentData?.aplicar_taxa || false
         };
         
         const newList = [...prev];
@@ -156,7 +152,10 @@ export default function EditParticipantModal({
     <Dialog
       open={isEditParticipantModalOpen}
       onOpenChange={(open) => {
+        console.log('[EditParticipantModal] onOpenChange:', open);
         if (!open) {
+          console.log('[EditParticipantModal] Protegendo modal de pagamentos');
+          protectPaymentModal(2000);
           closeEditParticipantModal();
           setEditParticipantSearch('');
         }
@@ -174,6 +173,7 @@ export default function EditParticipantModal({
           console.log('👆 [EditParticipantModal] onInteractOutside - prevenindo');
           e.preventDefault();
           e.stopPropagation();
+          protectPaymentModal(2000);
         }}
       >
         <DialogHeader>
@@ -210,7 +210,9 @@ export default function EditParticipantModal({
               </div>
             ) : (
               filtered.map((cliente) => {
-                const isCurrentParticipant = cliente.id === editParticipantData.participantId;
+                // Verificar se é o mesmo cliente na posição atual
+                const oldIndex = editParticipantData.participantId;
+                const isCurrentParticipant = participantsForm[oldIndex]?.cliente_id === cliente.id;
                 const isConsumidorFinal = cliente?.is_consumidor_final === true;
                 
                 return (
@@ -226,10 +228,16 @@ export default function EditParticipantModal({
                       !isCurrentParticipant && !isConsumidorFinal && "hover:bg-surface-2"
                     )}
                     disabled={isCurrentParticipant}
-                    onClick={() => handleSelectParticipant(cliente)}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      console.log('[EditParticipantModal] Cliente selecionado - protegendo modal');
+                      protectPaymentModal(2000);
+                      handleSelectParticipant(cliente);
+                    }}
                   >
                     <div className="flex items-center gap-3 flex-1">
-                      {cliente.codigo !== null && cliente.codigo !== undefined && (
+                      {(cliente.codigo !== null && cliente.codigo !== undefined) && (
                         <span className={cn(
                           "inline-flex items-center justify-center w-10 h-10 rounded-full font-bold text-sm transition-colors",
                           isConsumidorFinal && "bg-amber-500/15 text-amber-300/90 ring-1 ring-amber-500/20",
@@ -270,9 +278,19 @@ export default function EditParticipantModal({
             type="button"
             variant="ghost"
             className="border border-white/10"
-            onClick={() => {
+            onClick={(e) => {
+              console.log('🔴 [EditParticipantModal] ========== BOTÃO CANCELAR CLICADO ==========');
+              console.log('🔴 [EditParticipantModal] preventDefault()');
+              e.preventDefault();
+              console.log('🔴 [EditParticipantModal] stopPropagation()');
+              e.stopPropagation();
+              console.log('🔴 [EditParticipantModal] Protegendo modal de pagamentos (2000ms)');
+              protectPaymentModal(2000);
+              console.log('🔴 [EditParticipantModal] Fechando modal de editar participante');
               closeEditParticipantModal();
+              console.log('🔴 [EditParticipantModal] Limpando busca');
               setEditParticipantSearch('');
+              console.log('🔴 [EditParticipantModal] ========== CANCELAR CONCLUÍDO ==========');
             }}
           >
             Cancelar

@@ -4796,7 +4796,15 @@ function AgendaPage() {
       {isClientFormOpen && (
         <ClientFormModal
             open={isClientFormOpen}
-            onOpenChange={(open) => { setIsClientFormOpen(open); if (!open) setClientForModal(null); }}
+            onOpenChange={(open) => {
+              setIsClientFormOpen(open); 
+              if (!open) {
+                setClientForModal(null);
+                if (window.__paymentModalCallback) {
+                  window.__paymentModalCallback = null;
+                }
+              }
+            }}
             client={clientForModal}
             onSaved={(saved) => {
             try {
@@ -4866,6 +4874,9 @@ function AgendaPage() {
               // Executar callback do PaymentModal se existir
               if (window.__paymentModalCallback && typeof window.__paymentModalCallback === 'function') {
                 try {
+                  if (window.__protectPaymentModal) {
+                    window.__protectPaymentModal(3000);
+                  }
                   window.__paymentModalCallback();
                   window.__paymentModalCallback = null;
                 } catch (e) {
