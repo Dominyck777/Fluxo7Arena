@@ -19,6 +19,7 @@ import { listarFinalizadoras } from '@/lib/store';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
 import { useAgenda } from '@/contexts/AgendaContext';
+import { useAlerts } from '@/contexts/AlertsContext';
 import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import ClientFormModal from '@/components/clients/ClientFormModal';
 import PaymentModal from '@/components/agenda/PaymentModal';
@@ -160,6 +161,7 @@ const formatMinutesToTime = (minutes) => {
 
 function AgendaPage() {
   const { toast } = useToast();
+  const { loadAlerts } = useAlerts();
   const location = useLocation();
   
   // Context da Agenda
@@ -1064,8 +1066,7 @@ function AgendaPage() {
       .from('agendamentos')
       .select(`
         id, codigo, codigo_empresa, quadra_id, cliente_id, clientes, inicio, fim, modalidade, status, auto_disabled,
-        quadra:quadra_id ( nome ),
-        cliente:cliente_id ( nome )
+        quadra:quadra_id ( nome )
       `)
       .eq('codigo_empresa', userProfile.codigo_empresa)
       .gte('inicio', dayStart.toISOString())
@@ -1107,10 +1108,19 @@ function AgendaPage() {
       const end = new Date(row.fim);
       // Nome da quadra
       const courtName = row.quadra?.[0]?.nome || row.quadra?.nome || Object.values(courtsMap).find(c => c.id === row.quadra_id)?.nome || '';
-      // Nome do cliente: tentar relacionamento primeiro, depois array clientes, depois participantes
-      let customerName = row.cliente?.[0]?.nome || row.cliente?.nome || '';
       
-      // Fallback 1: se não tem cliente_id, buscar do array clientes (legado)
+      // Nome do cliente: SEMPRE buscar dos participantes primeiro (contém histórico editado)
+      let customerName = '';
+      
+      // Prioridade 1: buscar dos participantes já carregados (histórico editado)
+      if (participantsByAgendamento[row.id]) {
+        const participants = participantsByAgendamento[row.id];
+        if (Array.isArray(participants) && participants.length > 0) {
+          customerName = participants[0]?.nome || '';
+        }
+      }
+      
+      // Fallback: se não tem participantes carregados, buscar do array clientes (legado)
       if (!customerName && row.clientes) {
         try {
           const clientesArray = typeof row.clientes === 'string' ? JSON.parse(row.clientes) : row.clientes;
@@ -1118,14 +1128,6 @@ function AgendaPage() {
             customerName = clientesArray[0]?.nome || clientesArray[0] || '';
           }
         } catch {}
-      }
-      
-      // Fallback 2: buscar dos participantes já carregados
-      if (!customerName && participantsByAgendamento[row.id]) {
-        const participants = participantsByAgendamento[row.id];
-        if (Array.isArray(participants) && participants.length > 0) {
-          customerName = participants[0]?.nome || participants[0]?.cliente?.nome || '';
-        }
       }
       
       // Proteção: se mudamos localmente há pouco, preferir o status local por alguns segundos para evitar regressão visual
@@ -1351,7 +1353,8 @@ function AgendaPage() {
 
         if (!map[k]) map[k] = [];
 
-        const nomeResolvido = (Array.isArray(row.cliente) ? row.cliente[0]?.nome : row.cliente?.nome) || row.nome || '';
+        // Priorizar nome da tabela agendamento_participantes (histórico editado) sobre o nome do cliente (cadastro)
+        const nomeResolvido = row.nome || (Array.isArray(row.cliente) ? row.cliente[0]?.nome : row.cliente?.nome) || '';
         const codigoResolvido = (Array.isArray(row.cliente) ? row.cliente[0]?.codigo : row.cliente?.codigo) || null;
 
         map[k].push({ ...row, nome: nomeResolvido, codigo: codigoResolvido });
@@ -1933,6 +1936,12 @@ function AgendaPage() {
     // Saving flags
     const [isSavingPayments, setIsSavingPayments] = useState(false);
     const [isSavingBooking, setIsSavingBooking] = useState(false);
+    const [isAutoSaving, setIsAutoSaving] = useState(false);
+    
+    // Refs para auto-save
+    const autoSaveTimeoutRef = useRef(null);
+    const lastSavedFormRef = useRef(null);
+    const autoSaveEnabledRef = useRef(false); // Só ativa após inicialização completa
 
     // Carrega finalizadoras quando o modal de pagamentos abre
     useEffect(() => {
@@ -2697,7 +2706,8 @@ function AgendaPage() {
     }, [isModalOpen, editingBooking]);
 
     // Função idempotente para salvar uma vez; reusada em onClick e ao voltar foco da aba
-    const saveBookingOnce = useCallback(async () => {
+    const saveBookingOnce = useCallback(async (options = {}) => {
+      const { autoSave = false } = options;
       if (isSavingBooking) return;
       setIsSavingBooking(true);
       try {
@@ -2799,6 +2809,54 @@ function AgendaPage() {
             .eq('codigo_empresa', userProfile.codigo_empresa)
             .eq('id', editingBooking.id);
           if (error) throw error;
+          
+          // 🔄 Atualiza participantes na tabela agendamento_participantes
+          // Busca participantes atuais do banco para preservar dados de pagamento
+          const { data: currentParticipants } = await supabase
+            .from('agendamento_participantes')
+            .select('*')
+            .eq('codigo_empresa', userProfile.codigo_empresa)
+            .eq('agendamento_id', editingBooking.id);
+          
+          // Cria mapa de participantes atuais por cliente_id
+          const currentMap = new Map();
+          (currentParticipants || []).forEach(p => {
+            currentMap.set(p.cliente_id, p);
+          });
+          
+          // Remove TODOS os participantes antigos
+          const { error: deleteError } = await supabase
+            .from('agendamento_participantes')
+            .delete()
+            .eq('codigo_empresa', userProfile.codigo_empresa)
+            .eq('agendamento_id', editingBooking.id);
+          
+          if (deleteError) console.error('Erro ao deletar participantes:', deleteError);
+          
+          // Insere novos participantes PRESERVANDO dados de pagamento quando já existiam
+          if (selNow && selNow.length > 0) {
+            const participantesRows = selNow.map((c) => {
+              const existing = currentMap.get(c.id);
+              return {
+                codigo_empresa: userProfile.codigo_empresa,
+                agendamento_id: editingBooking.id,
+                cliente_id: c.id,
+                nome: c.nome,
+                // Preserva dados de pagamento se já existir
+                valor_cota: existing?.valor_cota ?? 0,
+                status_pagamento: existing?.status_pagamento ?? 'Pendente',
+                finalizadora_id: existing?.finalizadora_id ?? null,
+                aplicar_taxa: existing?.aplicar_taxa ?? false,
+                pago_em: existing?.pago_em ?? null,
+              };
+            });
+            
+            const { error: insertError } = await supabase
+              .from('agendamento_participantes')
+              .insert(participantesRows);
+              
+            if (insertError) console.error('Erro ao inserir participantes:', insertError);
+          }
           // Atualiza estado local (sem mexer em status quando ele mudou; será tratado abaixo)
           // Garante que pegamos o nome do cliente corretamente
           const customerName = primaryClient?.nome || primaryClient?.name || getCustomerName(primaryClient) || clientesArr[0] || editingBooking.customer;
@@ -2820,14 +2878,57 @@ function AgendaPage() {
             // Fecha o modal de edição antes de abrir o modal de reativação para evitar sobreposição incorreta
             try { setIsModalOpen(false); await updateBookingStatus(editingBooking.id, form.status, 'user'); } catch {}
           }
-          toast({ title: 'Agendamento atualizado' });
+          // Toast apenas se não for auto-save (evita notificação em cada mudança)
+          if (!autoSave) {
+            toast({ title: 'Agendamento atualizado' });
+          }
           completedSaveRef.current = true;
           pendingSaveRef.current = false;
-          // Clear customer selection caches to avoid carryover into next new booking
-          try { lastNonEmptySelectionRef.current = []; } catch {}
-          try { setChipsSnapshot([]); } catch {}
-          try { sessionStorage.removeItem(persistLastKey); } catch {}
-          setIsModalOpen(false);
+          
+          // 🔄 Atualiza cache de participantes para refletir mudanças imediatamente
+          const updatedParticipants = selNow.map(c => {
+            const existing = currentMap.get(c.id);
+            return {
+              cliente_id: c.id,
+              nome: c.nome,
+              codigo: c.codigo || null,
+              valor_cota: existing?.valor_cota ?? 0,
+              status_pagamento: existing?.status_pagamento ?? 'Pendente',
+              finalizadora_id: existing?.finalizadora_id ?? null,
+              aplicar_taxa: existing?.aplicar_taxa ?? false,
+            };
+          });
+          setParticipantsByAgendamento(prev => ({
+            ...prev,
+            [editingBooking.id]: updatedParticipants
+          }));
+          
+          // Atualiza também o participantsForm (dados de pagamento) com valores preservados
+          setParticipantsForm(updatedParticipants.map(p => ({
+            cliente_id: p.cliente_id,
+            nome: p.nome,
+            codigo: p.codigo,
+            valor_cota: p.valor_cota ? maskBRL(String(Number(p.valor_cota).toFixed(2))) : '',
+            status_pagamento: p.status_pagamento,
+            finalizadora_id: p.finalizadora_id ? String(p.finalizadora_id) : (payMethods?.[0]?.id ? String(payMethods[0].id) : null),
+            aplicar_taxa: p.aplicar_taxa,
+          })));
+          
+          // Recarregar alertas após salvar agendamento
+          try {
+            await loadAlerts();
+          } catch (err) {
+            console.error('[AgendaPage] Erro ao recarregar alertas:', err);
+          }
+          
+          // Só fecha o modal e limpa caches se NÃO for auto-save
+          if (!autoSave) {
+            // Clear customer selection caches to avoid carryover into next new booking
+            try { lastNonEmptySelectionRef.current = []; } catch {}
+            try { setChipsSnapshot([]); } catch {}
+            try { sessionStorage.removeItem(persistLastKey); } catch {}
+            setIsModalOpen(false);
+          }
           return;
         }
 
@@ -2976,6 +3077,13 @@ function AgendaPage() {
           };
           setBookings((prev) => [...prev, newItem]);
           toast({ title: 'Agendamento criado' });
+          
+          // Recarregar alertas após criar agendamento
+          try {
+            await loadAlerts();
+          } catch (err) {
+            console.error('[AgendaPage] Erro ao recarregar alertas:', err);
+          }
 
           // Participantes (não bloqueia conclusão do salvamento principal)
           try {
@@ -3031,6 +3139,101 @@ function AgendaPage() {
     // Ao voltar para a aba, se houver salvamento pendente e não concluído, reexecuta automaticamente
     // Auto-retry ao voltar de outra aba: desativado para evitar pulsos
     // useEffect(() => {}, [isModalOpen, isSavingBooking, saveBookingOnce]);
+  
+  // ✅ AUTO-SAVE: Salva automaticamente ao detectar mudanças no modo de edição
+  useEffect(() => {
+    // Só aplica auto-save no modo de EDIÇÃO (não em criação)
+    if (!editingBooking?.id) {
+      autoSaveEnabledRef.current = false;
+      lastSavedFormRef.current = null;
+      return;
+    }
+    
+    // Aguarda inicialização completa do form (sincroniza com initializedRef)
+    if (!initializedRef.current || !autoSaveEnabledRef.current) {
+      // Ativa auto-save após 500ms da inicialização para evitar saves prematuros
+      const timeout = setTimeout(() => {
+        if (initializedRef.current) {
+          autoSaveEnabledRef.current = true;
+          lastSavedFormRef.current = JSON.stringify({
+            court: form.court,
+            startMinutes: form.startMinutes,
+            endMinutes: form.endMinutes,
+            modality: form.modality,
+            status: form.status,
+            selectedClients: form.selectedClients,
+          });
+        }
+      }, 500);
+      return () => clearTimeout(timeout);
+    }
+    
+    // Serializa form atual para comparar
+    const currentForm = JSON.stringify({
+      court: form.court,
+      startMinutes: form.startMinutes,
+      endMinutes: form.endMinutes,
+      modality: form.modality,
+      status: form.status,
+      selectedClients: form.selectedClients,
+    });
+    
+    // Se não houve mudança real, não faz nada
+    if (currentForm === lastSavedFormRef.current) {
+      return;
+    }
+    
+    // Limpa timeout anterior
+    if (autoSaveTimeoutRef.current) {
+      clearTimeout(autoSaveTimeoutRef.current);
+    }
+    
+    // Debounce de 1.5 segundos
+    autoSaveTimeoutRef.current = setTimeout(async () => {
+      // Validações básicas antes de salvar
+      const court = courtsMap[form.court];
+      if (!court) return; // Sem quadra válida
+      
+      const s = form.startMinutes, e = form.endMinutes;
+      if (!(Number.isFinite(s) && Number.isFinite(e) && e > s)) return; // Horário inválido
+      
+      const free = isRangeFree(s, e);
+      if (!free) return; // Conflito de horário
+      
+      // Salva automaticamente
+      console.log('🔄 [Auto-save] Salvando alterações...');
+      setIsAutoSaving(true);
+      
+      try {
+        await saveBookingOnce({ autoSave: true });
+        lastSavedFormRef.current = currentForm;
+        console.log('✅ [Auto-save] Salvo com sucesso!');
+      } catch (error) {
+        console.error('❌ [Auto-save] Erro ao salvar:', error);
+      } finally {
+        setIsAutoSaving(false);
+      }
+    }, 1500);
+    
+    // Cleanup
+    return () => {
+      if (autoSaveTimeoutRef.current) {
+        clearTimeout(autoSaveTimeoutRef.current);
+      }
+    };
+  }, [
+    editingBooking?.id,
+    form.court,
+    form.startMinutes,
+    form.endMinutes,
+    form.modality,
+    form.status,
+    form.selectedClients,
+    courtsMap,
+    isRangeFree,
+    saveBookingOnce,
+  ]);
+  
   useEffect(() => {
     const loadClients = async () => {
       if (!isModalOpen || !userProfile?.codigo_empresa) return;
@@ -3172,18 +3375,24 @@ function AgendaPage() {
             try {
               const { data, error } = await supabase
                 .from('agendamento_participantes')
-                .select(`cliente_id, valor_cota, status_pagamento, finalizadora_id, aplicar_taxa, cliente:clientes!agendamento_participantes_cliente_id_fkey ( nome, codigo )`)
+                .select(`cliente_id, nome, valor_cota, status_pagamento, finalizadora_id, aplicar_taxa, cliente:clientes!agendamento_participantes_cliente_id_fkey ( nome, codigo )`)
                 .eq('codigo_empresa', userProfile.codigo_empresa)
                 .eq('agendamento_id', editingBooking.id);
               if (!error && Array.isArray(data)) {
                 const sel = data
                   .filter(p => p && p.cliente_id)
-                  .map(p => ({ id: p.cliente_id, nome: p.cliente?.nome || '', codigo: p.cliente?.codigo || null }));
+                  .map(p => ({ 
+                    id: p.cliente_id, 
+                    // Priorizar nome editado (agendamento_participantes.nome) sobre nome do cadastro
+                    nome: p.nome || p.cliente?.nome || '', 
+                    codigo: p.cliente?.codigo || null 
+                  }));
                   // Removido filtro de deduplicação para permitir clientes duplicados
                 setForm(f => ({ ...f, selectedClients: sel }));
                 setParticipantsForm(data.map(p => ({
                   cliente_id: p.cliente_id,
-                  nome: p.cliente?.nome || '',
+                  // Priorizar nome editado (agendamento_participantes.nome) sobre nome do cadastro
+                  nome: p.nome || p.cliente?.nome || '',
                   codigo: p.cliente?.codigo || null,
                   valor_cota: (() => {
                     const num = Number.isFinite(Number(p.valor_cota)) ? Number(p.valor_cota) : parseBRL(p.valor_cota);
@@ -3203,6 +3412,16 @@ function AgendaPage() {
         }
         // Marca como inicializado após preencher o formulário de edição
         initializedRef.current = true;
+        
+        // 🔄 Inicializa snapshot para detecção de mudanças ao fechar
+        lastSavedFormRef.current = JSON.stringify({
+          court: editingBooking.court,
+          startMinutes: startM,
+          endMinutes: endM,
+          modality: safeModality,
+          status: editingBooking.status,
+          selectedClients: selectedFromParts,
+        });
       } else if (prefill) {
         // Sanitize: garante que a quadra do prefill pertença às quadras disponíveis da empresa atual
         const safeCourt = (availableCourts || []).includes(prefill.court)
@@ -3270,6 +3489,10 @@ function AgendaPage() {
       // [DEBUG-PaymentModal] silenciado
       if (!isModalOpen || !editingBooking) return;
       if (participantsPrefillOnceRef.current) return;
+      
+      // 🛡️ PROTEÇÃO: Não sobrescreve se auto-save está ativo (usuário já fez mudanças)
+      if (autoSaveEnabledRef.current) return;
+      
       const loadedParts = participantsByAgendamento[editingBooking.id] || [];
       if (!loadedParts.length) return;
       const selectedFromParts = loadedParts
@@ -3311,6 +3534,26 @@ function AgendaPage() {
         // ESC para fechar modal
         if (e.key === 'Escape') {
           e.preventDefault();
+          
+          // 🔄 Auto-save ao fechar: SEMPRE salva antes de fechar no modo de edição
+          if (editingBooking?.id) {
+            console.log('💾 [Auto-save] Salvando ao fechar modal (ESC)...');
+            // Cancela timeout pendente
+            if (autoSaveTimeoutRef.current) {
+              clearTimeout(autoSaveTimeoutRef.current);
+            }
+            saveBookingOnce({ autoSave: true })
+              .then(() => {
+                console.log('✅ [Auto-save] Salvo ao fechar (ESC)!');
+                setIsModalOpen(false);
+              })
+              .catch((error) => {
+                console.error('❌ [Auto-save] Erro ao salvar ao fechar (ESC):', error);
+                setIsModalOpen(false);
+              });
+            return; // Não fecha imediatamente
+          }
+          
           setIsModalOpen(false);
         }
         
@@ -3342,7 +3585,7 @@ function AgendaPage() {
 
       window.addEventListener('keydown', handleKeyDown);
       return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [isModalOpen, editingBooking, isPaymentModalOpen, openPaymentModal, setIsCancelConfirmOpen, saveBookingOnce, pendingSaveRef, completedSaveRef, setIsModalOpen]);
+    }, [isModalOpen, editingBooking, isPaymentModalOpen, openPaymentModal, setIsCancelConfirmOpen, saveBookingOnce, pendingSaveRef, completedSaveRef, setIsModalOpen, form]);
 
     // Limites da quadra selecionada
     const courtBounds = useMemo(() => {
@@ -3686,7 +3929,7 @@ function AgendaPage() {
           alignTop
           className="sm:max-w-[960px] max-h-[85vh] min-h-[360px] flex flex-col p-0"
           onOpenAutoFocus={(e) => e.preventDefault()}
-          onInteractOutside={(e) => {
+          onInteractOutside={async (e) => {
             // Não permitir fechar o Dialog enquanto o seletor de clientes estiver aberto
             // ou imediatamente após o seu fechamento (janela de supressão),
             // ou enquanto o formulário de cliente estiver aberto.
@@ -3710,6 +3953,25 @@ function AgendaPage() {
                 e.preventDefault();
                 return;
               }
+              
+              // 🔄 Auto-save ao clicar fora: SEMPRE salva antes de fechar em modo de edição
+              if (editingBooking?.id) {
+                e.preventDefault();
+                console.log('💾 [Auto-save] Salvando ao clicar fora do modal...');
+                try {
+                  // Cancela timeout pendente
+                  if (autoSaveTimeoutRef.current) {
+                    clearTimeout(autoSaveTimeoutRef.current);
+                  }
+                  await saveBookingOnce({ autoSave: true });
+                  console.log('✅ [Auto-save] Salvo ao clicar fora!');
+                } catch (error) {
+                  console.error('❌ [Auto-save] Erro ao salvar ao clicar fora:', error);
+                } finally {
+                  setIsModalOpen(false);
+                }
+                return;
+              }
             } catch {}
           }}
           onEscapeKeyDown={(e) => {
@@ -3725,15 +3987,26 @@ function AgendaPage() {
           {/* Header fixo */}
           <DialogHeader className="px-6 pt-6 pb-4 flex-shrink-0">
             <DialogTitle className="flex items-center justify-between gap-3 flex-wrap">
-              <span>
-                {editingBooking
-                  ? (() => {
-                      const code = editingBooking?.code;
-                      const codeStr = typeof code === 'number' ? String(code).padStart(3, '0') : null;
-                      return codeStr ? `Editar agendamento - ${codeStr}` : 'Editar Agendamento';
-                    })()
-                  : 'Novo Agendamento'}
-              </span>
+              <div className="flex items-center gap-3">
+                <span>
+                  {editingBooking
+                    ? (() => {
+                        const code = editingBooking?.code;
+                        const codeStr = typeof code === 'number' ? String(code).padStart(3, '0') : null;
+                        return codeStr ? `Editar agendamento - ${codeStr}` : 'Editar Agendamento';
+                      })()
+                    : 'Novo Agendamento'}
+                </span>
+                {isAutoSaving && (
+                  <span className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full border text-xs bg-blue-600/10 text-blue-400 border-blue-700/30">
+                    <svg className="w-3 h-3 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Salvando...
+                  </span>
+                )}
+              </div>
               {editingBooking && (
                 (() => {
                   const allPaid = paymentSummary?.pending === 0 && participantsCount > 0;
@@ -3776,7 +4049,9 @@ function AgendaPage() {
               </span>
             </DialogTitle>
             <DialogDescription>
-              {editingBooking ? 'Atualize os detalhes do agendamento.' : 'Preencha os detalhes para criar uma nova reserva.'}
+              {editingBooking 
+                ? 'As alterações são salvas automaticamente enquanto você edita.' 
+                : 'Preencha os detalhes para criar uma nova reserva.'}
             </DialogDescription>
           </DialogHeader>
 
@@ -4621,39 +4896,59 @@ function AgendaPage() {
                   type="button" 
                   variant="ghost" 
                   className="border border-white/10 flex-1 sm:flex-none" 
-                  onClick={() => setIsModalOpen(false)}
+                  onClick={async () => {
+                    // 🔄 Auto-save ao fechar: SEMPRE salva antes de fechar no modo de edição
+                    if (editingBooking?.id) {
+                      console.log('💾 [Auto-save] Salvando ao fechar modal...');
+                      try {
+                        // Cancela timeout pendente
+                        if (autoSaveTimeoutRef.current) {
+                          clearTimeout(autoSaveTimeoutRef.current);
+                        }
+                        await saveBookingOnce({ autoSave: true });
+                        console.log('✅ [Auto-save] Salvo ao fechar!');
+                      } catch (error) {
+                        console.error('❌ [Auto-save] Erro ao salvar ao fechar:', error);
+                      }
+                    }
+                    
+                    setIsModalOpen(false);
+                  }}
                 >
                   Fechar
                   <kbd className="hidden sm:inline ml-2 px-2 py-1 text-sm font-mono bg-white/10 rounded border border-white/20">Esc</kbd>
                 </Button>
-                <Button
-                  type="button"
-                  className="bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-60 disabled:cursor-not-allowed flex-1 sm:flex-none"
-                  disabled={isSavingBooking}
-                  onClick={async () => {
-                    const clickTs = Date.now();
-                    try {
-                      if (isSavingBooking) {
-                        return;
+                {/* Botão Salvar: apenas em modo de criação (auto-save em modo de edição) */}
+                {!editingBooking?.id && (
+                  <Button
+                    type="button"
+                    className="bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-60 disabled:cursor-not-allowed flex-1 sm:flex-none"
+                    disabled={isSavingBooking}
+                    onClick={async () => {
+                      const clickTs = Date.now();
+                      try {
+                        if (isSavingBooking) {
+                          return;
+                        }
+                        
+                        // Se for recorrente e não estiver editando, mostrar modal de confirmação
+                        if (isRecorrente && !editingBooking) {
+                          setShowRecorrenteConfirm(true);
+                          return;
+                        }
+                        
+                        pendingSaveRef.current = true;
+                        completedSaveRef.current = false;
+                        await saveBookingOnce();
+                      } catch (e) {
+                        // Error handled in saveBookingOnce
                       }
-                      
-                      // Se for recorrente e não estiver editando, mostrar modal de confirmação
-                      if (isRecorrente && !editingBooking) {
-                        setShowRecorrenteConfirm(true);
-                        return;
-                      }
-                      
-                      pendingSaveRef.current = true;
-                      completedSaveRef.current = false;
-                      await saveBookingOnce();
-                    } catch (e) {
-                      // Error handled in saveBookingOnce
-                    }
-                  }}
-                >
-                  Salvar
-                  <kbd className="hidden sm:inline ml-2 px-2 py-1 text-sm font-mono bg-emerald-700/50 rounded border border-emerald-500/30">↵</kbd>
-                </Button>
+                    }}
+                  >
+                    Salvar
+                    <kbd className="hidden sm:inline ml-2 px-2 py-1 text-sm font-mono bg-emerald-700/50 rounded border border-emerald-500/30">↵</kbd>
+                  </Button>
+                )}
               </div>
             </div>
           </DialogFooter>

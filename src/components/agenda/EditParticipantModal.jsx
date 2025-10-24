@@ -25,7 +25,8 @@ export default function EditParticipantModal({
     participantsForm,
     setParticipantsForm,
     payMethods,
-    protectPaymentModal
+    protectPaymentModal,
+    onParticipantReplacedRef
   } = useAgenda();
   
   // Estados locais
@@ -98,20 +99,17 @@ export default function EditParticipantModal({
       });
     }
     
-    // Proteger modal de pagamentos
-    protectPaymentModal(1500); // Protege por 1.5 segundos
+    // Proteger modal de pagamentos por mais tempo para evitar fechamento acidental
+    protectPaymentModal(3000); // Protege por 3 segundos
     
     // Fechar modal de edição
     closeEditParticipantModal();
     setEditParticipantSearch('');
     
-    // Toast de sucesso
-    setTimeout(() => {
-      toast({
-        title: 'Participante substituído',
-        description: `${editParticipantData.participantName} foi substituído por ${cliente.nome}`,
-      });
-    }, 100);
+    // Notificar PaymentModal sobre a substituição para animação
+    if (onParticipantReplacedRef?.current) {
+      onParticipantReplacedRef.current(oldIndex);
+    }
   };
   
   // Reset quando modal abre

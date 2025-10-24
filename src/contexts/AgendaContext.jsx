@@ -45,6 +45,9 @@ export const AgendaProvider = ({ children }) => {
   // Ref para detectar mudanças de visibilidade
   const lastVisibilityChangeRef = useRef(0);
   
+  // Ref para callback de substituição de participante
+  const onParticipantReplacedRef = useRef(null);
+  
   // Função para proteger modal de pagamentos de fechamento acidental
   const protectPaymentModal = useCallback((durationMs = 2000) => {
     const newProtectionUntil = Date.now() + durationMs;
@@ -76,15 +79,19 @@ export const AgendaProvider = ({ children }) => {
     const now = Date.now();
     
     if (modalProtectionRef.current.isProtected && now < modalProtectionRef.current.protectedUntil) {
+      const remainingMs = modalProtectionRef.current.protectedUntil - now;
+      console.log(`🛡️ [PaymentModal] Fechamento bloqueado por proteção (${remainingMs}ms restantes)`);
       return false;
     }
     
     // Bloquear fechamento se aconteceu logo após mudança de visibilidade (500ms)
     const timeSinceVisibilityChange = Date.now() - lastVisibilityChangeRef.current;
     if (timeSinceVisibilityChange < 500) {
+      console.log('🛡️ [PaymentModal] Fechamento bloqueado por mudança de visibilidade recente');
       return false;
     }
     
+    console.log('✅ [PaymentModal] Fechando modal (não protegido)');
     setIsPaymentModalOpen(false);
     return true;
   }, []);
@@ -101,10 +108,8 @@ export const AgendaProvider = ({ children }) => {
     setIsEditParticipantModalOpen(false);
     setEditParticipantData({ participantId: null, participantName: '' });
     
-    // Desproteger modal de pagamentos após 500ms
-    setTimeout(() => {
-      modalProtectionRef.current.isProtected = false;
-    }, 500);
+    // Não força desproteger - deixa o timestamp expirar naturalmente
+    // A proteção configurada por protectPaymentModal() irá expirar automaticamente
   }, []);
   
   // Listener para rastrear mudanças de visibilidade
@@ -155,7 +160,10 @@ export const AgendaProvider = ({ children }) => {
     setLocalCustomers,
     
     // Proteção
-    protectPaymentModal
+    protectPaymentModal,
+    
+    // Callback de substituição
+    onParticipantReplacedRef
   };
   
   return (

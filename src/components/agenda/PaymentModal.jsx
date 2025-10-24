@@ -10,6 +10,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { supabase } from '@/lib/supabase';
 import { useAgenda } from '@/contexts/AgendaContext';
 import { useAuth } from '@/contexts/AuthContext';
+import { useAlerts } from '@/contexts/AlertsContext';
 import { toPng } from 'html-to-image';
 
 // Helpers de moeda BRL
@@ -40,17 +41,20 @@ export default function PaymentModal({
 }) {
   const { toast } = useToast();
   const { userProfile } = useAuth();
+  const { loadAlerts } = useAlerts();
   
   const { 
     isPaymentModalOpen, 
     closePaymentModal,
     editingBooking,
     paymentTotal,
+    setPaymentTotal,
     participantsForm,
     setParticipantsForm,
     payMethods,
     openEditParticipantModal,
-    protectPaymentModal
+    protectPaymentModal,
+    onParticipantReplacedRef
   } = useAgenda();
   
   // Expor protectPaymentModal globalmente para uso em callbacks (imediatamente)
@@ -79,6 +83,14 @@ export default function PaymentModal({
   const [addParticipantSearch, setAddParticipantSearch] = useState('');
   const [isAddParticipantOpen, setIsAddParticipantOpen] = useState(false);
   const [selectedParticipants, setSelectedParticipants] = useState([]);
+  const [editingNameIndex, setEditingNameIndex] = useState(null);
+  
+  // Estados para edição do valor total
+  const [isEditingTotal, setIsEditingTotal] = useState(false);
+  const [editingTotalValue, setEditingTotalValue] = useState('');
+  
+  // Estado para animação de participantes recém-adicionados
+  const [highlightedIndexes, setHighlightedIndexes] = useState([]);
   
   // Estado local para participantes (não usar o do contexto diretamente)
   const [localParticipantsForm, setLocalParticipantsForm] = useState([]);
@@ -87,6 +99,37 @@ export default function PaymentModal({
   const paymentSearchRef = useRef(null);
   const initializedRef = useRef(null); // Armazena timestamp de inicialização
   const loadingTimeoutRef = useRef(null);
+  
+  // Refs para auto-save
+  const autoSaveTimeoutRef = useRef(null);
+  const lastSavedFormRef = useRef(null);
+  const autoSaveEnabledRef = useRef(false);
+  
+  // Estado para indicador visual de auto-save
+  const [isAutoSaving, setIsAutoSaving] = useState(false);
+  
+  // Handler para atualizar nome do cliente consumidor
+  const handleUpdateConsumidorName = useCallback((index, newName) => {
+    setLocalParticipantsForm(prev => {
+      const list = [...prev];
+      if (index >= 0 && index < list.length) {
+        list[index] = { 
+          ...list[index], 
+          nome: newName
+        };
+      }
+      // Também sincronizar com o contexto
+      setParticipantsForm(list);
+      return list;
+    });
+  }, [setParticipantsForm]);
+  
+  // Helper para verificar se é cliente consumidor
+  const isClienteConsumidor = useCallback((clienteId) => {
+    if (!localCustomers || !Array.isArray(localCustomers)) return false;
+    const cliente = localCustomers.find(c => c.id === clienteId);
+    return cliente?.is_consumidor_final === true;
+  }, [localCustomers]);
   
   // Helper para pegar finalizadora padrão (menor código)
   const getDefaultPayMethod = useCallback(() => {
@@ -163,7 +206,12 @@ export default function PaymentModal({
       const newList = [...prev];
       newList.forEach((p, idx) => {
         if (!hidden.includes(idx)) {
-          newList[idx] = { ...newList[idx], valor_cota: masked, status_pagamento: 'Pago' };
+          newList[idx] = { 
+            ...newList[idx], 
+            valor_cota: masked, 
+            status_pagamento: 'Pago',
+            aplicar_taxa: false // Desmarca taxa ao dividir igualmente
+          };
         }
       });
       return newList;
@@ -225,7 +273,24 @@ export default function PaymentModal({
     openEditParticipantModal(participantIndex, participantName);
   };
   
-  const handleSavePayments = async () => {
+  // Funções para editar valor total
+  const startEditingTotal = () => {
+    setEditingTotalValue(paymentTotal || '');
+    setIsEditingTotal(true);
+  };
+  
+  const confirmEditingTotal = () => {
+    setPaymentTotal(editingTotalValue);
+    setIsEditingTotal(false);
+  };
+  
+  const cancelEditingTotal = () => {
+    setEditingTotalValue('');
+    setIsEditingTotal(false);
+  };
+  
+  const handleSavePayments = async (options = {}) => {
+    const { autoSave = false } = options;
     try {
       if (isSavingPayments) return;
       
@@ -256,11 +321,20 @@ export default function PaymentModal({
       }, 0);
       
       // Deletar registros anteriores
+      const saveTimestamp = new Date().toISOString();
+      console.log(`\n\n========== SALVAMENTO INICIADO ${saveTimestamp} ==========`);
+      console.log('\ud83d\uddd1\ufe0f DELETANDO participantes antigos:', { agendamentoId, codigo });
       const { error: delErr } = await supabase
         .from('agendamento_participantes')
         .delete()
         .eq('codigo_empresa', codigo)
         .eq('agendamento_id', agendamentoId);
+      
+      if (delErr) {
+        console.error('\u274c ERRO ao deletar:', delErr);
+      } else {
+        console.log('\u2705 Participantes antigos deletados');
+      }
         
       if (delErr) {
         console.error('[PaymentModal] Delete error', delErr);
@@ -278,7 +352,7 @@ export default function PaymentModal({
         const defaultMethod = getDefaultPayMethod();
         const finId = p.finalizadora_id || (defaultMethod?.id ? String(defaultMethod.id) : null);
         
-        return {
+        const rowData = {
           codigo_empresa: codigo,
           agendamento_id: agendamentoId,
           cliente_id: p.cliente_id,
@@ -288,22 +362,41 @@ export default function PaymentModal({
           finalizadora_id: finId,
           aplicar_taxa: p.aplicar_taxa || false,
         };
+        
+        console.log(`\ud83d\udcbe SALVAR: ${p.nome} | Valor: ${p.valor_cota} \u2192 ${rowData.valor_cota} | Fin: ${finId?.slice(-4)} | Taxa: ${rowData.aplicar_taxa} | Status: ${rowData.status_pagamento}`);
+        
+        return rowData;
       });
+      
+      console.log(`\ud83d\udcbe TOTAL A SALVAR: ${rows.length} participantes`);
+      console.log('\ud83d\udcbe AGENDAMENTO ID:', agendamentoId);
+      console.log('\ud83d\udcbe EMPRESA:', codigo);
       
       // Inserir novos registros
       if (rows.length > 0) {
+        console.log('\ud83d\udcbe INSERINDO no banco...');
         const { data, error } = await supabase
           .from('agendamento_participantes')
           .insert(rows)
           .select();
           
         if (error) {
+          console.error('\u274c ERRO ao inserir:', error);
           toast({ 
             title: 'Erro ao salvar pagamentos', 
             description: 'Falha ao inserir pagamentos.', 
             variant: 'destructive' 
           });
           throw error;
+        }
+        
+        console.log('\u2705 INSERT bem-sucedido! Registros inseridos:', data?.length || 0);
+        console.log('========== SALVAMENTO CONCLU\u00cdDO ==========\n\n');
+        
+        if (data && data.length > 0) {
+          data.forEach((row, idx) => {
+            console.log(`\u2705 SALVO #${idx + 1}: ${row.nome} | Valor: ${row.valor_cota} | Fin: ${row.finalizadora_id?.slice(-4)} | Taxa: ${row.aplicar_taxa} | Status: ${row.status_pagamento}`);
+          });
         }
       }
       
@@ -340,22 +433,35 @@ export default function PaymentModal({
       
       setPaymentHiddenIndexes([]);
       
-      // Toast de sucesso
-      if (pendingCount > 0) {
-        toast({
-          title: 'Pagamentos salvos',
-          description: `${pendingCount} ${pendingCount === 1 ? 'pendente' : 'pendentes'}`,
-          variant: 'warning',
-        });
-      } else {
-        toast({ title: 'Pagamentos salvos', variant: 'success' });
+      // Toast de sucesso (apenas se não for auto-save)
+      if (!autoSave) {
+        if (pendingCount > 0) {
+          toast({
+            title: 'Pagamentos salvos',
+            description: `${pendingCount} ${pendingCount === 1 ? 'pendente' : 'pendentes'}`,
+            variant: 'warning',
+          });
+        } else {
+          toast({ title: 'Pagamentos salvos', variant: 'success' });
+        }
       }
       
       setPaymentWarning(null);
       // Atualizar contexto com os dados salvos
       setParticipantsForm(effectiveParticipants);
-      closePaymentModal();
-      setIsModalOpen(false);
+      
+      // Recarregar alertas após salvar pagamentos
+      try {
+        await loadAlerts();
+      } catch (err) {
+        console.error('[PaymentModal] Erro ao recarregar alertas:', err);
+      }
+      
+      // Só fecha o modal se NÃO for auto-save
+      if (!autoSave) {
+        closePaymentModal();
+        setIsModalOpen(false);
+      }
       
     } catch (e) {
       toast({ 
@@ -379,15 +485,22 @@ export default function PaymentModal({
       // ESC para fechar modal
       if (e.key === 'Escape') {
         e.preventDefault();
-        closePaymentModal();
-      }
-      
-      // Enter para salvar (apenas se não estiver em um input de texto ou textarea)
-      if (e.key === 'Enter' && !['INPUT', 'TEXTAREA'].includes(e.target.tagName)) {
-        e.preventDefault();
-        if (!isSavingPayments) {
-          handleSavePayments();
+        
+        // 🔄 Auto-save ao fechar: SEMPRE salva antes de fechar
+        console.log('💾 [Auto-save Payments] Salvando ao fechar modal (ESC)...');
+        // Cancela timeout pendente
+        if (autoSaveTimeoutRef.current) {
+          clearTimeout(autoSaveTimeoutRef.current);
         }
+        handleSavePayments({ autoSave: true })
+          .then(() => {
+            console.log('✅ [Auto-save Payments] Salvo ao fechar (ESC)!');
+            closePaymentModal();
+          })
+          .catch((error) => {
+            console.error('❌ [Auto-save Payments] Erro ao salvar ao fechar (ESC):', error);
+            closePaymentModal();
+          });
       }
       
       // F8 para dividir igualmente
@@ -457,57 +570,154 @@ export default function PaymentModal({
           loadingTimeoutRef.current = null;
         }
         
-        const { defaultMethod, defaultFinalizadoraId, defaultAplicarTaxa } = (() => { 
-          const defaultMethod = getDefaultPayMethod();
-          const defaultFinalizadoraId = defaultMethod?.id ? String(defaultMethod.id) : null;
-          const defaultAplicarTaxa = Number(defaultMethod?.taxa_percentual || 0) > 0;
-          return { defaultMethod, defaultFinalizadoraId, defaultAplicarTaxa };
-        })();
-        
-        // Inicializar estado local a partir do contexto (ou form.selectedClients se vazio)
-        const sourceData = (participantsForm && participantsForm.length > 0) 
-          ? participantsForm 
-          : (form?.selectedClients || []).map(c => {
-            let codigo = c.codigo;
+        // Função async para inicializar participantes
+        const initializeParticipants = async () => {
+          const { defaultMethod, defaultFinalizadoraId, defaultAplicarTaxa } = (() => { 
+            const defaultMethod = getDefaultPayMethod();
+            const defaultFinalizadoraId = defaultMethod?.id ? String(defaultMethod.id) : null;
+            const defaultAplicarTaxa = Number(defaultMethod?.taxa_percentual || 0) > 0;
+            return { defaultMethod, defaultFinalizadoraId, defaultAplicarTaxa };
+          })();
+          
+          // PROTEÇÃO EM CAMADAS: Buscar participantes de múltiplas fontes
+          let sourceData = [];
+          let dataSource = 'nenhuma';
+          
+          // CAMADA 1: Contexto (dados em memória - mais rápido)
+          if (participantsForm && participantsForm.length > 0) {
+            sourceData = participantsForm;
+            dataSource = 'participantsForm (contexto)';
+          } 
+          // CAMADA 2: Form (dados do formulário)
+          else if (form?.selectedClients && form.selectedClients.length > 0) {
+            sourceData = (form?.selectedClients || []).map(c => {
+              let codigo = c.codigo;
+              if ((codigo === null || codigo === undefined) && localCustomers && Array.isArray(localCustomers)) {
+                const clienteCompleto = localCustomers.find(lc => lc.id === c.id);
+                codigo = clienteCompleto?.codigo !== null && clienteCompleto?.codigo !== undefined ? clienteCompleto.codigo : null;
+              }
+              return {
+                cliente_id: c.id,
+                nome: c.nome,
+                codigo: codigo,
+                valor_cota: '',
+                status_pagamento: 'Pendente',
+                finalizadora_id: defaultFinalizadoraId,
+                aplicar_taxa: defaultAplicarTaxa
+              };
+            });
+            dataSource = 'form.selectedClients';
+          } 
+          // CAMADA 3: BANCO DE DADOS (fallback crítico)
+          else if (editingBooking?.id) {
+            // Buscar do banco se ambos estão vazios (caso de reload)
+            const loadTimestamp = new Date().toISOString();
+            console.log(`\n\n========== CARREGAMENTO INICIADO ${loadTimestamp} ==========`);
+            console.log('\ud83d\udd0d BUSCANDO PARTICIPANTES DO BANCO...');
+            console.log('\ud83d\udd0d Query params:', {
+              agendamento_id: editingBooking.id,
+              codigo_empresa: userProfile?.codigo_empresa
+            });
+            try {
+              const { data: dbParticipants, error } = await supabase
+                .from('agendamento_participantes')
+                .select('*')
+                .eq('agendamento_id', editingBooking.id)
+                .eq('codigo_empresa', userProfile?.codigo_empresa);
+              
+              console.log('\ud83d\udd0d Resultado da query:', { 
+                encontrados: dbParticipants?.length || 0, 
+                erro: error,
+                dados: dbParticipants
+              });
+              
+              if (error) {
+                console.error('\u274c Erro ao buscar participantes:', error);
+              } else if (dbParticipants && dbParticipants.length > 0) {
+                console.log(`\u2705 ${dbParticipants.length} participantes encontrados no banco`);
+                sourceData = dbParticipants.map(p => ({
+                  cliente_id: p.cliente_id,
+                  nome: p.nome,
+                  codigo: null, // Será preenchido abaixo
+                  valor_cota: p.valor_cota ? maskBRL(String(Number(p.valor_cota).toFixed(2))) : '0,00',
+                  status_pagamento: p.status_pagamento || 'Pendente',
+                  finalizadora_id: p.finalizadora_id ? String(p.finalizadora_id) : defaultFinalizadoraId,
+                  aplicar_taxa: p.aplicar_taxa || false
+                }));
+                dataSource = 'banco de dados';
+              } else {
+                console.log('\u26a0\ufe0f Nenhum participante encontrado no banco!');
+                dataSource = 'banco vazio';
+              }
+            } catch (err) {
+              console.error('\u274c Erro ao buscar participantes:', err);
+            }
+          }
+          
+          // Atualizar códigos faltantes e garantir finalizadora padrão
+          const withCodes = sourceData.map(p => {
+            let codigo = p.codigo;
             if ((codigo === null || codigo === undefined) && localCustomers && Array.isArray(localCustomers)) {
-              const clienteCompleto = localCustomers.find(lc => lc.id === c.id);
+              const clienteCompleto = localCustomers.find(lc => lc.id === p.cliente_id);
               codigo = clienteCompleto?.codigo !== null && clienteCompleto?.codigo !== undefined ? clienteCompleto.codigo : null;
             }
-            return {
-              cliente_id: c.id,
-              nome: c.nome,
-              codigo: codigo,
-              valor_cota: '',
-              status_pagamento: 'Pendente',
-              finalizadora_id: defaultFinalizadoraId,
-              aplicar_taxa: defaultAplicarTaxa
+            
+            // Garantir que tenha finalizadora_id (usar padrão se vazio)
+            let finalizadoraId = p.finalizadora_id;
+            if (!finalizadoraId) {
+              const defaultMethod = getDefaultPayMethod();
+              finalizadoraId = defaultMethod?.id ? String(defaultMethod.id) : null;
+            }
+            
+            return { 
+              ...p, 
+              codigo: (codigo !== null && codigo !== undefined) ? codigo : p.codigo,
+              finalizadora_id: finalizadoraId
             };
           });
-        
-        // Atualizar códigos faltantes e garantir finalizadora padrão
-        const withCodes = sourceData.map(p => {
-          let codigo = p.codigo;
-          if ((codigo === null || codigo === undefined) && localCustomers && Array.isArray(localCustomers)) {
-            const clienteCompleto = localCustomers.find(lc => lc.id === p.cliente_id);
-            codigo = clienteCompleto?.codigo !== null && clienteCompleto?.codigo !== undefined ? clienteCompleto.codigo : null;
+          
+          // ALERTA CRÍTICO: Se não encontrou participantes em nenhuma fonte
+          if (withCodes.length === 0 && editingBooking?.id) {
+            console.error('\ud83d\udea8 ALERTA CRÍTICO: Nenhum participante encontrado em NENHUMA fonte!');
+            console.error('\ud83d\udea8 Agendamento ID:', editingBooking.id);
+            console.error('\ud83d\udea8 Empresa:', userProfile?.codigo_empresa);
+            console.error('\ud83d\udea8 Isso pode indicar perda de dados!');
+            
+            // Tentar buscar novamente com mais detalhes
+            try {
+              const { data: debugData, error: debugError } = await supabase
+                .from('agendamento_participantes')
+                .select('*')
+                .eq('agendamento_id', editingBooking.id);
+              
+              console.error('\ud83d\udea8 Busca sem filtro de empresa:', {
+                encontrados: debugData?.length || 0,
+                dados: debugData,
+                erro: debugError
+              });
+            } catch (err) {
+              console.error('\ud83d\udea8 Erro na busca de debug:', err);
+            }
           }
           
-          // Garantir que tenha finalizadora_id (usar padrão se vazio)
-          let finalizadoraId = p.finalizadora_id;
-          if (!finalizadoraId) {
-            const defaultMethod = getDefaultPayMethod();
-            finalizadoraId = defaultMethod?.id ? String(defaultMethod.id) : null;
-          }
+          console.log(`\ud83d\udcc2 CARREGANDO: ${withCodes.length} participantes de ${dataSource}`);
+          console.log('========== CARREGAMENTO CONCLU\u00cdDO ==========\n\n');
           
-          return { 
-            ...p, 
-            codigo: (codigo !== null && codigo !== undefined) ? codigo : p.codigo,
-            finalizadora_id: finalizadoraId
-          };
-        });
+          withCodes.forEach((p, idx) => {
+            console.log(`\ud83d\udcc2 #${idx + 1}: ${p.nome} (cod:${p.codigo}) | Valor: ${p.valor_cota} | Fin: ${p.finalizadora_id?.slice(-4)} | Taxa: ${p.aplicar_taxa} | Status: ${p.status_pagamento}`);
+          });
+          
+          // Só atualizar se tiver dados OU se for novo agendamento
+          if (withCodes.length > 0 || !editingBooking?.id) {
+            setLocalParticipantsForm(withCodes);
+            initializedRef.current = Date.now();
+          } else {
+            console.error('\ud83d\udea8 BLOQUEADO: Não vou sobrescrever com array vazio!');
+            console.error('\ud83d\udea8 Mantendo dados anteriores para evitar perda.');
+          }
+        };
         
-        setLocalParticipantsForm(withCodes);
-        initializedRef.current = Date.now();
+        initializeParticipants();
       }
     } else {
       // Ao fechar, resetar estado local E flag de inicialização
@@ -529,6 +739,21 @@ export default function PaymentModal({
       }
     };
   }, [isPaymentModalOpen, payMethods, getDefaultPayMethod, participantsForm, form?.selectedClients, localCustomers]);
+  
+  // Registrar callback para animação de substituição de participante
+  useEffect(() => {
+    onParticipantReplacedRef.current = (replacedIndex) => {
+      // Destacar participante substituído por 1 segundo
+      setHighlightedIndexes([replacedIndex]);
+      setTimeout(() => {
+        setHighlightedIndexes([]);
+      }, 1000);
+    };
+    
+    return () => {
+      onParticipantReplacedRef.current = null;
+    };
+  }, [onParticipantReplacedRef]);
   
   // Callback para EditParticipantModal atualizar participantes localmente
   const handleParticipantChange = useCallback((updatedParticipants) => {
@@ -591,12 +816,17 @@ export default function PaymentModal({
           })()
         }));
         
-        setLocalParticipantsForm(prev => [...prev, ...newParticipants]);
-        
-        toast({
-          title: 'Participantes adicionados',
-          description: `${selectedParticipants.length} ${selectedParticipants.length === 1 ? 'participante foi adicionado' : 'participantes foram adicionados'} aos pagamentos.`,
-          variant: 'success',
+        setLocalParticipantsForm(prev => {
+          const currentLength = prev.length;
+          const newIndexes = newParticipants.map((_, i) => currentLength + i);
+          
+          // Destacar novos participantes por 1 segundo
+          setHighlightedIndexes(newIndexes);
+          setTimeout(() => {
+            setHighlightedIndexes([]);
+          }, 1000);
+          
+          return [...prev, ...newParticipants];
         });
         
         setIsAddParticipantOpen(false);
@@ -608,6 +838,60 @@ export default function PaymentModal({
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isAddParticipantOpen, selectedParticipants, getDefaultPayMethod, setLocalParticipantsForm, toast, setAddParticipantSearch, setIsAddParticipantOpen, setSelectedParticipants]);
+  
+  // ✅ AUTO-SAVE: Salva automaticamente ao detectar mudanças
+  useEffect(() => {
+    if (!isPaymentModalOpen) {
+      autoSaveEnabledRef.current = false;
+      lastSavedFormRef.current = null;
+      return;
+    }
+    
+    // Aguarda inicialização completa (500ms após abrir)
+    if (!autoSaveEnabledRef.current) {
+      const timeout = setTimeout(() => {
+        autoSaveEnabledRef.current = true;
+        lastSavedFormRef.current = JSON.stringify(localParticipantsForm);
+      }, 500);
+      return () => clearTimeout(timeout);
+    }
+    
+    // Serializa form atual para comparar
+    const currentForm = JSON.stringify(localParticipantsForm);
+    
+    // Se não houve mudança real, não faz nada
+    if (currentForm === lastSavedFormRef.current) {
+      return;
+    }
+    
+    // Limpa timeout anterior
+    if (autoSaveTimeoutRef.current) {
+      clearTimeout(autoSaveTimeoutRef.current);
+    }
+    
+    // Debounce de 1.5 segundos
+    autoSaveTimeoutRef.current = setTimeout(async () => {
+      console.log('🔄 [Auto-save Payments] Salvando alterações...');
+      setIsAutoSaving(true);
+      
+      try {
+        await handleSavePayments({ autoSave: true });
+        lastSavedFormRef.current = currentForm;
+        console.log('✅ [Auto-save Payments] Salvo com sucesso!');
+      } catch (error) {
+        console.error('❌ [Auto-save Payments] Erro ao salvar:', error);
+      } finally {
+        setIsAutoSaving(false);
+      }
+    }, 1500);
+    
+    // Cleanup
+    return () => {
+      if (autoSaveTimeoutRef.current) {
+        clearTimeout(autoSaveTimeoutRef.current);
+      }
+    };
+  }, [isPaymentModalOpen, localParticipantsForm, handleSavePayments]);
   
   // Ref para o elemento que será convertido em imagem
   const relatorioRef = useRef(null);
@@ -679,7 +963,7 @@ export default function PaymentModal({
         forceMount
         className="w-[95vw] sm:max-w-[1100px] max-h-[90vh] overflow-y-scroll"
         onOpenAutoFocus={(e) => e.preventDefault()}
-        onInteractOutside={(e) => { 
+        onInteractOutside={async (e) => { 
           // Prevenir fechamento se modal de adicionar participante estiver aberto
           if (isAddParticipantOpen) {
             e.preventDefault();
@@ -692,8 +976,21 @@ export default function PaymentModal({
             return;
           }
           
-          // Permitir fechar clicando fora
-          closePaymentModal();
+          // 🔄 Auto-save ao clicar fora: SEMPRE salva antes de fechar
+          e.preventDefault();
+          console.log('💾 [Auto-save Payments] Salvando ao clicar fora do modal...');
+          try {
+            // Cancela timeout pendente
+            if (autoSaveTimeoutRef.current) {
+              clearTimeout(autoSaveTimeoutRef.current);
+            }
+            await handleSavePayments({ autoSave: true });
+            console.log('✅ [Auto-save Payments] Salvo ao clicar fora!');
+          } catch (error) {
+            console.error('❌ [Auto-save Payments] Erro ao salvar ao clicar fora:', error);
+          } finally {
+            closePaymentModal();
+          }
         }}
         onEscapeKeyDown={(e) => { 
           // ESC já é tratado pelo useEffect de atalhos
@@ -753,9 +1050,20 @@ export default function PaymentModal({
         <DialogHeader className="relative pb-4">
           <div className="flex flex-col sm:flex-row items-start justify-between gap-3 sm:gap-4">
             <div className="flex-1 w-full sm:w-auto">
-              <DialogTitle>Registrar pagamento</DialogTitle>
+              <div className="flex items-center gap-3">
+                <DialogTitle>Registrar pagamento</DialogTitle>
+                {isAutoSaving && (
+                  <span className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full border text-xs bg-blue-600/10 text-blue-400 border-blue-700/30">
+                    <svg className="w-3 h-3 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Salvando...
+                  </span>
+                )}
+              </div>
               <DialogDescription>
-                Gerencie valores, divisão e status de pagamento dos participantes.
+                As alterações são salvas automaticamente enquanto você edita.
               </DialogDescription>
             </div>
             <Button
@@ -777,9 +1085,55 @@ export default function PaymentModal({
           <div className="sm:hidden space-y-2 max-w-md mx-auto">
             {/* Cards compactos lado a lado */}
             <div className="grid grid-cols-2 gap-2">
-              <div className="p-2 rounded-lg bg-emerald-600/10 border border-emerald-500/30 min-w-0">
+              <div className="p-2 rounded-lg bg-emerald-600/10 border border-emerald-500/30 min-w-0 relative group">
                 <div className="text-[10px] text-emerald-300/80 mb-1 truncate">Total</div>
-                <div className="text-sm font-bold text-emerald-400 truncate">{maskBRL(paymentTotal) || 'R$ 0,00'}</div>
+                {isEditingTotal ? (
+                  <div className="flex items-center gap-1">
+                    <Input
+                      type="text"
+                      value={editingTotalValue}
+                      onChange={(e) => setEditingTotalValue(maskBRL(e.target.value))}
+                      className="w-full h-6 text-xs text-center font-bold bg-emerald-950/50 border-emerald-400/50 text-emerald-300 px-1"
+                      placeholder="0,00"
+                      autoFocus
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && editingTotalValue !== paymentTotal) {
+                          confirmEditingTotal();
+                        } else if (e.key === 'Escape') {
+                          cancelEditingTotal();
+                        }
+                      }}
+                      onBlur={() => {
+                        if (editingTotalValue !== paymentTotal) {
+                          confirmEditingTotal();
+                        } else {
+                          cancelEditingTotal();
+                        }
+                      }}
+                    />
+                    {editingTotalValue !== paymentTotal && (
+                      <button
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={confirmEditingTotal}
+                        className="p-0.5 rounded hover:bg-emerald-500/20 transition-colors flex-shrink-0"
+                        title="Confirmar"
+                      >
+                        <Check className="w-3 h-3 text-emerald-400" />
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <>
+                    <div className="text-sm font-bold text-emerald-400 truncate">{maskBRL(paymentTotal) || 'R$ 0,00'}</div>
+                    <button
+                      onClick={startEditingTotal}
+                      className="absolute right-1 top-1/2 -translate-y-1/2 p-0.5 rounded hover:bg-emerald-500/20 transition-colors"
+                      title="Editar"
+                    >
+                      <Edit className="w-3 h-3 text-emerald-400" />
+                    </button>
+                  </>
+                )}
               </div>
               <div className={`p-2 rounded-lg border min-w-0 ${
                 paymentSummary.diff === 0 
@@ -862,10 +1216,56 @@ export default function PaymentModal({
               <div className="flex flex-row gap-3">
                 <div className="space-y-1">
                   <Label className="font-bold text-base text-white">Valor total a receber</Label>
-                  <div className="w-[180px] px-3 py-2 rounded-md bg-gradient-to-br from-emerald-600/20 to-emerald-700/20 border-2 border-emerald-500/40 shadow-lg flex items-center justify-center">
-                    <span className="text-xl font-bold text-emerald-400">
-                      {maskBRL(paymentTotal) || 'R$ 0,00'}
-                    </span>
+                  <div className="w-[180px] px-3 py-2 rounded-md bg-gradient-to-br from-emerald-600/20 to-emerald-700/20 border-2 border-emerald-500/40 shadow-lg flex items-center justify-center gap-2 relative group">
+                    {isEditingTotal ? (
+                      <>
+                        <Input
+                          type="text"
+                          value={editingTotalValue}
+                          onChange={(e) => setEditingTotalValue(maskBRL(e.target.value))}
+                          className="w-full h-8 text-center text-lg font-bold bg-emerald-950/50 border-emerald-400/50 text-emerald-300"
+                          placeholder="0,00"
+                          autoFocus
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && editingTotalValue !== paymentTotal) {
+                              confirmEditingTotal();
+                            } else if (e.key === 'Escape') {
+                              cancelEditingTotal();
+                            }
+                          }}
+                          onBlur={() => {
+                            if (editingTotalValue !== paymentTotal) {
+                              confirmEditingTotal();
+                            } else {
+                              cancelEditingTotal();
+                            }
+                          }}
+                        />
+                        {editingTotalValue !== paymentTotal && (
+                          <button
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={confirmEditingTotal}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded hover:bg-emerald-500/20 transition-colors"
+                            title="Confirmar (Enter)"
+                          >
+                            <Check className="w-4 h-4 text-emerald-400" />
+                          </button>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        <span className="text-xl font-bold text-emerald-400">
+                          {maskBRL(paymentTotal) || 'R$ 0,00'}
+                        </span>
+                        <button
+                          onClick={startEditingTotal}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded hover:bg-emerald-500/20 transition-colors opacity-0 group-hover:opacity-100"
+                          title="Editar valor total"
+                        >
+                          <Edit className="w-4 h-4 text-emerald-400" />
+                        </button>
+                      </>
+                    )}
                   </div>
                 </div>
                 
@@ -1054,9 +1454,17 @@ export default function PaymentModal({
                       // Usar índice original como key para permitir duplicados
                       const uniqueKey = `participant-${pf._originalIndex}`;
                       const originalIdx = pf._originalIndex;
+                      const isHighlighted = highlightedIndexes.includes(originalIdx);
                       
                       return (
-                        <div key={uniqueKey} className="p-2 sm:p-3 border-b last:border-b-0">
+                        <div 
+                          key={uniqueKey} 
+                          className={`p-2 sm:p-3 border-b last:border-b-0 transition-all duration-500 ease-out ${
+                            isHighlighted 
+                              ? 'bg-white/10' 
+                              : ''
+                          }`}
+                        >
                           {/* Versão Mobile */}
                           <div className="sm:hidden space-y-2">
                             {/* Header com nome e ações */}
@@ -1071,7 +1479,26 @@ export default function PaymentModal({
                                     #{pf.codigo}
                                   </span>
                                 )}
-                                <span className="font-medium text-sm truncate">{pf.nome}</span>
+                                {isClienteConsumidor(pf.cliente_id) ? (
+                                  <input
+                                    type="text"
+                                    value={pf.nome || ''}
+                                    onChange={(e) => handleUpdateConsumidorName(originalIdx, e.target.value)}
+                                    onBlur={async () => {
+                                      try {
+                                        if (autoSaveTimeoutRef.current) clearTimeout(autoSaveTimeoutRef.current);
+                                        await handleSavePayments({ autoSave: true });
+                                      } catch (err) {
+                                        console.error('[PaymentModal] Erro ao salvar ao sair do nome consumidor (compacto):', err);
+                                      }
+                                    }}
+                                    placeholder="Nome do cliente..."
+                                    className="font-medium text-sm bg-black/40 text-white placeholder:text-white/50 border border-white/15 rounded px-2 py-0.5 focus:border-white/30 focus:outline-none focus:ring-1 focus:ring-white/20 w-full min-w-0"
+                                    title="Editar nome do Cliente Consumidor (histórico do agendamento)"
+                                  />
+                                ) : (
+                                  <span className="font-medium text-sm truncate">{pf.nome}</span>
+                                )}
                               </div>
                               <div className="flex items-center gap-1 shrink-0">
                                 <button
@@ -1249,7 +1676,26 @@ export default function PaymentModal({
                                     #{pf.codigo}
                                   </span>
                                 )}
-                                <span className="font-medium text-base">{pf.nome}</span>
+                                {isClienteConsumidor(pf.cliente_id) ? (
+                                  <input
+                                    type="text"
+                                    value={pf.nome || ''}
+                                    onChange={(e) => handleUpdateConsumidorName(originalIdx, e.target.value)}
+                                    onBlur={async () => {
+                                      try {
+                                        if (autoSaveTimeoutRef.current) clearTimeout(autoSaveTimeoutRef.current);
+                                        await handleSavePayments({ autoSave: true });
+                                      } catch (err) {
+                                        console.error('[PaymentModal] Erro ao salvar ao sair do nome consumidor (normal):', err);
+                                      }
+                                    }}
+                                    placeholder="Nome do cliente..."
+                                    className="font-medium text-base bg-black/40 text-white placeholder:text-white/50 border border-white/15 rounded-md px-3 py-1.5 focus:border-white/30 focus:outline-none focus:ring-2 focus:ring-white/20 min-w-[200px] max-w-[300px]"
+                                    title="Editar nome do Cliente Consumidor (histórico do agendamento)"
+                                  />
+                                ) : (
+                                  <span className="font-medium text-base">{pf.nome}</span>
+                                )}
                                 <button
                                   type="button"
                                   className="p-1 text-text-secondary hover:text-brand transition-colors"
@@ -1431,19 +1877,25 @@ export default function PaymentModal({
             type="button" 
             variant="ghost" 
             className="border border-white/10" 
-            onClick={closePaymentModal}
+            onClick={async () => {
+              // 🔄 Auto-save ao fechar: SEMPRE salva antes de fechar
+              console.log('💾 [Auto-save Payments] Salvando ao fechar modal...');
+              try {
+                // Cancela timeout pendente
+                if (autoSaveTimeoutRef.current) {
+                  clearTimeout(autoSaveTimeoutRef.current);
+                }
+                await handleSavePayments({ autoSave: true });
+                console.log('✅ [Auto-save Payments] Salvo ao fechar!');
+              } catch (error) {
+                console.error('❌ [Auto-save Payments] Erro ao salvar ao fechar:', error);
+              }
+              
+              closePaymentModal();
+            }}
           >
-            Cancelar
+            Fechar
             <kbd className="hidden sm:inline ml-2 px-2 py-1 text-sm font-mono bg-white/10 rounded border border-white/20">Esc</kbd>
-          </Button>
-          <Button
-            type="button"
-            className="bg-emerald-600 hover:bg-emerald-500 text-white"
-            disabled={isSavingPayments}
-            onClick={handleSavePayments}
-          >
-            Salvar Pagamentos
-            <kbd className="hidden sm:inline ml-2 px-2 py-1 text-sm font-mono bg-emerald-700/50 rounded border border-emerald-500/30">↵</kbd>
           </Button>
         </DialogFooter>
           </>
@@ -1800,13 +2252,17 @@ export default function PaymentModal({
                   })()
                 }));
                 
-                setLocalParticipantsForm(prev => [...prev, ...newParticipants]);
-                
-                console.log('[AddParticipant] Mostrando toast');
-                toast({
-                  title: 'Participantes adicionados',
-                  description: `${selectedParticipants.length} ${selectedParticipants.length === 1 ? 'participante foi adicionado' : 'participantes foram adicionados'} aos pagamentos.`,
-                  variant: 'success',
+                setLocalParticipantsForm(prev => {
+                  const currentLength = prev.length;
+                  const newIndexes = newParticipants.map((_, i) => currentLength + i);
+                  
+                  // Destacar novos participantes por 1 segundo
+                  setHighlightedIndexes(newIndexes);
+                  setTimeout(() => {
+                    setHighlightedIndexes([]);
+                  }, 1000);
+                  
+                  return [...prev, ...newParticipants];
                 });
                 
                 console.log('[AddParticipant] Fechando modal de adicionar participante');

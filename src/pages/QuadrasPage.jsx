@@ -355,7 +355,7 @@ export default function QuadrasPage() {
       
       const { data: agendamentos } = await supabase
         .from('agendamentos')
-        .select('quadra_id, cliente_id, quadras!inner(nome), clientes(nome)')
+        .select('quadra_id, cliente_id, quadras!inner(nome), clientes(nome, codigo)')
         .eq('codigo_empresa', userProfile.codigo_empresa)
         .gte('inicio', thirtyDaysAgo.toISOString())
         .neq('status', 'canceled');
@@ -373,10 +373,14 @@ export default function QuadrasPage() {
       });
       const mostUsed = Object.entries(quadraCount).sort((a, b) => b[1] - a[1])[0];
       
-      // Cliente mais agendado
+      // Cliente mais agendado (excluindo cliente consumidor - código 0)
       const clienteCount = {};
       agendamentos.forEach(a => {
         if (a.cliente_id && a.clientes?.nome) {
+          // Filtrar cliente consumidor (código 0)
+          const codigo = a.clientes?.codigo;
+          if (codigo === 0 || codigo === '0') return;
+          
           const nome = a.clientes.nome;
           clienteCount[nome] = (clienteCount[nome] || 0) + 1;
         }

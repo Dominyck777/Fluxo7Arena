@@ -171,40 +171,49 @@ function ClientDetailsModal({ open, onOpenChange, client, onEdit, onInactivate, 
       } else if (item?.kind === 'agendamento') {
         const agId = item?.data?.id;
         if (!agId) { setDetailLoading(false); return; }
-        // Buscar participantes e status de pagamento
+        // Buscar participantes diretamente da tabela agendamento_participantes
         let partRows = [];
         try {
           const { data: parts } = await supabase
-            .from('v_agendamento_participantes')
-            .select('*')
+            .from('agendamento_participantes')
+            .select('cliente_id, nome, valor_cota, status_pagamento')
             .eq('agendamento_id', agId)
             .limit(200);
           partRows = parts || [];
         } catch { partRows = []; }
         const ids = Array.from(new Set((partRows || []).map(p => p.cliente_id).filter(Boolean)));
         let participantes = [];
-        // Tentar montar participantes com dados do próprio view (nome/contato se existir)
+        // Montar participantes com nome da tabela participantes (pode ter sido editado)
         participantes = (partRows || []).map(p => ({
           id: p.cliente_id,
-          nome: p.cliente_nome || p.nome || null,
-          email: p.cliente_email || p.email || null,
-          telefone: p.cliente_telefone || p.telefone || null,
+          nome: p.nome || null,
+          email: null,
+          telefone: null,
+          codigo: null,
           valor_cota: p.valor_cota ?? null,
-          status_pagamento: p.status_pagamento_text || p.status_pagamento || null,
+          status_pagamento: p.status_pagamento || null,
         }));
-        // Fallback: completar dados de clientes faltantes
-        const missingIds = ids.filter(id => !participantes.some(pp => String(pp.id) === String(id) && pp.nome));
-        if (missingIds.length > 0) {
+        // Buscar código de TODOS os participantes na tabela clientes
+        if (ids.length > 0) {
           try {
             const { data: clientesInfo } = await supabase
               .from('clientes')
-              .select('id,nome,email,telefone')
-              .in('id', missingIds);
+              .select('id,nome,email,telefone,codigo')
+              .in('id', ids);
             const byId = new Map((clientesInfo || []).map(c => [String(c.id), c]));
             participantes = participantes.map(pp => {
-              if (!pp.nome) {
-                const c = byId.get(String(pp.id));
-                if (c) return { ...pp, nome: c.nome, email: c.email, telefone: c.telefone };
+              const c = byId.get(String(pp.id));
+              if (c) {
+                return { 
+                  ...pp,
+                  // MANTÉM nome da tabela participantes (editado para consumidor)
+                  // Só usa nome de clientes se vier vazio
+                  nome: pp.nome || c.nome,
+                  email: c.email,
+                  telefone: c.telefone,
+                  // Código sempre da tabela clientes
+                  codigo: c.codigo
+                };
               }
               return pp;
             });
@@ -568,7 +577,7 @@ function ClientDetailsModal({ open, onOpenChange, client, onEdit, onInactivate, 
                                   <span className={cn(
                                     "px-2 py-1 text-[11px] font-semibold rounded-full border",
                                     (() => {
-                                      const st = String(item.data.status || 'scheduled');
+                                      const st = String(item.data.status || '').toLowerCase();
                                       const s = bookingStatusStyles[st] || bookingStatusStyles.scheduled;
                                       return `${s.bg} ${s.text} ${s.border}`;
                                     })()
@@ -607,6 +616,14 @@ function ClientDetailsModal({ open, onOpenChange, client, onEdit, onInactivate, 
                   <DialogDescription>
                     {detailKind === 'comanda' ? 'Itens e pagamentos desta comanda.' : 'Informações do agendamento e participantes.'}
                   </DialogDescription>
+                  {/* Cliente e Código */}
+                  <div className="mt-2 flex items-center gap-2 flex-wrap">
+                    <span className="text-xs text-text-secondary">Cliente:</span>
+                    <span className="text-sm font-medium text-text-primary">{client?.nome || '—'}</span>
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-surface-2 border border-border text-text-secondary">
+                      Código: <span className="text-text-primary font-mono">{client?.codigo ?? '—'}</span>
+                    </span>
+                  </div>
                 </DialogHeader>
                 <div className="space-y-4">
                   {detailLoading ? (
@@ -690,13 +707,23 @@ function ClientDetailsModal({ open, onOpenChange, client, onEdit, onInactivate, 
                       <div>
                         <h5 className="text-sm font-semibold mb-2">Participantes</h5>
                         <div className="border rounded-md divide-y divide-border">
-                          {(detailData.participantes || []).map((p) => (
-                            <div key={p.id} className="p-2 text-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-3">
+                          {(detailData.participantes || []).map((p, idx) => (
+                            <div key={`${p.id}-${idx}`} className="p-2 text-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-3">
                               <div className="min-w-0">
-                                <div className="font-medium truncate">{p.nome || 'Participante'}</div>
-                                <div className="text-xs text-text-muted truncate">{p.email || '—'} {p.telefone ? `• ${p.telefone}` : ''}</div>
+                                <div className="flex items-center gap-2">
+                                  {(p.codigo !== null && p.codigo !== undefined) && (
+                                    <span className={`text-xs font-bold rounded px-1.5 py-0.5 shrink-0 ${
+                                      String(p.status_pagamento || '').toLowerCase() === 'pago'
+                                        ? 'text-emerald-400 bg-emerald-600/20 border border-emerald-700/40'
+                                        : 'text-amber-400 bg-amber-600/20 border border-amber-700/40'
+                                    }`}>
+                                      #{p.codigo}
+                                    </span>
+                                  )}
+                                  <span className="font-medium truncate">{p.nome || 'Participante'}</span>
+                                </div>
                               </div>
-                              <div className="flex items-center gap-2 w-full sm:w-auto justify-between sm:justify-end">
+                              <div className="flex items-center gap-2 sm:gap-3 w-full sm:w-auto justify-between sm:justify-end">
                                 {p.valor_cota != null && (
                                   <span className="text-xs font-semibold text-text-secondary">R$ {Number(p.valor_cota || 0).toFixed(2)}</span>
                                 )}
@@ -926,7 +953,7 @@ function ClientesPage() {
         return {
             total: clients.length,
             birthdays: clients.filter(c => c.aniversario && new Date(c.aniversario).getMonth() === currentMonth).length,
-            active: clients.filter(c => c.status === 'Ativo').length,
+            active: clients.filter(c => c.status === 'active').length,
         };
     }, [clients]);
 

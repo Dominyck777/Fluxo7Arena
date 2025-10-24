@@ -66,28 +66,38 @@ export const AlertsProvider = ({ children }) => {
         .eq('status_pagamento', 'Pendente');
       
       if (participantesPendentes && participantesPendentes.length > 0) {
-        // Buscar o agendamento mais antigo com pagamento pendente
+        // Buscar TODOS os agendamentos com pagamento pendente
+        // Excluindo agendamentos cancelados ou ausentes
         const agendamentoIds = [...new Set(participantesPendentes.map(p => p.agendamento_id))];
         const { data: agendamentos } = await supabase
           .from('agendamentos')
-          .select('id, inicio')
+          .select('id, inicio, status')
           .in('id', agendamentoIds)
-          .order('inicio', { ascending: true })
-          .limit(1);
+          .not('status', 'in', '(canceled,absent)')
+          .order('inicio', { ascending: true });
         
-        // Pegar a data do primeiro agendamento com pendência
-        const primeiroAgendamento = agendamentos?.[0];
-        const dataAgendamento = primeiroAgendamento 
-          ? format(new Date(primeiroAgendamento.inicio), 'yyyy-MM-dd')
-          : format(hoje, 'yyyy-MM-dd');
+        // Filtrar participantes apenas dos agendamentos válidos (não cancelados/ausentes)
+        const agendamentosValidosIds = new Set((agendamentos || []).map(a => a.id));
+        const participantesValidos = participantesPendentes.filter(p => 
+          agendamentosValidosIds.has(p.agendamento_id)
+        );
         
-        alertasList.push({
-          tipo: 'pagamento',
-          icone: 'DollarSign',
-          cor: 'warning',
-          mensagem: `${participantesPendentes.length} pagamento${participantesPendentes.length > 1 ? 's' : ''} pendente${participantesPendentes.length > 1 ? 's' : ''} em agendamentos`,
-          link: `/agenda?date=${dataAgendamento}`
-        });
+        // Só mostrar alerta se houver participantes pendentes em agendamentos válidos
+        if (participantesValidos.length > 0) {
+          // Pegar a data do primeiro agendamento com pendência
+          const primeiroAgendamento = agendamentos?.[0];
+          const dataAgendamento = primeiroAgendamento 
+            ? format(new Date(primeiroAgendamento.inicio), 'yyyy-MM-dd')
+            : format(hoje, 'yyyy-MM-dd');
+          
+          alertasList.push({
+            tipo: 'pagamento',
+            icone: 'DollarSign',
+            cor: 'warning',
+            mensagem: `${participantesValidos.length} pagamento${participantesValidos.length > 1 ? 's' : ''} pendente${participantesValidos.length > 1 ? 's' : ''} em agendamentos`,
+            link: `/agenda?date=${dataAgendamento}`
+          });
+        }
       }
       
       // 3. Comandas abertas há muito tempo (> 3 horas)
