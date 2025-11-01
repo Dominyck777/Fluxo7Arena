@@ -1830,6 +1830,7 @@ function AgendaPage() {
     
     const [isCustomerPickerOpen, setIsCustomerPickerOpen] = useState(false);
     const [customerQuery, setCustomerQuery] = useState('');
+    const [focusedCustomerIndex, setFocusedCustomerIndex] = useState(0);
     // Janela de bloqueio para ignorar fechamentos logo após retornar à aba
     const pickerBlockUntilRef = useRef(0);
     // Se o usuário saiu da aba com o picker aberto, reabrir uma vez ao voltar
@@ -1927,6 +1928,28 @@ function AgendaPage() {
     }, []);
     // Ref para o input de busca (para focar após limpar)
     const customerQueryInputRef = useRef(null);
+    // Ref para o container da lista de clientes (para scroll automático)
+    const customerListContainerRef = useRef(null);
+    // Ref para os botões de clientes (para scroll no item focado)
+    const customerButtonRefs = useRef([]);
+    
+    // Scroll automático para o item focado
+    useEffect(() => {
+      if (effectiveCustomerPickerOpen && customerButtonRefs.current[focusedCustomerIndex]) {
+        customerButtonRefs.current[focusedCustomerIndex]?.scrollIntoView({
+          behavior: 'smooth',
+          block: 'nearest'
+        });
+      }
+    }, [focusedCustomerIndex, effectiveCustomerPickerOpen]);
+    
+    // Resetar foco ao abrir o picker
+    useEffect(() => {
+      if (effectiveCustomerPickerOpen) {
+        setFocusedCustomerIndex(0);
+      }
+    }, [effectiveCustomerPickerOpen]);
+    
     // Participantes (apenas no modo edição): { cliente_id, nome, valor_cota, status_pagamento, finalizadora_id }
     // participantsForm e payMethods agora vem do contexto
     // payMethods já vem do contexto
@@ -2818,11 +2841,9 @@ function AgendaPage() {
             .eq('codigo_empresa', userProfile.codigo_empresa)
             .eq('agendamento_id', editingBooking.id);
           
-          // Cria mapa de participantes atuais por cliente_id
-          const currentMap = new Map();
-          (currentParticipants || []).forEach(p => {
-            currentMap.set(p.cliente_id, p);
-          });
+          // ⚠️ IMPORTANTE: Não usar Map por cliente_id pois sobrescreve duplicados!
+          // Usar array indexado para preservar cada participante individualmente
+          const currentArray = currentParticipants || [];
           
           // Remove TODOS os participantes antigos
           const { error: deleteError } = await supabase
@@ -2835,19 +2856,25 @@ function AgendaPage() {
           
           // Insere novos participantes PRESERVANDO dados de pagamento quando já existiam
           if (selNow && selNow.length > 0) {
-            const participantesRows = selNow.map((c) => {
-              const existing = currentMap.get(c.id);
+            const participantesRows = selNow.map((c, index) => {
+              // Buscar participante correspondente pelo ÍNDICE, não por cliente_id
+              // Isso preserva duplicados corretamente
+              const existing = currentArray[index];
+              
+              // Só preservar dados se for o MESMO cliente no MESMO índice
+              const shouldPreserve = existing && existing.cliente_id === c.id;
+              
               return {
                 codigo_empresa: userProfile.codigo_empresa,
                 agendamento_id: editingBooking.id,
                 cliente_id: c.id,
                 nome: c.nome,
-                // Preserva dados de pagamento se já existir
-                valor_cota: existing?.valor_cota ?? 0,
-                status_pagamento: existing?.status_pagamento ?? 'Pendente',
-                finalizadora_id: existing?.finalizadora_id ?? null,
-                aplicar_taxa: existing?.aplicar_taxa ?? false,
-                pago_em: existing?.pago_em ?? null,
+                // Preserva dados de pagamento se já existir no mesmo índice
+                valor_cota: shouldPreserve ? (existing.valor_cota ?? 0) : 0,
+                status_pagamento: shouldPreserve ? (existing.status_pagamento ?? 'Pendente') : 'Pendente',
+                finalizadora_id: shouldPreserve ? (existing.finalizadora_id ?? null) : null,
+                aplicar_taxa: shouldPreserve ? (existing.aplicar_taxa ?? false) : false,
+                pago_em: shouldPreserve ? (existing.pago_em ?? null) : null,
               };
             });
             
@@ -2886,16 +2913,19 @@ function AgendaPage() {
           pendingSaveRef.current = false;
           
           // 🔄 Atualiza cache de participantes para refletir mudanças imediatamente
-          const updatedParticipants = selNow.map(c => {
-            const existing = currentMap.get(c.id);
+          const updatedParticipants = selNow.map((c, index) => {
+            // Buscar pelo índice para preservar duplicados
+            const existing = currentArray[index];
+            const shouldPreserve = existing && existing.cliente_id === c.id;
+            
             return {
               cliente_id: c.id,
               nome: c.nome,
               codigo: c.codigo || null,
-              valor_cota: existing?.valor_cota ?? 0,
-              status_pagamento: existing?.status_pagamento ?? 'Pendente',
-              finalizadora_id: existing?.finalizadora_id ?? null,
-              aplicar_taxa: existing?.aplicar_taxa ?? false,
+              valor_cota: shouldPreserve ? (existing.valor_cota ?? 0) : 0,
+              status_pagamento: shouldPreserve ? (existing.status_pagamento ?? 'Pendente') : 'Pendente',
+              finalizadora_id: shouldPreserve ? (existing.finalizadora_id ?? null) : null,
+              aplicar_taxa: shouldPreserve ? (existing.aplicar_taxa ?? false) : false,
             };
           });
           setParticipantsByAgendamento(prev => ({
@@ -3076,7 +3106,11 @@ function AgendaPage() {
             modality: form.modality,
           };
           setBookings((prev) => [...prev, newItem]);
-          toast({ title: 'Agendamento criado' });
+          toast({ 
+            title: 'Agendamento criado',
+            variant: 'success',
+            duration: 2000
+          });
           
           // Recarregar alertas após criar agendamento
           try {
@@ -3200,14 +3234,27 @@ function AgendaPage() {
       const free = isRangeFree(s, e);
       if (!free) return; // Conflito de horário
       
+      // Detecta se houve mudança nos participantes
+      const oldClients = lastSavedFormRef.current ? JSON.parse(lastSavedFormRef.current).selectedClients : [];
+      const newClients = form.selectedClients || [];
+      const clientsChanged = JSON.stringify(oldClients) !== JSON.stringify(newClients);
+      
       // Salva automaticamente
-      console.log('🔄 [Auto-save] Salvando alterações...');
+      if (clientsChanged) {
+        console.log('🔄 [Auto-save] Salvando alterações (participantes modificados)...');
+      } else {
+        console.log('🔄 [Auto-save] Salvando alterações...');
+      }
       setIsAutoSaving(true);
       
       try {
         await saveBookingOnce({ autoSave: true });
         lastSavedFormRef.current = currentForm;
-        console.log('✅ [Auto-save] Salvo com sucesso!');
+        if (clientsChanged) {
+          console.log('✅ [Auto-save] Participantes salvos no banco! Disponíveis no modal de pagamentos.');
+        } else {
+          console.log('✅ [Auto-save] Salvo com sucesso!');
+        }
       } catch (error) {
         console.error('❌ [Auto-save] Erro ao salvar:', error);
       } finally {
@@ -3808,11 +3855,25 @@ function AgendaPage() {
     // (removido: adjustValue e controles avançados de edição por participante)
 
     // Utilitário: garantir fechamento do Customer Picker antes de abrir outros popovers/selects
-    const closeCustomerPicker = useCallback(() => {
+    const closeCustomerPicker = useCallback(async () => {
       try { customerPickerDesiredOpenRef.current = false; localStorage.removeItem('agenda:customerPicker:desiredAt'); } catch {}
       try { customerPickerIntentRef.current = 'close'; } catch {}
       try { setIsCustomerPickerOpen(false); setEffectiveCustomerPickerOpen(false); } catch {}
-    }, []);
+      
+      // Salva imediatamente ao fechar o picker de clientes (modo edição)
+      if (editingBooking?.id && autoSaveEnabledRef.current) {
+        try {
+          if (autoSaveTimeoutRef.current) {
+            clearTimeout(autoSaveTimeoutRef.current);
+          }
+          console.log('💾 [CustomerPicker] Salvando participantes ao fechar...');
+          await saveBookingOnce({ autoSave: true });
+          console.log('✅ [CustomerPicker] Participantes salvos!');
+        } catch (error) {
+          console.error('❌ [CustomerPicker] Erro ao salvar:', error);
+        }
+      }
+    }, [editingBooking?.id, saveBookingOnce]);
 
     // ... (rest of the code remains the same)
   return (
@@ -4228,6 +4289,22 @@ function AgendaPage() {
                         customerPickerDesiredOpenRef.current = false; try { localStorage.removeItem('agenda:customerPicker:desiredAt'); } catch {}
                         setIsCustomerPickerOpen(false);
                         setEffectiveCustomerPickerOpen(false);
+                        
+                        // Salva imediatamente ao clicar fora (modo edição)
+                        if (editingBooking?.id && autoSaveEnabledRef.current) {
+                          (async () => {
+                            try {
+                              if (autoSaveTimeoutRef.current) {
+                                clearTimeout(autoSaveTimeoutRef.current);
+                              }
+                              console.log('💾 [CustomerPicker] Salvando participantes (clique fora)...');
+                              await saveBookingOnce({ autoSave: true });
+                              console.log('✅ [CustomerPicker] Participantes salvos!');
+                            } catch (error) {
+                              console.error('❌ [CustomerPicker] Erro ao salvar:', error);
+                            }
+                          })();
+                        }
                       }}
                       onFocusOutside={(e) => {
                         pickerLog('focusOutside');
@@ -4245,7 +4322,77 @@ function AgendaPage() {
                             ref={customerQueryInputRef}
                             placeholder="Buscar por código ou nome..."
                             value={customerQuery}
-                            onChange={(e) => setCustomerQuery(e.target.value)}
+                            onChange={(e) => {
+                              setCustomerQuery(e.target.value);
+                              setFocusedCustomerIndex(0); // Reset foco ao buscar
+                            }}
+                            onKeyDown={(e) => {
+                              // Permitir navegação por setas mesmo no input
+                              if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                                e.preventDefault();
+                                const filtered = (localCustomers || []).filter((c) => {
+                                  const q = customerQuery.trim().toLowerCase();
+                                  if (!q) return true;
+                                  const label = String(getCustomerLabel(c) || '').toLowerCase();
+                                  return label.includes(q);
+                                });
+                                const clienteConsumidor = filtered.find(c => c?.is_consumidor_final === true);
+                                const clientesNormais = filtered.filter(c => c?.is_consumidor_final !== true);
+                                const sortedNormais = clientesNormais.slice().sort((a, b) => {
+                                  const ca = typeof a === 'object' ? (Number.isFinite(Number(a?.codigo)) ? Number(a.codigo) : Infinity) : Infinity;
+                                  const cb = typeof b === 'object' ? (Number.isFinite(Number(b?.codigo)) ? Number(b.codigo) : Infinity) : Infinity;
+                                  if (ca !== cb) return ca - cb;
+                                  const na = String(getCustomerName(a) || '').toLowerCase();
+                                  const nb = String(getCustomerName(b) || '').toLowerCase();
+                                  return na.localeCompare(nb);
+                                });
+                                const finalList = clienteConsumidor ? [clienteConsumidor, ...sortedNormais] : sortedNormais;
+                                
+                                if (e.key === 'ArrowDown') {
+                                  setFocusedCustomerIndex(prev => Math.min(prev + 1, finalList.length - 1));
+                                } else {
+                                  setFocusedCustomerIndex(prev => Math.max(prev - 1, 0));
+                                }
+                              }
+                              
+                              // Enter para selecionar o cliente focado
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                const filtered = (localCustomers || []).filter((c) => {
+                                  const q = customerQuery.trim().toLowerCase();
+                                  if (!q) return true;
+                                  const label = String(getCustomerLabel(c) || '').toLowerCase();
+                                  return label.includes(q);
+                                });
+                                const clienteConsumidor = filtered.find(c => c?.is_consumidor_final === true);
+                                const clientesNormais = filtered.filter(c => c?.is_consumidor_final !== true);
+                                const sortedNormais = clientesNormais.slice().sort((a, b) => {
+                                  const ca = typeof a === 'object' ? (Number.isFinite(Number(a?.codigo)) ? Number(a.codigo) : Infinity) : Infinity;
+                                  const cb = typeof b === 'object' ? (Number.isFinite(Number(b?.codigo)) ? Number(b.codigo) : Infinity) : Infinity;
+                                  if (ca !== cb) return ca - cb;
+                                  const na = String(getCustomerName(a) || '').toLowerCase();
+                                  const nb = String(getCustomerName(b) || '').toLowerCase();
+                                  return na.localeCompare(nb);
+                                });
+                                const finalList = clienteConsumidor ? [clienteConsumidor, ...sortedNormais] : sortedNormais;
+                                
+                                const focusedClient = finalList[focusedCustomerIndex];
+                                if (focusedClient) {
+                                  const id = focusedClient.id;
+                                  const nome = getCustomerName(focusedClient);
+                                  const codigo = focusedClient.codigo;
+                                  const novo = { id, nome, codigo };
+                                  const next = [...(Array.isArray(selectedClientsRef.current) ? selectedClientsRef.current : []), novo];
+                                  try { if ((selectedClientsRef.current || []).length === 0) firstSelectedIdRef.current = id || null; } catch {}
+                                  try { clearedByUserRef.current = false; } catch {}
+                                  try { if (next.length > 0) { lastNonEmptySelectionRef.current = next; } } catch {}
+                                  try { selectedClientsRef.current = next; } catch {}
+                                  applySelectedClients('keyboard:enter', next);
+                                  customerPickerDesiredOpenRef.current = true;
+                                  try { localStorage.setItem('agenda:customerPicker:desiredAt', String(Date.now())); } catch {}
+                                }
+                              }
+                            }}
                             className="pl-10 pr-10"
                           />
                           {customerQuery && (
@@ -4260,6 +4407,7 @@ function AgendaPage() {
                           )}
                         </div>
                         <div
+                          ref={customerListContainerRef}
                           className="max-h-[260px] overflow-y-auto divide-y divide-border rounded-md border border-border"
                           onWheel={(e) => { e.stopPropagation(); }}
                           onTouchMove={(e) => { e.stopPropagation(); }}
@@ -4299,7 +4447,7 @@ function AgendaPage() {
                             const finalList = clienteConsumidor ? [clienteConsumidor, ...sortedNormais] : sortedNormais;
 
                             return finalList;
-                          })().map((c) => {
+                          })().map((c, listIndex) => {
                             const isConsumidorFinal = c?.is_consumidor_final === true;
                             const id = typeof c === 'object' ? c.id : null;
                             const nome = getCustomerName(c);
@@ -4307,17 +4455,22 @@ function AgendaPage() {
                             const nameKey = String(nome || '').toLowerCase();
                             const isSame = (sc) => (sc.id && id) ? (sc.id === id) : (String(sc.nome || '').toLowerCase() === nameKey);
                             const selected = (form.selectedClients || []).some(isSame);
+                            const isFocused = listIndex === focusedCustomerIndex;
                             return (
                               <button
                                 key={id || nameKey}
+                                ref={(el) => { customerButtonRefs.current[listIndex] = el; }}
                                 type="button"
                                 className={`w-full text-left py-3 px-4 flex items-center gap-3 transition-all border-b border-border last:border-0 ${
+                                  isFocused ? 'ring-2 ring-blue-500 ring-inset z-10' : ''
+                                } ${
                                   isConsumidorFinal
                                     ? 'bg-gradient-to-r from-amber-500/5 to-transparent hover:from-amber-500/10 border-l-2 border-l-amber-500/40' // Cliente Consumidor com destaque sutil
                                     : selected 
                                       ? 'bg-emerald-600/20 hover:bg-emerald-600/30' 
                                       : 'hover:bg-surface-2'
                                 }`}
+                                onMouseEnter={() => setFocusedCustomerIndex(listIndex)}
                                 onMouseDown={(e) => { e.stopPropagation(); }}
                                 role="option"
                                 aria-checked={selected}
@@ -4500,6 +4653,22 @@ function AgendaPage() {
                                 setEffectiveCustomerPickerOpen(false);
                               }, 120);
                               // Janela de supressão imediata também aqui
+                              
+                              // Salva imediatamente ao clicar em Concluir (modo edição)
+                              if (editingBooking?.id && autoSaveEnabledRef.current) {
+                                (async () => {
+                                  try {
+                                    if (autoSaveTimeoutRef.current) {
+                                      clearTimeout(autoSaveTimeoutRef.current);
+                                    }
+                                    console.log('💾 [CustomerPicker] Salvando participantes (Concluir)...');
+                                    await saveBookingOnce({ autoSave: true });
+                                    console.log('✅ [CustomerPicker] Participantes salvos!');
+                                  } catch (error) {
+                                    console.error('❌ [CustomerPicker] Erro ao salvar:', error);
+                                  }
+                                })();
+                              }
                               try { suppressPickerCloseRef.current = Date.now() + 2500; } catch {}
                               try {
                                 const dump = {
@@ -5657,10 +5826,12 @@ function AgendaPage() {
               const startTime = court.hora_inicio || `${dayStartHour}:00:00`;
               const endTime = court.hora_fim || `${dayEndHourExclusive}:00:00`;
               const [startHour] = String(startTime).split(':').map(Number);
-              const [endHour] = String(endTime).split(':').map(Number);
+              const [endHour, endMinute] = String(endTime).split(':').map(Number);
+              // Se tem minutos no horário final (ex: 23:30), adiciona +1 hora para incluir o slot
+              const adjustedEndHour = endMinute > 0 ? endHour + 1 : endHour;
               return {
                 start: startHour || dayStartHour,
-                end: endHour || dayEndHourExclusive
+                end: adjustedEndHour || dayEndHourExclusive
               };
             }
             return { start: dayStartHour, end: dayEndHourExclusive };

@@ -32,6 +32,12 @@ export default function EditParticipantModal({
   // Estados locais
   const [editParticipantSearch, setEditParticipantSearch] = useState('');
   const [editParticipantLoading, setEditParticipantLoading] = useState(false);
+  const [focusedIndex, setFocusedIndex] = useState(0);
+  
+  // Refs para navegação
+  const searchInputRef = React.useRef(null);
+  const clientButtonRefs = React.useRef([]);
+  const listContainerRef = React.useRef(null);
   
   // Função para substituir participante
   const handleSelectParticipant = (cliente) => {
@@ -117,8 +123,19 @@ export default function EditParticipantModal({
     if (isEditParticipantModalOpen) {
       setEditParticipantSearch('');
       setEditParticipantLoading(false);
+      setFocusedIndex(0);
     }
   }, [isEditParticipantModalOpen]);
+  
+  // Scroll automático para o item focado
+  useEffect(() => {
+    if (isEditParticipantModalOpen && clientButtonRefs.current[focusedIndex]) {
+      clientButtonRefs.current[focusedIndex]?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'nearest'
+      });
+    }
+  }, [focusedIndex, isEditParticipantModalOpen]);
   
   if (!isEditParticipantModalOpen) return null;
   
@@ -186,18 +203,40 @@ export default function EditParticipantModal({
           <div>
             <Label htmlFor="edit-participant-search">Buscar cliente</Label>
             <Input
+              ref={searchInputRef}
               id="edit-participant-search"
               type="text"
               placeholder="Digite o nome do cliente..."
               value={editParticipantSearch}
-              onChange={(e) => setEditParticipantSearch(e.target.value)}
+              onChange={(e) => {
+                setEditParticipantSearch(e.target.value);
+                setFocusedIndex(0);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'ArrowDown') {
+                  e.preventDefault();
+                  setFocusedIndex(prev => Math.min(prev + 1, filtered.length - 1));
+                } else if (e.key === 'ArrowUp') {
+                  e.preventDefault();
+                  setFocusedIndex(prev => Math.max(prev - 1, 0));
+                } else if (e.key === 'Enter' && filtered[focusedIndex]) {
+                  e.preventDefault();
+                  const cliente = filtered[focusedIndex];
+                  const oldIndex = editParticipantData.participantId;
+                  const isCurrentParticipant = participantsForm[oldIndex]?.cliente_id === cliente.id;
+                  if (!isCurrentParticipant) {
+                    protectPaymentModal(2000);
+                    handleSelectParticipant(cliente);
+                  }
+                }
+              }}
               className="mt-1"
               autoFocus
             />
           </div>
           
           {/* Lista de clientes */}
-          <div className="border border-border rounded-md max-h-[300px] overflow-y-auto">
+          <div ref={listContainerRef} className="border border-border rounded-md max-h-[300px] overflow-y-auto">
             {editParticipantLoading ? (
               <div className="p-4 text-center text-sm text-text-muted">
                 Carregando clientes...
@@ -207,17 +246,20 @@ export default function EditParticipantModal({
                 {query ? 'Nenhum cliente encontrado' : 'Nenhum cliente cadastrado'}
               </div>
             ) : (
-              filtered.map((cliente) => {
+              filtered.map((cliente, listIndex) => {
                 // Verificar se é o mesmo cliente na posição atual
                 const oldIndex = editParticipantData.participantId;
                 const isCurrentParticipant = participantsForm[oldIndex]?.cliente_id === cliente.id;
                 const isConsumidorFinal = cliente?.is_consumidor_final === true;
+                const isFocused = listIndex === focusedIndex;
                 
                 return (
                   <button
                     key={cliente.id}
+                    ref={(el) => { clientButtonRefs.current[listIndex] = el; }}
                     type="button"
                     className={cn(
+                      isFocused && 'ring-2 ring-blue-500 ring-inset z-10',
                       "w-full px-4 py-3 text-left transition-all",
                       "border-b border-border last:border-b-0",
                       "flex items-center gap-3",
@@ -226,6 +268,7 @@ export default function EditParticipantModal({
                       !isCurrentParticipant && !isConsumidorFinal && "hover:bg-surface-2"
                     )}
                     disabled={isCurrentParticipant}
+                    onMouseEnter={() => setFocusedIndex(listIndex)}
                     onClick={(e) => {
                       e.preventDefault();
                       e.stopPropagation();
