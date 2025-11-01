@@ -5,13 +5,14 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { AlertTriangle, Edit, Search, X, Check, Download } from 'lucide-react';
+import { AlertTriangle, Edit, Search, X, Check, Download, RotateCcw } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import { supabase } from '@/lib/supabase';
 import { useAgenda } from '@/contexts/AgendaContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { useAlerts } from '@/contexts/AlertsContext';
-import { toPng } from 'html-to-image';
+import { toPng, toJpeg } from 'html-to-image';
+import jsPDF from 'jspdf';
 
 // Helpers de moeda BRL
 const maskBRL = (raw) => {
@@ -54,7 +55,9 @@ export default function PaymentModal({
     payMethods,
     openEditParticipantModal,
     protectPaymentModal,
-    onParticipantReplacedRef
+    onParticipantReplacedRef,
+    lastVisibilityChangeTime, // Timestamp de visibilidade
+    isModalProtected // Verificar se modal está protegido
   } = useAgenda();
   
   // Expor protectPaymentModal globalmente para uso em callbacks (imediatamente)
@@ -84,6 +87,7 @@ export default function PaymentModal({
   const [isAddParticipantOpen, setIsAddParticipantOpen] = useState(false);
   const [selectedParticipants, setSelectedParticipants] = useState([]);
   const [editingNameIndex, setEditingNameIndex] = useState(null);
+  const [focusedAddParticipantIndex, setFocusedAddParticipantIndex] = useState(0);
   
   // Estados para edição do valor total
   const [isEditingTotal, setIsEditingTotal] = useState(false);
@@ -95,10 +99,33 @@ export default function PaymentModal({
   // Estado local para participantes (não usar o do contexto diretamente)
   const [localParticipantsForm, setLocalParticipantsForm] = useState([]);
   
+  // Refs para inputs de Cliente Consumidor (para foco após limpar)
+  const consumidorInputRefs = useRef({});
+  
+  // Ref para armazenar últimos nomes (undo)
+  const lastConsumidorNames = useRef({});
+  
+  // Estado para destacar o próximo badge DEL que será acionado
+  const [nextDeleteIndex, setNextDeleteIndex] = useState(null);
+  
+  // Estado para rastrear qual input está focado
+  const [focusedInputIndex, setFocusedInputIndex] = useState(null);
+  
+  // Estados para modal de download
+  const [isDownloadModalOpen, setIsDownloadModalOpen] = useState(false);
+  const [downloadStatus, setDownloadStatus] = useState('downloading'); // 'downloading' | 'success'
+  const [downloadProgress, setDownloadProgress] = useState(0);
+  const [pdfBlob, setPdfBlob] = useState(null);
+  const [pdfFileName, setPdfFileName] = useState('');
+  const [pdfBlobUrl, setPdfBlobUrl] = useState(null);
+  
   // Refs
   const paymentSearchRef = useRef(null);
   const initializedRef = useRef(null); // Armazena timestamp de inicialização
   const loadingTimeoutRef = useRef(null);
+  const addParticipantSearchRef = useRef(null);
+  const addParticipantButtonRefs = useRef([]);
+  const addParticipantListRef = useRef(null);
   
   // Refs para auto-save
   const autoSaveTimeoutRef = useRef(null);
@@ -113,6 +140,15 @@ export default function PaymentModal({
     setLocalParticipantsForm(prev => {
       const list = [...prev];
       if (index >= 0 && index < list.length) {
+        // Se está limpando (newName vazio), salvar o nome atual para undo
+        if (newName === '' && list[index].nome) {
+          lastConsumidorNames.current[index] = list[index].nome;
+        }
+        // Se está restaurando um nome, limpar o histórico de undo
+        else if (newName !== '') {
+          delete lastConsumidorNames.current[index];
+        }
+        
         list[index] = { 
           ...list[index], 
           nome: newName
@@ -124,12 +160,109 @@ export default function PaymentModal({
     });
   }, [setParticipantsForm]);
   
+  // Handler para desfazer limpeza do nome (undo)
+  const handleUndoConsumidorName = useCallback((index) => {
+    const lastName = lastConsumidorNames.current[index];
+    if (lastName) {
+      setLocalParticipantsForm(prev => {
+        const list = [...prev];
+        if (index >= 0 && index < list.length) {
+          list[index] = { 
+            ...list[index], 
+            nome: lastName
+          };
+        }
+        // Limpar o histórico de undo após restaurar
+        delete lastConsumidorNames.current[index];
+        // Sincronizar com o contexto
+        setParticipantsForm(list);
+        return list;
+      });
+      // Focar no input após restaurar
+      setTimeout(() => {
+        consumidorInputRefs.current[index]?.focus();
+      }, 0);
+    }
+  }, [setParticipantsForm]);
+  
   // Helper para verificar se é cliente consumidor
   const isClienteConsumidor = useCallback((clienteId) => {
     if (!localCustomers || !Array.isArray(localCustomers)) return false;
     const cliente = localCustomers.find(c => c.id === clienteId);
     return cliente?.is_consumidor_final === true;
   }, [localCustomers]);
+  
+  // Helper para calcular próximo índice que será limpo ao pressionar Delete
+  const getNextDeleteIndex = useCallback(() => {
+    const hidden = paymentHiddenIndexes || [];
+    const visibleParticipants = (localParticipantsForm || [])
+      .map((p, idx) => ({ ...p, _originalIndex: idx }))
+      .filter((p) => !hidden.includes(p._originalIndex));
+    
+    // Buscar primeiro Cliente Consumidor que ainda tem nome padrão
+    const firstComNomePadrao = visibleParticipants.find(p => 
+      isClienteConsumidor(p.cliente_id) && 
+      p.nome && 
+      p.nome.toLowerCase().includes('cliente consumidor')
+    );
+    
+    if (firstComNomePadrao) {
+      return firstComNomePadrao._originalIndex;
+    }
+    
+    // Se não encontrou com nome padrão, retorna o primeiro Cliente Consumidor com nome
+    const firstConsumidor = visibleParticipants.find(p => 
+      isClienteConsumidor(p.cliente_id) && p.nome
+    );
+    
+    return firstConsumidor?._originalIndex ?? null;
+  }, [localParticipantsForm, paymentHiddenIndexes, isClienteConsumidor]);
+  
+  // Helper para encontrar próximo input de Cliente Consumidor
+  const getNextConsumidorInputIndex = useCallback((currentIndex) => {
+    const hidden = paymentHiddenIndexes || [];
+    const visibleParticipants = (localParticipantsForm || [])
+      .map((p, idx) => ({ ...p, _originalIndex: idx }))
+      .filter((p) => !hidden.includes(p._originalIndex));
+    
+    // Filtrar apenas Clientes Consumidores
+    const consumidores = visibleParticipants.filter(p => 
+      isClienteConsumidor(p.cliente_id)
+    );
+    
+    // Encontrar índice atual na lista de consumidores
+    const currentPosition = consumidores.findIndex(p => p._originalIndex === currentIndex);
+    
+    // Se encontrou e não é o último, retornar o próximo
+    if (currentPosition !== -1 && currentPosition < consumidores.length - 1) {
+      return consumidores[currentPosition + 1]._originalIndex;
+    }
+    
+    return null;
+  }, [localParticipantsForm, paymentHiddenIndexes, isClienteConsumidor]);
+  
+  // Helper para encontrar input anterior de Cliente Consumidor
+  const getPreviousConsumidorInputIndex = useCallback((currentIndex) => {
+    const hidden = paymentHiddenIndexes || [];
+    const visibleParticipants = (localParticipantsForm || [])
+      .map((p, idx) => ({ ...p, _originalIndex: idx }))
+      .filter((p) => !hidden.includes(p._originalIndex));
+    
+    // Filtrar apenas Clientes Consumidores
+    const consumidores = visibleParticipants.filter(p => 
+      isClienteConsumidor(p.cliente_id)
+    );
+    
+    // Encontrar índice atual na lista de consumidores
+    const currentPosition = consumidores.findIndex(p => p._originalIndex === currentIndex);
+    
+    // Se encontrou e não é o primeiro, retornar o anterior
+    if (currentPosition > 0) {
+      return consumidores[currentPosition - 1]._originalIndex;
+    }
+    
+    return null;
+  }, [localParticipantsForm, paymentHiddenIndexes, isClienteConsumidor]);
   
   // Helper para pegar finalizadora padrão (menor código)
   const getDefaultPayMethod = useCallback(() => {
@@ -482,6 +615,9 @@ export default function PaymentModal({
       // NÃO processar atalhos se modal de adicionar participante estiver aberto
       if (isAddParticipantOpen) return;
       
+      // NÃO processar atalhos se modal de download estiver aberto
+      if (isDownloadModalOpen) return;
+      
       // ESC para fechar modal
       if (e.key === 'Escape') {
         e.preventDefault();
@@ -526,11 +662,41 @@ export default function PaymentModal({
           zeroAllValues();
         }
       }
+      
+      // Delete para limpar próximo Cliente Consumidor (se nenhum input estiver focado)
+      if (e.key === 'Delete') {
+        // Verificar se algum input de Cliente Consumidor está focado
+        const activeElement = document.activeElement;
+        const isInputFocused = activeElement && activeElement.tagName === 'INPUT';
+        
+        // Se nenhum input está focado, limpar o próximo Cliente Consumidor
+        if (!isInputFocused) {
+          e.preventDefault();
+          
+          const nextIndex = getNextDeleteIndex();
+          
+          if (nextIndex !== null) {
+            handleUpdateConsumidorName(nextIndex, '');
+            // Focar no input após limpar
+            setTimeout(() => {
+              consumidorInputRefs.current[nextIndex]?.focus();
+            }, 0);
+          }
+        }
+      }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isPaymentModalOpen, isAddParticipantOpen, paymentTotal, participantsCount, splitEqually, aplicarTaxaEmTodos, zeroAllValues, isSavingPayments, handleSavePayments, closePaymentModal]);
+  }, [isPaymentModalOpen, isAddParticipantOpen, isDownloadModalOpen, paymentTotal, participantsCount, splitEqually, aplicarTaxaEmTodos, zeroAllValues, isSavingPayments, handleSavePayments, closePaymentModal, localParticipantsForm, paymentHiddenIndexes, isClienteConsumidor, handleUpdateConsumidorName, getNextDeleteIndex]);
+  
+  // Atualizar nextDeleteIndex sempre que os participantes mudarem
+  useEffect(() => {
+    if (isPaymentModalOpen) {
+      const nextIndex = getNextDeleteIndex();
+      setNextDeleteIndex(nextIndex);
+    }
+  }, [isPaymentModalOpen, localParticipantsForm, paymentHiddenIndexes, getNextDeleteIndex]);
   
   // Sincronizar estado local com contexto ao abrir modal
   useEffect(() => {
@@ -583,13 +749,60 @@ export default function PaymentModal({
           let sourceData = [];
           let dataSource = 'nenhuma';
           
-          // CAMADA 1: Contexto (dados em memória - mais rápido)
-          if (participantsForm && participantsForm.length > 0) {
+          // CAMADA 1: BANCO DE DADOS (prioridade para agendamentos existentes)
+          // Sempre buscar do banco primeiro para garantir dados atualizados e completos
+          if (editingBooking?.id) {
+            // Buscar do banco para garantir dados corretos (especialmente duplicados)
+            const loadTimestamp = new Date().toISOString();
+            console.log(`\n\n========== CARREGAMENTO INICIADO ${loadTimestamp} ==========`);
+            console.log('🔍 BUSCANDO PARTICIPANTES DO BANCO...');
+            console.log('🔍 Query params:', {
+              agendamento_id: editingBooking.id,
+              codigo_empresa: userProfile?.codigo_empresa
+            });
+            try {
+              const { data: dbParticipants, error } = await supabase
+                .from('agendamento_participantes')
+                .select('*')
+                .eq('agendamento_id', editingBooking.id)
+                .eq('codigo_empresa', userProfile?.codigo_empresa);
+              
+              console.log('🔍 Resultado da query:', { 
+                encontrados: dbParticipants?.length || 0, 
+                erro: error,
+                dados: dbParticipants
+              });
+              
+              if (error) {
+                console.error('❌ Erro ao buscar participantes:', error);
+              } else if (dbParticipants && dbParticipants.length > 0) {
+                console.log(`✅ ${dbParticipants.length} participantes encontrados no banco`);
+                sourceData = dbParticipants.map(p => ({
+                  cliente_id: p.cliente_id,
+                  nome: p.nome,
+                  codigo: null, // Será preenchido abaixo
+                  valor_cota: p.valor_cota ? maskBRL(String(Number(p.valor_cota).toFixed(2))) : '0,00',
+                  status_pagamento: p.status_pagamento || 'Pendente',
+                  finalizadora_id: p.finalizadora_id ? String(p.finalizadora_id) : defaultFinalizadoraId,
+                  aplicar_taxa: p.aplicar_taxa || false
+                }));
+                dataSource = 'banco de dados';
+              } else {
+                console.log('⚠️ Nenhum participante encontrado no banco!');
+                dataSource = 'banco vazio';
+              }
+            } catch (err) {
+              console.error('❌ Erro ao buscar participantes:', err);
+            }
+          }
+          
+          // CAMADA 2: Contexto (apenas se não encontrou no banco)
+          if (sourceData.length === 0 && participantsForm && participantsForm.length > 0) {
             sourceData = participantsForm;
             dataSource = 'participantsForm (contexto)';
           } 
-          // CAMADA 2: Form (dados do formulário)
-          else if (form?.selectedClients && form.selectedClients.length > 0) {
+          // CAMADA 3: Form (dados do formulário - apenas para novos agendamentos)
+          else if (sourceData.length === 0 && form?.selectedClients && form.selectedClients.length > 0) {
             sourceData = (form?.selectedClients || []).map(c => {
               let codigo = c.codigo;
               if ((codigo === null || codigo === undefined) && localCustomers && Array.isArray(localCustomers)) {
@@ -607,51 +820,6 @@ export default function PaymentModal({
               };
             });
             dataSource = 'form.selectedClients';
-          } 
-          // CAMADA 3: BANCO DE DADOS (fallback crítico)
-          else if (editingBooking?.id) {
-            // Buscar do banco se ambos estão vazios (caso de reload)
-            const loadTimestamp = new Date().toISOString();
-            console.log(`\n\n========== CARREGAMENTO INICIADO ${loadTimestamp} ==========`);
-            console.log('\ud83d\udd0d BUSCANDO PARTICIPANTES DO BANCO...');
-            console.log('\ud83d\udd0d Query params:', {
-              agendamento_id: editingBooking.id,
-              codigo_empresa: userProfile?.codigo_empresa
-            });
-            try {
-              const { data: dbParticipants, error } = await supabase
-                .from('agendamento_participantes')
-                .select('*')
-                .eq('agendamento_id', editingBooking.id)
-                .eq('codigo_empresa', userProfile?.codigo_empresa);
-              
-              console.log('\ud83d\udd0d Resultado da query:', { 
-                encontrados: dbParticipants?.length || 0, 
-                erro: error,
-                dados: dbParticipants
-              });
-              
-              if (error) {
-                console.error('\u274c Erro ao buscar participantes:', error);
-              } else if (dbParticipants && dbParticipants.length > 0) {
-                console.log(`\u2705 ${dbParticipants.length} participantes encontrados no banco`);
-                sourceData = dbParticipants.map(p => ({
-                  cliente_id: p.cliente_id,
-                  nome: p.nome,
-                  codigo: null, // Será preenchido abaixo
-                  valor_cota: p.valor_cota ? maskBRL(String(Number(p.valor_cota).toFixed(2))) : '0,00',
-                  status_pagamento: p.status_pagamento || 'Pendente',
-                  finalizadora_id: p.finalizadora_id ? String(p.finalizadora_id) : defaultFinalizadoraId,
-                  aplicar_taxa: p.aplicar_taxa || false
-                }));
-                dataSource = 'banco de dados';
-              } else {
-                console.log('\u26a0\ufe0f Nenhum participante encontrado no banco!');
-                dataSource = 'banco vazio';
-              }
-            } catch (err) {
-              console.error('\u274c Erro ao buscar participantes:', err);
-            }
           }
           
           // Atualizar códigos faltantes e garantir finalizadora padrão
@@ -720,7 +888,8 @@ export default function PaymentModal({
         initializeParticipants();
       }
     } else {
-      // Ao fechar, resetar estado local E flag de inicialização
+      // Ao fechar, resetar estado local MAS NÃO resetar initializedRef
+      // (para que na próxima abertura busque do banco ao invés de reinicializar)
       if (loadingTimeoutRef.current) {
         clearTimeout(loadingTimeoutRef.current);
         loadingTimeoutRef.current = null;
@@ -729,7 +898,7 @@ export default function PaymentModal({
       setPaymentWarning(null);
       setPaymentHiddenIndexes([]);
       setLocalParticipantsForm([]);
-      initializedRef.current = null;
+      // NÃO resetar initializedRef aqui - deixar para quando agendamento mudar
     }
     
     // Cleanup do timeout ao desmontar
@@ -739,6 +908,12 @@ export default function PaymentModal({
       }
     };
   }, [isPaymentModalOpen, payMethods, getDefaultPayMethod, participantsForm, form?.selectedClients, localCustomers]);
+  
+  // Resetar initializedRef quando o agendamento mudar (não quando o modal fechar)
+  useEffect(() => {
+    // Resetar flag de inicialização quando trocar de agendamento
+    initializedRef.current = null;
+  }, [editingBooking?.id]);
   
   // Registrar callback para animação de substituição de participante
   useEffect(() => {
@@ -780,8 +955,21 @@ export default function PaymentModal({
     if (!isAddParticipantOpen) {
       setSelectedParticipants([]);
       setAddParticipantSearch('');
+      setFocusedAddParticipantIndex(0);
+    } else {
+      setFocusedAddParticipantIndex(0);
     }
   }, [isAddParticipantOpen]);
+  
+  // Scroll automático para o item focado no modal de adicionar participante
+  useEffect(() => {
+    if (isAddParticipantOpen && addParticipantButtonRefs.current[focusedAddParticipantIndex]) {
+      addParticipantButtonRefs.current[focusedAddParticipantIndex]?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'nearest'
+      });
+    }
+  }, [focusedAddParticipantIndex, isAddParticipantOpen]);
   
   // Atalhos de teclado para modal de adicionar participante
   useEffect(() => {
@@ -893,57 +1081,230 @@ export default function PaymentModal({
     };
   }, [isPaymentModalOpen, localParticipantsForm, handleSavePayments]);
   
+  // Limpar URL do blob quando o modal de download fechar
+  useEffect(() => {
+    // Quando o modal fechar, revogar a URL do blob
+    if (!isDownloadModalOpen && pdfBlobUrl) {
+      console.log('🧹 [PDF] Revogando URL do blob ao fechar modal');
+      URL.revokeObjectURL(pdfBlobUrl);
+      setPdfBlobUrl(null);
+    }
+  }, [isDownloadModalOpen, pdfBlobUrl]);
+  
   // Ref para o elemento que será convertido em imagem
   const relatorioRef = useRef(null);
 
   // Função para baixar relatório como imagem
   const baixarRelatorioImagem = async () => {
     try {
+      console.log('🔵 [PDF] Iniciando geração do PDF');
       if (!relatorioRef.current) {
         throw new Error('Elemento do relatório não encontrado');
       }
 
-      toast({
-        title: 'Gerando imagem...',
-        description: 'Aguarde um momento.',
+      // Abrir modal de download e resetar estados
+      console.log('🔵 [PDF] Abrindo modal de download');
+      
+      // Revogar URL antiga se existir
+      if (pdfBlobUrl) {
+        URL.revokeObjectURL(pdfBlobUrl);
+      }
+      
+      setIsDownloadModalOpen(true);
+      setDownloadStatus('downloading');
+      setDownloadProgress(0);
+      setPdfBlob(null);
+      setPdfBlobUrl(null);
+      setPdfFileName('');
+
+      // Obter participantes visíveis
+      const visibleParticipants = (localParticipantsForm || [])
+        .filter((_, idx) => !(paymentHiddenIndexes || []).includes(idx));
+
+      // Dividir em grupos de 8
+      const PARTICIPANTS_PER_PAGE = 8;
+      const totalPages = Math.ceil(visibleParticipants.length / PARTICIPANTS_PER_PAGE);
+      
+      // Atualizar progresso inicial
+      setDownloadProgress(5);
+
+      // Criar PDF
+      const pdf = new jsPDF({
+        orientation: 'landscape',
+        unit: 'mm',
+        format: 'a4',
+        compress: true,
       });
 
-      // Tornar o elemento visível temporariamente
-      const elemento = relatorioRef.current;
-      elemento.style.left = '0';
-      elemento.style.top = '0';
-      elemento.style.zIndex = '9999';
+      const pdfWidth = 297;
+      const pdfHeight = 210;
 
-      // Aguardar um pouco para garantir que o elemento foi renderizado
-      await new Promise(resolve => setTimeout(resolve, 100));
+      // Gerar cada página
+      for (let pageNum = 0; pageNum < totalPages; pageNum++) {
+        const startIdx = pageNum * PARTICIPANTS_PER_PAGE;
+        const endIdx = Math.min(startIdx + PARTICIPANTS_PER_PAGE, visibleParticipants.length);
+        const pageParticipants = visibleParticipants.slice(startIdx, endIdx);
+        
+        // Atualizar progresso (10% a 90% durante geração das páginas)
+        const progress = 10 + Math.floor((pageNum / totalPages) * 80);
+        setDownloadProgress(progress);
 
-      const dataUrl = await toPng(elemento, {
-        quality: 1,
-        pixelRatio: 2,
-        backgroundColor: '#1a1a1a',
-      });
+        // Atualizar o relatório para mostrar apenas os participantes desta página
+        const elemento = relatorioRef.current;
+        if (!elemento) {
+          throw new Error('Elemento do relatório não encontrado durante a geração');
+        }
+        
+        // Atualizar indicador de página
+        const pageIndicator = elemento.querySelector('#page-indicator');
+        if (pageIndicator) {
+          pageIndicator.textContent = `Página ${pageNum + 1} de ${totalPages}`;
+        }
+        
+        // Temporariamente esconder participantes que não são desta página
+        const allParticipantDivs = elemento.querySelectorAll('[data-participant-index]');
+        allParticipantDivs.forEach((div, idx) => {
+          div.style.display = (idx >= startIdx && idx < endIdx) ? 'block' : 'none';
+        });
 
-      // Ocultar o elemento novamente
-      elemento.style.left = '-9999px';
-      elemento.style.top = '-9999px';
-      elemento.style.zIndex = '-1';
+        console.log(`📄 [PDF] Capturando página ${pageNum + 1}/${totalPages} (participantes ${startIdx + 1}-${endIdx})`);
+        
+        // Criar container offscreen para renderização invisível
+        const container = document.createElement('div');
+        container.style.cssText = `
+          position: fixed;
+          left: 0;
+          top: 0;
+          width: 1px;
+          height: 1px;
+          overflow: hidden;
+          opacity: 0.01;
+          pointer-events: none;
+          z-index: -1;
+        `;
+        document.body.appendChild(container);
+        
+        // Mover elemento para dentro do container offscreen
+        const originalParent = elemento.parentNode;
+        elemento.style.position = 'absolute';
+        elemento.style.left = '0';
+        elemento.style.top = '0';
+        elemento.style.transform = 'none';
+        elemento.style.visibility = 'visible';
+        elemento.style.opacity = '1';
+        elemento.style.pointerEvents = 'none';
+        container.appendChild(elemento);
 
-      // Criar link para download
+        // Aguardar renderização completa
+        await new Promise(resolve => setTimeout(resolve, 600));
+
+        console.log(`📸 [PDF] Renderizado offscreen, iniciando captura...`);
+
+        // Capturar página com qualidade otimizada (mais leve)
+        let canvas;
+        try {
+          canvas = await toJpeg(elemento, {
+            quality: 0.85, // Reduzido para diminuir tamanho
+            pixelRatio: 1.5, // Reduzido de 3 para 1.5 (muito mais leve)
+            backgroundColor: '#1a1a1a',
+            cacheBust: true,
+            skipFonts: false,
+            width: 2400, // Reduzido de 2800
+            height: elemento.scrollHeight,
+          });
+          
+          if (!canvas || canvas.length === 0) {
+            throw new Error('Canvas vazio retornado pela captura');
+          }
+          
+          console.log(`✅ [PDF] Página ${pageNum + 1} capturada (${canvas.length} bytes, ${elemento.scrollHeight}px altura)`);
+        } catch (captureError) {
+          console.error(`❌ [PDF] Erro ao capturar página ${pageNum + 1}:`, captureError);
+          throw new Error(`Falha ao capturar página ${pageNum + 1}: ${captureError.message}`);
+        }
+        
+        // Retornar elemento ao parent original
+        originalParent.appendChild(elemento);
+        document.body.removeChild(container);
+
+        // Retornar elemento para posição original (fora da tela)
+        elemento.style.position = 'fixed';
+        elemento.style.left = '-9999px';
+        elemento.style.top = '0';
+        elemento.style.transform = 'none';
+        elemento.style.visibility = 'hidden';
+        elemento.style.zIndex = '-1';
+        elemento.style.opacity = '1';
+        elemento.style.pointerEvents = 'none';
+
+        // Adicionar ao PDF
+        if (pageNum > 0) {
+          pdf.addPage();
+        }
+
+        // Adicionar imagem como JPEG (mais leve que PNG)
+        pdf.addImage(canvas, 'JPEG', 0, 0, pdfWidth, pdfHeight, '', 'MEDIUM');
+        console.log(`📑 [PDF] Página ${pageNum + 1} adicionada ao PDF`);
+      }
+
+      // Restaurar visibilidade de todos os participantes e limpar indicador
+      if (relatorioRef.current) {
+        const allParticipantDivs = relatorioRef.current.querySelectorAll('[data-participant-index]');
+        allParticipantDivs.forEach(div => {
+          div.style.display = 'block';
+        });
+        
+        // Limpar indicador de página
+        const pageIndicator = relatorioRef.current.querySelector('#page-indicator');
+        if (pageIndicator) {
+          pageIndicator.textContent = '';
+        }
+        
+        // Garantir que elemento fique oculto
+        relatorioRef.current.style.visibility = 'hidden';
+        relatorioRef.current.style.zIndex = '-1';
+      }
+
+      // Progresso: Finalizando
+      setDownloadProgress(95);
+      
+      // Gerar blob do PDF
+      const pageInfo = totalPages > 1 ? ` (${totalPages} páginas)` : '';
+      const fileName = `relatorio-pagamento-${editingBooking?.code || 'agendamento'}${pageInfo}.pdf`;
+      const pdfBlobData = pdf.output('blob');
+      
+      // Criar URL do blob (será revogada apenas ao fechar o modal)
+      const blobUrl = URL.createObjectURL(pdfBlobData);
+      
+      // Salvar blob, URL e nome para uso posterior
+      setPdfBlob(pdfBlobData);
+      setPdfBlobUrl(blobUrl);
+      setPdfFileName(fileName);
+      
+      // Progresso: 100%
+      setDownloadProgress(100);
+      
+      // Fazer download automático
       const link = document.createElement('a');
-      link.download = `relatorio-pagamento-${editingBooking?.code || 'agendamento'}.png`;
-      link.href = dataUrl;
+      link.href = blobUrl;
+      link.download = fileName;
       link.click();
-
-      toast({
-        title: 'Imagem baixada!',
-        description: 'O relatório foi salvo como imagem.',
-        variant: 'success'
-      });
+      // NÃO revogar a URL aqui - será revogada ao fechar o modal
+      
+      // Aguardar um pouco antes de mostrar sucesso
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      // Atualizar status para sucesso (modal continua aberto)
+      console.log('✅ [PDF] PDF gerado com sucesso! Modal de download deve permanecer aberto.');
+      console.log('✅ [PDF] isPaymentModalOpen deve continuar true');
+      setDownloadStatus('success');
+      console.log('✅ [PDF] Status atualizado para success');
     } catch (error) {
-      console.error('Erro ao gerar imagem:', error);
+      console.error('❌ [PDF] Erro ao gerar PDF:', error);
+      setIsDownloadModalOpen(false);
       toast({
-        title: 'Erro ao gerar imagem',
-        description: error?.message || 'Não foi possível gerar a imagem.',
+        title: 'Erro ao gerar PDF',
+        description: error?.message || 'Não foi possível gerar o PDF.',
         variant: 'destructive'
       });
     }
@@ -954,7 +1315,14 @@ export default function PaymentModal({
     <Dialog 
       open={isPaymentModalOpen}
       onOpenChange={(open) => {
+        console.log('🟡 [PaymentModal] onOpenChange chamado:', { open, isDownloadModalOpen });
         if (!open) {
+          console.log('🔴 [PaymentModal] Tentando fechar modal de pagamentos');
+          if (isDownloadModalOpen) {
+            console.log('⚠️ [PaymentModal] BLOQUEADO: Modal de download está aberto');
+            return; // Bloqueia fechamento se modal de download estiver aberto
+          }
+          console.log('✅ [PaymentModal] Fechando modal de pagamentos');
           closePaymentModal();
         }
       }}
@@ -963,15 +1331,54 @@ export default function PaymentModal({
         forceMount
         className="w-[95vw] sm:max-w-[1100px] max-h-[90vh] overflow-y-scroll"
         onOpenAutoFocus={(e) => e.preventDefault()}
-        onInteractOutside={async (e) => { 
+        onInteractOutside={async (e) => {
+          const now = Date.now();
+          const timeSinceInit = initializedRef.current ? now - initializedRef.current : 0;
+          const timeSinceVisibility = now - lastVisibilityChangeTime;
+          
+          console.log('🔍 [PaymentModal] onInteractOutside disparado:', {
+            target: e.target?.tagName,
+            className: e.target?.className?.substring?.(0, 50),
+            timeSinceInit: `${timeSinceInit}ms`,
+            timeSinceVisibility: `${timeSinceVisibility}ms`,
+            isAddParticipantOpen,
+            isDownloadModalOpen,
+            isModalProtected: isModalProtected,
+            timestamp: new Date().toISOString()
+          });
+          
+          // 🛡️ PROTEÇÃO: Bloquear fechamento se modal de download estiver aberto
+          if (isDownloadModalOpen) {
+            console.log('🛡️ [PaymentModal] Bloqueado: modal de download está aberto');
+            e.preventDefault();
+            return;
+          }
+          
+          // 🛡️ PROTEÇÃO PRINCIPAL: Verificar se modal está protegido (modalProtectionRef)
+          if (isModalProtected) {
+            console.log('🛡️ [PaymentModal] Bloqueado: modal protegido (protectPaymentModal ativo)');
+            e.preventDefault();
+            return;
+          }
+          
           // Prevenir fechamento se modal de adicionar participante estiver aberto
           if (isAddParticipantOpen) {
+            console.log('🛡️ [PaymentModal] Bloqueado: modal de adicionar participante aberto');
             e.preventDefault();
             return;
           }
           
           // Prevenir fechamento nos primeiros 500ms após abrir (falsos positivos)
-          if (initializedRef.current && Date.now() - initializedRef.current < 500) {
+          if (initializedRef.current && timeSinceInit < 500) {
+            console.log('🛡️ [PaymentModal] Bloqueado: modal abriu recentemente');
+            e.preventDefault();
+            return;
+          }
+          
+          // 🛡️ PROTEÇÃO ADICIONAL: Bloquear fechamento se aconteceu logo após mudança de visibilidade
+          // Aumentado para 3 segundos para evitar múltiplos disparos ao restaurar aba
+          if (timeSinceVisibility < 3000) {
+            console.log(`🛡️ [PaymentModal] Bloqueado: mudança de visibilidade recente (${timeSinceVisibility}ms atrás)`);
             e.preventDefault();
             return;
           }
@@ -1480,22 +1887,99 @@ export default function PaymentModal({
                                   </span>
                                 )}
                                 {isClienteConsumidor(pf.cliente_id) ? (
-                                  <input
-                                    type="text"
-                                    value={pf.nome || ''}
-                                    onChange={(e) => handleUpdateConsumidorName(originalIdx, e.target.value)}
-                                    onBlur={async () => {
-                                      try {
-                                        if (autoSaveTimeoutRef.current) clearTimeout(autoSaveTimeoutRef.current);
-                                        await handleSavePayments({ autoSave: true });
-                                      } catch (err) {
-                                        console.error('[PaymentModal] Erro ao salvar ao sair do nome consumidor (compacto):', err);
-                                      }
-                                    }}
-                                    placeholder="Nome do cliente..."
-                                    className="font-medium text-sm bg-black/40 text-white placeholder:text-white/50 border border-white/15 rounded px-2 py-0.5 focus:border-white/30 focus:outline-none focus:ring-1 focus:ring-white/20 w-full min-w-0"
-                                    title="Editar nome do Cliente Consumidor (histórico do agendamento)"
-                                  />
+                                  <div className="relative flex-1 min-w-0">
+                                    <input
+                                      ref={(el) => {
+                                        if (el) consumidorInputRefs.current[originalIdx] = el;
+                                      }}
+                                      type="text"
+                                      value={pf.nome || ''}
+                                      onChange={(e) => handleUpdateConsumidorName(originalIdx, e.target.value)}
+                                      onFocus={() => setFocusedInputIndex(originalIdx)}
+                                      onKeyDown={(e) => {
+                                        if (e.key === 'Delete' && pf.nome && e.target === document.activeElement) {
+                                          e.preventDefault();
+                                          e.stopPropagation();
+                                          
+                                          // Limpar o próprio input
+                                          handleUpdateConsumidorName(originalIdx, '');
+                                          // Manter foco no mesmo input
+                                          setTimeout(() => {
+                                            consumidorInputRefs.current[originalIdx]?.focus();
+                                          }, 0);
+                                        } else if (e.key === 'ArrowDown') {
+                                          e.preventDefault();
+                                          
+                                          // Encontrar próximo input de Cliente Consumidor
+                                          const nextIndex = getNextConsumidorInputIndex(originalIdx);
+                                          if (nextIndex !== null) {
+                                            setTimeout(() => {
+                                              consumidorInputRefs.current[nextIndex]?.focus();
+                                            }, 0);
+                                          }
+                                        } else if (e.key === 'ArrowUp') {
+                                          e.preventDefault();
+                                          
+                                          // Encontrar input anterior de Cliente Consumidor
+                                          const prevIndex = getPreviousConsumidorInputIndex(originalIdx);
+                                          if (prevIndex !== null) {
+                                            setTimeout(() => {
+                                              consumidorInputRefs.current[prevIndex]?.focus();
+                                            }, 0);
+                                          }
+                                        }
+                                      }}
+                                      onBlur={async () => {
+                                        // Limpar foco ao sair do input
+                                        setFocusedInputIndex(null);
+                                        
+                                        // Se o input está vazio ao sair, restaurar o último nome
+                                        if (!pf.nome && lastConsumidorNames.current[originalIdx]) {
+                                          handleUndoConsumidorName(originalIdx);
+                                        }
+                                        
+                                        try {
+                                          if (autoSaveTimeoutRef.current) clearTimeout(autoSaveTimeoutRef.current);
+                                          await handleSavePayments({ autoSave: true });
+                                        } catch (err) {
+                                          console.error('[PaymentModal] Erro ao salvar ao sair do nome consumidor (compacto):', err);
+                                        }
+                                      }}
+                                      placeholder="Nome do cliente..."
+                                      className="font-medium text-sm bg-black/40 text-white placeholder:text-white/50 border border-white/15 rounded px-2 py-0.5 pr-11 focus:border-white/30 focus:outline-none focus:ring-1 focus:ring-white/20 w-full"
+                                      title="Editar nome do Cliente Consumidor (histórico do agendamento)"
+                                    />
+                                    {/* Badge DEL quando há nome, ícone UNDO quando vazio */}
+                                    {pf.nome ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          handleUpdateConsumidorName(originalIdx, '');
+                                          // Focar no input após limpar
+                                          setTimeout(() => {
+                                            consumidorInputRefs.current[originalIdx]?.focus();
+                                          }, 0);
+                                        }}
+                                        className={`absolute right-1 top-1/2 -translate-y-1/2 px-1.5 py-0.5 text-[10px] font-bold border rounded transition-all ${
+                                          (focusedInputIndex === originalIdx || (!focusedInputIndex && nextDeleteIndex === originalIdx))
+                                            ? 'text-amber-300 bg-amber-500/20 border-amber-400/50 animate-pulse shadow-lg shadow-amber-500/20'
+                                            : 'text-white/60 bg-white/10 hover:bg-white/20 hover:text-white/90 border-white/20'
+                                        }`}
+                                        title={(focusedInputIndex === originalIdx || (!focusedInputIndex && nextDeleteIndex === originalIdx)) ? 'Será limpo ao pressionar Delete' : 'Limpar nome (tecla Delete)'}
+                                      >
+                                        DEL
+                                      </button>
+                                    ) : lastConsumidorNames.current[originalIdx] ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleUndoConsumidorName(originalIdx)}
+                                        className="absolute right-1 top-1/2 -translate-y-1/2 p-1 text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20 hover:text-emerald-300 border border-emerald-500/30 rounded transition-all"
+                                        title="Restaurar último nome"
+                                      >
+                                        <RotateCcw className="w-3 h-3" />
+                                      </button>
+                                    ) : null}
+                                  </div>
                                 ) : (
                                   <span className="font-medium text-sm truncate">{pf.nome}</span>
                                 )}
@@ -1677,22 +2161,99 @@ export default function PaymentModal({
                                   </span>
                                 )}
                                 {isClienteConsumidor(pf.cliente_id) ? (
-                                  <input
-                                    type="text"
-                                    value={pf.nome || ''}
-                                    onChange={(e) => handleUpdateConsumidorName(originalIdx, e.target.value)}
-                                    onBlur={async () => {
-                                      try {
-                                        if (autoSaveTimeoutRef.current) clearTimeout(autoSaveTimeoutRef.current);
-                                        await handleSavePayments({ autoSave: true });
-                                      } catch (err) {
-                                        console.error('[PaymentModal] Erro ao salvar ao sair do nome consumidor (normal):', err);
-                                      }
-                                    }}
-                                    placeholder="Nome do cliente..."
-                                    className="font-medium text-base bg-black/40 text-white placeholder:text-white/50 border border-white/15 rounded-md px-3 py-1.5 focus:border-white/30 focus:outline-none focus:ring-2 focus:ring-white/20 min-w-[200px] max-w-[300px]"
-                                    title="Editar nome do Cliente Consumidor (histórico do agendamento)"
-                                  />
+                                  <div className="relative">
+                                    <input
+                                      ref={(el) => {
+                                        if (el) consumidorInputRefs.current[originalIdx] = el;
+                                      }}
+                                      type="text"
+                                      value={pf.nome || ''}
+                                      onChange={(e) => handleUpdateConsumidorName(originalIdx, e.target.value)}
+                                      onFocus={() => setFocusedInputIndex(originalIdx)}
+                                      onKeyDown={(e) => {
+                                        if (e.key === 'Delete' && pf.nome && e.target === document.activeElement) {
+                                          e.preventDefault();
+                                          e.stopPropagation();
+                                          
+                                          // Limpar o próprio input
+                                          handleUpdateConsumidorName(originalIdx, '');
+                                          // Manter foco no mesmo input
+                                          setTimeout(() => {
+                                            consumidorInputRefs.current[originalIdx]?.focus();
+                                          }, 0);
+                                        } else if (e.key === 'ArrowDown') {
+                                          e.preventDefault();
+                                          
+                                          // Encontrar próximo input de Cliente Consumidor
+                                          const nextIndex = getNextConsumidorInputIndex(originalIdx);
+                                          if (nextIndex !== null) {
+                                            setTimeout(() => {
+                                              consumidorInputRefs.current[nextIndex]?.focus();
+                                            }, 0);
+                                          }
+                                        } else if (e.key === 'ArrowUp') {
+                                          e.preventDefault();
+                                          
+                                          // Encontrar input anterior de Cliente Consumidor
+                                          const prevIndex = getPreviousConsumidorInputIndex(originalIdx);
+                                          if (prevIndex !== null) {
+                                            setTimeout(() => {
+                                              consumidorInputRefs.current[prevIndex]?.focus();
+                                            }, 0);
+                                          }
+                                        }
+                                      }}
+                                      onBlur={async () => {
+                                        // Limpar foco ao sair do input
+                                        setFocusedInputIndex(null);
+                                        
+                                        // Se o input está vazio ao sair, restaurar o último nome
+                                        if (!pf.nome && lastConsumidorNames.current[originalIdx]) {
+                                          handleUndoConsumidorName(originalIdx);
+                                        }
+                                        
+                                        try {
+                                          if (autoSaveTimeoutRef.current) clearTimeout(autoSaveTimeoutRef.current);
+                                          await handleSavePayments({ autoSave: true });
+                                        } catch (err) {
+                                          console.error('[PaymentModal] Erro ao salvar ao sair do nome consumidor (normal):', err);
+                                        }
+                                      }}
+                                      placeholder="Nome do cliente..."
+                                      className="font-medium text-base bg-black/40 text-white placeholder:text-white/50 border border-white/15 rounded-md px-3 py-1.5 pr-14 focus:border-white/30 focus:outline-none focus:ring-2 focus:ring-white/20 min-w-[200px] max-w-[300px]"
+                                      title="Editar nome do Cliente Consumidor (histórico do agendamento)"
+                                    />
+                                    {/* Badge DEL quando há nome, ícone UNDO quando vazio */}
+                                    {pf.nome ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          handleUpdateConsumidorName(originalIdx, '');
+                                          // Focar no input após limpar
+                                          setTimeout(() => {
+                                            consumidorInputRefs.current[originalIdx]?.focus();
+                                          }, 0);
+                                        }}
+                                        className={`absolute right-2 top-1/2 -translate-y-1/2 px-2 py-1 text-xs font-bold border rounded transition-all ${
+                                          (focusedInputIndex === originalIdx || (!focusedInputIndex && nextDeleteIndex === originalIdx))
+                                            ? 'text-amber-300 bg-amber-500/20 border-amber-400/50 animate-pulse shadow-lg shadow-amber-500/30'
+                                            : 'text-white/60 bg-white/10 hover:bg-white/20 hover:text-white/90 border-white/20 shadow-sm'
+                                        }`}
+                                        title={(focusedInputIndex === originalIdx || (!focusedInputIndex && nextDeleteIndex === originalIdx)) ? 'Será limpo ao pressionar Delete' : 'Limpar nome (tecla Delete)'}
+                                      >
+                                        DEL
+                                      </button>
+                                    ) : lastConsumidorNames.current[originalIdx] ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleUndoConsumidorName(originalIdx)}
+                                        className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20 hover:text-emerald-300 border border-emerald-500/30 rounded transition-all shadow-sm"
+                                        title="Restaurar último nome"
+                                      >
+                                        <RotateCcw className="w-4 h-4" />
+                                      </button>
+                                    ) : null}
+                                  </div>
                                 ) : (
                                   <span className="font-medium text-base">{pf.nome}</span>
                                 )}
@@ -1909,81 +2470,87 @@ export default function PaymentModal({
       style={{
         position: 'fixed',
         left: '-9999px',
-        top: '-9999px',
-        width: '1000px',
+        top: '0',
+        width: '2400px',
+        minHeight: 'auto',
         padding: '60px',
-        backgroundColor: '#1a1a1a',
-        color: '#ffffff',
+        backgroundColor: '#ffffff',
+        color: '#000000',
         fontFamily: 'Arial, sans-serif',
+        visibility: 'hidden',
+        zIndex: '-1',
+        pointerEvents: 'none',
       }}
     >
-      <div style={{ marginBottom: '50px', textAlign: 'center', borderBottom: '5px solid #4ade80', paddingBottom: '30px' }}>
-        <h1 style={{ fontSize: '48px', fontWeight: 'bold', color: '#4ade80', margin: 0, letterSpacing: '2px' }}>
+      <div style={{ marginBottom: '30px', textAlign: 'center', borderBottom: '3px solid #333', paddingBottom: '20px', backgroundColor: '#000' }}>
+        <h1 style={{ fontSize: '48px', fontWeight: 'bold', color: '#fff', margin: 0, padding: '15px 0' }}>
           RELATÓRIO DE PAGAMENTOS
         </h1>
       </div>
 
-      <div style={{ marginBottom: '45px', backgroundColor: '#2a2a2a', padding: '35px', borderRadius: '12px', borderLeft: '6px solid #3b82f6' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '25px', fontSize: '20px' }}>
+      <div style={{ marginBottom: '30px', backgroundColor: '#f5f5f5', padding: '30px', border: '2px solid #ddd' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '25px', fontSize: '26px' }}>
           <div>
-            <span style={{ color: '#9ca3af', fontSize: '20px' }}>📅 Data:</span>
-            <strong style={{ marginLeft: '15px', fontSize: '24px' }}>
+            <span style={{ color: '#666' }}>Data:</span>
+            <strong style={{ marginLeft: '10px', fontSize: '28px' }}>
               {editingBooking?.start ? new Date(editingBooking.start).toLocaleDateString('pt-BR') : ''}
             </strong>
           </div>
           <div>
-            <span style={{ color: '#9ca3af', fontSize: '20px' }}>🕐 Horário:</span>
-            <strong style={{ marginLeft: '15px', fontSize: '24px' }}>
+            <span style={{ color: '#666' }}>Horário:</span>
+            <strong style={{ marginLeft: '10px', fontSize: '28px' }}>
               {editingBooking?.start && editingBooking?.end 
                 ? `${new Date(editingBooking.start).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} - ${new Date(editingBooking.end).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`
                 : ''}
             </strong>
           </div>
           <div>
-            <span style={{ color: '#9ca3af', fontSize: '20px' }}>🏐 Quadra:</span>
-            <strong style={{ marginLeft: '15px', fontSize: '24px' }}>{editingBooking?.court || ''}</strong>
+            <span style={{ color: '#666' }}>Quadra:</span>
+            <strong style={{ marginLeft: '10px', fontSize: '28px' }}>{editingBooking?.court || ''}</strong>
           </div>
           <div>
-            <span style={{ color: '#9ca3af', fontSize: '20px' }}>🎯 Modalidade:</span>
-            <strong style={{ marginLeft: '15px', fontSize: '24px' }}>{editingBooking?.modality || ''}</strong>
+            <span style={{ color: '#666' }}>Modalidade:</span>
+            <strong style={{ marginLeft: '10px', fontSize: '28px' }}>{editingBooking?.modality || ''}</strong>
           </div>
           <div>
-            <span style={{ color: '#9ca3af', fontSize: '20px' }}>📋 Código:</span>
-            <strong style={{ marginLeft: '15px', fontSize: '24px' }}>#{editingBooking?.code || ''}</strong>
+            <span style={{ color: '#666' }}>Código:</span>
+            <strong style={{ marginLeft: '10px', fontSize: '28px' }}>#{editingBooking?.code || ''}</strong>
           </div>
           <div>
-            <span style={{ color: '#9ca3af', fontSize: '20px' }}>💰 Valor Total:</span>
-            <strong style={{ marginLeft: '15px', color: '#4ade80', fontSize: '26px' }}>R$ {maskBRL(paymentTotal || 0)}</strong>
+            <span style={{ color: '#666' }}>Valor Total:</span>
+            <strong style={{ marginLeft: '10px', color: '#16a34a', fontSize: '30px' }}>R$ {maskBRL(paymentTotal || 0)}</strong>
           </div>
         </div>
       </div>
 
-      <div style={{ marginBottom: '45px' }}>
-        <h2 style={{ fontSize: '32px', fontWeight: 'bold', color: '#4ade80', marginBottom: '25px', borderBottom: '4px solid #374151', paddingBottom: '15px' }}>
+      <div style={{ marginBottom: '25px' }}>
+        <h2 style={{ fontSize: '36px', fontWeight: 'bold', color: '#fff', marginBottom: '20px', textAlign: 'center', borderBottom: '2px solid #ddd', paddingBottom: '15px', backgroundColor: '#000', padding: '10px 0' }}>
           PARTICIPANTES
         </h2>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
         {(localParticipantsForm || [])
           .filter((_, idx) => !(paymentHiddenIndexes || []).includes(idx))
           .map((p, index) => (
-            <div key={index} style={{ marginBottom: '30px', backgroundColor: '#2a2a2a', padding: '28px', borderRadius: '12px', borderLeft: p.status_pagamento === 'Pago' ? '6px solid #4ade80' : '6px solid #fbbf24' }}>
-              <div style={{ fontSize: '26px', fontWeight: 'bold', marginBottom: '15px', color: p.status_pagamento === 'Pago' ? '#4ade80' : '#fbbf24' }}>
-                {index + 1}. {p.nome || 'Sem nome'}
+            <div key={index} data-participant-index={index} style={{ backgroundColor: p.status_pagamento === 'Pago' ? '#f0fdf4' : '#fef9c3', padding: '30px', border: p.status_pagamento === 'Pago' ? '3px solid #16a34a' : '3px solid #ca8a04', borderRadius: '8px' }}>
+              <div style={{ fontSize: '36px', fontWeight: 'bold', marginBottom: '18px', color: p.status_pagamento === 'Pago' ? '#16a34a' : '#ca8a04' }}>
+                {index + 1}. {p.nome || 'Sem nome'} {p.status_pagamento === 'Pago' ? '✓' : '○'}
               </div>
-              <div style={{ fontSize: '20px', color: '#e5e7eb', lineHeight: '2.2' }}>
-                <div><span style={{ color: '#9ca3af' }}>Código:</span> <strong style={{ marginLeft: '12px', fontSize: '22px' }}>{p.codigo || 'N/A'}</strong></div>
-                <div><span style={{ color: '#9ca3af' }}>Valor:</span> <strong style={{ marginLeft: '12px', color: '#4ade80', fontSize: '22px' }}>R$ {maskBRL(p.valor_cota || 0)}</strong></div>
-                <div><span style={{ color: '#9ca3af' }}>Status:</span> <strong style={{ marginLeft: '12px', fontSize: '22px' }}>{p.status_pagamento === 'Pago' ? '✅' : '⏳'} {p.status_pagamento || 'Pendente'}</strong></div>
-                <div><span style={{ color: '#9ca3af' }}>Finalizadora:</span> <strong style={{ marginLeft: '12px', fontSize: '22px' }}>{payMethods.find(m => String(m.id) === String(p.finalizadora_id))?.nome || 'Não definido'}</strong></div>
-                {p.pago_em && (
-                  <div><span style={{ color: '#9ca3af' }}>Pago em:</span> <strong style={{ marginLeft: '12px', fontSize: '22px' }}>{new Date(p.pago_em).toLocaleString('pt-BR')}</strong></div>
-                )}
+              <div style={{ fontSize: '26px', color: '#333', lineHeight: '1.9' }}>
+                <div><span style={{ color: '#666' }}>Código:</span> <strong style={{ marginLeft: '10px', fontSize: '28px' }}>{p.codigo || 'N/A'}</strong></div>
+                <div><span style={{ color: '#666' }}>Valor:</span> <strong style={{ marginLeft: '10px', color: '#16a34a', fontSize: '30px' }}>R$ {maskBRL(p.valor_cota || 0)}</strong></div>
+                <div><span style={{ color: '#666' }}>Status:</span> <strong style={{ marginLeft: '10px', fontSize: '28px' }}>{p.status_pagamento || 'Pendente'}</strong></div>
+                <div><span style={{ color: '#666' }}>Forma:</span> <strong style={{ marginLeft: '10px', fontSize: '28px' }}>{payMethods.find(m => String(m.id) === String(p.finalizadora_id))?.nome || 'N/D'}</strong></div>
               </div>
             </div>
           ))}
+        </div>
       </div>
 
-      <div style={{ marginTop: '45px', textAlign: 'center', fontSize: '18px', color: '#9ca3af', borderTop: '4px solid #374151', paddingTop: '25px' }}>
-        Gerado em: {new Date().toLocaleString('pt-BR')}
+      <div style={{ marginTop: '30px', textAlign: 'center', fontSize: '16px', color: '#666', borderTop: '2px solid #ddd', paddingTop: '15px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div>Gerado em: {new Date().toLocaleString('pt-BR')}</div>
+        <div id="page-indicator" style={{ fontSize: '18px', fontWeight: 'bold', color: '#000' }}>
+          {/* Será preenchido dinamicamente */}
+        </div>
       </div>
     </div>
     
@@ -2019,9 +2586,44 @@ export default function PaymentModal({
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted" />
               <Input
+                ref={addParticipantSearchRef}
                 placeholder="Buscar por código ou nome..."
                 value={addParticipantSearch}
-                onChange={(e) => setAddParticipantSearch(e.target.value)}
+                onChange={(e) => {
+                  setAddParticipantSearch(e.target.value);
+                  setFocusedAddParticipantIndex(0);
+                }}
+                onKeyDown={(e) => {
+                  const searchLower = addParticipantSearch.toLowerCase().trim();
+                  const filtered = (localCustomers || [])
+                    .filter(cliente => {
+                      if (!searchLower) return true;
+                      const codigo = String(cliente.codigo || '');
+                      const nome = (cliente.nome || '').toLowerCase();
+                      return codigo.includes(searchLower) || nome.includes(searchLower);
+                    });
+                  const clienteConsumidor = filtered.find(c => c?.is_consumidor_final === true);
+                  const clientesNormais = filtered.filter(c => c?.is_consumidor_final !== true);
+                  const sortedNormais = clientesNormais.sort((a, b) => {
+                    const codigoA = a.codigo || 0;
+                    const codigoB = b.codigo || 0;
+                    return codigoA - codigoB;
+                  });
+                  const finalList = clienteConsumidor ? [clienteConsumidor, ...sortedNormais] : sortedNormais;
+                  
+                  if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    setFocusedAddParticipantIndex(prev => Math.min(prev + 1, finalList.length - 1));
+                  } else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    setFocusedAddParticipantIndex(prev => Math.max(prev - 1, 0));
+                  } else if (e.key === 'Enter' && finalList[focusedAddParticipantIndex]) {
+                    e.preventDefault();
+                    const cliente = finalList[focusedAddParticipantIndex];
+                    const participantWithTimestamp = { ...cliente, timestamp: Date.now() };
+                    setSelectedParticipants(prev => [...prev, participantWithTimestamp]);
+                  }
+                }}
                 className="pl-10 pr-10"
               />
               {addParticipantSearch && (
@@ -2058,7 +2660,7 @@ export default function PaymentModal({
           </div>
           
           {/* Lista de clientes */}
-          <div className="border rounded-md max-h-[400px] overflow-y-auto">
+          <div ref={addParticipantListRef} className="border rounded-md max-h-[400px] overflow-y-auto">
             {(() => {
               const searchLower = addParticipantSearch.toLowerCase().trim();
               const filtered = (localCustomers || [])
@@ -2091,23 +2693,27 @@ export default function PaymentModal({
                 );
               }
               
-              return finalList.map((cliente) => {
+              return finalList.map((cliente, listIndex) => {
                 const isConsumidorFinal = cliente?.is_consumidor_final === true;
                 const selectionCount = selectedParticipants.filter(p => p.id === cliente.id).length;
-                
+                const isFocused = listIndex === focusedAddParticipantIndex;
                 
                 return (
                   <div
                     key={cliente.id}
+                    ref={(el) => { addParticipantButtonRefs.current[listIndex] = el; }}
                     role="button"
                     tabIndex={0}
                     className={`w-full px-4 py-3 text-left transition-all border-b border-border last:border-0 flex items-center gap-3 cursor-pointer ${
+                      isFocused ? 'ring-2 ring-blue-500 ring-inset z-10' : ''
+                    } ${
                       isConsumidorFinal
                         ? 'bg-gradient-to-r from-amber-500/5 to-transparent hover:from-amber-500/10 border-l-2 border-l-amber-500/40'
                         : selectionCount > 0 
                           ? 'bg-emerald-600/20 hover:bg-emerald-600/30' 
                           : 'hover:bg-surface-2'
                     }`}
+                    onMouseEnter={() => setFocusedAddParticipantIndex(listIndex)}
                     onClick={(e) => {
                       e.preventDefault();
                       e.stopPropagation();
@@ -2277,6 +2883,172 @@ export default function PaymentModal({
             </Button>
           </div>
         </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    {/* Modal de Download do PDF */}
+    <Dialog 
+      open={isDownloadModalOpen} 
+      onOpenChange={(open) => {
+        console.log('🟢 [DownloadModal] onOpenChange chamado:', { open, downloadStatus });
+        // Só permite fechar se estiver no estado de sucesso
+        if (!open && downloadStatus === 'success') {
+          console.log('✅ [DownloadModal] Fechando modal de download (sucesso)');
+          setIsDownloadModalOpen(false);
+        } else if (!open) {
+          console.log('⚠️ [DownloadModal] BLOQUEADO: Ainda baixando');
+        }
+      }}
+    >
+      <DialogContent 
+        className="sm:max-w-md"
+        onPointerDownOutside={(e) => {
+          // Impedir fechamento ao clicar fora durante download
+          if (downloadStatus === 'downloading') {
+            e.preventDefault();
+          }
+        }}
+        onEscapeKeyDown={(e) => {
+          // Impedir fechamento com ESC durante download
+          if (downloadStatus === 'downloading') {
+            e.preventDefault();
+          }
+        }}
+      >
+        <DialogHeader>
+          <DialogTitle className="text-center">
+            {downloadStatus === 'downloading' ? 'Gerando PDF...' : 'PDF Gerado com Sucesso!'}
+          </DialogTitle>
+          <DialogDescription className="sr-only">
+            {downloadStatus === 'downloading' 
+              ? 'Aguarde enquanto o relatório de pagamentos está sendo gerado' 
+              : 'Relatório de pagamentos gerado e baixado com sucesso'}
+          </DialogDescription>
+        </DialogHeader>
+        
+        <div className="flex flex-col items-center justify-center py-6 space-y-4">
+          {downloadStatus === 'downloading' ? (
+            <>
+              <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-green-500"></div>
+              <p className="text-sm text-gray-500">Gerando seu relatório...</p>
+              
+              {/* Barra de progresso */}
+              <div className="w-full max-w-xs">
+                <div className="flex justify-between text-xs text-gray-500 mb-1">
+                  <span>Progresso</span>
+                  <span>{downloadProgress}%</span>
+                </div>
+                <div className="w-full bg-gray-200 rounded-full h-2.5">
+                  <div 
+                    className="bg-green-600 h-2.5 rounded-full transition-all duration-300"
+                    style={{ width: `${downloadProgress}%` }}
+                  ></div>
+                </div>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="rounded-full bg-green-100 p-3">
+                <svg className="w-12 h-12 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+              </div>
+              <p className="text-sm text-gray-600 text-center">
+                Relatório baixado com sucesso!
+              </p>
+              <p className="text-xs text-gray-400 text-center">
+                {pdfFileName}
+              </p>
+            </>
+          )}
+        </div>
+
+        {downloadStatus === 'success' && (
+          <div className="flex flex-col gap-2">
+            {/* Botão Compartilhar - APENAS em dispositivos móveis */}
+            {navigator.share && navigator.canShare && navigator.canShare({ files: [] }) && (
+              <Button
+                onClick={async () => {
+                  if (!pdfBlob) {
+                    toast({
+                      title: 'Arquivo não disponível',
+                      description: 'Tente gerar o PDF novamente.',
+                      variant: 'destructive'
+                    });
+                    return;
+                  }
+                  
+                  try {
+                    console.log('📱 [PDF] Compartilhando via Web Share API...');
+                    const file = new File([pdfBlob], pdfFileName, { type: 'application/pdf' });
+                    await navigator.share({
+                      files: [file],
+                      title: 'Relatório de Pagamentos',
+                      text: 'Confira o relatório de pagamentos'
+                    });
+                    console.log('✅ [PDF] Compartilhado com sucesso');
+                    toast({
+                      title: 'Compartilhado com sucesso!',
+                      variant: 'success'
+                    });
+                  } catch (error) {
+                    if (error.name === 'AbortError') {
+                      console.log('ℹ️ [PDF] Compartilhamento cancelado');
+                      return;
+                    }
+                    console.error('❌ [PDF] Erro ao compartilhar:', error);
+                    toast({
+                      title: 'Erro ao compartilhar',
+                      description: error.message,
+                      variant: 'destructive'
+                    });
+                  }
+                }}
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white"
+              >
+                <svg className="w-4 h-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+                </svg>
+                Compartilhar
+              </Button>
+            )}
+            
+            <Button
+              onClick={() => {
+                if (pdfBlobUrl) {
+                  console.log('📄 [PDF] Abrindo PDF em nova aba:', pdfBlobUrl);
+                  window.open(pdfBlobUrl, '_blank');
+                } else {
+                  console.error('❌ [PDF] URL do blob não disponível');
+                  toast({
+                    title: 'Erro ao abrir PDF',
+                    description: 'URL do PDF não está disponível.',
+                    variant: 'destructive'
+                  });
+                }
+              }}
+              className="w-full bg-green-600 hover:bg-green-700"
+            >
+              <svg className="w-4 h-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+              </svg>
+              Abrir PDF
+            </Button>
+            
+            <p className="text-xs text-center text-gray-500 px-2">
+              O PDF foi baixado. Abra-o para visualizar, imprimir ou compartilhar.
+            </p>
+
+            <Button
+              onClick={() => setIsDownloadModalOpen(false)}
+              variant="ghost"
+              className="w-full"
+            >
+              Fechar
+            </Button>
+          </div>
+        )}
       </DialogContent>
     </Dialog>
     </>

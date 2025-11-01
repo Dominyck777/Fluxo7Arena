@@ -43,7 +43,8 @@ export const AgendaProvider = ({ children }) => {
   });
   
   // Ref para detectar mudanças de visibilidade
-  const lastVisibilityChangeRef = useRef(0);
+  // IMPORTANTE: Inicializa com Date.now() para evitar bug ao abrir modal pela primeira vez
+  const lastVisibilityChangeRef = useRef(Date.now());
   
   // Ref para callback de substituição de participante
   const onParticipantReplacedRef = useRef(null);
@@ -115,11 +116,39 @@ export const AgendaProvider = ({ children }) => {
   // Listener para rastrear mudanças de visibilidade
   useEffect(() => {
     const handleVisibilityChange = () => {
-      lastVisibilityChangeRef.current = Date.now();
+      const newTime = Date.now();
+      const wasHidden = document.hidden;
+      console.log('👁️ [AgendaContext] visibilitychange:', {
+        hidden: wasHidden,
+        timestamp: new Date().toISOString(),
+        isPaymentModalOpen: isPaymentModalOpen
+      });
+      lastVisibilityChangeRef.current = newTime;
+      
+      // 🛡️ Se a aba voltou a ficar visível E o modal de pagamentos está aberto, proteger por 3s
+      if (!wasHidden && isPaymentModalOpen) {
+        console.log('🛡️ [AgendaContext] Aba restaurada com modal aberto - protegendo por 3s');
+        const newProtectionUntil = Date.now() + 3000;
+        modalProtectionRef.current.isProtected = true;
+        modalProtectionRef.current.protectedUntil = newProtectionUntil;
+      }
     };
     
     const handleFocus = () => {
-      lastVisibilityChangeRef.current = Date.now();
+      const newTime = Date.now();
+      console.log('🎯 [AgendaContext] window focus:', {
+        timestamp: new Date().toISOString(),
+        isPaymentModalOpen: isPaymentModalOpen
+      });
+      lastVisibilityChangeRef.current = newTime;
+      
+      // 🛡️ Se a janela ganhou foco E o modal de pagamentos está aberto, proteger por 3s
+      if (isPaymentModalOpen) {
+        console.log('🛡️ [AgendaContext] Janela ganhou foco com modal aberto - protegendo por 3s');
+        const newProtectionUntil = Date.now() + 3000;
+        modalProtectionRef.current.isProtected = true;
+        modalProtectionRef.current.protectedUntil = newProtectionUntil;
+      }
     };
     
     document.addEventListener('visibilitychange', handleVisibilityChange);
@@ -129,7 +158,7 @@ export const AgendaProvider = ({ children }) => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('focus', handleFocus);
     };
-  }, []);
+  }, [isPaymentModalOpen]);
   
   const value = {
     // Estados dos modais
@@ -163,7 +192,18 @@ export const AgendaProvider = ({ children }) => {
     protectPaymentModal,
     
     // Callback de substituição
-    onParticipantReplacedRef
+    onParticipantReplacedRef,
+    
+    // Timestamp de mudança de visibilidade
+    get lastVisibilityChangeTime() {
+      return lastVisibilityChangeRef.current;
+    },
+    
+    // Verificar se modal está protegido
+    get isModalProtected() {
+      const now = Date.now();
+      return modalProtectionRef.current.isProtected && now < modalProtectionRef.current.protectedUntil;
+    }
   };
   
   return (

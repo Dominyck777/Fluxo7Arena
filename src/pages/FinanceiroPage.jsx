@@ -125,6 +125,7 @@ export default function FinanceiroPage() {
   const [agSearch, setAgSearch] = useState('');
   const [agStatus, setAgStatus] = useState('all'); // all, Pago, Pendente, Cancelado
   const [agFinalizadora, setAgFinalizadora] = useState('all');
+  const [expandedAgendamentos, setExpandedAgendamentos] = useState(new Set()); // IDs dos agendamentos expandidos
   // Modal de detalhes de recebimento
   const [recModalOpen, setRecModalOpen] = useState(false);
   const [recSelecionado, setRecSelecionado] = useState(null);
@@ -879,7 +880,7 @@ export default function FinanceiroPage() {
     }
   };
 
-  // Carregar Agendamentos (aba específica)
+  // Carregar Agendamentos (aba específica) - agrupados por agendamento
   const loadAgendamentos = async () => {
     try {
       setLoading(true);
@@ -888,7 +889,7 @@ export default function FinanceiroPage() {
       const toISO = mkEnd(endDate) || undefined;
       let q = supabase
         .from('v_agendamentos_detalhado')
-        .select('agendamento_codigo, inicio, quadra_nome, participante_nome, valor_cota, finalizadora_nome, status_pagamento')
+        .select('agendamento_id, agendamento_codigo, inicio, fim, quadra_nome, participante_nome, valor_cota, finalizadora_nome, status_pagamento')
         .eq('codigo_empresa', codigo)
         .order('inicio', { ascending: false });
       if (fromISO) q = q.gte('inicio', fromISO);
@@ -1048,20 +1049,75 @@ export default function FinanceiroPage() {
     return result;
   }, [pagamentos, searchPagamento, filterFinalizadora, filterFonte]);
 
+  // Agrupar agendamentos e calcular totais
+  const agendamentosAgrupados = useMemo(() => {
+    const grupos = {};
+    (agAgendamentos || []).forEach(r => {
+      const key = r.agendamento_id || r.agendamento_codigo;
+      if (!grupos[key]) {
+        grupos[key] = {
+          agendamento_id: r.agendamento_id,
+          agendamento_codigo: r.agendamento_codigo,
+          inicio: r.inicio,
+          fim: r.fim,
+          quadra_nome: r.quadra_nome,
+          participantes: [],
+          total: 0,
+          totalPago: 0,
+          totalPendente: 0,
+          statusGeral: 'Pendente'
+        };
+      }
+      grupos[key].participantes.push(r);
+      grupos[key].total += Number(r.valor_cota || 0);
+      if (r.status_pagamento === 'Pago') {
+        grupos[key].totalPago += Number(r.valor_cota || 0);
+      } else {
+        grupos[key].totalPendente += Number(r.valor_cota || 0);
+      }
+    });
+    
+    // Determinar status geral de cada agendamento
+    Object.values(grupos).forEach(g => {
+      const todosPagos = g.participantes.every(p => p.status_pagamento === 'Pago');
+      const todosCancelados = g.participantes.every(p => p.status_pagamento === 'Cancelado');
+      
+      if (todosCancelados) {
+        g.statusGeral = 'Cancelado';
+      } else if (todosPagos) {
+        g.statusGeral = 'Pago';
+      } else {
+        g.statusGeral = 'Pendente';
+      }
+    });
+    
+    return Object.values(grupos).sort((a, b) => new Date(b.inicio) - new Date(a.inicio));
+  }, [agAgendamentos]);
+  
   const filteredAg = useMemo(() => {
-    let arr = agAgendamentos || [];
-    if (agStatus !== 'all') arr = arr.filter(r => (r.status_pagamento || '').toLowerCase() === agStatus.toLowerCase());
-    if (agFinalizadora !== 'all') arr = arr.filter(r => (r.finalizadora_nome || '') === agFinalizadora);
-    if (agSearch) {
-      const term = agSearch.toLowerCase();
-      arr = arr.filter(r =>
-        String(r.agendamento_codigo || '').toLowerCase().includes(term) ||
-        (r.participante_nome || '').toLowerCase().includes(term) ||
-        (r.quadra_nome || '').toLowerCase().includes(term)
-      );
-    }
-    return arr;
-  }, [agAgendamentos, agStatus, agFinalizadora, agSearch]);
+    const q = agSearch.toLowerCase().trim();
+    return agendamentosAgrupados.filter(ag => {
+      // Filtro de status
+      if (agStatus !== 'all') {
+        if (agStatus === 'Pago' && ag.statusGeral !== 'Pago') return false;
+        if (agStatus === 'Pendente' && ag.statusGeral !== 'Pendente') return false;
+        if (agStatus === 'Cancelado' && ag.statusGeral !== 'Cancelado') return false;
+      }
+      
+      // Filtro de finalizadora
+      if (agFinalizadora !== 'all') {
+        const temFinalizadora = ag.participantes.some(p => p.finalizadora_nome === agFinalizadora);
+        if (!temFinalizadora) return false;
+      }
+      
+      // Busca
+      if (!q) return true;
+      const codigo = String(ag.agendamento_codigo || '');
+      const quadra = String(ag.quadra_nome || '').toLowerCase();
+      const participantes = ag.participantes.map(p => String(p.participante_nome || '').toLowerCase()).join(' ');
+      return codigo.includes(q) || quadra.includes(q) || participantes.includes(q);
+    });
+  }, [agendamentosAgrupados, agSearch, agStatus, agFinalizadora]);
 
   return (
     <>
@@ -1426,21 +1482,46 @@ export default function FinanceiroPage() {
                   </div>
                   <Button variant="outline" size="sm" onClick={() => {
                     try {
-                      const rows = filteredAg || [];
-                      const headers = ['Data/Hora','Código','Quadra','Participante','Finalizadora','Valor','Status'];
+                      const headers = ['Data/Hora','Código','Quadra','Participantes','Total','Status','Participante','Finalizadora','Valor Participante','Status Participante'];
                       const csvRows = [headers.join(';')];
-                      for (const r of rows) {
-                        const line = [
-                          r.inicio ? new Date(r.inicio).toLocaleString('pt-BR') : '',
-                          r.agendamento_codigo ?? '',
-                          (r.quadra_nome ?? '').replaceAll('"','""'),
-                          (r.participante_nome ?? '').replaceAll('"','""'),
-                          (r.finalizadora_nome ?? '').replaceAll('"','""'),
-                          String(fmt2(r.valor_cota)).replace('.', ','),
-                          r.status_pagamento ?? ''
+                      
+                      for (const ag of filteredAg) {
+                        // Linha do agendamento (resumo)
+                        const dataHora = ag.inicio && ag.fim 
+                          ? `${new Date(ag.inicio).toLocaleDateString('pt-BR')} ${new Date(ag.inicio).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} - ${new Date(ag.fim).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`
+                          : ag.inicio ? new Date(ag.inicio).toLocaleString('pt-BR') : '';
+                        const agLine = [
+                          dataHora,
+                          ag.agendamento_codigo ?? '',
+                          (ag.quadra_nome ?? '').replaceAll('"','""'),
+                          ag.participantes.length,
+                          String(fmt2(ag.total)).replace('.', ','),
+                          ag.statusGeral === 'Parcial' ? 'Pendente' : ag.statusGeral ?? '',
+                          '', // Participante (vazio na linha de resumo)
+                          '', // Finalizadora (vazio na linha de resumo)
+                          '', // Valor Participante (vazio na linha de resumo)
+                          ''  // Status Participante (vazio na linha de resumo)
                         ].map(v => `"${String(v)}"`).join(';');
-                        csvRows.push(line);
+                        csvRows.push(agLine);
+                        
+                        // Linhas dos participantes
+                        for (const p of ag.participantes) {
+                          const pLine = [
+                            '', // Data/Hora (vazio para participantes)
+                            '', // Código (vazio para participantes)
+                            '', // Quadra (vazio para participantes)
+                            '', // Participantes (vazio para participantes)
+                            '', // Total (vazio para participantes)
+                            '', // Status (vazio para participantes)
+                            (p.participante_nome ?? '').replaceAll('"','""'),
+                            (p.finalizadora_nome ?? '').replaceAll('"','""'),
+                            String(fmt2(p.valor_cota)).replace('.', ','),
+                            p.status_pagamento ?? ''
+                          ].map(v => `"${String(v)}"`).join(';');
+                          csvRows.push(pLine);
+                        }
                       }
+                      
                       const csvString = '\ufeff' + csvRows.join('\n');
                       const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
                       const url = URL.createObjectURL(blob);
@@ -1453,6 +1534,7 @@ export default function FinanceiroPage() {
                       a.click();
                       document.body.removeChild(a);
                       URL.revokeObjectURL(url);
+                      toast({ title: 'CSV exportado com sucesso!' });
                     } catch (e) {
                       toast({ title: 'Falha ao exportar CSV', description: e?.message, variant: 'destructive' });
                     }
@@ -1471,87 +1553,198 @@ export default function FinanceiroPage() {
                 <div className="text-sm text-text-muted">Sem registros no período.</div>
               ) : (
                 <>
-                  {/* Desktop: Tabela */}
+                  {/* Desktop: Tabela com Expansão */}
                   <div className="hidden md:block overflow-x-auto">
                     <Table>
                       <TableHeader>
                         <TableRow>
+                          <TableHead className="w-12"></TableHead>
                           <TableHead>Data/Hora</TableHead>
                           <TableHead>Código</TableHead>
                           <TableHead>Quadra</TableHead>
-                          <TableHead>Participante</TableHead>
-                          <TableHead>Finalizadora</TableHead>
-                          <TableHead className="text-right">Valor</TableHead>
+                          <TableHead className="text-right">Participantes</TableHead>
+                          <TableHead className="text-right">Total</TableHead>
                           <TableHead>Status</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {filteredAg.map((r, i) => (
-                          <TableRow key={`${r.agendamento_codigo}-${i}`}>
-                            <TableCell>{r.inicio ? new Date(r.inicio).toLocaleString('pt-BR') : '—'}</TableCell>
-                            <TableCell>#{r.agendamento_codigo || '—'}</TableCell>
-                            <TableCell>{r.quadra_nome || '—'}</TableCell>
-                            <TableCell>{r.participante_nome || '—'}</TableCell>
-                            <TableCell>{r.finalizadora_nome || '—'}</TableCell>
-                            <TableCell className="text-right font-semibold">{fmtBRL(r.valor_cota)}</TableCell>
-                            <TableCell>{r.status_pagamento || '—'}</TableCell>
-                          </TableRow>
-                        ))}
+                        {filteredAg.map((ag) => {
+                          const isExpanded = expandedAgendamentos.has(ag.agendamento_id || ag.agendamento_codigo);
+                          return (
+                            <React.Fragment key={ag.agendamento_id || ag.agendamento_codigo}>
+                              <TableRow 
+                                className="cursor-pointer hover:bg-surface-2"
+                                onClick={() => {
+                                  const key = ag.agendamento_id || ag.agendamento_codigo;
+                                  setExpandedAgendamentos(prev => {
+                                    const newSet = new Set(prev);
+                                    if (newSet.has(key)) {
+                                      newSet.delete(key);
+                                    } else {
+                                      newSet.add(key);
+                                    }
+                                    return newSet;
+                                  });
+                                }}
+                              >
+                                <TableCell>
+                                  <div className={`transition-transform ${
+                                    isExpanded ? 'rotate-90' : ''
+                                  }`}>
+                                    ▶
+                                  </div>
+                                </TableCell>
+                                <TableCell>
+                                  {ag.inicio ? (
+                                    <div className="flex flex-col">
+                                      <span className="text-xs text-text-secondary">{new Date(ag.inicio).toLocaleDateString('pt-BR')}</span>
+                                      <span className="font-medium">
+                                        {new Date(ag.inicio).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                                        {ag.fim && ` - ${new Date(ag.fim).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`}
+                                      </span>
+                                    </div>
+                                  ) : '—'}
+                                </TableCell>
+                                <TableCell className="font-semibold">#{ag.agendamento_codigo || '—'}</TableCell>
+                                <TableCell>{ag.quadra_nome || '—'}</TableCell>
+                                <TableCell className="text-right">{ag.participantes.length}</TableCell>
+                                <TableCell className="text-right font-semibold">{fmtBRL(ag.total)}</TableCell>
+                                <TableCell>
+                                  <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                                    ag.statusGeral === 'Pago' ? 'bg-success/20 text-success' :
+                                    ag.statusGeral === 'Cancelado' ? 'bg-danger/20 text-danger' :
+                                    'bg-warning/20 text-warning'
+                                  }`}>
+                                    {ag.statusGeral === 'Parcial' ? 'Pendente' : ag.statusGeral}
+                                  </span>
+                                </TableCell>
+                              </TableRow>
+                              {isExpanded && ag.participantes.map((p, idx) => (
+                                <TableRow key={`${ag.agendamento_codigo}-${idx}`} className="bg-surface-2/50">
+                                  <TableCell></TableCell>
+                                  <TableCell className="pl-8 text-sm text-text-secondary" colSpan={2}>
+                                    {p.participante_nome || '—'}
+                                  </TableCell>
+                                  <TableCell className="text-sm">{p.finalizadora_nome || '—'}</TableCell>
+                                  <TableCell className="text-right text-sm">{fmtBRL(p.valor_cota)}</TableCell>
+                                  <TableCell className="text-sm">
+                                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs ${
+                                      p.status_pagamento === 'Pago' ? 'bg-success/20 text-success' :
+                                      p.status_pagamento === 'Cancelado' ? 'bg-danger/20 text-danger' :
+                                      'bg-warning/20 text-warning'
+                                    }`}>
+                                      {p.status_pagamento || 'Pendente'}
+                                    </span>
+                                  </TableCell>
+                                  <TableCell></TableCell>
+                                </TableRow>
+                              ))}
+                            </React.Fragment>
+                          );
+                        })}
                       </TableBody>
                     </Table>
                   </div>
                   
-                  {/* Mobile: Cards */}
+                  {/* Mobile: Cards com Expansão */}
                   <div className="md:hidden space-y-3">
-                    {filteredAg.map((r, i) => (
-                      <div key={`${r.agendamento_codigo}-${i}`} className="bg-surface-2 rounded-lg p-4">
-                        <div className="flex items-center justify-between mb-2">
-                          <div className="text-sm font-semibold text-text-primary">
-                            #{r.agendamento_codigo || '—'}
+                    {filteredAg.map((ag) => {
+                      const isExpanded = expandedAgendamentos.has(ag.agendamento_id || ag.agendamento_codigo);
+                      return (
+                        <div key={ag.agendamento_id || ag.agendamento_codigo} className="bg-surface-2 rounded-lg overflow-hidden">
+                          <div 
+                            className="p-4 cursor-pointer"
+                            onClick={() => {
+                              const key = ag.agendamento_id || ag.agendamento_codigo;
+                              setExpandedAgendamentos(prev => {
+                                const newSet = new Set(prev);
+                                if (newSet.has(key)) {
+                                  newSet.delete(key);
+                                } else {
+                                  newSet.add(key);
+                                }
+                                return newSet;
+                              });
+                            }}
+                          >
+                            <div className="flex items-center justify-between mb-2">
+                              <div className="flex items-center gap-2">
+                                <div className={`transition-transform text-text-secondary ${
+                                  isExpanded ? 'rotate-90' : ''
+                                }`}>
+                                  ▶
+                                </div>
+                                <div className="text-sm font-semibold text-text-primary">
+                                  #{ag.agendamento_codigo || '—'}
+                                </div>
+                              </div>
+                              <div className={`text-xs px-2 py-1 rounded-full ${
+                                ag.statusGeral === 'Pago' ? 'bg-success/20 text-success' :
+                                ag.statusGeral === 'Cancelado' ? 'bg-danger/20 text-danger' :
+                                'bg-warning/20 text-warning'
+                              }`}>
+                                {ag.statusGeral === 'Parcial' ? 'Pendente' : ag.statusGeral}
+                              </div>
+                            </div>
+                            <div className="space-y-2 text-sm">
+                              <div className="flex justify-between">
+                                <span className="text-text-secondary">Data:</span>
+                                <span className="text-text-primary">
+                                  {ag.inicio ? new Date(ag.inicio).toLocaleDateString('pt-BR') : '—'}
+                                </span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-text-secondary">Horário:</span>
+                                <span className="text-text-primary font-medium">
+                                  {ag.inicio && ag.fim ? (
+                                    `${new Date(ag.inicio).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} - ${new Date(ag.fim).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`
+                                  ) : '—'}
+                                </span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-text-secondary">Quadra:</span>
+                                <span className="text-text-primary font-medium">
+                                  {ag.quadra_nome || '—'}
+                                </span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-text-secondary">Participantes:</span>
+                                <span className="text-text-primary">
+                                  {ag.participantes.length}
+                                </span>
+                              </div>
+                              <div className="flex justify-between items-center pt-2 border-t border-border/50">
+                                <span className="text-text-secondary">Total:</span>
+                                <span className="font-bold text-lg text-success">{fmtBRL(ag.total)}</span>
+                              </div>
+                            </div>
                           </div>
-                          <div className={`text-xs px-2 py-1 rounded-full ${
-                            r.status_pagamento === 'Pago' ? 'bg-success/20 text-success' : 
-                            r.status_pagamento === 'Cancelado' ? 'bg-danger/20 text-danger' : 
-                            'bg-warning/20 text-warning'
-                          }`}>
-                            {r.status_pagamento || 'Pendente'}
-                          </div>
+                          
+                          {isExpanded && (
+                            <div className="border-t border-border/50 bg-black/20">
+                              {ag.participantes.map((p, idx) => (
+                                <div key={idx} className="px-4 py-3 border-b border-border/30 last:border-b-0">
+                                  <div className="flex items-center justify-between mb-2">
+                                    <div className="font-medium text-sm">{p.participante_nome || '—'}</div>
+                                    <div className={`text-xs px-2 py-0.5 rounded-full ${
+                                      p.status_pagamento === 'Pago' ? 'bg-success/20 text-success' :
+                                      p.status_pagamento === 'Cancelado' ? 'bg-danger/20 text-danger' :
+                                      'bg-warning/20 text-warning'
+                                    }`}>
+                                      {p.status_pagamento || 'Pendente'}
+                                    </div>
+                                  </div>
+                                  <div className="flex justify-between text-xs">
+                                    <span className="text-text-secondary">{p.finalizadora_nome || '—'}</span>
+                                    <span className="font-semibold text-success">{fmtBRL(p.valor_cota)}</span>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
                         </div>
-                        <div className="space-y-2 text-sm">
-                          <div className="flex justify-between">
-                            <span className="text-text-secondary">Data/Hora:</span>
-                            <span className="text-text-primary">
-                              {r.inicio ? new Date(r.inicio).toLocaleString('pt-BR', { 
-                                day: '2-digit', month: '2-digit', year: '2-digit',
-                                hour: '2-digit', minute: '2-digit'
-                              }) : '—'}
-                            </span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-text-secondary">Quadra:</span>
-                            <span className="text-text-primary font-medium">
-                              {r.quadra_nome || '—'}
-                            </span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-text-secondary">Participante:</span>
-                            <span className="text-text-primary">
-                              {r.participante_nome || '—'}
-                            </span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-text-secondary">Finalizadora:</span>
-                            <span className="text-text-primary">
-                              {r.finalizadora_nome || '—'}
-                            </span>
-                          </div>
-                          <div className="flex justify-between items-center pt-2 border-t border-border/50">
-                            <span className="text-text-secondary">Valor da Cota:</span>
-                            <span className="font-bold text-lg text-success">{fmtBRL(r.valor_cota)}</span>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </>
               )}

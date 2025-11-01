@@ -266,21 +266,17 @@ export const AlertsProvider = ({ children }) => {
       if (document.visibilityState === 'visible') {
         // Não recarregar se há modais abertos
         if (hasOpenModals()) {
-          console.log('[AlertsContext] Aba voltou a ficar visível, mas há modais abertos - ignorando recarga');
           return;
         }
-        console.log('[AlertsContext] Aba voltou a ficar visível - recarregando alertas');
         loadAlerts();
       }
     };
-
+    
     const handleFocus = () => {
       // Não recarregar se há modais abertos
       if (hasOpenModals()) {
-        console.log('[AlertsContext] Janela ganhou foco, mas há modais abertos - ignorando recarga');
         return;
       }
-      console.log('[AlertsContext] Janela ganhou foco - recarregando alertas');
       loadAlerts();
     };
 
