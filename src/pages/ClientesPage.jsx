@@ -252,27 +252,27 @@ function ClientDetailsModal({ open, onOpenChange, client, onEdit, onInactivate, 
     const loadHistory = async () => {
       if (!open || !client?.id) return;
       setHistoryLoading(true);
-      // Safety timeout: evita loader infinito em casos de latência/restrições RLS
-      let safetyTimer;
-      try { safetyTimer = setTimeout(() => setHistoryLoading(false), 10000); } catch {}
-      try {
-        console.debug('[ClientDetailsModal] loadHistory: start', { clientId: client.id, codigoEmpresa });
-        // 1) Buscar últimos vínculos do cliente com comandas
-        let qV = supabase
-          .from('comanda_clientes')
-          .select('comanda_id, created_at')
-          .eq('cliente_id', client.id)
-          .order('created_at', { ascending: false })
-          .limit(10);
-        if (codigoEmpresa) qV = qV.eq('codigo_empresa', codigoEmpresa);
-        const { data: vincs, error: vincErr } = await qV;
-        if (vincs && vincs.length === 0) {
-          // ainda tentaremos pegar comandas diretas por cliente_id
-        }
-        if (vincErr) throw vincErr;
-        const vincComandaIds = Array.from(new Set((vincs || []).map(v => v.comanda_id).filter(Boolean)));
+      // 1) Buscar vínculos do cliente com comandas
+      const isConsumidor = Number(client?.codigo ?? -1) === 0;
+      let qV = supabase
+        .from('comanda_clientes')
+        .select('comanda_id, created_at');
+      if (isConsumidor) {
+        // Cliente Consumidor (codigo 0): considerar vínculos nome_livre (cliente_id IS NULL)
+        qV = qV.is('cliente_id', null);
+      } else {
+        qV = qV.eq('cliente_id', client.id);
+      }
+      qV = qV.order('created_at', { ascending: false }).limit(50);
+      if (codigoEmpresa) qV = qV.eq('codigo_empresa', codigoEmpresa);
+      const { data: vincs, error: vincErr } = await qV;
+      if (vincErr) throw vincErr;
+      const vincComandaIds = Array.from(new Set((vincs || []).map(v => v.comanda_id).filter(Boolean)));
 
-        // 1b) Complementar: comandas vinculadas diretamente ao cliente (comandas.cliente_id)
+      // 1b) Complementar: comandas vinculadas diretamente ao cliente (comandas.cliente_id)
+      // Para Cliente Consumidor (codigo 0), não buscamos por cliente_id, pois são vínculos nome_livre
+      let directComandas = [];
+      if (!isConsumidor) {
         let qDirect = supabase
           .from('comandas')
           .select('id, status, aberto_em, fechado_em')
@@ -280,17 +280,23 @@ function ClientDetailsModal({ open, onOpenChange, client, onEdit, onInactivate, 
           .order('aberto_em', { ascending: false })
           .limit(10);
         if (codigoEmpresa) qDirect = qDirect.eq('codigo_empresa', codigoEmpresa);
-        const { data: directComandas, error: dirErr } = await qDirect;
+        const { data: dRows, error: dirErr } = await qDirect;
         if (dirErr) throw dirErr;
-        const directIds = Array.from(new Set((directComandas || []).map(c => c.id)));
+        directComandas = dRows || [];
+      }
 
-        const comandaIds = Array.from(new Set([ ...vincComandaIds, ...directIds ]));
-        if (comandaIds.length === 0) {
-          setHistory([]);
-          setHistoryLoading(false);
-          return; // Evita seguir para queries com lista vazia, que podem travar
-        }
-
+      const directIds = Array.from(new Set((directComandas || []).map(c => c.id)));
+      const comandaIds = Array.from(new Set([ ...vincComandaIds, ...directIds ]));
+      if (comandaIds.length === 0) {
+        setHistory([]);
+        setHistoryLoading(false);
+        return; // Evita seguir para queries com lista vazia, que podem travar
+      }
+      
+      // Safety timeout: evita loader infinito em casos de latência/restrições RLS
+      let safetyTimer;
+      try { safetyTimer = setTimeout(() => setHistoryLoading(false), 10000); } catch {}
+      try {
         // 2) Detalhes das comandas (join mesa para exibir nome/numero)
         let qCom = supabase
           .from('comandas')

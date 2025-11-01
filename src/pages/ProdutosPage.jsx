@@ -5,7 +5,7 @@ import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useToast } from "@/components/ui/use-toast";
-import { Plus, Search, List, LayoutGrid, Download, Edit, Trash2, Trophy, AlertTriangle, CalendarX, Tag, Filter, Eye, EyeOff, FileText } from 'lucide-react';
+import { Plus, Search, List, LayoutGrid, Download, Edit, Trash2, Trophy, AlertTriangle, CalendarX, Tag, Filter, Eye, EyeOff, FileText, CheckCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -221,7 +221,7 @@ const StatCard = ({ icon, title, value, subtitle, color, onClick, isActive }) =>
     );
 };
 
-function ProductFormModal({ open, onOpenChange, product, onSave, categories, onCreateCategory, suggestedCode, onRefreshProducts }) {
+function ProductFormModal({ open, onOpenChange, product, onSave, categories, onCreateCategory, suggestedCode, onRefreshProducts, products }) {
   const { toast } = useToast();
   const { userProfile } = useAuth();
   const [activeTab, setActiveTab] = useState('dados');
@@ -297,17 +297,9 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
   const [ncmDescription, setNcmDescription] = useState(product?.ncmDescription || '');
   const [cest, setCest] = useState(product?.cest || '');
   
-  // Desmembrar preço
-  const [showDismember, setShowDismember] = useState(false);
-  const [dismemberTotal, setDismemberTotal] = useState('');
-  const [dismemberQty, setDismemberQty] = useState('');
-  const [mergeWithExisting, setMergeWithExisting] = useState(false);
-  const [similarProducts, setSimilarProducts] = useState([]);
-  const [selectedMergeProduct, setSelectedMergeProduct] = useState(null);
-  // Novo: permitir escolher preço unitário final e decidir se atualiza o preço do produto destino na união
-  const [overrideUnitPrice, setOverrideUnitPrice] = useState(''); // string formatada BR
-  const [updateTargetPrice, setUpdateTargetPrice] = useState(false);
-  
+  // Modais independentes
+  const [showDismemberModal, setShowDismemberModal] = useState(false);
+  const [showMergeModal, setShowMergeModal] = useState(false);
 
   const formatCurrencyBR = (value) => {
     const digits = String(value || '').replace(/\D/g, '');
@@ -420,13 +412,9 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
     if (!product && suggestedCode && !code) {
       setCode(suggestedCode);
     }
-    // Limpar estados do desmembramento ao trocar de produto
-    setShowDismember(false);
-    setDismemberTotal('');
-    setDismemberQty('');
-    setMergeWithExisting(false);
-    setSimilarProducts([]);
-    setSelectedMergeProduct(null);
+    // Limpar modais ao trocar de produto
+    setShowDismemberModal(false);
+    setShowMergeModal(false);
   }, [product, open]);
 
   // Auto-cálculos: custo e margem
@@ -790,285 +778,6 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
                 <Label htmlFor="marginPercent" className="text-right">% de Lucro</Label>
                 <Input id="marginPercent" inputMode="decimal" placeholder="Calculado" value={`${marginPercent || '0,00'} %`} onChange={(e)=> setMarginPercent(formatPercent(e.target.value))} disabled={!editEnabled} className="col-span-3" />
               </div>
-              
-              {/* Desmembrar Preço */}
-              <div className="border-t pt-3 mt-4">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => {
-                    if (!showDismember) {
-                      // Preencher automaticamente com o preço de venda atual
-                      if (salePrice && currencyToNumber(salePrice) > 0) {
-                        setDismemberTotal(salePrice);
-                      }
-                    }
-                    setShowDismember(!showDismember);
-                  }}
-                  disabled={!editEnabled}
-                  className="bg-amber-500 hover:bg-amber-400 text-black"
-                >
-                  {showDismember ? 'Fechar Desmembramento' : 'Desmembrar Preço'}
-                </Button>
-              </div>
-              
-              {showDismember && (
-                <div className="border-t pt-3 mt-4">
-                  <div className="p-4 bg-surface border border-border rounded-md space-y-3">
-                    <p className="text-sm text-text-secondary font-medium">
-                      Divida o valor total pela quantidade de unidades
-                    </p>
-                    <div className="grid grid-cols-4 items-center gap-4">
-                      <Label className="text-right text-sm">Valor Total</Label>
-                      <div className="col-span-3 flex items-center gap-2">
-                        <span className="text-sm text-text-secondary">R$</span>
-                        <Input 
-                          inputMode="numeric" 
-                          placeholder="0,00" 
-                          value={dismemberTotal || ''} 
-                          onChange={(e)=> setDismemberTotal(formatCurrencyBR(e.target.value))} 
-                          className="flex-1" 
-                        />
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-4 items-center gap-4">
-                      <Label className="text-right text-sm">Quantidade</Label>
-                      <Input 
-                        type="text"
-                        inputMode="numeric"
-                        placeholder="0" 
-                        value={dismemberQty} 
-                        onChange={(e)=> setDismemberQty(e.target.value.replace(/[^0-9]/g, ''))} 
-                        className="col-span-3" 
-                      />
-                    </div>
-                    
-                    {dismemberTotal && dismemberQty && Number(dismemberQty) > 0 && (
-                      <div className="bg-success/10 border border-success/30 p-3 rounded">
-                        <div className="grid grid-cols-4 items-center gap-4">
-                          <Label className="text-right text-sm">Preço Unitário</Label>
-                          <Input
-                            className="col-span-3"
-                            placeholder="0,00"
-                            value={(() => {
-                              const base = (currencyToNumber(dismemberTotal) / Number(dismemberQty));
-                              const manual = currencyToNumber(overrideUnitPrice);
-                              const show = manual > 0 ? manual : base;
-                              return show.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-                            })()}
-                            inputMode="numeric"
-                            onChange={(e) => setOverrideUnitPrice(formatCurrencyBR(e.target.value))}
-                            onKeyDown={(e) => {
-                              e.stopPropagation();
-                              const allowed = ['Backspace','Delete','ArrowLeft','ArrowRight','Tab'];
-                              if (allowed.includes(e.key)) return;
-                              if (!/^[0-9]$/.test(e.key)) { e.preventDefault(); }
-                            }}
-                            onBeforeInput={(e) => { const data = e.data ?? ''; if (data && /\D/.test(data)) e.preventDefault(); }}
-                          />
-                        </div>
-                      </div>
-                    )}
-                    
-                    {/* Opção de Unir com Produto Existente */}
-                    <div className="border-t pt-3 mt-3">
-                      <div className="flex items-center gap-2 mb-2">
-                        <Checkbox 
-                          id="mergeWithExisting" 
-                          checked={mergeWithExisting} 
-                          onCheckedChange={async (checked) => {
-                            setMergeWithExisting(!!checked);
-                            if (checked && name) {
-                              // Buscar produtos similares (sem CX, CAIXA, etc)
-                              try {
-                                const allProducts = await listProducts({ codigoEmpresa: userProfile?.codigo_empresa, search: firstTwoWords });
-
-                                const cleanName = name.replace(/\b(CX|CAIXA|C\/|PCT|PACOTE|UN|UNIDADE)\b/gi, '').trim();
-                                const cleanWords = cleanName.toLowerCase().split(/\s+/).filter(w => w.length > 1);
-                                const firstTwoWords = cleanWords.slice(0, 2).join(' ');
-                                
-                                console.log('[Desmembrar] Buscando similares para:', name);
-                                console.log('[Desmembrar] Nome limpo:', cleanName);
-                                console.log('[Desmembrar] Primeiras 2 palavras:', firstTwoWords);
-                                
-                                const similar = allProducts.filter(p => {
-                                  if (p.id === product?.id) return false; // Não incluir o próprio produto
-                                  const pName = (p.name || '').replace(/\b(CX|CAIXA|C\/|PCT|PACOTE|UN|UNIDADE)\b/gi, '').trim();
-                                  const pWords = pName.toLowerCase().split(/\s+/).filter(w => w.length > 1);
-                                  const pFirstTwoWords = pWords.slice(0, 2).join(' ');
-                                  
-                                  // Comparar nome completo OU primeiras 2 palavras
-                                  const match = pName.toLowerCase() === cleanName.toLowerCase() || 
-                                         (firstTwoWords && pFirstTwoWords === firstTwoWords);
-                                  
-                                  if (match) {
-                                    console.log('[Desmembrar] Match encontrado:', p.name, '| Limpo:', pName, '| 2 palavras:', pFirstTwoWords);
-                                  }
-                                  
-                                  return match;
-                                });
-                                
-                                console.log('[Desmembrar] Total de produtos similares:', similar.length);
-                                setSimilarProducts(similar);
-                                if (similar.length > 0) {
-                                  setSelectedMergeProduct(similar[0].id);
-                                }
-                              } catch (err) {
-                                console.error('Erro ao buscar produtos similares:', err);
-                              }
-                            } else {
-                              setSimilarProducts([]);
-                              setSelectedMergeProduct(null);
-                            }
-                          }}
-                        />
-                        <Label htmlFor="mergeWithExisting" className="cursor-pointer text-sm">
-                          Unir com produto existente (somar estoque)
-                          <span className="block text-[11px] text-text-muted">
-                            O produto atual será INATIVADO e o produto selecionado abaixo será PRESERVADO (estoque somado)
-                          </span>
-                        </Label>
-                      </div>
-                      
-                      {mergeWithExisting && (
-                        <div className="ml-6 space-y-2">
-                          {similarProducts.length === 0 ? (
-                            <p className="text-xs text-text-muted">Nenhum produto similar encontrado</p>
-                          ) : (
-                            <>
-                              <Label className="text-xs">Produto destino (será preservado):</Label>
-                              <Select value={selectedMergeProduct || ''} onValueChange={setSelectedMergeProduct}>
-                                <SelectTrigger className="w-full text-sm">
-                                  <SelectValue placeholder="Escolha um produto" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {similarProducts.map(p => (
-                                    <SelectItem key={p.id} value={p.id}>
-                                      {p.name} - Estoque: {p.stock || 0} - R$ {Number(p.salePrice || p.price || 0).toFixed(2)}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                              <div className="flex items-center gap-2 mt-1">
-                                <Checkbox id="updateTargetPrice" checked={updateTargetPrice} onCheckedChange={(v) => setUpdateTargetPrice(!!v)} />
-                                <Label htmlFor="updateTargetPrice" className="cursor-pointer text-xs">Atualizar preço do produto destino com o preço unitário informado</Label>
-                              </div>
-                              <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">⚠️ O estoque será somado e este produto será excluído</p>
-                            </>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                    
-                    
-                    <div className="flex gap-2 pt-2">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onPointerUp={() => {
-                          setDismemberTotal('');
-                          setDismemberQty('');
-                          setMergeWithExisting(false);
-                          setSimilarProducts([]);
-                          setSelectedMergeProduct(null);
-                          setOverrideUnitPrice('');
-                          setUpdateTargetPrice(false);
-                          setShowDismember(false);
-                        }}
-                        className="flex-1"
-                      >
-                        Cancelar Desmembramento
-                      </Button>
-                      <Button
-                        type="button"
-                        onPointerUp={async () => {
-                          if (!dismemberTotal || !dismemberQty || Number(dismemberQty) <= 0) {
-                            toast({ title: 'Preencha os campos', description: 'Informe o valor total e a quantidade.', variant: 'warning' });
-                            return;
-                          }
-                          
-                          const baseUnitPrice = currencyToNumber(dismemberTotal) / Number(dismemberQty);
-                          const override = currencyToNumber(overrideUnitPrice);
-                          const finalUnitPrice = (override > 0 ? override : baseUnitPrice);
-                          
-                          if (mergeWithExisting && selectedMergeProduct) {
-                            // Unir com produto existente
-                            try {
-                              const targetProduct = similarProducts.find(p => p.id === selectedMergeProduct);
-                              if (!targetProduct) {
-                                toast({ title: 'Erro', description: 'Produto selecionado não encontrado.', variant: 'destructive' });
-                                return;
-                              }
-                              if (product?.id && selectedMergeProduct === product.id) {
-                                toast({ title: 'Seleção inválida', description: 'O produto destino deve ser diferente do produto atual.', variant: 'warning' });
-                                return;
-                              }
-                              
-                              // 1) Ajuste de estoque com operação atômica (evita sobrescrever estoque por engano)
-                              const delta = Number(dismemberQty);
-                              let adj;
-                              try {
-                                adj = await adjustProductStock({ productId: targetProduct.id, delta, codigoEmpresa: userProfile?.codigo_empresa });
-                              } catch (e) {
-                                console.error('[Merge] Falha ao ajustar estoque de destino', e);
-                                throw e;
-                              }
-                              const newStock = Number(adj?.stock ?? (Number(targetProduct.stock || 0) + delta));
-                              // 2) Atualiza preço opcionalmente sem perder o estoque ajustado
-                              if (updateTargetPrice) {
-                                const priceUpdate = { ...targetProduct, stock: newStock, salePrice: finalUnitPrice, price: finalUnitPrice };
-                                await updateProduct(targetProduct.id, priceUpdate);
-                              }
-                              // Logs para depuração
-                              console.log('[Merge] Fonte (inativar):', { id: product?.id, name: product?.name, code: product?.code });
-                              console.log('[Merge] Destino (preservar):', { id: targetProduct.id, name: targetProduct.name, code: targetProduct.code, newStock, updateTargetPrice, finalUnitPrice });
-                              
-                              // Excluir produto atual (CX)
-                              if (product?.id) {
-                                await deleteProduct(product.id);
-                              }
-                              
-                              const srcCode = product?.code ? `(${product.code})` : '';
-                              const dstCode = targetProduct?.code ? `(${targetProduct.code})` : '';
-                              toast({ 
-                                title: 'Produtos unidos!', 
-                                description: `Destino ${dstCode} ${targetProduct.name}: estoque = ${newStock}${updateTargetPrice ? ` | preço = R$ ${finalUnitPrice.toFixed(2)}` : ''}. Fonte ${srcCode} ${product?.name} inativado.`, 
-                                variant: 'success' 
-                              });
-                              
-                              onOpenChange(false);
-                              // Atualiza a lista imediatamente no pai, se disponível
-                              try { typeof onRefreshProducts === 'function' && onRefreshProducts(); } catch {}
-                              // Não chamar onSave() sem payload: isso quebra handleSaveProduct.
-                              // O refetch será feito pelo usuário após fechar ou em ações subsequentes.
-                            } catch (err) {
-                              console.error('Erro ao unir produtos:', err);
-                              toast({ title: 'Erro ao unir produtos', description: err?.message || 'Tente novamente', variant: 'destructive' });
-                            }
-                          } else {
-                            // Aplicar desmembramento normal
-                            setSalePrice(finalUnitPrice.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
-                            setStock(dismemberQty);
-                            setDismemberTotal('');
-                            setDismemberQty('');
-                            setOverrideUnitPrice('');
-                            setUpdateTargetPrice(false);
-                            setShowDismember(false);
-                            toast({ 
-                              title: 'Preço desmembrado!', 
-                              description: `Preço unitário: R$ ${finalUnitPrice.toFixed(2)} | Estoque: ${dismemberQty}`, 
-                              variant: 'success' 
-                            });
-                          }
-                        }}
-                        className="flex-1 bg-amber-500 hover:bg-amber-400 text-black"
-                      >
-                        Aplicar
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              )}
             </TabsContent>
 
             <TabsContent value="impostos" className="space-y-4 mt-2">
@@ -1195,6 +904,23 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
             </TabsContent>
 
             <TabsContent value="outras" className="space-y-3 mt-2">
+              {/* Botão para Modal Integrado */}
+              {product && (
+                <div className="pb-4 mb-4 border-b border-border">
+                  <Button
+                    type="button"
+                    onClick={() => setShowDismemberModal(true)}
+                    disabled={!editEnabled}
+                    className="w-full bg-primary hover:bg-primary/90 text-primary-foreground"
+                  >
+                    Desmembrar e Unir Produto
+                  </Button>
+                  <p className="text-xs text-muted-foreground mt-2">
+                    Divida o preço por quantidade e opcionalmente una com outro produto
+                  </p>
+                </div>
+              )}
+              
               <div className="grid grid-cols-4 items-center gap-4">
                 <Label htmlFor="barcode2" className="text-right">Código de Barras</Label>
                 <Input id="barcode2" value={barcode} onChange={(e)=>setBarcode(formatEAN13(e.target.value))} className="col-span-3" placeholder="EAN-13" disabled={!editEnabled} />
@@ -1228,6 +954,291 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
           </DialogClose>
           <Button type="button" onClick={handleSave} disabled={saving || !editEnabled} title="F5 para salvar">
             {saving ? 'Salvando...' : 'Salvar Produto'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+      
+      {/* Modal Integrado: Desmembrar e Unir */}
+      <DismemberAndMergeModal
+        open={showDismemberModal}
+        onOpenChange={setShowDismemberModal}
+        product={product}
+        currentPrice={salePrice}
+        allProducts={products}
+        userProfile={userProfile}
+        onApply={async (unitPrice, quantity, targetProduct, updatePrice) => {
+          if (!targetProduct) {
+            // Apenas desmembrar
+            setSalePrice(unitPrice);
+            setStock(quantity);
+            setShowDismemberModal(false);
+            toast({ 
+              title: 'Preço desmembrado!', 
+              description: `Preço unitário: R$ ${currencyToNumber(unitPrice).toFixed(2)} | Estoque: ${quantity}`, 
+              variant: 'success' 
+            });
+          } else {
+            // Desmembrar E unir
+            try {
+              const delta = Number(quantity);
+              const adj = await adjustProductStock({ 
+                productId: targetProduct.id, 
+                delta, 
+                codigoEmpresa: userProfile?.codigo_empresa 
+              });
+              const newStock = Number(adj?.stock ?? (Number(targetProduct.stock || 0) + delta));
+              
+              if (updatePrice) {
+                const priceUpdate = { 
+                  ...targetProduct, 
+                  stock: newStock, 
+                  salePrice: currencyToNumber(unitPrice), 
+                  price: currencyToNumber(unitPrice)
+                };
+                await updateProduct(targetProduct.id, priceUpdate);
+              }
+              
+              await deleteProduct(product.id);
+              
+              toast({ 
+                title: 'Produto desmembrado e unido!', 
+                description: `${targetProduct.name}: novo estoque = ${newStock} | preço unitário = R$ ${currencyToNumber(unitPrice).toFixed(2)}`, 
+                variant: 'success' 
+              });
+              
+              setShowDismemberModal(false);
+              onOpenChange(false);
+              try { typeof onRefreshProducts === 'function' && onRefreshProducts(); } catch {}
+            } catch (err) {
+              console.error('[Desmembrar e Unir] Erro:', err);
+              toast({ 
+                title: 'Erro ao processar', 
+                description: err?.message || 'Tente novamente', 
+                variant: 'destructive' 
+              });
+            }
+          }
+        }}
+      />
+    </Dialog>
+  );
+}
+
+// Modal Integrado: Desmembrar e Unir Produtos
+function DismemberAndMergeModal({ open, onOpenChange, product, currentPrice, allProducts, userProfile, onApply }) {
+  const [total, setTotal] = useState('');
+  const [quantity, setQuantity] = useState('');
+  const [wantToMerge, setWantToMerge] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedProduct, setSelectedProduct] = useState(null);
+  const [updatePrice, setUpdatePrice] = useState(false);
+  
+  const formatCurrencyBR = (value) => {
+    const digits = String(value || '').replace(/\D/g, '');
+    const number = digits ? Number(digits) / 100 : 0;
+    return number.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  };
+  
+  const currencyToNumber = (value) => {
+    if (!value) return 0;
+    const normalized = String(value).replace(/\./g, '').replace(',', '.');
+    const n = Number(normalized);
+    return Number.isFinite(n) ? n : 0;
+  };
+  
+  useEffect(() => {
+    if (open && currentPrice) {
+      setTotal(currentPrice);
+      setQuantity('');
+      setWantToMerge(false);
+      setSearchTerm('');
+      setSelectedProduct(null);
+      setUpdatePrice(false);
+    }
+  }, [open, currentPrice]);
+  
+  const unitPrice = total && quantity && Number(quantity) > 0 
+    ? currencyToNumber(total) / Number(quantity) 
+    : 0;
+  
+  const filteredProducts = (allProducts || [])
+    .filter(p => {
+      if (!product || p.id === product.id) return false;
+      if (!searchTerm.trim()) return true;
+      const term = searchTerm.toLowerCase();
+      return (p.name || '').toLowerCase().includes(term) || 
+             (p.code || '').toLowerCase().includes(term);
+    })
+    .slice(0, 10);
+  
+  const newStock = selectedProduct 
+    ? Number(quantity || 0) + Number(selectedProduct.stock || 0)
+    : 0;
+  
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-[650px] max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Desmembrar e Unir Produto</DialogTitle>
+          <DialogDescription>
+            Divida o preço por quantidade e opcionalmente una com outro produto
+          </DialogDescription>
+        </DialogHeader>
+        
+        <div className="space-y-4 py-4">
+          {/* Passo 1: Desmembrar */}
+          <div className="space-y-3">
+            <h3 className="text-sm font-semibold">1. Desmembrar Preço</h3>
+            <div className="space-y-2">
+              <Label>Valor Total (R$)</Label>
+              <Input 
+                inputMode="numeric" 
+                placeholder="0,00" 
+                value={`R$ ${total || '0,00'}`}
+                onChange={(e) => setTotal(formatCurrencyBR(e.target.value))}
+              />
+            </div>
+            
+            <div className="space-y-2">
+              <Label>Quantidade de Unidades</Label>
+              <Input 
+                type="text"
+                inputMode="numeric"
+                placeholder="0" 
+                value={quantity} 
+                onChange={(e) => setQuantity(e.target.value.replace(/[^0-9]/g, ''))}
+              />
+            </div>
+            
+            {unitPrice > 0 && (
+              <div className="bg-muted/50 border border-border p-3 rounded-lg">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium text-muted-foreground">Preço Unitário:</span>
+                  <span className="text-lg font-bold">R$ {unitPrice.toFixed(2)}</span>
+                </div>
+              </div>
+            )}
+          </div>
+          
+          {/* Passo 2: Unir (Opcional) */}
+          {unitPrice > 0 && (
+            <div className="space-y-3 border-t pt-4">
+              <div className="flex items-center gap-2">
+                <Checkbox 
+                  id="wantToMerge" 
+                  checked={wantToMerge} 
+                  onCheckedChange={(v) => {
+                    setWantToMerge(!!v);
+                    if (!v) {
+                      setSelectedProduct(null);
+                      setSearchTerm('');
+                      setUpdatePrice(false);
+                    }
+                  }} 
+                />
+                <Label htmlFor="wantToMerge" className="cursor-pointer text-sm font-semibold">
+                  2. Unir com outro produto (opcional)
+                </Label>
+              </div>
+              
+              {wantToMerge && (
+                <div className="space-y-3 ml-6">
+                  <div className="bg-muted/30 border border-border p-3 rounded-lg">
+                    <p className="text-xs text-muted-foreground">
+                      <strong>Produto atual:</strong> {product?.name} (será inativado após união)
+                    </p>
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <Label>Buscar Produto Destino</Label>
+                    <Input 
+                      placeholder="Digite o nome ou código..."
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                    />
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <Label className="text-xs">Produtos Disponíveis ({filteredProducts.length})</Label>
+                    <div className="max-h-48 overflow-y-auto space-y-1 border border-border rounded-lg p-2">
+                      {filteredProducts.length === 0 ? (
+                        <p className="text-xs text-muted-foreground p-2 text-center">
+                          Nenhum produto encontrado
+                        </p>
+                      ) : (
+                        filteredProducts.map(p => (
+                          <div
+                            key={p.id}
+                            onClick={() => setSelectedProduct(p)}
+                            className={cn(
+                              "p-2 rounded-md cursor-pointer border transition-colors",
+                              selectedProduct?.id === p.id
+                                ? "bg-primary/10 border-primary"
+                                : "bg-background hover:bg-muted/50 border-transparent"
+                            )}
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-medium truncate">{p.name}</p>
+                                <p className="text-xs text-muted-foreground">
+                                  {p.code && `Código: ${p.code} • `}
+                                  Estoque: {p.stock || 0} • R$ {Number(p.price || p.salePrice || 0).toFixed(2)}
+                                </p>
+                              </div>
+                              {selectedProduct?.id === p.id && (
+                                <CheckCircle className="w-4 h-4 text-primary flex-shrink-0" />
+                              )}
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                  
+                  {selectedProduct && (
+                    <div className="space-y-2">
+                      <div className="bg-primary/5 border border-primary/20 p-3 rounded-lg">
+                        <p className="text-xs font-medium mb-1">Resumo da União:</p>
+                        <div className="text-xs space-y-0.5 text-muted-foreground">
+                          <p>• Destino: <strong>{selectedProduct.name}</strong></p>
+                          <p>• Estoque atual: {selectedProduct.stock || 0}</p>
+                          <p>• Estoque a somar: +{quantity}</p>
+                          <p className="text-primary font-bold">→ Novo estoque: {newStock}</p>
+                        </div>
+                      </div>
+                      
+                      <div className="flex items-center gap-2">
+                        <Checkbox 
+                          id="updatePrice" 
+                          checked={updatePrice} 
+                          onCheckedChange={(v) => setUpdatePrice(!!v)} 
+                        />
+                        <Label htmlFor="updatePrice" className="cursor-pointer text-xs">
+                          Atualizar preço do destino para R$ {unitPrice.toFixed(2)}
+                        </Label>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+        
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Cancelar
+          </Button>
+          <Button 
+            onClick={() => {
+              if (unitPrice > 0) {
+                const formattedPrice = unitPrice.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                onApply(formattedPrice, quantity, wantToMerge ? selectedProduct : null, updatePrice);
+              }
+            }}
+            disabled={unitPrice <= 0 || (wantToMerge && !selectedProduct)}
+          >
+            {wantToMerge && selectedProduct ? 'Desmembrar e Unir' : 'Aplicar Desmembramento'}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -2085,6 +2096,8 @@ function ProdutosPage() {
             onSave={handleSaveProduct}
             onCreateCategory={handleAddCategory}
             suggestedCode={selectedProduct ? undefined : suggestedCode}
+            onRefreshProducts={refetchProducts}
+            products={products}
         />
         {/* Confirm Dialog for Delete */}
         <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>

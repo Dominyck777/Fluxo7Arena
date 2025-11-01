@@ -467,8 +467,8 @@ export default function HistoricoComandasPage() {
           const fins = finsByComanda[r.id];
           return {
             ...r,
-            // status derivado: se existe fechado_em, considerar 'closed' para exibição/filtragem
-            statusDerived: r.fechado_em ? 'closed' : (r.status || 'open'),
+            // status derivado: respeita 'cancelled'; senão, se tem fechado_em => 'closed', senão status real
+            statusDerived: (r.status === 'cancelled') ? 'cancelled' : (r.fechado_em ? 'closed' : (r.status || 'open')),
             total: Number(totals[r.id] || 0),
             mesaNumero: mapMesaNumero.get(r.mesa_id),
             clientesStr: Array.isArray(names) ? names.join(', ') : (names || ''),
@@ -663,10 +663,11 @@ export default function HistoricoComandasPage() {
     });
     // 1.5) Aplica filtro por Status no client-side também (além do backend)
     const byStatus = byTipo.filter(r => {
-      const s = (r.fechado_em ? 'closed' : (r.status || 'open'));
+      const s = (r.statusDerived || (r.status === 'cancelled' ? 'cancelled' : (r.fechado_em ? 'closed' : (r.status || 'open'))));
       if (status === 'closed') return s === 'closed';
       if (status === 'open') return s === 'open';
       if (status === 'awaiting-payment') return s === 'awaiting-payment';
+      if (status === 'cancelled') return s === 'cancelled';
       return true;
     });
     // 2) Se não houver termo, retorna somente por Tipo
@@ -691,6 +692,7 @@ export default function HistoricoComandasPage() {
     if (s === 'open') return 'Aberta';
     if (s === 'awaiting-payment') return 'Pagamento';
     if (s === 'closed') return 'Fechada';
+    if (s === 'cancelled') return 'Cancelada';
     return s || '—';
   };
 
@@ -716,6 +718,7 @@ export default function HistoricoComandasPage() {
     if (s === 'open') return 'text-info bg-info/10 border-info/30';
     if (s === 'awaiting-payment') return 'text-warning bg-warning/10 border-warning/30';
     if (s === 'closed') return 'text-success bg-success/10 border-success/30';
+    if (s === 'cancelled') return 'text-red-400 bg-red-500/10 border-red-500/30';
     return 'text-text-secondary bg-transparent border-border/50';
   };
 
@@ -894,6 +897,7 @@ export default function HistoricoComandasPage() {
                 <SelectItem value="closed">Fechadas</SelectItem>
                 <SelectItem value="open">Abertas</SelectItem>
                 <SelectItem value="awaiting-payment">Pagamento</SelectItem>
+                <SelectItem value="cancelled">Canceladas</SelectItem>
               </SelectContent>
             </Select>
           </div>

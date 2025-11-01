@@ -398,7 +398,7 @@ export async function listarComandas({ status, from, to, search = '', limit = 50
     if (status === 'closed') {
       // Considera como fechadas tanto as com status 'closed' quanto as que possuem fechado_em preenchido
       // PostgREST OR syntax
-      q = q.or('status.eq.closed,fechado_em.not.is.null')
+      q = q.or('status.eq.closed,fechado_em.not.is.null').neq('status','cancelled')
     } else {
       q = q.eq('status', status)
     }
@@ -949,18 +949,10 @@ export async function fecharCaixa({ saldoFinal = null, valorFinalDinheiro = null
     
     console.log(`[fecharCaixa] 📊 Comandas abertas encontradas: ${abertas.length}`, abertas.map(a => ({ id: a.id, status: a.status, mesa: a.mesa_id })))
 
-    // 1) Auto-fechar comandas sem itens (mesa e balcão)
-    for (const c of (abertas || [])) {
-      try {
-        const itens = await listarItensDaComanda({ comandaId: c.id, codigoEmpresa: codigo })
-        const qtd = (itens || []).length
-        if (qtd === 0) {
-          // auto-fecha comanda vazia (independente de ser mesa ou balcão)
-          await fecharComandaEMesa({ comandaId: c.id, codigoEmpresa: codigo })
-        }
-      } catch (e) {
-        // se falhar aqui, não bloqueia o fluxo; será tratado no próximo passo
-      }
+    // BLOQUEIO IMEDIATO: Se há comandas abertas, não permitir fechamento
+    if (abertas && abertas.length > 0) {
+      const ids = abertas.map(a => `${a.id}${a.mesa_id ? `@mesa:${a.mesa_id}` : '@balcao'}`).join(', ')
+      throw new Error(`Existem ${abertas.length} comanda(s) aberta(s). Feche todas as comandas antes de encerrar o caixa.`)
     }
 
     // 2) Recarregar a lista e bloquear somente se ainda restarem abertas com itens
@@ -1756,42 +1748,89 @@ export async function getOrCreateComandaForMesa({ mesaId, codigoEmpresa } = {}) 
 }
 
 // Multi-clientes por comanda através de tabela de vínculo
-export async function adicionarClientesAComanda({ comandaId, clienteIds = [], nomesLivres = [], codigoEmpresa } = {}) {
+export async function adicionarClientesAComanda({ comandaId, clienteIds = [], nomesLivres = [], codigoEmpresa, replace = false } = {}) {
   const codigo = codigoEmpresa || getCachedCompanyCode()
   if (!comandaId) throw new Error('comandaId é obrigatório')
   
-  console.log(`[adicionarClientesAComanda] Adicionando clientes à comanda ${comandaId}:`, { clienteIds, nomesLivres, codigo })
+  // Coerção defensiva: garantir arrays simples de valores
+  let idsArr = []
+  let livresArr = []
   
-  // NÃO deletar clientes existentes - apenas adicionar os novos
-  // Verificar se já existem para evitar duplicatas
-  const { data: existentes } = await supabase
-    .from('comanda_clientes')
-    .select('cliente_id')
-    .eq('comanda_id', comandaId)
+  try {
+    idsArr = Array.isArray(clienteIds) ? clienteIds : (clienteIds ? [clienteIds] : [])
+  } catch (e) {
+    console.warn('[adicionarClientesAComanda] Erro ao processar clienteIds:', e)
+    idsArr = []
+  }
   
-  const idsExistentes = new Set((existentes || []).map(e => e.cliente_id).filter(Boolean))
+  try {
+    livresArr = Array.isArray(nomesLivres) ? nomesLivres : (nomesLivres ? [nomesLivres] : [])
+  } catch (e) {
+    console.warn('[adicionarClientesAComanda] Erro ao processar nomesLivres:', e)
+    livresArr = []
+  }
   
-  const rows = []
-  for (const id of (clienteIds || [])) {
-    // Só adicionar se não existir
-    if (!idsExistentes.has(id)) {
-      rows.push({ comanda_id: comandaId, cliente_id: id })
-    } else {
-      console.log(`[adicionarClientesAComanda] Cliente ${id} já vinculado, pulando`)
+  // Se vieram objetos por engano, extrair chaves comuns
+  const cleanIds = idsArr.map(v => (v && typeof v === 'object' ? (v.id || v.cliente_id || v.value) : v)).filter(Boolean)
+  const cleanLivres = livresArr.map(v => (v && typeof v === 'object' ? (v.nome || v.name || v.label) : v)).map(s => String(s || '').trim()).filter(Boolean)
+
+  console.log(`[adicionarClientesAComanda] Adicionando clientes à comanda ${comandaId}:`, { clienteIds: cleanIds, nomesLivres: cleanLivres, codigo, replace })
+  
+  if (replace) {
+    // LIMPAR todos os vínculos e inserir exatamente os informados
+    const { error: deleteError } = await supabase
+      .from('comanda_clientes')
+      .delete()
+      .eq('comanda_id', comandaId)
+    if (deleteError) {
+      console.warn('[adicionarClientesAComanda] Erro ao limpar clientes existentes:', deleteError)
     }
   }
   
-  for (const nome of (nomesLivres || [])) {
-    const n = (nome || '').trim()
-    if (n) rows.push({ comanda_id: comandaId, nome_livre: n })
+  const rows = []
+  
+  // Iterar sobre cleanIds de forma segura (evitar duplicar quando replace=false)
+  if (Array.isArray(cleanIds)) {
+    // Se não vamos substituir, buscar existentes para pular duplicatas
+    let existentes = []
+    if (!replace) {
+      try {
+        const { data } = await supabase
+          .from('comanda_clientes')
+          .select('cliente_id, nome_livre')
+          .eq('comanda_id', comandaId)
+        existentes = Array.isArray(data) ? data : []
+      } catch {}
+    }
+    const existSet = new Set((existentes || []).map(x => x.cliente_id).filter(Boolean))
+    for (let i = 0; i < cleanIds.length; i++) {
+      const id = cleanIds[i]
+      if (!id) continue
+      if (!replace && existSet.has(id)) continue
+      rows.push({ comanda_id: comandaId, cliente_id: id })
+    }
+  }
+  
+  // Iterar sobre cleanLivres de forma segura
+  if (Array.isArray(cleanLivres)) {
+    // Quando replace=false, não há como checar duplicidade de nome_livre de forma inequívoca
+    // então apenas insere nomes válidos; cabe ao chamador evitar duplicidade se necessário.
+    for (let i = 0; i < cleanLivres.length; i++) {
+      const nome = cleanLivres[i]
+      const n = (nome || '').trim()
+      if (n) rows.push({ comanda_id: comandaId, nome_livre: n })
+    }
   }
   
   if (rows.length === 0) {
-    console.log(`[adicionarClientesAComanda] Nenhum cliente novo para adicionar`)
+    console.log(`[adicionarClientesAComanda] Nenhum cliente para adicionar`)
     return true
   }
   
-  const payload = rows.map(r => (codigo ? { ...r, codigo_empresa: codigo } : r))
+  let payload = []
+  if (Array.isArray(rows)) {
+    payload = rows.map(r => (codigo ? { ...r, codigo_empresa: codigo } : r))
+  }
   console.log(`[adicionarClientesAComanda] Payload para inserção:`, payload)
   
   const { error } = await supabase.from('comanda_clientes').insert(payload)
@@ -1811,11 +1850,11 @@ export async function listarClientesDaComanda({ comandaId, codigoEmpresa } = {})
   try {
     const { data, error } = await supabase
       .from('comanda_clientes')
-      .select('id, cliente_id, nome_livre, clientes:clientes!comanda_clientes_cliente_id_fkey(id, nome, email, telefone)')
+      .select('id, cliente_id, nome_livre, clientes:clientes!comanda_clientes_cliente_id_fkey(id, codigo, nome, email, telefone)')
       .eq('comanda_id', comandaId)
       .order('created_at', { ascending: true })
     if (error) throw error
-    return (data || []).map(r => ({ id: r.id, tipo: r.cliente_id ? 'cadastrado' : 'comum', nome: r.clientes?.nome || r.nome_livre, cliente_id: r.cliente_id }))
+    return (data || []).map(r => ({ id: r.id, tipo: r.cliente_id ? 'cadastrado' : 'livre', nome: r.clientes?.nome || r.nome_livre, cliente_id: r.cliente_id }))
   } catch (e1) {
     // Se for ambiguidade (PGRST201) ou relação não encontrada, tenta relacionamento alternativo
     try {
@@ -1825,7 +1864,7 @@ export async function listarClientesDaComanda({ comandaId, codigoEmpresa } = {})
         .eq('comanda_id', comandaId)
         .order('created_at', { ascending: true })
       if (error) throw error
-      return (data || []).map(r => ({ id: r.id, tipo: r.cliente_id ? 'cadastrado' : 'comum', nome: r.clientes?.nome || r.nome_livre, cliente_id: r.cliente_id }))
+      return (data || []).map(r => ({ id: r.id, tipo: r.cliente_id ? 'cadastrado' : 'livre', nome: r.clientes?.nome || r.nome_livre, cliente_id: r.cliente_id }))
     } catch (e2) {
       // Último fallback: retornar sem embed (evita quebrar UI)
       const { data, error } = await supabase
@@ -1834,7 +1873,7 @@ export async function listarClientesDaComanda({ comandaId, codigoEmpresa } = {})
         .eq('comanda_id', comandaId)
         .order('created_at', { ascending: true })
       if (error) throw error
-      return (data || []).map(r => ({ id: r.id, tipo: r.cliente_id ? 'cadastrado' : 'comum', nome: r.nome_livre || '', cliente_id: r.cliente_id }))
+      return (data || []).map(r => ({ id: r.id, tipo: r.cliente_id ? 'cadastrado' : 'livre', nome: r.nome_livre || '', cliente_id: r.cliente_id }))
     }
   }
 }

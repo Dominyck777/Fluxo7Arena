@@ -4,17 +4,32 @@
 		<meta charset="UTF-8" />
 		<link rel="icon" type="image/x-icon" href="/logof7.ico" />
 		<meta name="generator" content="Fluxo7 Arena" />
-		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+		<meta name="screen-orientation" content="portrait" />
 		<title>F7 Arena</title>
 		
 		<!-- PWA Manifest -->
 		<link rel="manifest" href="/manifest.json" />
 		
 		<!-- PWA Meta Tags -->
-		<meta name="theme-color" content="#0a0a0a" />
+		<meta name="theme-color" content="#FFAA33" />
+		<meta name="mobile-web-app-capable" content="yes" />
+		<meta name="application-name" content="F7 Arena" />
+		
+		<!-- Apple iOS -->
 		<meta name="apple-mobile-web-app-capable" content="yes" />
 		<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 		<meta name="apple-mobile-web-app-title" content="F7 Arena" />
+		<link rel="apple-touch-icon" href="/logof7.png" />
+		
+		<!-- Microsoft -->
+		<meta name="msapplication-TileColor" content="#0a0a0a" />
+		<meta name="msapplication-TileImage" content="/logof7.png" />
+		<meta name="msapplication-config" content="none" />
+		
+		<!-- Android Chrome -->
+		<meta name="theme-color" media="(prefers-color-scheme: light)" content="#FFAA33" />
+		<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0a0a0a" />
 		
 		<!-- Splash Screen Background -->
 		<style>
@@ -27,8 +42,8 @@
 				min-height: 100vh;
 			}
 		</style>
-		<script type="module" crossorigin src="/assets/index-1c6dd225.js"></script>
-		<link rel="stylesheet" href="/assets/index-1e56e179.css">
+		<script type="module" crossorigin src="/assets/index-ade3554f.js"></script>
+		<link rel="stylesheet" href="/assets/index-9b77b2d7.css">
 		<script type="module">
   window.onerror = (message, source, lineno, colno, errorObj) => {
     const errorDetails = errorObj ? JSON.stringify({

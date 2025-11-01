@@ -12,13 +12,15 @@ function mapDbToUi(row) {
     price: Number(row.valor_venda ?? row.preco_venda ?? 0),
     stock: Number(row.estoque ?? row.estoque_atual ?? 0),
     minStock: Number(row.estoque_minimo ?? 0),
-    // Respeita status do banco se existir; senão, deriva pelo estoque
+    // Respeita status do banco se existir; senão, deriva pelo estoque e active flag
     status: row.status ?? (
-      Number(row.estoque ?? 0) === 0
+      (row.ativo === false)
         ? 'inactive'
-        : (Number(row.estoque ?? 0) > 0 && Number(row.estoque ?? 0) <= Number(row.estoque_minimo ?? 0))
-          ? 'low_stock'
-          : 'active'
+        : (Number(row.estoque ?? 0) === 0)
+          ? 'inactive'
+          : (Number(row.estoque ?? 0) > 0 && Number(row.estoque ?? 0) <= Number(row.estoque_minimo ?? 0))
+            ? 'low_stock'
+            : 'active'
     ),
     validade: row.validade ? new Date(row.validade) : null,
 

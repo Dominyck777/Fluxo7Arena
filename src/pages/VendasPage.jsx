@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { DragDropContext, Droppable, Draggable } from 'react-beautiful-dnd';
 import { Button } from '@/components/ui/button';
 import { useToast } from "@/components/ui/use-toast";
-import { Plus, GripVertical, Search, CheckCircle, Clock, FileText, ShoppingBag, Trash2, DollarSign, X, Store, Lock, Unlock, Minus, Banknote, ArrowDownCircle, ArrowUpCircle, CalendarDays, Users, ChevronRight, AlertCircle } from 'lucide-react';
+import { Plus, GripVertical, Search, CheckCircle, Clock, FileText, ShoppingBag, Trash2, DollarSign, X, Store, Lock, Unlock, Minus, Banknote, ArrowDownCircle, ArrowUpCircle, CalendarDays, Users, ChevronRight, AlertCircle, Edit } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -62,6 +62,21 @@ function VendasPage() {
   const [isCounterModeOpen, setIsCounterModeOpen] = useState(false);
   const [counterOrder, setCounterOrder] = useState([]);
   const [isCashierDetailsOpen, setIsCashierDetailsOpen] = useState(false);
+  // Refs para Produtos (atalhos)
+  const productsSearchRef = useRef(null);
+  const productsListRef = useRef(null);
+  const productItemRefs = useRef([]);
+  // Ref para busca no balcão (Counter)
+  const counterSearchRef = useRef(null);
+  const [productFocusIndex, setProductFocusIndex] = useState(0);
+  // Sistema de foco: 'tables' ou 'panel' (comanda/produtos)
+  const [focusContext, setFocusContext] = useState('tables');
+  const orderPanelRef = useRef(null);
+  // Aba selecionada no painel lateral (desktop)
+  const [desktopTab, setDesktopTab] = useState('order');
+  // Controle de hover para evitar flicker ao pré-selecionar mesa
+  const hoverSelectTimeoutRef = useRef(null);
+  const hoverSelectTargetRef = useRef(null);
   const [cashLoading, setCashLoading] = useState(false);
   const [cashSummary, setCashSummary] = useState(null);
   // Detalhes de produto (como no Balcão)
@@ -72,9 +87,8 @@ function VendasPage() {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(false);
   // Abrir mesa
+  const [isCreateTableDialog, setIsCreateTableDialog] = useState(false);
   const [isOpenTableDialog, setIsOpenTableDialog] = useState(false);
-  // Criar mesa (modal)
-  const [isCreateMesaOpen, setIsCreateMesaOpen] = useState(false);
   const [pendingTable, setPendingTable] = useState(null);
   const [clienteNome, setClienteNome] = useState('');
   // Pagamento
@@ -94,6 +108,7 @@ function VendasPage() {
   const [isMobileModalOpen, setIsMobileModalOpen] = useState(false);
   // Controlar aba ativa do modal mobile para evitar reset ao re-render
   const [mobileTableTab, setMobileTableTab] = useState('order');
+  // Removido productsKeyModeRef - causava bloqueio total das setas
   // Alerta compacto no mobile
   const [mobileWarnOpen, setMobileWarnOpen] = useState(false);
   const [mobileWarnMsg, setMobileWarnMsg] = useState('');
@@ -101,11 +116,129 @@ function VendasPage() {
   const [isMobileView, setIsMobileView] = useState(() => {
     try { return typeof window !== 'undefined' && window.innerWidth <= 640; } catch { return false; }
   });
+  // Construir mapa de quantidades atuais na comanda
+  const qtyByProductId = useMemo(() => {
+    const map = new Map();
+    const items = selectedTable?.order || [];
+    for (const it of items) map.set(it.productId, (map.get(it.productId) || 0) + Number(it.quantity || 0));
+    return map;
+  }, [selectedTable?.order]);
+
+  // Helpers: alterar quantidade
+  const incProduct = async (prod) => {
+    try {
+      await addProductToComanda(prod);
+    } catch (e) {
+      toast({ title: 'Falha ao adicionar', description: e?.message || 'Tente novamente', variant: 'destructive' });
+    }
+  };
+  const decProduct = async (prod) => {
+    try {
+      const items = selectedTable?.order || [];
+      const it = items.find(x => String(x.productId) === String(prod.id));
+      if (!it) return; // nada para diminuir
+      
+      const newQty = Number(it.quantity || 0) - 1;
+      
+      // Persistir no backend PRIMEIRO
+      if (newQty > 0) {
+        await atualizarQuantidadeItem({ itemId: it.id, quantidade: newQty, codigoEmpresa: userProfile?.codigo_empresa });
+      } else {
+        await removerItem({ itemId: it.id, codigoEmpresa: userProfile?.codigo_empresa });
+      }
+      
+      // Recarregar itens do backend para sincronizar
+      const itens = await listarItensDaComanda({ comandaId: selectedTable.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
+      const order = (itens || []).map((it) => ({ 
+        id: it.id, 
+        productId: it.produto_id, 
+        name: it.descricao || 'Item', 
+        price: Number(it.preco_unitario || 0), 
+        quantity: Number(it.quantidade || 1) 
+      }));
+      const syncedTotal = (order || []).reduce((acc, it) => acc + Number(it.price || 0) * Number(it.quantity || 0), 0);
+      
+      const updatedTable = { ...selectedTable, order, totalHint: syncedTotal };
+      setSelectedTable(updatedTable);
+      setTables((prevTables) => prevTables.map(t => (t.id === updatedTable.id ? updatedTable : t)));
+    } catch (e) {
+      toast({ title: 'Falha ao alterar quantidade', description: e?.message || 'Tente novamente', variant: 'destructive' });
+    }
+  };
+  // Ref do grid desktop para calcular colunas e fazer scroll até a mesa selecionada
+  const gridRef = useRef(null);
+  const getGridColumns = useCallback(() => {
+    try {
+      const el = gridRef.current;
+      if (!el) return 1;
+      const style = window.getComputedStyle(el);
+      const cols = style.gridTemplateColumns || '';
+      if (cols) {
+        const count = cols.split(' ').filter(Boolean).length;
+        if (count > 0) return count;
+      }
+      // Fallback: calcular por largura do grid e do primeiro card
+      const first = el.querySelector('[data-table-id]');
+      if (first) {
+        const colWidth = first.getBoundingClientRect().width;
+        const gridWidth = el.getBoundingClientRect().width;
+        if (colWidth > 0) return Math.max(1, Math.floor(gridWidth / colWidth));
+      }
+      return 1;
+    } catch { return 1; }
+  }, []);
   const [loadingItems, setLoadingItems] = useState(false);
   const location = useLocation();
   const firstAvailableId = useMemo(() => (tables || []).find(t => t.status === 'available')?.id || null, [tables]);
   // Evita movimentação do layout quando diálogos estão abertos (bloqueia scroll do fundo)
-  const anyDialogOpen = isCreateMesaOpen || isOpenTableDialog || isOrderDetailsOpen || isCashierDetailsOpen || isPayOpen || openCashDialogOpen || isCounterModeOpen || isProductDetailsOpen || isMobileModalOpen || false;
+  const anyDialogOpen = isCreateTableDialog || isOpenTableDialog || isOrderDetailsOpen || isCashierDetailsOpen || isPayOpen || openCashDialogOpen || isCounterModeOpen || isProductDetailsOpen || isMobileModalOpen || false;
+
+  // Selecionar/abrir mesa (usado por clique e pelo Enter)
+  const handleSelectTable = async (table) => {
+    try {
+      if (!table) return;
+      if (!isCashierOpen) {
+        toast({ title: 'Caixa Fechado', description: 'Abra o caixa antes de gerenciar as mesas.', variant: 'warning' });
+        return;
+      }
+      if (isSelectingTable) return;
+      setIsSelectingTable(true);
+      // Atualiza seleção atual imediatamente para feedback visual
+      setSelectedTable((prev) => {
+        if (!prev || prev.id !== table.id) return table;
+        return prev;
+      });
+
+      // Se mesa está disponível, abrir diálogo de abrir mesa
+      if (table.status === 'available' || !table.comandaId) {
+        setPendingTable(table);
+        setIsOpenTableDialog(true);
+        return;
+      }
+
+      // Mesa com comanda: hidratar itens e clientes
+      try {
+        await refetchSelectedTableDetails(table);
+      } catch (e) {
+        // Fallback manual em caso de erro no helper
+        try {
+          const itens = await listarItensDaComanda({ comandaId: table.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
+          const order = (itens || []).map((it) => ({ id: it.id, productId: it.produto_id, name: it.descricao || 'Item', price: Number(it.preco_unitario || 0), quantity: Number(it.quantidade || 1) }));
+          let customer = null;
+          try {
+            const vincs = await listarClientesDaComanda({ comandaId: table.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
+            const nomes = (vincs || []).map(v => v?.nome).filter(Boolean);
+            customer = nomes.length ? nomes.join(', ') : null;
+          } catch {}
+          const enriched = { ...table, order, customer };
+          setSelectedTable(enriched);
+          setTables((prev) => prev.map((t) => (t.id === enriched.id ? enriched : t)));
+        } catch {}
+      }
+    } finally {
+      setIsSelectingTable(false);
+    }
+  };
 
   useEffect(() => {
     const update = () => {
@@ -120,11 +253,36 @@ function VendasPage() {
   useEffect(() => {
     const handler = async (e) => {
       try {
-        // Ignorar quando um dialog está aberto
-        if (anyDialogOpen) return;
         // Ignorar quando digitando em campos de texto
         const tag = String(e.target?.tagName || '').toLowerCase();
-        if (['input','textarea','select'].includes(tag) || e.target?.isContentEditable) return;
+        const isInInput = ['input','textarea','select'].includes(tag) || e.target?.isContentEditable;
+        
+        // Se está em input, ignorar navegação (exceto atalho P para balcão)
+        if (isInInput) {
+          if ((e.key === 'p' || e.key === 'P') && isCounterModeOpen) {
+            e.preventDefault();
+            setTimeout(() => { try { counterSearchRef.current?.focus(); } catch {} }, 0);
+          }
+          return;
+        }
+        
+        // Ignorar quando um dialog modal está aberto (não listbox de produtos)
+        const isInDialog = e.target?.closest('[role="dialog"]');
+        if (anyDialogOpen && isInDialog) {
+          if ((e.key === 'p' || e.key === 'P') && isCounterModeOpen) {
+            e.preventDefault();
+            setTimeout(() => { try { counterSearchRef.current?.focus(); } catch {} }, 0);
+            return;
+          }
+          return;
+        }
+        
+        // Se o foco está na lista de produtos (role="listbox"), ignorar TODAS as teclas no handler global
+        const isInListbox = e.target?.closest('[role="listbox"]');
+        if (isInListbox) {
+          return;
+        }
+        
         if (e.repeat) return;
 
         // F1: Selecionar 1ª mesa disponível e abrir (OpenTableDialog)
@@ -167,11 +325,134 @@ function VendasPage() {
           setIsCashierDetailsOpen(true);
           return;
         }
+
+        // Navegação por setas entre mesas (desktop) - SOMENTE se focusContext === 'tables'
+        if (['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key)) {
+          // CRÍTICO: Só processar se focusContext === 'tables' E há mesa selecionada
+          if (focusContext !== 'tables') {
+            return;
+          }
+          if (!selectedTable || !Array.isArray(tables) || tables.length === 0) {
+            return;
+          }
+          e.preventDefault();
+          e.stopPropagation();
+          let idx = Math.max(0, tables.findIndex(t => t.id === selectedTable?.id));
+          if (idx < 0) idx = 0;
+          // Detectar colunas reais do grid pela primeira linha
+          let cols = getGridColumns();
+          let nextIdx = idx;
+          if (e.key === 'ArrowRight') nextIdx = idx + 1;
+          if (e.key === 'ArrowLeft') nextIdx = idx - 1;
+          if (e.key === 'ArrowDown') nextIdx = idx + cols;
+          if (e.key === 'ArrowUp') nextIdx = idx - cols;
+          // Wrap-around com aritmética modular
+          const n = tables.length;
+          nextIdx = ((nextIdx % n) + n) % n;
+          const next = tables[nextIdx];
+          if (next && next.id !== selectedTable?.id) {
+            setSelectedTable(next);
+            // rolar até a mesa selecionada no grid
+            setTimeout(() => {
+              try {
+                const el = document.querySelector(`[data-table-id="${next.id}"]`);
+                el?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
+              } catch {}
+            }, 0);
+          }
+          return;
+        }
+        // Enter: abrir/selecionar mesa atual (desktop) - SOMENTE se focusContext === 'tables'
+        if (e.key === 'Enter') {
+          if (focusContext !== 'tables') {
+            return;
+          }
+          e.preventDefault();
+          e.stopPropagation();
+          if (selectedTable && !isSelectingTable) {
+            await handleSelectTable(selectedTable);
+          }
+          return;
+        }
+        // Escape: navegação reversa (Produtos -> Comanda -> Desselecionar Mesa)
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          // Se estiver na aba Produtos, volta para Comanda
+          if (selectedTable && (desktopTab === 'products' || mobileTableTab === 'products')) {
+            setDesktopTab('order');
+            setMobileTableTab('order');
+            return;
+          }
+          // Se estiver na aba Comanda (ou qualquer outra), desseleciona a mesa
+          if (selectedTable) {
+            setSelectedTable(null);
+            return;
+          }
+          return;
+        }
+        // P: focar Produtos (busca) quando houver mesa selecionada
+        if (e.key === 'p' || e.key === 'P') {
+          e.preventDefault();
+          // Prioridade 1: se Modo Balcão estiver aberto, focar a busca do balcão
+          if (isCounterModeOpen) {
+            setTimeout(() => {
+              try { counterSearchRef.current?.focus(); } catch {}
+            }, 0);
+            return;
+          }
+          // Prioridade 2: mesa selecionada -> focar busca de produtos da comanda
+          if (selectedTable) {
+            // No mobile, se houver modal com tabs, tentar ir para aba de produtos
+            try { setMobileTableTab?.('products'); } catch {}
+            // No desktop, mudar Tabs laterais para 'products'
+            try { setDesktopTab('products'); } catch {}
+            setFocusContext('panel');
+            setTimeout(() => {
+              try {
+                // Focar na lista de produtos ao invés do input
+                if (productsListRef.current) {
+                  productsListRef.current.focus();
+                  setProductFocusIndex(0);
+                }
+              } catch {}
+            }, 100);
+            return;
+          }
+          // Prioridade 3: sem mesa e balcão fechado -> abrir Modo Balcão e focar a busca
+          setIsCounterModeOpen(true);
+          setTimeout(() => {
+            try { counterSearchRef.current?.focus(); } catch {}
+          }, 50);
+          return;
+        }
       } catch {}
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [anyDialogOpen, selectedTable?.comandaId, tables]);
+  }, [anyDialogOpen, selectedTable?.id, tables, getGridColumns]);
+
+
+  // Persistir mesa selecionada por empresa
+  useEffect(() => {
+    try {
+      if (selectedTable?.id && userProfile?.codigo_empresa) {
+        localStorage.setItem(`vendas:selected:${userProfile.codigo_empresa}`, String(selectedTable.id));
+      }
+    } catch {}
+  }, [selectedTable?.id, userProfile?.codigo_empresa]);
+
+  // Restaurar mesa selecionada quando as mesas carregarem
+  useEffect(() => {
+    try {
+      if (!selectedTable && userProfile?.codigo_empresa && Array.isArray(tables) && tables.length > 0) {
+        const sid = localStorage.getItem(`vendas:selected:${userProfile.codigo_empresa}`);
+        if (sid) {
+          const t = tables.find(x => String(x.id) === String(sid));
+          if (t) setSelectedTable(t);
+        }
+      }
+    } catch {}
+  }, [tables, selectedTable, userProfile?.codigo_empresa]);
 
   // (moved) anyDialogOpen declarado acima
   // Animações desativadas
@@ -316,13 +597,13 @@ function VendasPage() {
           const c = byMesa.get(m.id);
           let status = mapStatus(m.status);
           let comandaId = null;
-          let totalHint = 0;
           let customer = null;
+          let totalHint = 0;
           if (c) {
             status = (c.status === 'awaiting-payment' || c.status === 'awaiting_payment') ? 'awaiting-payment' : 'in-use';
             comandaId = c.id;
-            totalHint = Number(totals[c.id] || 0);
             customer = namesByComanda[c.id] || null;
+            totalHint = totals[c.id] || 0;
           }
           return { id: m.id, number: m.numero, name: m.nome || null, status, order: [], customer, comandaId, totalHint };
         });
@@ -530,21 +811,11 @@ function VendasPage() {
     return `${truncateClientName(names[0])} +${names.length - 1}`;
   };
 
-  const qtyByProductId = useMemo(() => {
-    const map = new Map();
-    const order = selectedTable?.order || [];
-    for (const it of order) {
-      const pid = it.productId;
-      if (!pid) continue;
-      map.set(pid, (map.get(pid) || 0) + Number(it.quantity || 0));
-    }
-    return map;
-  }, [selectedTable?.order]);
-
   // Utilitário: recarrega os detalhes (itens e clientes) da 'selectedTable'
   const refetchSelectedTableDetails = async (target) => {
     try {
       if (!target?.comandaId) return;
+      console.log('[refetchSelectedTableDetails] Recarregando mesa:', target.id);
       const itens = await listarItensDaComanda({ comandaId: target.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
       const order = (itens || []).map((it) => ({ id: it.id, productId: it.produto_id, name: it.descricao || 'Item', price: Number(it.preco_unitario || 0), quantity: Number(it.quantidade || 1) }));
       let customer = target.customer || null;
@@ -552,6 +823,7 @@ function VendasPage() {
         const vinculos = await listarClientesDaComanda({ comandaId: target.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
         const nomes = (vinculos || []).map(v => v?.nome).filter(Boolean);
         customer = nomes.length ? nomes.join(', ') : null;
+        console.log('[refetchSelectedTableDetails] Clientes atualizados:', customer);
       } catch {}
       const enriched = { ...target, status: target.status === 'awaiting-payment' ? 'awaiting-payment' : 'in-use', order, customer };
       setSelectedTable(enriched);
@@ -655,86 +927,24 @@ function VendasPage() {
     }
   };
 
-  const handleSelectTable = async (table) => {
-    if (isSelectingTable) return;
-    setIsSelectingTable(true);
-    setLoadingItems(true);
-    try {
-      const previous = selectedTable;
-      if (table.comandaId) {
-        // VERIFICAR se a comanda ainda está ativa antes de carregar dados
-        try {
-          const { data: comandaAtual, error } = await supabase
-            .from('comandas')
-            .select('id, status, fechado_em')
-            .eq('id', table.comandaId)
-            .eq('codigo_empresa', userProfile?.codigo_empresa)
-            .single();
-            
-          if (error || !comandaAtual || comandaAtual.fechado_em || comandaAtual.status === 'closed') {
-            setLoadingItems(false);
-            React.startTransition(() => {
-              setPendingTable(table);
-              setIsOpenTableDialog(true);
-            });
-            return;
-          }
-          
-          // Só carregar dados se comanda estiver realmente ativa
-          const itens = await listarItensDaComanda({ comandaId: table.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
-          const order = (itens || []).map((it) => ({ id: it.id, name: it.descricao || 'Item', price: Number(it.preco_unitario || 0), quantity: Number(it.quantidade || 1) }));
-          
-          let customer = null;
-          try {
-            const vinculos = await listarClientesDaComanda({ comandaId: table.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
-            const nomes = (vinculos || []).map(v => v?.nome).filter(Boolean);
-            customer = nomes.length ? nomes.join(', ') : null;
-          } catch (err) {
-            console.error(`[handleSelectTable] Erro ao carregar clientes:`, err);
-          }
-          
-          const enriched = { ...table, status: 'in-use', order, customer };
-          React.startTransition(() => {
-            setSelectedTable(enriched);
-            setTables((prev) => prev.map((t) => (t.id === table.id ? enriched : t)));
-            setLoadingItems(false);
-          });
-          
-        } catch (err) {
-          console.error(`[handleSelectTable] Erro ao verificar comanda:`, err);
-          setLoadingItems(false);
-          React.startTransition(() => {
-            setPendingTable(table);
-            setIsOpenTableDialog(true);
-          });
-        }
-      } else {
-        // não abrir automaticamente; solicitar abertura
-        setLoadingItems(false);
-        React.startTransition(() => {
-          setPendingTable(table);
-          setIsOpenTableDialog(true);
-        });
-      }
-    } catch (e) {
-      setLoadingItems(false);
-      toast({ title: 'Falha ao carregar comanda da mesa', description: e?.message || 'Tente novamente', variant: 'destructive' });
-      // restaura seleção anterior em caso de erro
-      setSelectedTable((prev) => prev || previous || null);
-    } finally {
-      setIsSelectingTable(false);
-    }
-  };
-
   const TableCard = ({ table, provided, isDragging }) => {
     const config = statusConfig[table.status];
     const Icon = config.icon;
-    const total = calculateTotal(table.order);
+    // Calcular total considerando itens otimizados (temporários) somados ao hint
+    const orderArr = Array.isArray(table.order) ? table.order : [];
+    const optimisticExtra = orderArr
+      .filter(it => String(it.id || '').startsWith('tmp-'))
+      .reduce((acc, it) => acc + Number(it.quantity || 0) * Number(it.price || 0), 0);
+    const persistedTotal = orderArr
+      .filter(it => !String(it.id || '').startsWith('tmp-'))
+      .reduce((acc, it) => acc + Number(it.quantity || 0) * Number(it.price || 0), 0);
+    const hintTotal = Number(table.totalHint || 0);
+    const total = Math.max(persistedTotal, 0); // mantemos para compatibilidade
     const customerDisplay = formatClientDisplay(table.customer);
     const isFirstAvailable = table.status === 'available' && table.id === firstAvailableId;
 
     const displayTotal = (table.status === 'in-use' || table.status === 'awaiting-payment')
-      ? (total > 0 ? total : Number(table.totalHint || 0))
+      ? ((hintTotal > 0 ? hintTotal : persistedTotal) + optimisticExtra)
       : 0;
     const badgeClass = table.status === 'available'
       ? 'text-success bg-success/10 border-success/30'
@@ -743,13 +953,14 @@ function VendasPage() {
         : 'text-info bg-info/10 border-info/30');
     return (
       <div
-        ref={provided.innerRef}
-        {...provided.draggableProps}
+        ref={provided?.innerRef}
+        data-table-id={table.id}
+        {...(provided?.draggableProps || {})}
         className={cn(
-          "p-4 rounded-lg border bg-surface flex flex-col transition-colors duration-150 relative h-44 shadow-sm min-w-[240px]",
+          "p-4 rounded-lg border bg-surface flex flex-col relative h-44 shadow-sm min-w-[240px]",
           isDragging && 'shadow-lg',
-          selectedTable?.id === table.id && 'ring-2 ring-brand/60 bg-surface-2',
-          isCashierOpen ? 'cursor-pointer hover:shadow-md' : 'cursor-not-allowed opacity-60'
+          focusContext === 'tables' && selectedTable?.id === table.id && 'ring-2 ring-brand/60 bg-surface-2',
+          isCashierOpen ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'
         )}
         onClick={() => {
           if (!isCashierOpen) {
@@ -763,7 +974,7 @@ function VendasPage() {
           handleSelectTable(table);
         }}
       >
-        <div {...provided.dragHandleProps} className="absolute top-2 right-2 text-text-muted opacity-60 hover:opacity-100">
+        <div {...(provided?.dragHandleProps || {})} className="absolute top-2 right-2 text-text-muted opacity-60 hover:opacity-100">
           <GripVertical size={14} />
         </div>
         <div className="flex items-center gap-2 mb-2">
@@ -788,8 +999,8 @@ function VendasPage() {
               src="/mesalivre.png" 
               alt="Mesa livre" 
               className={cn(
-                "w-16 h-16 object-contain opacity-80 transition-all duration-200",
-                selectedTable?.id === table.id && "opacity-100 scale-110"
+                "w-16 h-16 object-contain opacity-80",
+                selectedTable?.id === table.id && "opacity-100"
               )}
             />
           ) : table.status === 'in-use' ? (
@@ -797,14 +1008,14 @@ function VendasPage() {
               src="/mesaocupada.png" 
               alt="Mesa ocupada" 
               className={cn(
-                "w-16 h-16 object-contain opacity-80 transition-all duration-200",
-                selectedTable?.id === table.id && "opacity-100 scale-110"
+                "w-16 h-16 object-contain opacity-80",
+                selectedTable?.id === table.id && "opacity-100"
               )}
             />
           ) : (
             <div className={cn(
-              "w-16 h-16 rounded-lg bg-info/20 border-2 border-info/40 flex items-center justify-center transition-all duration-200",
-              selectedTable?.id === table.id && "bg-info/30 border-info/60 scale-110"
+              "w-16 h-16 rounded-lg bg-info/20 border-2 border-info/40 flex items-center justify-center",
+              selectedTable?.id === table.id && "bg-info/30 border-info/60"
             )}>
               <FileText className="w-8 h-8 text-info" />
             </div>
@@ -904,8 +1115,12 @@ function VendasPage() {
             const vinc = await listarClientesDaComanda({ comandaId: selectedTable.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
             const arr = Array.isArray(vinc) ? vinc : [];
             normalized = arr.map(r => {
-              const id = r?.cliente_id ?? r?.clientes?.id ?? null;
+              const id = r?.cliente_id ?? r?.clientes?.id ?? r?.id ?? null;
               const nome = r?.clientes?.nome ?? r?.nome ?? r?.nome_livre ?? '';
+              // Incluir consumidores (nome_livre) mesmo sem cliente_id
+              if (!id && nome) {
+                return { id: `livre-${r?.id || Math.random()}`, nome };
+              }
               return id ? { id, nome } : null;
             }).filter(Boolean);
           } catch { normalized = []; }
@@ -919,7 +1134,7 @@ function VendasPage() {
           // auto-preencher SEMPRE com o valor total (independente de quantos clientes)
           try {
             const itens = await listarItensDaComanda({ comandaId: selectedTable.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
-            const total = (itens || []).reduce((acc, it) => acc + Number(it.quantidade || 0) * Number(it.preco_unitario || 0), 0);
+            const total = (itens || []).reduce((acc, it) => acc + Number(it.quantidade||0) * Number(it.preco_unitario||0), 0);
             if (total > 0) {
               initialValue = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(total);
             }
@@ -930,7 +1145,9 @@ function VendasPage() {
           const shown = ln0.chargeFee ? (base * (1 + t0)) : base;
           setPaymentLines([{ ...ln0, value: formatBRL(shown) }]);
           setNextPayLineId(2);
-        } catch {}
+        } catch (e) {
+          console.error(e);
+        }
       };
       boot();
       return () => { active = false; };
@@ -1368,7 +1585,6 @@ function VendasPage() {
             <DialogTitle className="text-2xl font-bold">Detalhes do Caixa</DialogTitle>
             <DialogDescription>Resumo da sessão atual do caixa.</DialogDescription>
           </DialogHeader>
-          {/* Conteúdo resumido abaixo do header para evitar erros de marcação */}
           {showSkeleton || !cashSummary ? (
             <div className="px-4 space-y-3">
               <Skeleton className="h-16 w-full" />
@@ -1480,7 +1696,9 @@ function VendasPage() {
                       <div className="font-medium truncate">{it.name}</div>
                       <div className="text-xs text-text-muted">Qtd: {it.quantity} • Unit: R$ {Number(it.price || 0).toFixed(2)}</div>
                     </div>
-                    <div className="font-semibold">R$ {(Number(it.price || 0) * Number(it.quantity || 0)).toFixed(2)}</div>
+                    <div className="flex items-center gap-2">
+                      <div className="font-semibold">R$ {(Number(it.price || 0) * Number(it.quantity || 0)).toFixed(2)}</div>
+                    </div>
                   </li>
                 ))}
               </ul>
@@ -1501,7 +1719,10 @@ function VendasPage() {
 
   const OrderPanel = ({ table }) => {
     if (!table) return (
-      <div className="flex items-center justify-center h-full text-text-muted">
+      <div 
+        className="flex items-center justify-center h-full text-text-muted"
+        onClick={() => setFocusContext('panel')}
+      >
         <div className="text-center">
           <ShoppingBag className="mx-auto mb-4 h-12 w-12 opacity-50" />
           <p>Selecione uma mesa para ver a comanda</p>
@@ -1510,14 +1731,24 @@ function VendasPage() {
     );
     
     if (loadingItems) return (
-      <div className="flex flex-col h-full p-4 space-y-3">
-        <Skeleton className="h-8 w-3/4" />
-        <Skeleton className="h-20 w-full" />
-        <Skeleton className="h-20 w-full" />
-        <Skeleton className="h-20 w-full" />
-        <div className="mt-auto space-y-2">
-          <Skeleton className="h-12 w-full" />
-          <Skeleton className="h-12 w-full" />
+      <div className="flex flex-col h-full">
+        <div className="p-3 border-b border-border flex items-center justify-between gap-2">
+          <div className="h-0 w-0" aria-hidden="true" />
+          <div className="flex items-center gap-2">
+            <Button size="sm" className="h-7 px-2.5 rounded-full text-[12px] font-medium leading-none whitespace-nowrap" disabled={!isCashierOpen} onClick={() => { if (!isCashierOpen) { toast({ title: 'Caixa Fechado', description: 'Abra o caixa antes de abrir uma mesa.', variant: 'warning' }); return; } setPendingTable(table); setIsOpenTableDialog(true); }}>Abrir Mesa</Button>
+          </div>
+        </div>
+        <div className="flex-1 overflow-y-auto p-4 thin-scroll">
+          <Skeleton className="h-20 w-full" />
+          <Skeleton className="h-20 w-full" />
+          <Skeleton className="h-20 w-full" />
+        </div>
+        <div className="p-4 border-t border-border mt-auto">
+          <div className="flex justify-between items-center text-sm font-semibold text-text-secondary mb-2">
+            <span>Total</span>
+            <span>R$ 0,00</span>
+          </div>
+          <Button size="lg" className="w-full" disabled={!isCashierOpen}>Fechar Conta</Button>
         </div>
       </div>
     );
@@ -1528,6 +1759,7 @@ function VendasPage() {
       if (!table?.comandaId) return;
       const itens = await listarItensDaComanda({ comandaId: table.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
       const order = (itens || []).map((it) => ({ id: it.id, productId: it.produto_id, name: it.descricao || 'Item', price: Number(it.preco_unitario || 0), quantity: Number(it.quantidade || 1) }));
+      const syncedTotal = (order || []).reduce((acc, it) => acc + Number(it.price || 0) * Number(it.quantity || 0), 0);
       // refresh customer names to avoid disappearing labels
       let customerName = table.customer || null;
       try {
@@ -1535,7 +1767,7 @@ function VendasPage() {
         const nomes = (vinculos || []).map(v => v?.nome).filter(Boolean);
         customerName = nomes.length ? nomes.join(', ') : null;
       } catch {}
-      const updated = { ...table, order, customer: customerName };
+      const updated = { ...table, order, customer: customerName, totalHint: syncedTotal };
       setSelectedTable(updated);
       setTables((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
     };
@@ -1545,10 +1777,20 @@ function VendasPage() {
         const current = Number(item.quantity || 1);
         const next = current + delta;
         if (next <= 0) {
+          // Ajuste otimista do totalHint (remoção total da linha)
+          const dec = Number(item.price || 0) * Number(item.quantity || 0);
+          setSelectedTable((prev) => prev ? { ...prev, totalHint: Math.max(0, Number(prev.totalHint || 0) - dec) } : prev);
+          setTables((prev) => prev.map(t => t.id === (selectedTable?.id) ? { ...t, totalHint: Math.max(0, Number(t.totalHint || 0) - dec) } : t));
           await removerItem({ itemId: item.id, codigoEmpresa: userProfile?.codigo_empresa });
           await reloadItems();
           toast({ title: 'Item removido', description: item.name, variant: 'warning' });
           return;
+        }
+        // Ajuste otimista do totalHint (delta unidades)
+        const deltaValue = Number(item.price || 0) * Number(delta || 0);
+        if (deltaValue) {
+          setSelectedTable((prev) => prev ? { ...prev, totalHint: Math.max(0, Number(prev.totalHint || 0) + deltaValue) } : prev);
+          setTables((prev) => prev.map(t => t.id === (selectedTable?.id) ? { ...t, totalHint: Math.max(0, Number(t.totalHint || 0) + deltaValue) } : t));
         }
         await atualizarQuantidadeItem({ itemId: item.id, quantidade: next, codigoEmpresa: userProfile?.codigo_empresa });
         await reloadItems();
@@ -1557,9 +1799,12 @@ function VendasPage() {
         toast({ title: 'Falha ao atualizar quantidade', description: e?.message || 'Tente novamente', variant: 'destructive' });
       }
     };
-
     const removeLine = async (item) => {
       try {
+        // Ajuste otimista do totalHint antes de persistir
+        const dec = Number(item.price || 0) * Number(item.quantity || 0);
+        setSelectedTable((prev) => prev ? { ...prev, totalHint: Math.max(0, Number(prev.totalHint || 0) - dec) } : prev);
+        setTables((prev) => prev.map(t => t.id === (selectedTable?.id) ? { ...t, totalHint: Math.max(0, Number(t.totalHint || 0) - dec) } : t));
         await removerItem({ itemId: item.id, codigoEmpresa: userProfile?.codigo_empresa });
         await reloadItems();
         toast({ title: 'Item removido', description: item.name, variant: 'warning' });
@@ -1569,7 +1814,13 @@ function VendasPage() {
     };
     return (
       <>
-        <div className="flex flex-col h-full">
+        <div 
+          className="flex flex-col h-full"
+          onClick={(e) => {
+            e.stopPropagation();
+            setFocusContext('panel');
+          }}
+        >
           <div className="p-3 border-b border-border flex items-center justify-between gap-2">
             {customerDisplay ? (
               <div className="text-sm font-medium text-text-primary leading-none truncate" title={table.customer || ''}>{customerDisplay}</div>
@@ -1725,12 +1976,12 @@ function VendasPage() {
       }
     };
     return (
-      <Dialog open={isCreateMesaOpen} onOpenChange={(open) => { 
-        setIsCreateMesaOpen(open); 
+      <Dialog open={isCreateTableDialog} onOpenChange={(open) => { 
+        setIsCreateTableDialog(open); 
         if (!open) { setNumeroVal(''); setNomeVal(''); }
       }}>
         <DialogContent
-          className="sm:max-w-md w-[92vw] sm:w-[400px]"
+          className="sm:max-w-md w-[92vw]"
           onOpenAutoFocus={(e) => e.preventDefault()}
           onKeyDown={(e) => e.stopPropagation()}
           onKeyDownCapture={(e) => e.stopPropagation()}
@@ -1771,61 +2022,83 @@ function VendasPage() {
   };
 
   const addProductToComanda = async (prod) => {
+    console.log('[addProductToComanda] START - Product:', prod.name);
+    console.log('[addProductToComanda] isCashierOpen:', isCashierOpen);
+    console.log('[addProductToComanda] selectedTable:', selectedTable);
     try {
       if (!isCashierOpen) {
+        console.log('[addProductToComanda] BLOCKED - Caixa fechado');
         toast({ title: 'Caixa Fechado', description: 'Abra o caixa antes de adicionar produtos.', variant: 'warning' });
         return;
       }
       if (!selectedTable?.comandaId) {
+        console.log('[addProductToComanda] BLOCKED - Sem comanda');
         toast({ title: 'Selecione uma mesa', description: 'Abra a comanda clicando na mesa primeiro.', variant: 'destructive' });
         return;
       }
+      
+      // Validar estoque ANTES de adicionar
+      const currentStock = Number(prod.stock ?? prod.currentStock ?? 0);
+      const currentQtyInOrder = (selectedTable?.order || []).find(it => it.productId === prod.id)?.quantity || 0;
+      const newQty = currentQtyInOrder + 1;
+      
+      if (newQty > currentStock) {
+        toast({ 
+          title: 'Estoque insuficiente', 
+          description: `${prod.name} - Estoque disponível: ${currentStock}`, 
+          variant: 'destructive' 
+        });
+        return;
+      }
+      
       const price = Number(prod.salePrice ?? prod.price ?? 0);
-      // 1) Otimista: atualiza UI imediatamente para evitar latência no mobile
-      setSelectedTable((prev) => {
-        const order = Array.isArray(prev?.order) ? [...prev.order] : [];
-        const idx = order.findIndex(it => it.productId === prod.id);
-        if (idx >= 0) {
-          const it = order[idx];
-          order[idx] = { ...it, quantity: Number(it.quantity || 1) + 1 };
-        } else {
-          order.push({ id: `tmp-${Date.now()}`, productId: prod.id, name: prod.name, price, quantity: 1 });
-        }
-        const updated = { ...prev, order };
-        setTables((prevTables) => prevTables.map(t => (prev && t.id === prev.id ? updated : t)));
-        return updated;
-      });
-
-      // 2) Persistência real no backend
+      
+      console.log('[addProductToComanda] Persisting to backend...');
+      // Persistir no backend PRIMEIRO
       const existing = (selectedTable?.order || []).find(it => it.productId === prod.id);
+      let itemResult;
       if (existing) {
         await atualizarQuantidadeItem({ itemId: existing.id, quantidade: Number(existing.quantity || 1) + 1, codigoEmpresa: userProfile?.codigo_empresa });
+        itemResult = { ...existing, quantity: Number(existing.quantity || 1) + 1 };
       } else {
-        await adicionarItem({ comandaId: selectedTable.comandaId, produtoId: prod.id, descricao: prod.name, quantidade: 1, precoUnitario: price, codigoEmpresa: userProfile?.codigo_empresa });
+        itemResult = await adicionarItem({ comandaId: selectedTable.comandaId, produtoId: prod.id, descricao: prod.name, quantidade: 1, precoUnitario: price, codigoEmpresa: userProfile?.codigo_empresa });
       }
-
-      // 3) Recarregar em background para sincronizar ids/quantidades corretas
-      setTimeout(async () => {
-        try {
-          const itens = await listarItensDaComanda({ comandaId: selectedTable.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
-          const order = (itens || []).map((it) => ({ id: it.id, productId: it.produto_id, name: it.descricao || 'Item', price: Number(it.preco_unitario || 0), quantity: Number(it.quantidade || 1) }));
-          setSelectedTable((prev) => {
-            if (!prev) return prev;
-            const updated = { ...prev, order };
-            setTables((prevTables) => prevTables.map(t => (t.id === updated.id ? updated : t)));
-            return updated;
-          });
-        } catch {}
-      }, 0);
-
-      toast({ title: 'Produto adicionado', description: prod.name, variant: 'success' });
+      console.log('[addProductToComanda] Backend persist SUCCESS, reloading items...');
+      
+      // Recarregar itens do backend para sincronizar
+      const itens = await listarItensDaComanda({ comandaId: selectedTable.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
+      const order = (itens || []).map((it) => ({ 
+        id: it.id, 
+        productId: it.produto_id, 
+        name: it.descricao || 'Item', 
+        price: Number(it.preco_unitario || 0), 
+        quantity: Number(it.quantidade || 1) 
+      }));
+      const syncedTotal = (order || []).reduce((acc, it) => acc + Number(it.price || 0) * Number(it.quantity || 0), 0);
+      
+      const updatedTable = { ...selectedTable, order, totalHint: syncedTotal };
+      console.log('[addProductToComanda] UI updated with backend data');
+      setSelectedTable(updatedTable);
+      setTables((prevTables) => prevTables.map(t => (t.id === updatedTable.id ? updatedTable : t)));
     } catch (e) {
+      console.error('[addProductToComanda] EXCEPTION:', e);
       toast({ title: 'Falha ao adicionar produto', description: e?.message || 'Tente novamente', variant: 'destructive' });
     }
+    console.log('[addProductToComanda] END');
   };
 
   const ProductsPanel = () => {
     const [productSearch, setProductSearch] = useState('');
+    // Garantir que item focado fique visível ao navegar por setas
+    useEffect(() => {
+      try {
+        const idx = productFocusIndex || 0;
+        const el = productItemRefs.current?.[idx];
+        if (el && typeof el.scrollIntoView === 'function') {
+          el.scrollIntoView({ block: 'nearest' });
+        }
+      } catch {}
+    }, [productFocusIndex]);
     // Ordenar produtos por código (somente produtos reais do catálogo)
     const sortedProducts = (products || []).slice().sort((a, b) => {
       const codeA = a.code || '';
@@ -1848,17 +2121,224 @@ function VendasPage() {
        <div className="p-4 border-b border-border">
           <div className="relative">
              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted" />
-             <Input id="products-search" placeholder="Buscar produto..." className="pl-9" value={productSearch} onChange={(e) => setProductSearch(e.target.value)} onKeyDown={(e) => e.stopPropagation()} />
+             <input
+               className="pl-8 pr-2 py-2 w-full rounded-md bg-surface text-text-primary border border-border focus-visible:ring-0 focus-visible:border-brand"
+               placeholder="Buscar produto por nome ou código"
+               value={productSearch}
+               onChange={(e) => setProductSearch(e.target.value)}
+               ref={productsSearchRef}
+               onKeyDown={(e) => {
+                 // Capturar teclas de navegação no input de busca
+                 if (['ArrowDown','ArrowUp','Home','End','Enter','Delete','Backspace','Escape'].includes(e.key)) {
+                   e.preventDefault();
+                   e.stopPropagation();
+                   if (e.nativeEvent) {
+                     e.nativeEvent.preventDefault();
+                     e.nativeEvent.stopPropagation();
+                     e.nativeEvent.stopImmediatePropagation();
+                   }
+                   
+                   const idx = productFocusIndex || 0;
+                   const n = filtered.length;
+                   
+                   // Navegação vertical
+                   if (e.key === 'ArrowDown') {
+                     const next = Math.min(idx + 1, n - 1);
+                     setProductFocusIndex(next);
+                     // Focar na lista após navegar
+                     setTimeout(() => { try { productsListRef.current?.focus(); } catch {} }, 0);
+                     return;
+                   }
+                   if (e.key === 'ArrowUp') {
+                     const next = Math.max(idx - 1, 0);
+                     setProductFocusIndex(next);
+                     setTimeout(() => { try { productsListRef.current?.focus(); } catch {} }, 0);
+                     return;
+                   }
+                   if (e.key === 'Home') { 
+                     setProductFocusIndex(0); 
+                     setTimeout(() => { try { productsListRef.current?.focus(); } catch {} }, 0);
+                     return; 
+                   }
+                   if (e.key === 'End') { 
+                     setProductFocusIndex(n - 1); 
+                     setTimeout(() => { try { productsListRef.current?.focus(); } catch {} }, 0);
+                     return; 
+                   }
+                   
+                   // Enter: adicionar produto focado
+                   if (e.key === 'Enter') {
+                     try {
+                       const prod = filtered[idx];
+                       if (prod) addProductToComanda(prod);
+                       productsListRef.current?.focus();
+                     } catch {}
+                     return;
+                   }
+                   // Delete/Backspace: remover produto focado
+                   if (e.key === 'Delete' || e.key === 'Backspace') {
+                     try {
+                       const prod = filtered[idx];
+                       if (prod) decProduct(prod);
+                       productsListRef.current?.focus();
+                     } catch {}
+                     return;
+                   }
+                   // Escape: volta para aba Comanda
+                   if (e.key === 'Escape') {
+                     setDesktopTab('order');
+                     setMobileTableTab('order');
+                     return;
+                   }
+                 }
+               }}
+             />
           </div>
        </div>
-       <div className="flex-1 overflow-y-auto p-4 thin-scroll">
+       <div 
+         className="flex-1 overflow-y-auto p-4 thin-scroll"
+         role="listbox"
+         tabIndex={0}
+         ref={(el) => {
+           productsListRef.current = el;
+           if (el && !el._hasClickHandler) {
+             el._hasClickHandler = true;
+             // Capturar TODOS os cliques dentro da área de produtos
+             el.addEventListener('click', (e) => {
+               console.log('[PRODUCTS CONTAINER] Click captured:', e.target);
+               // NÃO bloquear cliques em botões
+               if (e.target.closest('button')) {
+                 console.log('[PRODUCTS CONTAINER] Click is on button, allowing it through');
+                 return;
+               }
+               e.stopPropagation();
+               setFocusContext('panel');
+               // Auto-selecionar primeiro produto se nenhum estiver selecionado
+               if (productFocusIndex === null || productFocusIndex === undefined) {
+                 setProductFocusIndex(0);
+               }
+               // Focar na lista para capturar teclas
+               el.focus();
+             }, true);
+           }
+         }}
+         onFocus={(e) => {
+           e.stopPropagation();
+           setFocusContext('panel');
+           // Auto-selecionar primeiro produto se nenhum estiver selecionado
+           if (productFocusIndex === null || productFocusIndex === undefined) {
+             setProductFocusIndex(0);
+           }
+         }}
+         onBlur={(e) => {
+           // Prevenir perda de foco para elementos fora do painel
+           const relatedTarget = e.relatedTarget;
+           if (relatedTarget && !relatedTarget.closest('[role="listbox"]')) {
+             e.preventDefault();
+             requestAnimationFrame(() => {
+               if (focusContext === 'panel') {
+                 productsListRef.current?.focus();
+               }
+             });
+           }
+         }}
+         onKeyDown={(e) => {
+           // Capturar teclas de navegação na lista de produtos e impedir propagação
+           if (['ArrowDown','ArrowUp','Home','End','Enter','Delete','Backspace','Escape'].includes(e.key)) {
+             e.preventDefault();
+             e.stopPropagation();
+             if (e.nativeEvent) {
+               e.nativeEvent.stopImmediatePropagation();
+             }
+             
+             // Garantir que focusContext permaneça 'panel' ANTES de qualquer operação
+             setFocusContext('panel');
+             
+             const idx = productFocusIndex || 0;
+             const n = filtered.length;
+             
+             // Navegação: não permitir repeat
+             if (['ArrowDown','ArrowUp','Home','End','Escape'].includes(e.key) && e.repeat) {
+               return;
+             }
+             
+             if (e.key === 'ArrowDown') {
+               const next = Math.min(idx + 1, n - 1);
+               setProductFocusIndex(next);
+               requestAnimationFrame(() => { 
+                 try { 
+                   productItemRefs.current[next]?.scrollIntoView({ block: 'nearest' });
+                   productsListRef.current?.focus();
+                   setFocusContext('panel');
+                 } catch {} 
+               });
+               return;
+             }
+             if (e.key === 'ArrowUp') {
+               const next = Math.max(idx - 1, 0);
+               setProductFocusIndex(next);
+               requestAnimationFrame(() => { 
+                 try { 
+                   productItemRefs.current[next]?.scrollIntoView({ block: 'nearest' });
+                   productsListRef.current?.focus();
+                   setFocusContext('panel');
+                 } catch {} 
+               });
+               return;
+             }
+             if (e.key === 'Home') { 
+               setProductFocusIndex(0); 
+               requestAnimationFrame(() => { 
+                 try { 
+                   productItemRefs.current[0]?.scrollIntoView({ block: 'nearest' });
+                   productsListRef.current?.focus();
+                   setFocusContext('panel');
+                 } catch {} 
+               });
+               return; 
+             }
+             if (e.key === 'End') { 
+               setProductFocusIndex(n - 1); 
+               requestAnimationFrame(() => { 
+                 try { 
+                   productItemRefs.current[n-1]?.scrollIntoView({ block: 'nearest' });
+                   productsListRef.current?.focus();
+                   setFocusContext('panel');
+                 } catch {} 
+               });
+               return; 
+             }
+             // Enter e Delete: executar sem bloquear
+             if (e.key === 'Enter') {
+               const prod = filtered[idx];
+               if (prod) {
+                 addProductToComanda(prod);
+               }
+               return;
+             }
+             if (e.key === 'Delete' || e.key === 'Backspace') {
+               const prod = filtered[idx];
+               if (prod) {
+                 decProduct(prod);
+               }
+               return;
+             }
+             if (e.key === 'Escape') {
+               setDesktopTab('order');
+               setMobileTableTab('order');
+               setFocusContext('tables');
+               return;
+             }
+           }
+         }}
+       >
           <ul className="space-y-2">
               {filtered.length === 0 ? (
                 <li className="text-center text-text-muted py-8">
                   <div className="mb-3">Nenhum produto encontrado.</div>
                   <Button size="sm" onClick={() => navigate('/produtos')}>Cadastrar Produtos</Button>
                 </li>
-              ) : filtered.map(prod => {
+              ) : filtered.map((prod, idx) => {
                   const q = qtyByProductId.get(prod.id) || 0;
                   const stock = Number(prod.stock ?? prod.currentStock ?? 0);
                   const remaining = Math.max(0, stock - q);
@@ -1866,10 +2346,16 @@ function VendasPage() {
                   return (
                     <li
                       key={prod.id}
-                      className="flex items-center gap-3 p-3 rounded-md border border-border bg-surface hover:bg-surface-2 transition-colors"
-                      onClick={handleOpenDetails}
+                      className={cn(
+                        "flex items-center gap-3 p-3 rounded-md border border-border bg-surface hover:bg-surface-2 transition-colors cursor-pointer",
+                        focusContext === 'panel' && idx === (productFocusIndex || 0) && "ring-2 ring-brand/60 bg-surface-2"
+                      )}
+                      ref={(el) => { productItemRefs.current[idx] = el; }}
+                      role="option"
+                      aria-selected={focusContext === 'panel' && idx === (productFocusIndex || 0)}
+                      tabIndex={-1}
                     >
-                      <div className="flex-1 min-w-0">
+                      <div className="flex-1 min-w-0" onClick={handleOpenDetails}>
                         <div className="flex items-center gap-2">
                           <p className="font-semibold truncate" title={`${prod.code ? `[${prod.code}] ` : ''}${prod.name}`}>
                             {prod.code && <span className="text-text-muted">[{prod.code}]</span>} {prod.name}
@@ -1883,10 +2369,25 @@ function VendasPage() {
                           <span className="inline-flex items-center justify-center text-[10px] sm:text-[11px] px-1.5 py-0.5 rounded-full bg-surface-2 text-text-secondary border border-border flex-shrink-0">Qtd {remaining}</span>
                         </div>
                       </div>
-                      <Button size="icon" className="flex-shrink-0 bg-amber-500 hover:bg-amber-400 text-black border border-amber-500/60"
-                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); addProductToComanda(prod); }}
-                      onTouchEnd={(e) => { e.preventDefault(); e.stopPropagation(); addProductToComanda(prod); }}
-                      aria-label={`Adicionar ${prod.name}`}>
+                      <Button 
+                        size="icon" 
+                        className="flex-shrink-0 bg-amber-500 hover:bg-amber-400 text-black border border-amber-500/60"
+                        onClick={(e) => { 
+                          console.log('[BUTTON +] Clicked on product:', prod.name);
+                          e.preventDefault(); 
+                          e.stopPropagation(); 
+                          console.log('[BUTTON +] Calling addProductToComanda...');
+                          addProductToComanda(prod);
+                          console.log('[BUTTON +] addProductToComanda called');
+                        }}
+                        onTouchEnd={(e) => { 
+                          console.log('[BUTTON + TOUCH] Touched on product:', prod.name);
+                          e.preventDefault(); 
+                          e.stopPropagation(); 
+                          addProductToComanda(prod);
+                        }}
+                        aria-label={`Adicionar ${prod.name}`}
+                      >
                         <Plus size={16} />
                       </Button>
                     </li>
@@ -2046,7 +2547,7 @@ function VendasPage() {
               </div>
               <div className="relative mb-4">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted" />
-                <Input placeholder="Buscar produto..." className="pl-9" value={counterSearch} onChange={(e) => setCounterSearch(e.target.value)} />
+                <Input placeholder="Buscar produto..." className="pl-9" value={counterSearch} onChange={(e) => setCounterSearch(e.target.value)} ref={counterSearchRef} />
               </div>
               <div className="flex-1 overflow-y-auto -mr-4 pr-4 thin-scroll">
                 <ul className="space-y-2">
@@ -2280,6 +2781,19 @@ function VendasPage() {
     const [loadingClients, setLoadingClients] = useState(false);
     const [clients, setClients] = useState([]);
     const [selectedClientIds, setSelectedClientIds] = useState([]); // multi-seleção de cadastrados
+    const [consumidorCount, setConsumidorCount] = useState(0); // contador exclusivo do cliente consumidor
+    const [showConsumidorControls, setShowConsumidorControls] = useState(false);
+    const [otFocusIndex, setOtFocusIndex] = useState(0);
+    const otItemRefs = useRef([]);
+    const otListRef = useRef(null);
+    const otBodyRef = useRef(null);
+    const otDialogRef = useRef(null);
+    const otSearchRef = useRef(null);
+    // timestamp do último nav via teclado; mouse hover só atua se passar um intervalo
+    const otKbNavTsRef = useRef(0);
+    // (removido) duplo Enter; agora Enter confirma diretamente
+    // timestamp da última digitação para diferenciar Enter de confirmação vs Enter de busca
+    const otTypeTsRef = useRef(0);
 
     useEffect(() => {
       let active = true;
@@ -2288,8 +2802,27 @@ function VendasPage() {
           setLoadingClients(true);
           const rows = await listarClientes({ searchTerm: search, limit: 20 });
           if (!active) return;
-          const sorted = (rows || []).slice().sort((a, b) => Number(a?.codigo || 0) - Number(b?.codigo || 0));
-          setClients(sorted);
+          const arr = (rows || []).slice();
+          // ranking: começa com termo > contém termo > outros; depois por codigo
+          const term = String(search || '').trim().toLowerCase();
+          const score = (c) => {
+            const nome = String(c?.nome || '').toLowerCase();
+            if (!term) return 2;
+            if (nome.startsWith(term)) return 0;
+            if (nome.includes(term)) return 1;
+            return 2;
+          };
+          arr.sort((a, b) => {
+            const sa = score(a);
+            const sb = score(b);
+            if (sa !== sb) return sa - sb;
+            const ca = Number(a?.codigo || 0);
+            const cb = Number(b?.codigo || 0);
+            return ca - cb;
+          });
+          setClients(arr);
+          // foco inicial no primeiro item ao carregar
+          setOtFocusIndex(0);
         } catch {
           if (!active) return;
           setClients([]);
@@ -2297,32 +2830,84 @@ function VendasPage() {
           if (active) setLoadingClients(false);
         }
       };
-      const t = setTimeout(load, 200);
-      return () => { active = false; clearTimeout(t); };
+      load();
+      return () => { active = false; };
     }, [search]);
 
-    const confirmOpen = async () => {
+    // resetar scroll para o topo apenas ao abrir (não na troca de seleção/clique)
+    const openedOnceRef = useRef(false);
+    useEffect(() => {
+      try {
+        if (isOpenTableDialog && !openedOnceRef.current) {
+          openedOnceRef.current = true;
+          if (otDialogRef.current) otDialogRef.current.scrollTop = 0;
+          if (otListRef.current) otListRef.current.scrollTop = 0;
+          if (otBodyRef.current) otBodyRef.current.scrollTop = 0;
+        }
+        if (!isOpenTableDialog) {
+          openedOnceRef.current = false;
+        }
+      } catch {}
+    }, [isOpenTableDialog]);
+
+    // Quando o modal abrir e houver clientes, focar a lista e inicializar foco
+    useEffect(() => {
+      try {
+        if (isOpenTableDialog && Array.isArray(clients) && clients.length > 0) {
+          setOtFocusIndex(0);
+          setTimeout(() => { 
+            try { 
+              otListRef.current?.focus(); 
+              if (otBodyRef.current) otBodyRef.current.scrollTop = 0;
+            } catch {} 
+          }, 0);
+        }
+      } catch {}
+    }, [isOpenTableDialog, clients.length]);
+
+    const confirmOpen = async (overrideSelectedIds = null) => {
       try {
         if (!pendingTable) return;
         // 1) abre (ou obtém) a comanda para a mesa
         const comanda = await getOrCreateComandaForMesa({ mesaId: pendingTable.id, codigoEmpresa: userProfile?.codigo_empresa });
-        // 2) associar clientes cadastrados selecionados (sem cliente comum)
-        const clienteIds = Array.from(new Set(selectedClientIds || []));
+        // 2) associar clientes cadastrados selecionados + consumidores nome_livre
+        const overrideIsArray = Array.isArray(overrideSelectedIds);
+        const baseIds = overrideIsArray ? overrideSelectedIds : selectedClientIds;
+        const clienteIds = Array.isArray(baseIds) ? Array.from(new Set(baseIds)) : [];
+        
+        // Criar array de nomes livres de forma simples
         const nomesLivres = [];
+        const count = Math.max(0, Number(consumidorCount || 0));
+        for (let i = 0; i < count; i++) {
+          nomesLivres.push('Consumidor');
+        }
+        
+        console.log('[confirmOpen] Chamando adicionarClientesAComanda com:', { comandaId: comanda.id, clienteIds, nomesLivres });
         
         // SEMPRE limpar clientes antigos da comanda, mesmo se não adicionar novos
-        await adicionarClientesAComanda({ comandaId: comanda.id, clienteIds, nomesLivres, codigoEmpresa: userProfile?.codigo_empresa });
+        await adicionarClientesAComanda({ 
+          comandaId: comanda.id, 
+          clienteIds: clienteIds, 
+          nomesLivres: nomesLivres, 
+          codigoEmpresa: userProfile?.codigo_empresa,
+          replace: true
+        });
         
         // Pega nomes confirmados do backend APÓS limpar e adicionar novos
         let displayName = null;
         try {
           const vinculos = await listarClientesDaComanda({ comandaId: comanda.id, codigoEmpresa: userProfile?.codigo_empresa });
-          const nomes = (vinculos || []).map(v => v?.nome).filter(Boolean);
+          const vinculosArray = Array.isArray(vinculos) ? vinculos : [];
+          const nomes = vinculosArray.map(v => v?.nome).filter(Boolean);
           displayName = nomes.length ? nomes.join(', ') : null;
-        } catch {}
+        } catch (err) {
+          console.warn('[confirmOpen] Erro ao buscar vínculos:', err);
+        }
         if (!displayName) {
-          displayName = clienteIds.length
-            ? clienteIds.map(cid => clients.find(c => c.id === cid)?.nome).filter(Boolean).join(', ')
+          const clientIdsArray = Array.isArray(clienteIds) ? clienteIds : [];
+          const clientsArray = Array.isArray(clients) ? clients : [];
+          displayName = clientIdsArray.length
+            ? clientIdsArray.map(cid => clientsArray.find(c => c.id === cid)?.nome).filter(Boolean).join(', ')
             : (nomesLivres[0] || '');
         }
         const enriched = { ...pendingTable, comandaId: comanda.id, status: 'in-use', customer: displayName || null, order: [] };
@@ -2341,21 +2926,25 @@ function VendasPage() {
           const totalsByComanda = {};
           
           // Buscar clientes e totais das comandas
-          await Promise.all((openComandas || []).map(async (c) => {
+          const comandasArray = Array.isArray(openComandas) ? openComandas : [];
+          await Promise.all(comandasArray.map(async (c) => {
             try {
               const vincs = await listarClientesDaComanda({ comandaId: c.id, codigoEmpresa: userProfile?.codigo_empresa });
-              const nomes = (vincs || []).map(v => v?.nome).filter(Boolean);
+              const nomesArray = Array.isArray(vincs) ? vincs : [];
+              const nomes = nomesArray.map(v => v?.nome).filter(Boolean);
               namesByComanda[c.id] = nomes.length ? nomes.join(', ') : null;
               
               // Calcular total da comanda
               const itens = await listarItensDaComanda({ comandaId: c.id, codigoEmpresa: userProfile?.codigo_empresa });
-              const total = (itens || []).reduce((acc, item) => {
+              const itensArray = Array.isArray(itens) ? itens : [];
+              const total = itensArray.reduce((acc, item) => {
                 const itemTotal = (item.quantidade || 0) * (item.preco_unitario || 0) - (item.desconto || 0);
                 return acc + itemTotal;
               }, 0);
               totalsByComanda[c.id] = total;
               
-            } catch { 
+            } catch (err) { 
+              console.warn('[confirmOpen] Erro ao buscar dados da comanda:', err);
               namesByComanda[c.id] = null;
               totalsByComanda[c.id] = 0;
             }
@@ -2382,29 +2971,40 @@ function VendasPage() {
         setPendingTable(null);
         setClienteNome('');
         setSelectedClientIds([]);
+        setConsumidorCount(0);
+        setShowConsumidorControls(false);
         toast({ title: 'Mesa aberta', description: displayName ? `Comanda criada para: ${displayName}` : 'Comanda criada.', variant: 'success' });
       } catch (e) {
+        try {
+          console.error('[confirmOpen] Falha ao abrir mesa:', e?.message || e, e?.stack);
+          console.log('[confirmOpen] Contexto debug:', {
+            pendingTable,
+            consumidorCount,
+            selectedClientIds,
+            clienteIdsType: Array.isArray(selectedClientIds),
+          });
+        } catch {}
         toast({ title: 'Falha ao abrir mesa', description: e?.message || 'Tente novamente', variant: 'destructive' });
       }
     };
 
     return (
-      <Dialog open={isOpenTableDialog} onOpenChange={(open) => { setIsOpenTableDialog(open); if (!open) { setPendingTable(null); setClienteNome(''); setSelectedClientIds([]); } }}>
+      <Dialog open={isOpenTableDialog} onOpenChange={(open) => { setIsOpenTableDialog(open); if (!open) { setPendingTable(null); setClienteNome(''); setSelectedClientIds([]); setConsumidorCount(0); setShowConsumidorControls(false); } }}>
         <DialogContent
-          className="w-[95vw] max-w-md max-h-[75vh] flex flex-col animate-none"
+          className="w-[95vw] max-w-md h-[560px] max-h-[75vh] flex flex-col animate-none overflow-hidden"
           onOpenAutoFocus={(e) => e.preventDefault()}
-          onKeyDown={(e) => e.stopPropagation()}
-          onKeyDownCapture={(e) => e.stopPropagation()}
           onPointerDownOutside={(e) => { e.preventDefault(); e.stopPropagation(); }}
           onInteractOutside={(e) => { e.preventDefault(); e.stopPropagation(); }}
-          onEscapeKeyDown={(e) => e.preventDefault()}
+          onEscapeKeyDown={(e) => { e.preventDefault(); setIsOpenTableDialog(false); }}
+          onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setIsOpenTableDialog(false); } }}
+          ref={otDialogRef}
         >
           <DialogHeader className="flex-shrink-0">
             <DialogTitle className="text-xl font-bold">Abrir Mesa {pendingTable ? `#${pendingTable.number}` : ''}</DialogTitle>
             <DialogDescription className="text-sm">Selecione um ou mais clientes para a mesa.</DialogDescription>
           </DialogHeader>
           
-          <div className="flex-1 overflow-y-auto min-h-0 space-y-3 py-2">
+          <div className="flex-1 overflow-y-auto thin-scroll min-h-0 space-y-2 py-2" ref={otBodyRef}>
             <div>
               <Label className="text-sm font-medium mb-1.5 block">Buscar cliente</Label>
               <div className="flex items-center gap-2">
@@ -2414,7 +3014,29 @@ function VendasPage() {
                     placeholder="Nome, telefone ou código" 
                     className="pl-8 h-9 text-sm" 
                     value={search} 
-                    onChange={(e) => setSearch(e.target.value)} 
+                    ref={otSearchRef}
+                    onChange={(e) => { otTypeTsRef.current = Date.now(); setSearch(e.target.value); }} 
+                    onKeyDown={(e) => {
+                      // Enter dentro do campo de busca: marcar cliente focado e limpar busca
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        try {
+                          if (Array.isArray(clients) && clients.length > 0) {
+                            const idx = Math.min(Math.max(otFocusIndex || 0, 0), clients.length - 1);
+                            const c = clients[idx];
+                            if (c?.id) {
+                              setSelectedClientIds(prev => prev.includes(c.id) ? prev.filter(id => id !== c.id) : [...prev, c.id]);
+                            }
+                          }
+                        } catch {}
+                        // limpar busca e voltar foco para a lista
+                        setSearch('');
+                        setTimeout(() => { try { otListRef.current?.focus(); } catch {} }, 0);
+                      } else {
+                        // marcar que estamos digitando
+                        otTypeTsRef.current = Date.now();
+                      }
+                    }}
                   />
                 </div>
                 <Button 
@@ -2427,55 +3049,238 @@ function VendasPage() {
                   <Plus className="h-4 w-4" />
                 </Button>
               </div>
+              <div className="mt-1.5 text-[12px] text-text-muted flex items-center gap-2">
+                <span className="inline-flex items-center gap-1"><kbd className="px-1.5 py-0.5 rounded border border-border/70 bg-surface-2">→</kbd> seleciona</span>
+                <span className="inline-flex items-center gap-1"><kbd className="px-1.5 py-0.5 rounded border border-border/70 bg-surface-2">←</kbd> desmarca</span>
+                <span className="inline-flex items-center gap-1"><kbd className="px-1.5 py-0.5 rounded border border-border/70 bg-surface-2">Enter</kbd> confirma</span>
+                <span className="inline-flex items-center gap-1">Digite para buscar</span>
+              </div>
             </div>
             
-            {selectedClientIds.length > 0 && (
-              <div className="bg-success/10 border border-success/30 rounded-md p-2.5">
-                <div className="text-xs font-medium text-success mb-1">
-                  {selectedClientIds.length} cliente{selectedClientIds.length > 1 ? 's' : ''} selecionado{selectedClientIds.length > 1 ? 's' : ''}
+            <div className="min-h-[8px]">
+              {selectedClientIds.length > 0 && (
+                <div className="bg-success/10 border border-success/30 rounded-md p-2.5">
+                  <div className="text-xs font-medium text-success mb-1">
+                    {selectedClientIds.length} cliente{selectedClientIds.length > 1 ? 's' : ''} selecionado{selectedClientIds.length > 1 ? 's' : ''}
+                  </div>
+                  <div className="text-sm text-text-primary">
+                    {clients.filter(c => selectedClientIds.includes(c.id)).map(c => c.nome).join(', ')}
+                  </div>
                 </div>
-                <div className="text-sm text-text-primary">
-                  {clients.filter(c => selectedClientIds.includes(c.id)).map(c => c.nome).join(', ')}
-                </div>
-              </div>
-            )}
+              )}
+            </div>
             
-            <div className="border rounded-md max-h-56 overflow-auto thin-scroll">
+            <div
+              className="border rounded-md focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"
+              role="listbox"
+              aria-label="Clientes"
+              aria-activedescendant={(clients && clients.length > 0 && clients[otFocusIndex] && clients[otFocusIndex].id) ? `ot-option-${clients[otFocusIndex].id}` : undefined}
+              ref={otListRef}
+              tabIndex={0}
+              onKeyDown={(e) => {
+                try {
+                  const isPrintable = (
+                    e.key && e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey
+                  );
+                  // Digitação direta na lista: envia para o campo de busca
+                  if (isPrintable || e.key === 'Backspace') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    let next = String(search || '');
+                    if (e.key === 'Backspace') {
+                      next = next.slice(0, -1);
+                    } else {
+                      next += e.key;
+                    }
+                    setSearch(next);
+                    otTypeTsRef.current = Date.now();
+                    // Garantir que o topo (barra de busca) esteja visível na área de rolagem do corpo
+                    try { if (otBodyRef.current) otBodyRef.current.scrollTop = 0; } catch {}
+                    // Focar input e colocar cursor no fim
+                    setTimeout(() => {
+                      try {
+                        if (otSearchRef.current) {
+                          otSearchRef.current.focus();
+                          const len = next.length;
+                          otSearchRef.current.setSelectionRange?.(len, len);
+                        }
+                      } catch {}
+                    }, 0);
+                    return;
+                  }
+                  if (['ArrowDown','ArrowUp','Home','End','ArrowRight','ArrowLeft',' '].includes(e.key)) {
+                    let idx = otFocusIndex || 0;
+                    const n = clients.length;
+                    if (e.key === 'ArrowDown') idx = Math.min(idx + 1, n - 1);
+                    if (e.key === 'ArrowUp') idx = Math.max(idx - 1, 0);
+                    if (e.key === 'Home') idx = 0;
+                    if (e.key === 'End') idx = n - 1;
+                    setOtFocusIndex(idx);
+                    setTimeout(() => { try { otItemRefs.current[idx]?.scrollIntoView({ block: 'nearest' }); } catch {} }, 0);
+                    // ArrowRight/Left and Space are handled below using the same idx
+                    const c = clients[idx];
+                    const isConsumidorKey = c?.codigo === 0;
+                    if (e.key === 'ArrowRight' && c?.id) {
+                      if (isConsumidorKey) {
+                        // Consumidor: incrementar contador
+                        setShowConsumidorControls(true);
+                        setConsumidorCount(prev => prev + 1);
+                      } else {
+                        // Cliente normal: adicionar aos selecionados
+                        setClienteNome('');
+                        setSelectedClientIds(prev => prev.includes(c.id) ? prev : [...prev, c.id]);
+                      }
+                    }
+                    if (e.key === 'ArrowLeft' && c?.id) {
+                      if (isConsumidorKey) {
+                        // Consumidor: decrementar contador
+                        const newCount = Math.max(0, consumidorCount - 1);
+                        setConsumidorCount(newCount);
+                        if (newCount === 0) setShowConsumidorControls(false);
+                      } else {
+                        // Cliente normal: remover dos selecionados
+                        setSelectedClientIds(prev => prev.filter(id => id !== c.id));
+                      }
+                    }
+                    if (e.key === ' ') {
+                      if (c?.id) {
+                        setClienteNome('');
+                        setSelectedClientIds(prev => prev.includes(c.id) ? prev.filter(id => id !== c.id) : [...prev, c.id]);
+                      }
+                    }
+                    return;
+                  }
+                  if (e.key === 'Enter') {
+                    // Enter: selecionar cliente focado e confirmar imediatamente
+                    e.preventDefault();
+                    const idx = Math.min(Math.max(otFocusIndex || 0, 0), clients.length - 1);
+                    const c = clients[idx];
+                    // Só considera "digitando" se houve entrada no input de busca recentemente
+                    const recentlyTyped = (Date.now() - otTypeTsRef.current) < 600;
+                    const typingOrSearching = recentlyTyped || document.activeElement === otSearchRef.current || (search && search.length > 0);
+                    if (typingOrSearching) {
+                      if (c?.id) {
+                        setClienteNome('');
+                        setSelectedClientIds(prev => prev.includes(c.id) ? prev.filter(id => id !== c.id) : [...prev, c.id]);
+                      }
+                      setSearch('');
+                      setTimeout(() => { try { otListRef.current?.focus(); if (otBodyRef.current) otBodyRef.current.scrollTop = 0; } catch {} }, 0);
+                      return;
+                    }
+                    // Se não está digitando: selecionar (se ainda não) e confirmar imediatamente
+                    if (c?.id) {
+                      const nextIds = selectedClientIds.includes(c.id)
+                        ? selectedClientIds
+                        : [...selectedClientIds, c.id];
+                      if (!selectedClientIds.includes(c.id)) {
+                        setSelectedClientIds(prev => [...prev, c.id]);
+                      }
+                      setTimeout(() => { try { confirmOpen(nextIds); } catch {} }, 0);
+                      return;
+                    }
+                    setTimeout(() => { try { confirmOpen(selectedClientIds); } catch {} }, 0);
+                    return;
+                  }
+                } catch {}
+              }}
+            >
               {loadingClients ? (
                 <div className="p-3 text-center text-sm text-text-muted">Carregando...</div>
               ) : clients.length > 0 ? (
                 <ul className="divide-y divide-border">
-                  {clients.map(c => {
+                  {clients.map((c, idx) => {
+                    const isConsumidor = c.codigo === 0;
                     const active = selectedClientIds.includes(c.id);
+                    const isFocused = idx === (otFocusIndex || 0);
+                    const consumidorQty = isConsumidor ? consumidorCount : 0;
                     return (
-                      <li 
-                        key={c.id} 
+                      <li
+                        key={c.id}
+                        id={`ot-option-${c.id}`}
+                        ref={(el) => { otItemRefs.current[idx] = el; }}
+                        role="option"
+                        aria-selected={isFocused}
                         className={cn(
-                          'p-2.5 flex items-center justify-between cursor-pointer transition-colors',
-                          active ? 'bg-success/5 hover:bg-success/10' : 'hover:bg-surface-2'
-                        )} 
+                          'p-2.5 flex items-center gap-2 cursor-pointer transition-colors outline-none focus:outline-none focus-visible:outline-none border border-transparent',
+                          isConsumidor ? 'bg-amber-500/5 border-l-2 border-l-amber-500/40' : '',
+                          active && !isConsumidor ? 'bg-success/10 hover:bg-success/15' : 'hover:bg-surface-2',
+                          showConsumidorControls && isConsumidor ? 'bg-amber-500/10' : '',
+                          isFocused ? 'bg-brand/10' : ''
+                        )}
                         onClick={() => {
-                          setClienteNome('');
-                          setSelectedClientIds(prev => 
-                            prev.includes(c.id) ? prev.filter(id => id !== c.id) : [...prev, c.id]
-                          );
+                          if (isConsumidor) {
+                            // Clique mostra controles e inicia com 1
+                            if (!showConsumidorControls) {
+                              setShowConsumidorControls(true);
+                              setConsumidorCount(1);
+                            }
+                          } else {
+                            setClienteNome('');
+                            setSelectedClientIds(prev => 
+                              prev.includes(c.id) ? prev.filter(id => id !== c.id) : [...prev, c.id]
+                            );
+                          }
                         }}
+                        onDoubleClick={() => {
+                          if (!isConsumidor) {
+                            const nextIds = selectedClientIds.includes(c.id) ? selectedClientIds : [...selectedClientIds, c.id];
+                            setSelectedClientIds(nextIds);
+                            setTimeout(() => { try { confirmOpen(nextIds); } catch {} }, 0);
+                          }
+                        }}
+                        onMouseEnter={() => { if (Date.now() - (otKbNavTsRef.current || 0) > 300) setOtFocusIndex(idx); }}
+                        tabIndex={-1}
                       >
-                        <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-1 min-w-0">
+                          {!isConsumidor && <span className={cn('w-2 h-2 rounded-full flex-shrink-0', active ? 'bg-success' : (isFocused ? 'bg-brand' : 'bg-border'))} />}
                           <div className="font-medium text-sm truncate">
-                            {c.codigo != null ? `${c.codigo} - ` : ''}{c.nome}
+                            {c.codigo != null && c.codigo !== 0 ? `${c.codigo} - ` : ''}{c.nome}
+                            {isConsumidor && <span className="ml-2 text-xs text-amber-600">Cliente Padrão</span>}
                           </div>
-                          {c.telefone && (
-                            <div className="text-xs text-text-muted mt-0.5">{c.telefone}</div>
-                          )}
                         </div>
-                        <div className="ml-2 flex-shrink-0">
-                          {active ? (
-                            <CheckCircle size={18} className="text-success" />
-                          ) : (
-                            <div className="w-[18px] h-[18px] rounded-full border-2 border-border" />
-                          )}
-                        </div>
+                        {isConsumidor ? (
+                          showConsumidorControls ? (
+                            <div className="flex items-center gap-1 flex-shrink-0">
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                className="h-7 w-7 p-0 hover:bg-red-500/10"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const newCount = Math.max(0, consumidorCount - 1);
+                                  setConsumidorCount(newCount);
+                                  if (newCount === 0) setShowConsumidorControls(false);
+                                }}
+                              >
+                                <Minus className="h-4 w-4" />
+                              </Button>
+                              <div className="w-8 h-7 flex items-center justify-center bg-surface-2 rounded text-sm font-medium">
+                                {consumidorQty}
+                              </div>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                className="h-7 w-7 p-0 hover:bg-green-500/10"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setConsumidorCount(prev => prev + 1);
+                                }}
+                              >
+                                <Plus className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          ) : null
+                        ) : (
+                          <div className="ml-2 flex-shrink-0">
+                            {active ? (
+                              <CheckCircle size={18} className="text-success" />
+                            ) : (
+                              <div className="w-[18px] h-[18px] rounded-full border-2 border-border" />
+                            )}
+                          </div>
+                        )}
                       </li>
                     )
                   })}
@@ -2502,7 +3307,7 @@ function VendasPage() {
               Cancelar
             </Button>
             <Button 
-              onClick={confirmOpen} 
+              onClick={() => confirmOpen()} 
               disabled={!pendingTable}
             >
               Confirmar Abertura
@@ -2803,39 +3608,51 @@ function VendasPage() {
   const ManageClientsDialog = () => {
     const [localSearch, setLocalSearch] = useState('');
     const [localClients, setLocalClients] = useState([]);
-    const [localLinked, setLocalLinked] = useState([]);
+    const [localLinked, setLocalLinked] = useState([]); // Array de {id, cliente_id, nome, tipo: 'cadastrado'|'livre'}
     const [localLoading, setLocalLoading] = useState(false);
     const [pendingChanges, setPendingChanges] = useState(new Set());
     const initialLinkedRef = useRef([]);
     const loadedRef = useRef(false);
+    const [localFocusIndex, setLocalFocusIndex] = useState(0);
+    const itemRefs = useRef([]);
+    const listboxRef = useRef(null);
+    const kbNavTsRef = useRef(0);
+    const [isAddClientModalOpen, setIsAddClientModalOpen] = useState(false);
+    const [editingClientId, setEditingClientId] = useState(null);
+    const [editingConsumidorId, setEditingConsumidorId] = useState(null);
+    const [editingConsumidorName, setEditingConsumidorName] = useState('');
 
     useEffect(() => {
-      let active = true;
-      const load = async () => {
-        if (!isManageClientsOpen || !selectedTable?.comandaId) return;
-        try {
-          setLocalLoading(true);
-          // Carregar clientes vinculados à comanda
+    let active = true;
+    const load = async () => {
+      if (!isManageClientsOpen || !selectedTable?.comandaId) return;
+      
+      // Evitar recarregar se já carregou (exceto se mudou a busca)
+      if (loadedRef.current && localSearch === '') return;
+      
+      try {
+        setLocalLoading(true);
+          // Carregar clientes vinculados à comanda (retorna {id, tipo, nome, cliente_id})
           const vincs = await listarClientesDaComanda({ comandaId: selectedTable.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
-          const clientIds = (vincs || []).map(v => v?.cliente_id ?? v?.clientes?.id).filter(Boolean);
           if (!active) return;
-          // Se não houver clientes vinculados, adicionar cliente Consumidor (cod 0) automaticamente
-          if (clientIds.length === 0) {
-            const rows = await listarClientes({ searchTerm: '', limit: 50 });
-            const consumidor = rows?.find(c => c?.codigo === 0);
-            if (consumidor) {
-              clientIds.push(consumidor.id);
-            }
-          }
-          setLocalLinked(clientIds);
-          initialLinkedRef.current = clientIds;
+          // Mapear para formato interno: {id, cliente_id, nome, tipo}
+          const linked = (vincs || []).map(v => ({
+            id: v.id, // ID do registro em comanda_clientes
+            cliente_id: v.cliente_id,
+            nome: v.nome || '',
+            tipo: v.tipo || (v.cliente_id ? 'cadastrado' : 'livre')
+          }));
+          setLocalLinked(linked);
+          initialLinkedRef.current = JSON.parse(JSON.stringify(linked));
           setPendingChanges(new Set());
           // Carregar lista de clientes disponíveis
           const rows = await listarClientes({ searchTerm: localSearch, limit: 50 });
-          if (!active) return;
-          const sorted = (rows || []).slice().sort((a, b) => Number(a?.codigo || 0) - Number(b?.codigo || 0));
-          setLocalClients(sorted);
-          loadedRef.current = true;
+        if (!active) return;
+        const sorted = (rows || []).slice().sort((a, b) => Number(a?.codigo || 0) - Number(b?.codigo || 0));
+        setLocalClients(sorted);
+        // definir foco inicial no primeiro item para navegação por setas
+        setLocalFocusIndex(0);
+        loadedRef.current = true;
         } catch (e) {
           console.error('Erro ao carregar clientes:', e);
         } finally {
@@ -2846,45 +3663,131 @@ function VendasPage() {
       // Carregar apenas quando o modal abre pela primeira vez
       if (!isManageClientsOpen) {
         loadedRef.current = false;
+        setLocalSearch('');
         return () => { active = false; };
       }
       
-      // Debounce apenas para busca
-      if (localSearch) {
-        const timer = setTimeout(() => {
-          load();
-        }, 300);
-        return () => { 
-          active = false; 
-          clearTimeout(timer);
-        };
-      } else if (!loadedRef.current) {
-        load();
-      }
-      
+      load();
       return () => { active = false; };
-    }, [isManageClientsOpen, localSearch]);
+    }, [isManageClientsOpen, selectedTable?.comandaId]);
+
+  // Foco inicial quando o modal abre e há clientes carregados
+  useEffect(() => {
+    if (isManageClientsOpen && Array.isArray(localClients) && localClients.length > 0) {
+      setLocalFocusIndex(0);
+      // Scroll para o topo do modal ao abrir
+      setTimeout(() => { 
+        try { 
+          const dialogContent = document.querySelector('[role="dialog"]');
+          if (dialogContent) {
+            const scrollableDiv = dialogContent.querySelector('.overflow-y-auto');
+            if (scrollableDiv) scrollableDiv.scrollTop = 0;
+          }
+        } catch {} 
+      }, 0);
+    }
+  }, [isManageClientsOpen, localClients.length]);
+
+    const addConsumidor = () => {
+      const newEntry = {
+        id: `temp-${Date.now()}`, // ID temporário
+        cliente_id: null, // consumidor é nome_livre, não vincula a um cliente cadastrado
+        nome: 'Consumidor',
+        tipo: 'livre'
+      };
+      setLocalLinked(prev => [...prev, newEntry]);
+      setPendingChanges(prev => new Set([...prev, newEntry.id]));
+      // Abrir edição imediatamente
+      setEditingConsumidorId(newEntry.id);
+      setEditingConsumidorName('Consumidor');
+    };
+
+    const addClientFromModal = (clientId) => {
+      const client = localClients.find(c => c.id === clientId);
+      if (!client) return;
+      const newEntry = {
+        id: `temp-${Date.now()}`,
+        cliente_id: clientId,
+        nome: client.nome,
+        tipo: 'cadastrado'
+      };
+      setLocalLinked(prev => [...prev, newEntry]);
+      setPendingChanges(prev => new Set([...prev, newEntry.id]));
+      setIsAddClientModalOpen(false);
+    };
+
+    const replaceClient = (linkedId, newClientId) => {
+      const client = localClients.find(c => c.id === newClientId);
+      if (!client) return;
+      
+      // Encontrar o vínculo antigo
+      const oldLink = localLinked.find(l => l.id === linkedId);
+      if (!oldLink) return;
+      
+      // Remover o antigo e adicionar o novo
+      setLocalLinked(prev => [
+        ...prev.filter(l => l.id !== linkedId),
+        {
+          id: `temp-${Date.now()}`,
+          cliente_id: newClientId,
+          nome: client.nome,
+          tipo: 'cadastrado'
+        }
+      ]);
+      
+      // Marcar ambos como pendentes (remoção do antigo + adição do novo)
+      setPendingChanges(prev => new Set([...prev, linkedId, newClientId]));
+      setEditingClientId(null);
+      setIsAddClientModalOpen(false);
+    };
 
     const toggleClient = (clientId) => {
       if (!selectedTable?.comandaId) return;
       
-      // Atualizar UI imediatamente
-      const isCurrentlyLinked = localLinked.includes(clientId);
+      // Verificar se já está vinculado
+      const existing = localLinked.find(l => l.cliente_id === clientId && l.tipo === 'cadastrado');
       
-      setLocalLinked(prev => {
-        if (isCurrentlyLinked) {
-          return prev.filter(id => id !== clientId);
-        } else {
-          return [...prev, clientId];
-        }
-      });
+      if (existing) {
+        // Remover
+        setLocalLinked(prev => prev.filter(l => l.id !== existing.id));
+      } else {
+        // Adicionar cliente cadastrado
+        const client = localClients.find(c => c.id === clientId);
+        if (!client) return;
+        const newEntry = {
+          id: `temp-${Date.now()}`,
+          cliente_id: clientId,
+          nome: client.nome,
+          tipo: 'cadastrado'
+        };
+        setLocalLinked(prev => [...prev, newEntry]);
+      }
       
-      // Marcar como mudança pendente
-      setPendingChanges(prev => {
-        const newSet = new Set(prev);
-        newSet.add(clientId);
-        return newSet;
-      });
+      setPendingChanges(prev => new Set([...prev, clientId]));
+    };
+
+    const removeLinked = (linkedId) => {
+      setLocalLinked(prev => prev.filter(l => l.id !== linkedId));
+      setPendingChanges(prev => new Set([...prev, linkedId]));
+    };
+
+    const startEditConsumidor = (linkedId) => {
+      const entry = localLinked.find(l => l.id === linkedId);
+      if (entry) {
+        setEditingConsumidorId(linkedId);
+        setEditingConsumidorName(entry.nome || 'Consumidor');
+      }
+    };
+
+    const saveEditConsumidor = () => {
+      if (!editingConsumidorId) return;
+      const nome = editingConsumidorName.trim() || 'Consumidor';
+      setLocalLinked(prev => prev.map(l => 
+        l.id === editingConsumidorId ? { ...l, nome } : l
+      ));
+      setPendingChanges(prev => new Set([...prev, editingConsumidorId]));
+      setEditingConsumidorId(null);
+      setEditingConsumidorName('');
     };
 
     const confirmChanges = async () => {
@@ -2902,34 +3805,64 @@ function VendasPage() {
       try {
         setLocalLoading(true);
         
-        // Determinar quais clientes adicionar e remover
-        const toAdd = localLinked.filter(id => !initialLinkedRef.current.includes(id));
-        const toRemove = initialLinkedRef.current.filter(id => !localLinked.includes(id));
+        // Comparar estado atual com inicial
+        const initialIds = initialLinkedRef.current.map(l => l.id);
+        const currentIds = localLinked.map(l => l.id);
         
-        // Remover clientes
-        for (const clientId of toRemove) {
-          const { error } = await supabase
-            .from('comanda_clientes')
-            .delete()
-            .eq('comanda_id', selectedTable.comandaId)
-            .eq('cliente_id', clientId)
-            .eq('codigo_empresa', userProfile?.codigo_empresa);
-          
-          if (error) {
-            console.error('[confirmChanges] Erro ao remover:', error);
-            throw error;
+        // Remover clientes que não estão mais na lista
+        const toRemove = initialLinkedRef.current.filter(l => !currentIds.includes(l.id));
+        for (const entry of toRemove) {
+          // Se tem ID real (não temporário), deletar do banco
+          if (!String(entry.id).startsWith('temp-')) {
+            const { error } = await supabase
+              .from('comanda_clientes')
+              .delete()
+              .eq('id', entry.id)
+              .eq('codigo_empresa', userProfile?.codigo_empresa);
+            
+            if (error) {
+              console.error('[confirmChanges] Erro ao remover:', error);
+              throw error;
+            }
           }
         }
         
-        // Adicionar clientes
+        // Adicionar/atualizar clientes
+        const toAdd = localLinked.filter(l => String(l.id).startsWith('temp-'));
+        const toUpdate = localLinked.filter(l => {
+          if (String(l.id).startsWith('temp-')) return false;
+          if (l.tipo !== 'livre') return false; // só atualiza nome_livre para consumidores
+          const initial = initialLinkedRef.current.find(i => i.id === l.id);
+          return initial && initial.nome !== l.nome;
+        });
+        
+        // Inserir novos
         if (toAdd.length > 0) {
-          console.log('[confirmChanges] Adicionando clientes:', toAdd);
+          const clienteIds = toAdd.filter(l => l.tipo === 'cadastrado').map(l => l.cliente_id);
+          const nomesLivres = toAdd.filter(l => l.tipo === 'livre').map(l => l.nome);
+          
+          console.log('[confirmChanges] Adicionando:', { clienteIds, nomesLivres });
+          
           await adicionarClientesAComanda({
             comandaId: selectedTable.comandaId,
-            clienteIds: toAdd,
-            nomesLivres: [],
+            clienteIds,
+            nomesLivres,
             codigoEmpresa: userProfile?.codigo_empresa
           });
+        }
+        
+        // Atualizar nomes editados
+        for (const entry of toUpdate) {
+          const { error } = await supabase
+            .from('comanda_clientes')
+            .update({ nome_livre: entry.nome })
+            .eq('id', entry.id)
+            .eq('codigo_empresa', userProfile?.codigo_empresa);
+          
+          if (error) {
+            console.error('[confirmChanges] Erro ao atualizar:', error);
+            throw error;
+          }
         }
         
         console.log('[confirmChanges] Operações concluídas, atualizando mesa');
@@ -2953,87 +3886,98 @@ function VendasPage() {
     return (
       <Dialog open={isManageClientsOpen} onOpenChange={setIsManageClientsOpen}>
         <DialogContent 
-          className="sm:max-w-[480px] w-[92vw] animate-none" 
+          className="sm:max-w-[480px] w-[92vw] max-h-[85vh] h-[85vh] animate-none flex flex-col overflow-hidden" 
           onOpenAutoFocus={(e) => e.preventDefault()}
-          onKeyDown={(e) => e.stopPropagation()} 
-          onKeyDownCapture={(e) => e.stopPropagation()}
           onPointerDownOutside={(e) => { e.preventDefault(); e.stopPropagation(); }} 
           onInteractOutside={(e) => { e.preventDefault(); e.stopPropagation(); }}
           onEscapeKeyDown={(e) => e.preventDefault()}
         >
-          <DialogHeader>
+          <DialogHeader className="flex-shrink-0">
             <DialogTitle>Gerenciar Clientes da Mesa</DialogTitle>
-            <DialogDescription>Clique nos clientes para adicionar ou remover. Pode ter múltiplos clientes.</DialogDescription>
+            <DialogDescription>Gerencie os clientes vinculados a esta mesa.</DialogDescription>
           </DialogHeader>
-          <div className="space-y-4">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted" />
-              <Input
-                placeholder="Buscar cliente..."
-                className="pl-9"
-                value={localSearch}
-                onChange={(e) => setLocalSearch(e.target.value)}
-                onKeyDown={(e) => e.stopPropagation()}
-                onKeyUp={(e) => e.stopPropagation()}
-              />
-            </div>
-            {localLinked.length > 0 && (
-              <div className="bg-success/10 border border-success/30 rounded-md p-3">
-                <div className="text-xs font-medium text-success mb-1">Clientes vinculados ({localLinked.length}):</div>
-                <div className="text-sm text-text-primary">
-                  {localClients
-                    .filter(c => localLinked.includes(c.id))
-                    .map(c => (c?.codigo ? `${c.codigo} - ${c?.nome || ''}` : (c?.nome || '')))
-                    .join(', ') || 'Carregando...'}
+          <div className="flex-1 overflow-y-auto min-h-0 space-y-4 thin-scroll">
+            {/* Clientes vinculados */}
+            <div className="space-y-2">
+              <div className="text-sm font-medium text-text-primary">Clientes vinculados ({localLinked.length}):</div>
+              {localLinked.length === 0 ? (
+                <div className="p-4 text-center text-sm text-text-muted border border-dashed rounded-md">
+                  Nenhum cliente vinculado ainda
                 </div>
-              </div>
-            )}
-            <div className="border rounded-md max-h-[400px] overflow-y-auto thin-scroll">
-              {localLoading ? (
-                <div className="p-4 text-center text-text-muted">Carregando...</div>
-              ) : localClients.length === 0 ? (
-                <div className="p-4 text-center text-text-muted">Nenhum cliente encontrado</div>
               ) : (
-                <ul className="divide-y divide-border">
-                  {localClients.map(client => {
-                    const isLinked = localLinked.includes(client.id);
+                <div className="space-y-2">
+                  {localLinked.map((entry) => {
+                    const isConsumidor = entry.tipo === 'livre';
+                    const isEditing = editingConsumidorId === entry.id;
                     return (
-                      <li
-                        key={client.id}
-                        className={cn(
-                          "p-3 cursor-pointer transition-colors flex items-center justify-between",
-                          client?.codigo === 0 ? "bg-warning/10 border-l-4 border-warning" : "",
-                          isLinked ? "bg-success/5 hover:bg-success/10" : "hover:bg-surface-2"
+                      <div key={entry.id} className={cn(
+                        "flex items-center gap-2 p-2 rounded-md border",
+                        isConsumidor ? "bg-amber-500/10 border-amber-500/30" : "bg-surface-2 border-border"
+                      )}>
+                        {isEditing ? (
+                          <>
+                            <Input
+                              value={editingConsumidorName}
+                              onChange={(e) => setEditingConsumidorName(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') saveEditConsumidor();
+                                if (e.key === 'Escape') { setEditingConsumidorId(null); setEditingConsumidorName(''); }
+                                e.stopPropagation();
+                              }}
+                              className="flex-1 h-8"
+                              autoFocus
+                            />
+                            <Button size="sm" onClick={saveEditConsumidor} className="h-8 px-2">
+                              <CheckCircle className="h-4 w-4" />
+                            </Button>
+                          </>
+                        ) : (
+                          <>
+                            <div 
+                              className={cn("flex-1 text-sm truncate p-1 rounded",
+                                isConsumidor ? "cursor-pointer hover:bg-amber-500/10" : "cursor-default")}
+                              onClick={() => isConsumidor && startEditConsumidor(entry.id)}
+                              title={isConsumidor ? "Clique para editar" : ""}
+                            >
+                              <span>{entry.nome}</span>
+                              {isConsumidor && (
+                                <span className="ml-2 text-[11px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-600 border border-amber-500/30 align-middle">
+                                  Cliente Padrão
+                                </span>
+                              )}
+                            </div>
+                            {!isConsumidor && (
+                              <Button 
+                                size="sm" 
+                                variant="ghost" 
+                                onClick={() => { setEditingClientId(entry.id); setIsAddClientModalOpen(true); }} 
+                                className="h-7 px-2"
+                                title="Trocar cliente"
+                              >
+                                <Edit className="h-4 w-4" />
+                              </Button>
+                            )}
+                            <Button size="sm" variant="ghost" onClick={() => removeLinked(entry.id)} className="h-7 px-2 text-destructive hover:text-destructive">
+                              <X className="h-4 w-4" />
+                            </Button>
+                          </>
                         )}
-                        onClick={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          toggleClient(client.id);
-                        }}
-                        style={{ userSelect: 'none', WebkitUserSelect: 'none' }}
-                      >
-                        <div className="flex-1 min-w-0">
-                          <div className="font-medium truncate">
-                            {`${client?.codigo ? `${client.codigo} - ` : ''}${client?.nome || ''}`}
-                            {client?.codigo === 0 && <span className="ml-2 text-xs text-warning">(Padrão)</span>}
-                          </div>
-                          {client.telefone && (
-                            <div className="text-xs text-text-muted">{client.telefone}</div>
-                          )}
-                        </div>
-                        <div className="ml-3 flex-shrink-0">
-                          {isLinked ? (
-                            <CheckCircle className="h-5 w-5 text-success" />
-                          ) : (
-                            <div className="h-5 w-5 rounded-full border-2 border-border" />
-                          )}
-                        </div>
-                      </li>
+                      </div>
                     );
                   })}
-                </ul>
+                </div>
               )}
             </div>
+            
+            {/* Botão de ação */}
+            <Button 
+              onClick={() => { setEditingClientId(null); setIsAddClientModalOpen(true); }} 
+              className="w-full"
+              size="sm"
+            >
+              <Plus className="h-4 w-4 mr-2" />
+              Adicionar Cliente
+            </Button>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsManageClientsOpen(false)} disabled={localLoading}>Cancelar</Button>
@@ -3042,6 +3986,95 @@ function VendasPage() {
             </Button>
           </DialogFooter>
         </DialogContent>
+        
+        {/* Modal aninhado para seleção de cliente */}
+        <Dialog open={isAddClientModalOpen} onOpenChange={setIsAddClientModalOpen}>
+          <DialogContent className="sm:max-w-[500px] max-h-[80vh] flex flex-col">
+            <DialogHeader>
+              <DialogTitle>{editingClientId ? 'Trocar Cliente' : 'Adicionar Cliente'}</DialogTitle>
+              <DialogDescription>Selecione um cliente da lista</DialogDescription>
+            </DialogHeader>
+            <div className="flex-1 overflow-hidden flex flex-col gap-3">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted" />
+                <Input
+                  placeholder="Buscar cliente..."
+                  className="pl-9"
+                  value={localSearch}
+                  onChange={(e) => setLocalSearch(e.target.value)}
+                />
+              </div>
+              <div className="flex-1 border rounded-md overflow-y-auto thin-scroll"
+              role="listbox"
+              aria-label="Clientes disponíveis"
+              ref={listboxRef}
+              tabIndex={0}
+>
+                {localLoading ? (
+                  <div className="p-4 text-center text-text-muted">Carregando...</div>
+                ) : localClients.length === 0 ? (
+                  <div className="p-4 text-center text-text-muted">Nenhum cliente encontrado</div>
+                ) : (
+                  <ul className="divide-y divide-border">
+                    {localClients.map((client) => {
+                      const isConsumidor = client.codigo === 0;
+                      const isLinked = localLinked.some(l => l.cliente_id === client.id && l.tipo === 'cadastrado');
+                      return (
+                        <li
+                          key={client.id}
+                          className={cn(
+                            "p-3 cursor-pointer transition-colors flex items-center justify-between",
+                            isConsumidor ? "bg-amber-500/5 hover:bg-amber-500/10" : "hover:bg-surface-2"
+                          )}
+                          onClick={() => {
+                            if (isConsumidor) {
+                              // Adicionar consumidor
+                              if (editingClientId) {
+                                setEditingClientId(null);
+                                setIsAddClientModalOpen(false);
+                              } else {
+                                addConsumidor();
+                                setIsAddClientModalOpen(false);
+                              }
+                            } else {
+                              // Cliente cadastrado
+                              if (editingClientId) {
+                                replaceClient(editingClientId, client.id);
+                              } else {
+                                addClientFromModal(client.id);
+                              }
+                            }
+                          }}
+                        >
+                          <div className="flex-1 min-w-0">
+                            <div className="font-medium truncate flex items-center gap-2">
+                              {isConsumidor ? 'Cliente Consumidor' : `${client?.codigo ? `${client.codigo} - ` : ''}${client?.nome || ''}`}
+                              {isConsumidor && (
+                                <span className="text-[11px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-600 border border-amber-500/30">Cliente Padrão</span>
+                              )}
+                            </div>
+                            {!isConsumidor && client.telefone && (
+                              <div className="text-xs text-text-muted">{client.telefone}</div>
+                            )}
+                            {isConsumidor && (
+                              <div className="text-xs text-text-muted">Clique para adicionar consumidor</div>
+                            )}
+                          </div>
+                          {isLinked && !isConsumidor && (
+                            <CheckCircle className="h-5 w-5 text-success ml-2 flex-shrink-0" />
+                          )}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setIsAddClientModalOpen(false)}>Cancelar</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </Dialog>
     );
   };
@@ -3311,7 +4344,36 @@ function VendasPage() {
         )}
         
         <div className="flex-1 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 overflow-hidden min-h-0">
-            <div className="lg:col-span-2 bg-surface rounded-lg border border-border p-4 md:p-6 overflow-y-auto thin-scroll min-h-0">
+            <div 
+              className="lg:col-span-2 bg-surface rounded-lg border border-border p-4 md:p-6 overflow-y-auto thin-scroll min-h-0"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                // Prevenir scroll com setas quando focusContext === 'tables'
+                if (focusContext === 'tables' && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+                  e.preventDefault();
+                }
+              }}
+              onClick={(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                setFocusContext('tables');
+                if (!selectedTable && tables.length > 0) {
+                  setSelectedTable(tables[0]);
+                }
+                e.currentTarget.focus();
+              }}
+              onFocus={() => {
+                setFocusContext('tables');
+                if (!selectedTable && tables.length > 0) {
+                  setSelectedTable(tables[0]);
+                }
+              }}
+              style={{
+                outline: focusContext === 'tables' ? '2px solid rgba(148, 163, 184, 0.4)' : 'none',
+                outlineOffset: '-2px',
+                transition: 'outline 0.15s ease'
+              }}
+            >
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-xl font-bold">Mapa de Mesas</h2>
                 {/* Mobile-only '+' button to create a new mesa */}
@@ -3334,7 +4396,13 @@ function VendasPage() {
                 <DragDropContext onDragEnd={onDragEnd}>
                     <Droppable droppableId="tables">
                         {(provided) => (
-                             <div {...provided.droppableProps} ref={provided.innerRef} className="grid gap-5 grid-cols-[repeat(auto-fit,minmax(240px,1fr))]">
+                             <div
+                               {...provided.droppableProps}
+                               ref={(el) => { provided.innerRef(el); gridRef.current = el; }}
+                               role="grid"
+                               aria-label="Lista de mesas"
+                               className="grid gap-5 grid-cols-[repeat(auto-fit,minmax(240px,1fr))]"
+                             >
                                 {tables.length === 0 ? (
                                   <div className="col-span-full flex flex-col items-center justify-center py-12 text-center">
                                     <div className="text-text-muted mb-4">
@@ -3365,8 +4433,30 @@ function VendasPage() {
             </div>
 
             {/* Painel Lateral - Apenas Desktop */}
-            <div className="hidden md:flex bg-surface rounded-lg border border-border flex-col min-h-0">
-                <Tabs defaultValue="order" className="flex flex-col h-full">
+            <div 
+              className="hidden md:flex bg-surface rounded-lg border border-border flex-col min-h-0"
+              onClick={(e) => {
+                e.stopPropagation();
+                setFocusContext('panel');
+                // Focar na lista de produtos se estiver na aba produtos
+                if (desktopTab === 'products') {
+                  setTimeout(() => { try { productsListRef.current?.focus(); } catch {} }, 0);
+                }
+              }}
+              style={{
+                outline: focusContext === 'panel' ? '2px solid rgba(148, 163, 184, 0.4)' : 'none',
+                outlineOffset: '-2px',
+                transition: 'outline 0.15s ease'
+              }}
+            >
+                <Tabs value={desktopTab} onValueChange={(val) => {
+                  setDesktopTab(val);
+                  // Focar na lista de produtos ao trocar para aba produtos
+                  if (val === 'products') {
+                    setFocusContext('panel');
+                    setTimeout(() => { try { productsListRef.current?.focus(); } catch {} }, 100);
+                  }
+                }} className="flex flex-col h-full">
                     <TabsList className="grid w-full grid-cols-2 m-2">
                         <TabsTrigger value="order">Comanda</TabsTrigger>
                         <TabsTrigger value="products">Produtos</TabsTrigger>
