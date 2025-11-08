@@ -12,7 +12,7 @@ import { Search, Plus, CheckCircle, Unlock, Lock, Banknote, X, FileText, Shoppin
 import { useNavigate } from 'react-router-dom';
 import { listProducts } from '@/lib/products';
 import { useAuth } from '@/contexts/AuthContext';
-import { getOrCreateComandaBalcao, listarComandaBalcaoAberta, criarComandaBalcao, listarItensDaComanda, adicionarItem, listarFinalizadoras, registrarPagamento, fecharComandaEMesa, listarClientes, adicionarClientesAComanda, atualizarQuantidadeItem, removerItem, listarClientesDaComanda, verificarEstoqueComanda, ensureCaixaAberto, fecharCaixa, listarResumoSessaoCaixaAtual, getCaixaAberto, listarMovimentacoesCaixa, listarComandasAbertas, criarMovimentacaoCaixa } from '@/lib/store';
+import { getOrCreateComandaBalcao, listarComandaBalcaoAberta, criarComandaBalcao, listarItensDaComanda, adicionarItem, listarFinalizadoras, registrarPagamento, fecharComandaEMesa, listarClientes, adicionarClientesAComanda, atualizarQuantidadeItem, removerItem, listarClientesDaComanda, verificarEstoqueComanda, ensureCaixaAberto, fecharCaixa, listarResumoSessaoCaixaAtual, getCaixaAberto, listarMovimentacoesCaixa, listarComandasAbertas, criarMovimentacaoCaixa, listarItensDeTodasComandasAbertas } from '@/lib/store';
 import { supabase } from '@/lib/supabase';
 
 const pageVariants = { hidden: { opacity: 0 }, visible: { opacity: 1, transition: { staggerChildren: 0.1 } } };
@@ -34,6 +34,8 @@ export default function BalcaoPage() {
   const [cancelLoading, setCancelLoading] = useState(false);
   // Guarda se já existiram itens nesta sessão para detectar sumiço inesperado
   const hadItemsRefFlag = useRef(false);
+  // Estoque reservado global (todas as comandas abertas)
+  const [reservedStock, setReservedStock] = useState(new Map());
 
   // Caixa
   const [isCashierOpen, setIsCashierOpen] = useState(false);
@@ -81,6 +83,31 @@ export default function BalcaoPage() {
   const [showClientBox, setShowClientBox] = useState(false); // desativado no novo fluxo
   const [isClientWizardOpen, setIsClientWizardOpen] = useState(false);
   const [clientChosen, setClientChosen] = useState(false);
+  
+  // Navegação por teclado e filtros
+  const [productFocusIndex, setProductFocusIndex] = useState(0);
+  const [statusFilter, setStatusFilter] = useState('all'); // 'all', 'available', 'low', 'out'
+  const [sortOrder, setSortOrder] = useState(() => {
+    try {
+      return localStorage.getItem('balcao_sort_order') || 'code';
+    } catch {
+      return 'code';
+    }
+  }); // 'code', 'name'
+  const productItemRefs = useRef([]);
+  const productListRef = useRef(null);
+  
+  // Redimensionamento de painéis
+  const [leftPanelWidth, setLeftPanelWidth] = useState(() => {
+    try {
+      const saved = localStorage.getItem('balcao_left_panel_width');
+      return saved ? parseFloat(saved) : 50;
+    } catch {
+      return 50;
+    }
+  });
+  const [isResizing, setIsResizing] = useState(false);
+  const containerRef = useRef(null);
   
   // Refs para robustez contra respostas antigas (stale)
   const itemsReqIdRef = useRef(0); // identifica a última requisição válida de itens
@@ -271,6 +298,36 @@ export default function BalcaoPage() {
       if (!comandaId) { toast({ title: 'Nenhuma comanda aberta', description: 'Adicione itens para abrir uma comanda.', variant: 'warning' }); return; }
       const codigoEmpresa = userProfile?.codigo_empresa;
       if (!codigoEmpresa) { toast({ title: 'Empresa não definida', variant: 'destructive' }); return; }
+
+      // Validar que a comanda existe no banco antes de prosseguir
+      try {
+        const { data: comandaExists, error: checkError } = await supabase
+          .from('comandas')
+          .select('id')
+          .eq('id', comandaId)
+          .eq('codigo_empresa', codigoEmpresa)
+          .single();
+        
+        if (checkError || !comandaExists) {
+          console.error('[confirmPay] Comanda não encontrada no banco:', comandaId);
+          toast({ title: 'Comanda inválida', description: 'A comanda não existe mais. Criando nova comanda...', variant: 'warning' });
+          
+          // Limpar cache e recarregar
+          setComandaId(null);
+          setItems([]);
+          try {
+            localStorage.removeItem(LS_KEY.comandaId);
+            localStorage.removeItem(LS_KEY.items);
+          } catch {}
+          
+          await loadAll();
+          return;
+        }
+      } catch (validationError) {
+        console.error('[confirmPay] Erro ao validar comanda:', validationError);
+        toast({ title: 'Erro de validação', description: 'Não foi possível validar a comanda.', variant: 'destructive' });
+        return;
+      }
 
       // validações de múltiplos pagamentos
       if (!Array.isArray(paymentLines) || paymentLines.length === 0) { toast({ title: 'Informe os pagamentos', description: 'Adicione pelo menos uma forma de pagamento.', variant: 'warning' }); return; }
@@ -886,8 +943,8 @@ export default function BalcaoPage() {
           // 1) Apagar itens e vínculos de clientes da comanda
           try { await supabase.from('comanda_itens').delete().eq('comanda_id', comandaId).eq('codigo_empresa', codigoEmpresa); } catch {}
           try { await supabase.from('comanda_clientes').delete().eq('comanda_id', comandaId).eq('codigo_empresa', codigoEmpresa); } catch {}
-          // 2) Marcar comanda como cancelada (sem fechar)
-          await supabase.from('comandas').update({ status: 'canceled' }).eq('id', comandaId).eq('codigo_empresa', codigoEmpresa);
+          // 2) Deletar a comanda completamente (não apenas marcar como cancelada)
+          await supabase.from('comandas').delete().eq('id', comandaId).eq('codigo_empresa', codigoEmpresa);
         } catch { /* ignora e segue limpando UI */ }
       }
     } finally {
@@ -953,6 +1010,96 @@ export default function BalcaoPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [comandaId]);
 
+  // Atalhos de teclado globais
+  useEffect(() => {
+    const handleGlobalKeyDown = (e) => {
+      // Ignorar se estiver digitando em input/textarea
+      const target = e.target;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return;
+      
+      // P = focar na lista de produtos
+      if (e.key === 'p' || e.key === 'P') {
+        e.preventDefault();
+        productListRef.current?.focus();
+        return;
+      }
+      
+      // C = abrir wizard de clientes (se caixa aberto e cliente escolhido)
+      if ((e.key === 'c' || e.key === 'C') && isCashierOpen && clientChosen) {
+        e.preventDefault();
+        setIsClientWizardOpen(true);
+        return;
+      }
+      
+      // Escape = fechar modais abertos
+      if (e.key === 'Escape') {
+        if (isProductPickerOpen) {
+          setIsProductPickerOpen(false);
+          return;
+        }
+        if (isClientWizardOpen) {
+          setIsClientWizardOpen(false);
+          return;
+        }
+        if (isPayOpen) {
+          setIsPayOpen(false);
+          return;
+        }
+        if (isProductDetailsOpen) {
+          setIsProductDetailsOpen(false);
+          return;
+        }
+      }
+    };
+    
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, [isCashierOpen, clientChosen, isProductPickerOpen, isClientWizardOpen, isPayOpen, isProductDetailsOpen]);
+
+  // Redimensionamento de painéis
+  useEffect(() => {
+    const handleMouseMove = (e) => {
+      if (!isResizing || !containerRef.current) return;
+      
+      const container = containerRef.current;
+      const rect = container.getBoundingClientRect();
+      // Considerar a largura do divisor + margens (w-2 + mx-2 = 2px + 16px = 18px total)
+      const dividerWidth = 18;
+      const availableWidth = rect.width - dividerWidth;
+      const mouseX = e.clientX - rect.left;
+      const newWidth = (mouseX / rect.width) * 100;
+      
+      // Limitar entre 20% e 80%
+      if (newWidth >= 20 && newWidth <= 80) {
+        setLeftPanelWidth(newWidth);
+      }
+    };
+    
+    const handleMouseUp = () => {
+      if (isResizing) {
+        setIsResizing(false);
+        // Salvar no localStorage
+        try {
+          localStorage.setItem('balcao_left_panel_width', String(leftPanelWidth));
+        } catch {}
+      }
+    };
+    
+    if (isResizing) {
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUp);
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+    }
+    
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+  }, [isResizing, leftPanelWidth]);
+
   // Busca de produtos com debounce
   useEffect(() => {
     let active = true;
@@ -988,6 +1135,49 @@ export default function BalcaoPage() {
     return () => { active = false; clearTimeout(t); };
   }, [productSearch]);
 
+  // Buscar estoque reservado global (todas as comandas abertas)
+  useEffect(() => {
+    let active = true;
+    const fetchReservedStock = async () => {
+      try {
+        const codigoEmpresa = userProfile?.codigo_empresa;
+        if (!codigoEmpresa) return;
+        
+        const itens = await listarItensDeTodasComandasAbertas({ codigoEmpresa });
+        if (!active) return;
+        
+        console.log('[BalcaoPage] Itens de todas comandas abertas:', itens?.length || 0);
+        
+        const map = new Map();
+        for (const item of itens || []) {
+          const pid = item.produto_id;
+          const qty = Number(item.quantidade || 0);
+          map.set(pid, (map.get(pid) || 0) + qty);
+        }
+        
+        console.log('[BalcaoPage] Estoque reservado atualizado:', map.size, 'produtos diferentes');
+        if (map.size > 0) {
+          console.log('[BalcaoPage] Produtos reservados:', Array.from(map.entries()).map(([id, qty]) => ({ id, qty })));
+        }
+        
+        setReservedStock(map);
+      } catch (err) {
+        console.error('[BalcaoPage] Erro ao buscar estoque reservado:', err);
+        if (active) setReservedStock(new Map());
+      }
+    };
+    
+    fetchReservedStock();
+    
+    // Atualizar a cada 5 segundos (reduzido de 10s para melhor sincronização)
+    const interval = setInterval(fetchReservedStock, 5000);
+    
+    return () => { 
+      active = false; 
+      clearInterval(interval);
+    };
+  }, [userProfile?.codigo_empresa, items]); // Recarrega quando items muda
+
   useEffect(() => {
     let active = true;
     const t = setTimeout(async () => {
@@ -1012,7 +1202,8 @@ export default function BalcaoPage() {
   }, [clientSearch, isClientWizardOpen]);
 
   const total = useMemo(() => items.reduce((acc, it) => acc + Number(it.price || 0) * Number(it.quantity || 0), 0), [items]);
-  // Mapa de quantidades por produto para exibir badge na lista de produtos
+  
+  // Mapa de quantidades por produto APENAS da comanda atual (para badge)
   const qtyByProductId = useMemo(() => {
     const map = new Map();
     for (const it of items || []) {
@@ -1046,9 +1237,16 @@ export default function BalcaoPage() {
 
       // Pré-validação no cliente para UX imediata (servidor também valida)
       const stock = Number(prod.stock ?? prod.currentStock ?? 0);
+      const reserved = reservedStock.get(prod.id) || 0;
+      const available = Math.max(0, stock - reserved);
       const minStock = Number(prod.minStock ?? 0);
-      if (stock <= 0) {
-        toast({ title: 'Sem estoque', description: `Produto "${prod.name}" está com estoque zerado.`, variant: 'destructive' });
+      
+      if (available <= 0) {
+        toast({ 
+          title: 'Sem estoque disponível', 
+          description: `Produto "${prod.name}" está sem estoque (${stock} total, ${reserved} reservado em outras comandas).`, 
+          variant: 'destructive' 
+        });
         return;
       }
 
@@ -1063,6 +1261,21 @@ export default function BalcaoPage() {
           const c = await getOrCreateComandaBalcao({ codigoEmpresa });
           cid = c.id;
           setComandaId(c.id);
+          
+          // Aguardar RLS processar antes de continuar
+          await new Promise(r => setTimeout(r, 300));
+          
+          // Validar que a comanda foi criada e está acessível
+          const { data: checkComanda } = await supabase
+            .from('comandas')
+            .select('id')
+            .eq('id', cid)
+            .eq('codigo_empresa', codigoEmpresa)
+            .single();
+          
+          if (!checkComanda) {
+            throw new Error('Comanda criada mas não acessível via RLS');
+          }
         } catch (err) {
           if (err?.code === 'NO_OPEN_CASH_SESSION') {
             toast({ title: 'Abra o caixa para vender', description: 'Você precisa abrir o caixa antes de iniciar uma comanda no Balcão.', variant: 'warning' });
@@ -1096,6 +1309,21 @@ export default function BalcaoPage() {
       
       // Atualizar itens da comanda
       await refetchItemsAndCustomer(cid);
+      
+      // Atualizar estoque reservado global após adicionar item
+      try {
+        const itensGlobal = await listarItensDeTodasComandasAbertas({ codigoEmpresa });
+        const reservedMap = new Map();
+        for (const item of itensGlobal || []) {
+          const pid = item.produto_id;
+          const qty = Number(item.quantidade || 0);
+          reservedMap.set(pid, (reservedMap.get(pid) || 0) + qty);
+        }
+        setReservedStock(reservedMap);
+        console.log('[BalcaoPage:addProduct] Estoque reservado atualizado:', reservedMap.size, 'produtos');
+      } catch (err) {
+        console.error('[BalcaoPage:addProduct] Erro ao atualizar estoque reservado:', err);
+      }
       
       // Se havia clientes selecionados em memória e a comanda acabou de ser criada, associar agora
       if (createdNow) {
@@ -1246,21 +1474,19 @@ export default function BalcaoPage() {
 
   return (
     <div className="h-full flex flex-col">
-      <div className="mb-3 space-y-2">
-        <div className="w-full">
-          <Tabs value="balcao" onValueChange={(v) => {
-            if (v === 'mesas') navigate('/vendas');
-            if (v === 'balcao') navigate('/balcao');
-            if (v === 'historico') navigate('/historico');
-          }}>
-            <TabsList className="w-full grid grid-cols-3 sm:w-auto sm:inline-flex">
-              <TabsTrigger value="mesas">Mesas</TabsTrigger>
-              <TabsTrigger value="balcao">Balcão</TabsTrigger>
-              <TabsTrigger value="historico">Histórico</TabsTrigger>
-            </TabsList>
-          </Tabs>
-        </div>
-        <div className="w-full flex items-center gap-2 justify-end">
+      <div className="mb-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+        <Tabs value="balcao" onValueChange={(v) => {
+          if (v === 'mesas') navigate('/vendas');
+          if (v === 'balcao') navigate('/balcao');
+          if (v === 'historico') navigate('/historico');
+        }}>
+          <TabsList className="w-full grid grid-cols-3 sm:w-auto sm:inline-flex">
+            <TabsTrigger value="mesas">Mesas</TabsTrigger>
+            <TabsTrigger value="balcao">Balcão</TabsTrigger>
+            <TabsTrigger value="historico">Histórico</TabsTrigger>
+          </TabsList>
+        </Tabs>
+        <div className="flex items-center gap-2">
           <OpenCashierDialog />
           <CloseCashierDialog />
           <Button
@@ -1394,15 +1620,185 @@ export default function BalcaoPage() {
         </DialogContent>
       </Dialog>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 h-full overflow-hidden">
-        <div className="hidden md:flex flex-col border rounded-lg border-border overflow-hidden">
-          <div className="p-4 border-b border-border">
+      <div ref={containerRef} className="hidden md:flex gap-0 h-full overflow-hidden relative">
+        <div 
+          className="flex flex-col border rounded-lg border-border overflow-hidden"
+          style={{ width: `${leftPanelWidth}%` }}
+        >
+          <div 
+            className="p-4 border-b border-border space-y-3 cursor-pointer"
+            onClick={(e) => {
+              // Não focar se clicou em input ou botão
+              if (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON' || e.target.closest('button')) {
+                return;
+              }
+              productListRef.current?.focus();
+            }}
+          >
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted" />
-              <Input placeholder="Buscar produto..." className="pl-9" value={productSearch} onChange={(e) => setProductSearch(e.target.value)} />
+              <Input 
+                placeholder="Buscar produto..." 
+                className="pl-9" 
+                value={productSearch} 
+                onChange={(e) => setProductSearch(e.target.value)}
+                onKeyDown={(e) => {
+                  // Bloquear setas no input de busca
+                  if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+                    e.stopPropagation();
+                  }
+                }}
+              />
+            </div>
+            
+            {/* Filtros de Status e Ordenação */}
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  onClick={() => setStatusFilter('all')}
+                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap ${
+                    statusFilter === 'all' 
+                      ? 'bg-brand text-black' 
+                      : 'bg-surface text-text-muted hover:bg-surface-2'
+                  }`}
+                >
+                  Todos
+                </button>
+                <button
+                  onClick={() => setStatusFilter('available')}
+                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap ${
+                    statusFilter === 'available' 
+                      ? 'bg-success text-white' 
+                      : 'bg-surface text-text-muted hover:bg-surface-2'
+                  }`}
+                >
+                  Disponível
+                </button>
+                <button
+                  onClick={() => setStatusFilter('low')}
+                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap ${
+                    statusFilter === 'low' 
+                      ? 'bg-warning text-black' 
+                      : 'bg-surface text-text-muted hover:bg-surface-2'
+                  }`}
+                >
+                  Estoque Baixo
+                </button>
+                <button
+                  onClick={() => setStatusFilter('out')}
+                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap ${
+                    statusFilter === 'out' 
+                      ? 'bg-destructive text-white' 
+                      : 'bg-surface text-text-muted hover:bg-surface-2'
+                  }`}
+                >
+                  Sem Estoque
+                </button>
+              </div>
+              
+              {/* Ordenação */}
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    setSortOrder('code');
+                    try { localStorage.setItem('balcao_sort_order', 'code'); } catch {}
+                  }}
+                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap ${
+                    sortOrder === 'code' 
+                      ? 'bg-brand text-black' 
+                      : 'bg-surface text-text-muted hover:bg-surface-2'
+                  }`}
+                  title="Ordenar por código"
+                >
+                  Código
+                </button>
+                <button
+                  onClick={() => {
+                    setSortOrder('name');
+                    try { localStorage.setItem('balcao_sort_order', 'name'); } catch {}
+                  }}
+                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap ${
+                    sortOrder === 'name' 
+                      ? 'bg-brand text-black' 
+                      : 'bg-surface text-text-muted hover:bg-surface-2'
+                  }`}
+                  title="Ordenar por nome"
+                >
+                  A-Z
+                </button>
+              </div>
+            </div>
+            
+            <div 
+              className="flex items-center gap-4 text-sm text-text-muted cursor-pointer"
+              onClick={() => productListRef.current?.focus()}
+            >
+              <div className="flex items-center gap-2">
+                <kbd className="px-2 py-1 bg-surface border border-border rounded text-xs font-mono">↑↓</kbd>
+                <span>Navegar</span>
+              </div>
             </div>
           </div>
-          <div className="flex-1 overflow-y-auto p-4 thin-scroll">
+          <div 
+            ref={productListRef}
+            className="flex-1 overflow-y-auto p-4 thin-scroll focus:outline-none focus:ring-2 focus:ring-brand/20"
+            tabIndex={0}
+            onClick={() => productListRef.current?.focus()}
+            onKeyDown={(e) => {
+              const filtered = products.filter(p => {
+                const q = productSearch.trim().toLowerCase();
+                const matchesSearch = !q || (p.name || '').toLowerCase().includes(q) || String(p.code || '').toLowerCase().includes(q);
+                
+                if (statusFilter === 'all') return matchesSearch;
+                
+                const reserved = reservedStock.get(p.id) || 0;
+                const stock = Number(p.stock ?? p.currentStock ?? 0);
+                const remaining = Math.max(0, stock - reserved);
+                
+                if (statusFilter === 'available') return matchesSearch && remaining > 0;
+                if (statusFilter === 'low') return matchesSearch && remaining > 0 && remaining <= 5;
+                if (statusFilter === 'out') return matchesSearch && remaining <= 0;
+                
+                return matchesSearch;
+              }).sort((a, b) => {
+                if (sortOrder === 'name') {
+                  const nameA = (a.name || '').toLowerCase();
+                  const nameB = (b.name || '').toLowerCase();
+                  return nameA.localeCompare(nameB);
+                } else {
+                  const codeA = a.code ? parseInt(a.code, 10) : 999999;
+                  const codeB = b.code ? parseInt(b.code, 10) : 999999;
+                  return codeA - codeB;
+                }
+              });
+              
+              if (!['ArrowDown','ArrowUp','Home','End'].includes(e.key)) return;
+              e.preventDefault();
+              
+              const idx = productFocusIndex || 0;
+              const n = filtered.length;
+              
+              if (e.key === 'ArrowDown') {
+                const next = Math.min(idx + 1, n - 1);
+                setProductFocusIndex(next);
+                requestAnimationFrame(() => productItemRefs.current[next]?.scrollIntoView({ block: 'nearest' }));
+              }
+              if (e.key === 'ArrowUp') {
+                const next = Math.max(idx - 1, 0);
+                setProductFocusIndex(next);
+                requestAnimationFrame(() => productItemRefs.current[next]?.scrollIntoView({ block: 'nearest' }));
+              }
+              if (e.key === 'Home') {
+                setProductFocusIndex(0);
+                requestAnimationFrame(() => productItemRefs.current[0]?.scrollIntoView({ block: 'nearest' }));
+              }
+              if (e.key === 'End') {
+                const next = Math.max(0, n - 1);
+                setProductFocusIndex(next);
+                requestAnimationFrame(() => productItemRefs.current[next]?.scrollIntoView({ block: 'nearest' }));
+              }
+            }}
+          >
             {(products || []).length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full py-12">
                 <ShoppingBag className="w-16 h-16 text-text-muted mb-4" />
@@ -1415,35 +1811,85 @@ export default function BalcaoPage() {
               </div>
             ) : (
               <ul className="space-y-2">
-                {products.sort((a, b) => {
-                  const codeA = a.code ? parseInt(a.code, 10) : 999999;
-                  const codeB = b.code ? parseInt(b.code, 10) : 999999;
-                  return codeA - codeB;
-                }).map(prod => {
+                {products.filter(p => {
+                  const q = productSearch.trim().toLowerCase();
+                  const matchesSearch = !q || (p.name || '').toLowerCase().includes(q) || String(p.code || '').toLowerCase().includes(q);
+                  
+                  if (statusFilter === 'all') return matchesSearch;
+                  
+                  const reserved = reservedStock.get(p.id) || 0;
+                  const stock = Number(p.stock ?? p.currentStock ?? 0);
+                  const remaining = Math.max(0, stock - reserved);
+                  
+                  if (statusFilter === 'available') return matchesSearch && remaining > 0;
+                  if (statusFilter === 'low') return matchesSearch && remaining > 0 && remaining <= 5;
+                  if (statusFilter === 'out') return matchesSearch && remaining <= 0;
+                  
+                  return matchesSearch;
+                }).sort((a, b) => {
+                  if (sortOrder === 'name') {
+                    const nameA = (a.name || '').toLowerCase();
+                    const nameB = (b.name || '').toLowerCase();
+                    return nameA.localeCompare(nameB);
+                  } else {
+                    const codeA = a.code ? parseInt(a.code, 10) : 999999;
+                    const codeB = b.code ? parseInt(b.code, 10) : 999999;
+                    return codeA - codeB;
+                  }
+                }).map((prod, idx) => {
                   const qty = qtyByProductId.get(prod.id) || 0;
+                  const reserved = reservedStock.get(prod.id) || 0;
                   const stock = Number(prod.stock ?? prod.currentStock ?? 0);
-                  const remaining = Math.max(0, stock - qty);
+                  const remaining = Math.max(0, stock - reserved);
                   const price = Number(prod.salePrice ?? prod.price ?? 0);
+                  const isFocused = idx === productFocusIndex;
                   
                   return (
                     <React.Fragment key={prod.id}>
-                      <li className="flex items-center p-2 rounded-md hover:bg-surface-2 transition-colors">
+                      <li 
+                        ref={(el) => { productItemRefs.current[idx] = el; }}
+                        className={`flex items-center gap-3 p-2 rounded-md transition-colors border-2 ${
+                          isFocused
+                            ? 'border-brand bg-brand/5'
+                            : 'border-transparent hover:bg-surface-2'
+                        } ${
+                          remaining === 0 && qty === 0
+                            ? 'opacity-50 cursor-not-allowed'
+                            : ''
+                        }`}
+                        onClick={() => {
+                          setProductFocusIndex(idx);
+                          productListRef.current?.focus();
+                        }}
+                      >
                         <div 
                           className="flex-1 min-w-0 cursor-pointer"
-                          onClick={() => { setSelectedProduct({ ...prod, qty, remaining, price }); setIsProductDetailsOpen(true); }}
+                          onClick={(e) => { 
+                            e.stopPropagation();
+                            setSelectedProduct({ ...prod, qty, remaining, price }); 
+                            setIsProductDetailsOpen(true); 
+                          }}
                         >
-                          <div className="flex items-center gap-2">
-                            <p className="font-semibold truncate max-w-[180px]" title={`${prod.code ? `[${prod.code}] ` : ''}${prod.name}`}>
-                              {prod.code && <span className="text-text-muted">[{prod.code}]</span>} {prod.name.length > 20 ? `${prod.name.substring(0, 20)}...` : prod.name}
+                          <div className="flex items-center gap-2 mb-1">
+                            <p className="font-semibold truncate" title={`${prod.code ? `[${prod.code}] ` : ''}${prod.name}`}>
+                              {prod.code && <span className="text-text-muted">[{prod.code}]</span>} {prod.name}
                             </p>
                             {qty > 0 && (
                               <span className="inline-flex items-center justify-center text-[11px] px-1.5 py-0.5 rounded-full bg-brand/15 text-brand border border-brand/30 flex-shrink-0">x{qty}</span>
                             )}
-                            <span className="inline-flex items-center justify-center text-[11px] px-1.5 py-0.5 rounded-full bg-surface text-text-secondary border border-border flex-shrink-0">
-                              Qtd {remaining}
+                          </div>
+                          <div className="flex items-center justify-between gap-3">
+                            <p className="text-sm text-text-muted">R$ {price.toFixed(2)}</p>
+                            <span className={`text-xs font-medium whitespace-nowrap ${
+                              remaining <= 0 
+                                ? 'text-destructive' 
+                                : remaining <= 5 
+                                ? 'text-warning' 
+                                : 'text-text-secondary'
+                            }`}>
+                              Estoque: {remaining}
                             </span>
                           </div>
-                          <p className="text-sm text-text-muted">R$ {price.toFixed(2)}</p>
                         </div>
                         <Button 
                           size="icon" 
@@ -1452,6 +1898,7 @@ export default function BalcaoPage() {
                             e.stopPropagation();
                             addProduct(prod);
                           }}
+                          disabled={remaining === 0}
                           aria-label={`Adicionar ${prod.name}`}
                         >
                           <Plus className="h-4 w-4" />
@@ -1465,24 +1912,34 @@ export default function BalcaoPage() {
           </div>
         </div>
 
-        <div className="flex flex-col border rounded-lg border-border overflow-hidden">
+        {/* Divisor redimensionável */}
+        <div
+          className="w-2 bg-border hover:bg-brand cursor-col-resize transition-colors flex-shrink-0 mx-2"
+          onMouseDown={() => setIsResizing(true)}
+          title="Arraste para redimensionar"
+        />
+
+        <div 
+          className="flex flex-col border rounded-lg border-border overflow-hidden"
+          style={{ width: `${100 - leftPanelWidth}%` }}
+        >
           <div className="p-3 border-b border-border flex items-center justify-between gap-2 flex-wrap">
-            <div className="min-w-0">
+            <div className="min-w-0 flex-shrink">
               <div className="text-xs text-text-secondary">Comanda</div>
               <div className="flex items-center gap-2 min-w-0">
-                <span className="text-base font-bold">Balcão</span>
+                <span className="text-base font-bold whitespace-nowrap">Balcão</span>
                 {customerName ? (
-                  <span className="max-w-[140px] truncate text-[11px] px-2 py-0.5 rounded-full border border-border bg-surface-2 text-text-secondary">
+                  <span className="truncate text-[11px] px-2 py-0.5 rounded-full border border-border bg-surface-2 text-text-secondary">
                     {customerName}
                   </span>
                 ) : null}
               </div>
             </div>
-            <div className="flex items-center gap-1 ml-auto">
-              {/* Botão Produto */}
+            <div className="flex items-center gap-1 flex-shrink-0 flex-wrap">
+              {/* Botão Produto - apenas mobile */}
               <Button
                 size="sm"
-                className="h-8 px-2 text-xs whitespace-nowrap bg-amber-500 hover:bg-amber-400 text-black border border-amber-500/60"
+                className="md:hidden h-8 px-2 text-xs whitespace-nowrap bg-amber-500 hover:bg-amber-400 text-black border border-amber-500/60"
                 disabled={!isCashierOpen}
                 onClick={() => { if (!isCashierOpen) { toast({ title: 'Caixa Fechado', description: 'Abra o caixa antes de adicionar produtos.', variant: 'warning' }); return; } setIsProductPickerOpen(true); }}
                 title="Adicionar produto"
@@ -1536,7 +1993,7 @@ export default function BalcaoPage() {
                   <li key={it.id} className="p-2 rounded-md border border-border/30 bg-surface hover:bg-surface-2 transition-colors">
                     <div className="min-w-0 flex-1">
                       <div className="font-medium truncate" title={it.name}>
-                        {it.name.length > 25 ? `${it.name.substring(0, 25)}...` : it.name}
+                        {it.name}
                       </div>
                     </div>
                     <div className="mt-1 flex items-center justify-between gap-2">
@@ -1546,23 +2003,31 @@ export default function BalcaoPage() {
                         const codigoEmpresa = userProfile?.codigo_empresa;
                         if (!codigoEmpresa) { toast({ title: 'Empresa não definida', variant: 'destructive' }); return; }
                         const next = Number(it.quantity || 1) - 1;
-                        // Otimista: atualiza UI primeiro
-                        setItems(prev => {
-                          const arr = prev.map(n => n.id === it.id ? { ...n, quantity: Math.max(next, 0) } : n).filter(n => n.quantity > 0);
-                          return arr;
-                        });
                         try {
                           if (next <= 0) {
                             await removerItem({ itemId: it.id, codigoEmpresa });
+                            // Remove da UI após sucesso
+                            setItems(prev => prev.filter(n => n.id !== it.id));
                           } else {
                             await atualizarQuantidadeItem({ itemId: it.id, quantidade: next, codigoEmpresa });
+                            // Atualiza UI após sucesso
+                            setItems(prev => prev.map(n => n.id === it.id ? { ...n, quantity: next } : n));
+                          }
+                          
+                          // Atualizar estoque reservado global após remover/diminuir
+                          try {
+                            const itensGlobal = await listarItensDeTodasComandasAbertas({ codigoEmpresa });
+                            const reservedMap = new Map();
+                            for (const item of itensGlobal || []) {
+                              const pid = item.produto_id;
+                              const qty = Number(item.quantidade || 0);
+                              reservedMap.set(pid, (reservedMap.get(pid) || 0) + qty);
+                            }
+                            setReservedStock(reservedMap);
+                          } catch (err) {
+                            console.error('[BalcaoPage:removeItem] Erro ao atualizar estoque reservado:', err);
                           }
                         } catch (err) {
-                          // Recarrega estado real se falhar
-                          try {
-                            const itens = await listarItensDaComanda({ comandaId, codigoEmpresa });
-                            setItems((itens || []).map((n) => ({ id: n.id, productId: n.produto_id, name: n.descricao || 'Item', price: Number(n.preco_unitario || 0), quantity: Number(n.quantidade || 1) })));
-                          } catch {}
                           const msg = String(err?.message || '').toLowerCase();
                           if (err?.code === 'INSUFFICIENT_STOCK' || msg.includes('insuficiente')) {
                             toast({ title: 'Estoque insuficiente', description: err?.message || 'Quantidade maior que o disponível.', variant: 'warning' });
@@ -1582,16 +2047,11 @@ export default function BalcaoPage() {
                           return; 
                         }
                         const next = Number(it.quantity || 1) + 1;
-                        // Otimista: atualiza UI primeiro
-                        setItems(prev => prev.map(n => n.id === it.id ? { ...n, quantity: next } : n));
                         try {
                           await atualizarQuantidadeItem({ itemId: it.id, quantidade: next, codigoEmpresa });
+                          // Atualiza UI após sucesso
+                          setItems(prev => prev.map(n => n.id === it.id ? { ...n, quantity: next } : n));
                         } catch (err) {
-                          // Recarrega estado real se falhar
-                          try {
-                            const itens = await listarItensDaComanda({ comandaId, codigoEmpresa });
-                            setItems((itens || []).map((n) => ({ id: n.id, productId: n.produto_id, name: n.descricao || 'Item', price: Number(n.preco_unitario || 0), quantity: Number(n.quantidade || 1) })));
-                          } catch {}
                           const msg = String(err?.message || '').toLowerCase();
                           if (err?.code === 'INSUFFICIENT_STOCK' || msg.includes('insuficiente')) {
                             toast({ title: 'Estoque insuficiente', description: err?.message || 'Quantidade maior que o disponível.', variant: 'warning' });
@@ -1912,11 +2372,58 @@ export default function BalcaoPage() {
                   } catch {}
                   setIsClientWizardOpen(false);
                 } else {
+                  // Validar que a comanda existe antes de adicionar clientes
+                  try {
+                    const { data: checkComanda, error: checkError } = await supabase
+                      .from('comandas')
+                      .select('id')
+                      .eq('id', comandaId)
+                      .eq('codigo_empresa', codigoEmpresa)
+                      .single();
+                    
+                    if (checkError || !checkComanda) {
+                      console.error('[ClientWizard] Comanda não encontrada:', comandaId);
+                      toast({ title: 'Comanda inválida', description: 'A comanda não existe mais. Reiniciando...', variant: 'warning' });
+                      
+                      // Limpar cache e estado
+                      setComandaId(null);
+                      setItems([]);
+                      setClientChosen(false);
+                      setCustomerName('');
+                      try {
+                        localStorage.removeItem(LS_KEY.comandaId);
+                        localStorage.removeItem(LS_KEY.items);
+                        localStorage.removeItem(LS_KEY.customerName);
+                        localStorage.removeItem(LS_KEY.clientChosen);
+                      } catch {}
+                      
+                      setIsClientWizardOpen(false);
+                      return;
+                    }
+                  } catch (validationError) {
+                    console.error('[ClientWizard] Erro ao validar comanda:', validationError);
+                    toast({ title: 'Erro de validação', variant: 'destructive' });
+                    return;
+                  }
+                  
                   try {
                     await adicionarClientesAComanda({ comandaId, clienteIds: ids, nomesLivres: [], codigoEmpresa });
                   } catch (error) {
-                    // Ignora erro de duplicata (constraint violation)
-                    if (!error?.message?.includes('duplicate') && !error?.message?.includes('violates foreign key')) {
+                    // Se erro de foreign key, limpar cache
+                    if (error?.message?.includes('violates foreign key')) {
+                      console.error('[ClientWizard] Foreign key error, limpando cache:', error);
+                      setComandaId(null);
+                      setItems([]);
+                      try {
+                        localStorage.removeItem(LS_KEY.comandaId);
+                        localStorage.removeItem(LS_KEY.items);
+                      } catch {}
+                      toast({ title: 'Comanda inválida', description: 'Reinicie a venda.', variant: 'destructive' });
+                      setIsClientWizardOpen(false);
+                      return;
+                    }
+                    // Ignora erro de duplicata
+                    if (!error?.message?.includes('duplicate')) {
                       throw error;
                     }
                     console.log('Alguns clientes já estavam vinculados, continuando...');
@@ -1938,8 +2445,6 @@ export default function BalcaoPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      
 
       {/* Modal de Detalhes do Item da Comanda */}
       <Dialog open={!!selectedCommandItem} onOpenChange={(open) => !open && setSelectedCommandItem(null)}>

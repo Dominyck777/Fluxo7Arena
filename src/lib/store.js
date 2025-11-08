@@ -1667,6 +1667,47 @@ export async function listarItensDaComanda({ comandaId, codigoEmpresa }) {
   return data || []
 }
 
+// Busca TODOS os itens de TODAS as comandas abertas (para controle de estoque global)
+export async function listarItensDeTodasComandasAbertas({ codigoEmpresa }) {
+  const codigo = codigoEmpresa || getCachedCompanyCode()
+  
+  // 1. Buscar todas as comandas abertas (fechado_em IS NULL significa aberta)
+  let qComandas = supabase
+    .from('comandas')
+    .select('id')
+    .is('fechado_em', null)
+  if (codigo) qComandas = qComandas.eq('codigo_empresa', codigo)
+  
+  const { data: comandas, error: errComandas } = await qComandas
+  if (errComandas) throw errComandas
+  
+  console.log('[listarItensDeTodasComandasAbertas] Comandas abertas:', comandas?.length || 0, 'IDs:', comandas?.map(c => c.id))
+  
+  if (!comandas || comandas.length === 0) {
+    console.log('[listarItensDeTodasComandasAbertas] Nenhuma comanda aberta encontrada')
+    return [] // Nenhuma comanda aberta
+  }
+  
+  const comandaIds = comandas.map(c => c.id)
+  
+  // 2. Buscar todos os itens dessas comandas
+  let qItens = supabase
+    .from('comanda_itens')
+    .select('produto_id, quantidade')
+    .in('comanda_id', comandaIds)
+  if (codigo) qItens = qItens.eq('codigo_empresa', codigo)
+  
+  const { data: itens, error: errItens } = await qItens
+  if (errItens) throw errItens
+  
+  console.log('[listarItensDeTodasComandasAbertas] Itens encontrados:', itens?.length || 0)
+  if (itens && itens.length > 0) {
+    console.log('[listarItensDeTodasComandasAbertas] Detalhes dos itens:', itens)
+  }
+  
+  return itens || []
+}
+
 // Conveniência: SEMPRE criar nova comanda para mesa (nunca reutilizar)
 const _mesaLocks = new Map();
 
@@ -2007,9 +2048,10 @@ export async function removerItem({ itemId, codigoEmpresa }) {
     .delete()
     .eq('id', itemId)
   if (codigo) q = q.eq('codigo_empresa', codigo)
-  const { data, error } = await q.select('id').single()
-  if (error) throw error
-  return !!data
+  const { data, error } = await q.select('id')
+  // Ignora erro se item já foi deletado (0 rows)
+  if (error && error.code !== 'PGRST116') throw error
+  return Array.isArray(data) && data.length > 0
 }
 
 // Pagamentos
@@ -2270,12 +2312,24 @@ export async function cancelarComandaEMesa({ comandaId, codigoEmpresa }) {
     // Marca status como cancelled e define fechado_em agora
     // Importante: definir fechado_em evita que consultas baseadas em 'fechado_em IS NULL' considerem a comanda aberta
     const nowIso = new Date().toISOString()
-    const { error: upErr } = await supabase
+    const { data: updateResult, error: upErr } = await supabase
       .from('comandas')
       .update({ status: 'cancelled', fechado_em: nowIso })
       .eq('id', comandaId)
       .eq('codigo_empresa', codigo)
-    if (upErr) throw upErr
+      .select()
+    
+    if (upErr) {
+      console.error(`${trace} Erro ao atualizar comanda:`, upErr)
+      throw upErr
+    }
+    
+    if (!updateResult || updateResult.length === 0) {
+      console.error(`${trace} ⚠️ UPDATE não afetou nenhuma linha! Comanda ${comandaId} não foi encontrada ou RLS bloqueou`)
+      throw new Error('Comanda não encontrada ou sem permissão para cancelar')
+    }
+    
+    console.log(`${trace} ✅ Comanda atualizada:`, updateResult[0])
     
     // Se tiver mesa associada, marca como disponível
     if (comanda?.mesa_id) {

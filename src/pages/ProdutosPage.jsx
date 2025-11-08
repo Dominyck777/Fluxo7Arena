@@ -316,10 +316,10 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
   };
 
   const formatPercent = (value) => {
-    const cleaned = String(value || '').replace(/[^\d,\.]/g, '').replace(/\./g, '').replace(',', '.');
-    const n = Number(cleaned);
-    const safe = Number.isFinite(n) ? n : 0;
-    return safe.toFixed(2).replace('.', ',');
+    // Permite digitação livre, apenas remove caracteres inválidos
+    const cleaned = String(value || '').replace(/[^\d,]/g, '');
+    // Formata com % na frente
+    return cleaned ? `% ${cleaned}` : '';
   };
 
   const percentToNumber = (value) => {
@@ -418,18 +418,50 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
   }, [product, open]);
 
   // Auto-cálculos: custo e margem
-  // Removido o recálculo automático baseado em "Preço Compra" e "% Custos"
+  // Cálculo bidirecional: editar margem atualiza preço de venda, editar preço atualiza margem
+  const lastEditedFieldRef = useRef('salePrice'); // 'salePrice' ou 'marginPercent'
 
+  // Quando custo ou preço de venda mudam, recalcula margem (se último campo editado foi preço)
   useEffect(() => {
-    const cp = currencyToNumber(costPrice);
-    const sp = currencyToNumber(salePrice);
-    if (sp > 0) {
-      const m = ((sp - cp) / sp) * 100;
-      setMarginPercent(m.toFixed(2).replace('.', ','));
-    } else {
-      setMarginPercent('');
+    if (lastEditedFieldRef.current === 'salePrice') {
+      const cp = currencyToNumber(costPrice);
+      const sp = currencyToNumber(salePrice);
+      if (sp > 0) {
+        const m = ((sp - cp) / sp) * 100;
+        setMarginPercent(m.toFixed(2).replace('.', ','));
+      } else {
+        setMarginPercent('');
+      }
     }
   }, [costPrice, salePrice]);
+
+  // Quando margem muda, recalcula preço de venda (se último campo editado foi margem)
+  // Usa debounce para evitar cálculos enquanto digita
+  useEffect(() => {
+    if (lastEditedFieldRef.current === 'marginPercent') {
+      const timer = setTimeout(() => {
+        const cp = currencyToNumber(costPrice);
+        const m = percentToNumber(marginPercent);
+        console.log('[Margem] Custo:', cp, 'Margem:', m);
+        if (cp > 0 && m > 0) {
+          if (m >= 100) {
+            // Margem >= 100%: usar fórmula alternativa (markup)
+            // PreçoVenda = PreçoCusto * (1 + Margem/100)
+            const sp = cp * (1 + m / 100);
+            console.log('[Margem] Preço calculado (markup):', sp);
+            setSalePrice(sp.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+          } else {
+            // Margem < 100%: fórmula normal
+            // PreçoVenda = PreçoCusto / (1 - Margem/100)
+            const sp = cp / (1 - m / 100);
+            console.log('[Margem] Preço calculado (margem):', sp);
+            setSalePrice(sp.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+          }
+        }
+      }, 500); // Aguarda 500ms após parar de digitar
+      return () => clearTimeout(timer);
+    }
+  }, [marginPercent, costPrice]);
 
   const handleSave = async (e) => {
     e.preventDefault();
@@ -768,15 +800,67 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
             <TabsContent value="preco" className="space-y-3 mt-2">
               <div className="grid grid-cols-4 items-center gap-4">
                 <Label htmlFor="costPrice" className="text-right">Preço de Custo (R$)</Label>
-                <Input id="costPrice" inputMode="numeric" placeholder="Ex.: 10,00" value={`R$ ${costPrice || '0,00'}`} onChange={(e)=> setCostPrice(formatCurrencyBR(e.target.value))} disabled={!editEnabled} className="col-span-3" />
+                <Input 
+                  id="costPrice" 
+                  inputMode="numeric" 
+                  placeholder="Ex.: 10,00" 
+                  value={`R$ ${costPrice || '0,00'}`} 
+                  onChange={(e)=> {
+                    setCostPrice(formatCurrencyBR(e.target.value));
+                    // Mantém o último campo editado para recalcular corretamente
+                  }} 
+                  disabled={!editEnabled} 
+                  className="col-span-3" 
+                />
               </div>
               <div className="grid grid-cols-4 items-center gap-4">
                 <Label htmlFor="salePrice" className="text-right">Preço de Venda (R$) {((!salePrice) || (currencyToNumber(salePrice) <= 0)) && (<span className="text-danger">*</span>)}</Label>
-                <Input id="salePrice" inputMode="numeric" placeholder="Ex.: 15,00" value={`R$ ${salePrice || '0,00'}`} onChange={(e)=> setSalePrice(formatCurrencyBR(e.target.value))} disabled={!editEnabled} className="col-span-3" />
+                <Input 
+                  id="salePrice" 
+                  inputMode="numeric" 
+                  placeholder="Ex.: 15,00" 
+                  value={`R$ ${salePrice || '0,00'}`} 
+                  onChange={(e)=> {
+                    lastEditedFieldRef.current = 'salePrice';
+                    setSalePrice(formatCurrencyBR(e.target.value));
+                  }} 
+                  disabled={!editEnabled} 
+                  className="col-span-3" 
+                />
               </div>
               <div className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor="marginPercent" className="text-right">% de Lucro</Label>
-                <Input id="marginPercent" inputMode="decimal" placeholder="Calculado" value={`${marginPercent || '0,00'} %`} onChange={(e)=> setMarginPercent(formatPercent(e.target.value))} disabled={!editEnabled} className="col-span-3" />
+                <Label htmlFor="marginPercent" className="text-right">% de Lucro (Margem)</Label>
+                <Input 
+                  id="marginPercent" 
+                  type="text"
+                  placeholder="Ex.: 40" 
+                  value={marginPercent ? `% ${marginPercent}` : ''} 
+                  onChange={(e)=> {
+                    lastEditedFieldRef.current = 'marginPercent';
+                    const cleaned = e.target.value.replace(/[^\d,]/g, '');
+                    setMarginPercent(cleaned);
+                  }}
+                  onBlur={() => {
+                    // Ao sair do campo, força recalculo imediato
+                    if (lastEditedFieldRef.current === 'marginPercent') {
+                      const cp = currencyToNumber(costPrice);
+                      const m = percentToNumber(marginPercent);
+                      if (cp > 0 && m > 0) {
+                        if (m >= 100) {
+                          // Markup para margem >= 100%
+                          const sp = cp * (1 + m / 100);
+                          setSalePrice(sp.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+                        } else {
+                          // Margem normal
+                          const sp = cp / (1 - m / 100);
+                          setSalePrice(sp.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+                        }
+                      }
+                    }
+                  }}
+                  disabled={!editEnabled} 
+                  className="col-span-3" 
+                />
               </div>
             </TabsContent>
 
