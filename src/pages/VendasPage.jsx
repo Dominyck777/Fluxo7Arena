@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger, } from "@/components/ui/alert-dialog"
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
-import { listMesas, ensureCaixaAberto, fecharCaixa, getOrCreateComandaForMesa, listarItensDaComanda, adicionarItem, atualizarQuantidadeItem, removerItem, listarFinalizadoras, registrarPagamento, fecharComandaEMesa, cancelarComandaEMesa, listarComandasAbertas, listarTotaisPorComanda, criarMesa, listarClientes, adicionarClientesAComanda, listarClientesDaComanda, getCaixaAberto, listarResumoSessaoCaixaAtual, criarMovimentacaoCaixa, listarMovimentacoesCaixa } from '@/lib/store';
+import { listMesas, ensureCaixaAberto, fecharCaixa, getOrCreateComandaForMesa, listarItensDaComanda, adicionarItem, atualizarQuantidadeItem, removerItem, listarFinalizadoras, registrarPagamento, fecharComandaEMesa, cancelarComandaEMesa, listarComandasAbertas, listarTotaisPorComanda, criarMesa, listarClientes, adicionarClientesAComanda, listarClientesDaComanda, getCaixaAberto, listarResumoSessaoCaixaAtual, criarMovimentacaoCaixa, listarMovimentacoesCaixa, listarItensDeTodasComandasAbertas } from '@/lib/store';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -62,6 +62,10 @@ function VendasPage() {
   const [isCounterModeOpen, setIsCounterModeOpen] = useState(false);
   const [counterOrder, setCounterOrder] = useState([]);
   const [isCashierDetailsOpen, setIsCashierDetailsOpen] = useState(false);
+  // Estoque reservado global (todas as comandas abertas)
+  const [reservedStock, setReservedStock] = useState(new Map());
+  // Modal de Produtos
+  const [isProductsModalOpen, setIsProductsModalOpen] = useState(false);
   // Refs para Produtos (atalhos)
   const productsSearchRef = useRef(null);
   const productsListRef = useRef(null);
@@ -161,6 +165,20 @@ function VendasPage() {
       const updatedTable = { ...selectedTable, order, totalHint: syncedTotal };
       setSelectedTable(updatedTable);
       setTables((prevTables) => prevTables.map(t => (t.id === updatedTable.id ? updatedTable : t)));
+      
+      // Atualizar estoque reservado global após remover/diminuir item
+      try {
+        const itensGlobal = await listarItensDeTodasComandasAbertas({ codigoEmpresa: userProfile?.codigo_empresa });
+        const reservedMap = new Map();
+        for (const item of itensGlobal || []) {
+          const pid = item.produto_id;
+          const qty = Number(item.quantidade || 0);
+          reservedMap.set(pid, (reservedMap.get(pid) || 0) + qty);
+        }
+        setReservedStock(reservedMap);
+      } catch (err) {
+        console.error('[decProduct] Erro ao atualizar estoque reservado:', err);
+      }
     } catch (e) {
       toast({ title: 'Falha ao alterar quantidade', description: e?.message || 'Tente novamente', variant: 'destructive' });
     }
@@ -253,37 +271,24 @@ function VendasPage() {
   useEffect(() => {
     const handler = async (e) => {
       try {
+        // CRÍTICO: Bloquear TODOS os atalhos se modal de produtos estiver aberto
+        if (isProductsModalOpen) {
+          return;
+        }
+        
         // Ignorar quando digitando em campos de texto
         const tag = String(e.target?.tagName || '').toLowerCase();
         const isInInput = ['input','textarea','select'].includes(tag) || e.target?.isContentEditable;
         
-        // Se está em input, ignorar navegação (exceto atalho P para balcão)
+        // Se está em input/textarea, ignorar TODOS os atalhos de letra
         if (isInInput) {
-          if ((e.key === 'p' || e.key === 'P') && isCounterModeOpen) {
-            e.preventDefault();
-            setTimeout(() => { try { counterSearchRef.current?.focus(); } catch {} }, 0);
-          }
           return;
         }
         
-        // Ignorar quando um dialog modal está aberto (não listbox de produtos)
-        const isInDialog = e.target?.closest('[role="dialog"]');
-        if (anyDialogOpen && isInDialog) {
-          if ((e.key === 'p' || e.key === 'P') && isCounterModeOpen) {
-            e.preventDefault();
-            setTimeout(() => { try { counterSearchRef.current?.focus(); } catch {} }, 0);
-            return;
-          }
+        // Bloquear atalhos se qualquer diálogo estiver aberto (exceto mesa selecionada)
+        if (anyDialogOpen) {
           return;
         }
-        
-        // Se o foco está na lista de produtos (role="listbox"), ignorar TODAS as teclas no handler global
-        const isInListbox = e.target?.closest('[role="listbox"]');
-        if (isInListbox) {
-          return;
-        }
-        
-        if (e.repeat) return;
 
         // F1: Selecionar 1ª mesa disponível e abrir (OpenTableDialog)
         if (e.key === 'F1') {
@@ -390,7 +395,7 @@ function VendasPage() {
           }
           return;
         }
-        // P: focar Produtos (busca) quando houver mesa selecionada
+        // P: abrir modal de Produtos quando houver mesa selecionada
         if (e.key === 'p' || e.key === 'P') {
           e.preventDefault();
           // Prioridade 1: se Modo Balcão estiver aberto, focar a busca do balcão
@@ -400,22 +405,9 @@ function VendasPage() {
             }, 0);
             return;
           }
-          // Prioridade 2: mesa selecionada -> focar busca de produtos da comanda
+          // Prioridade 2: mesa selecionada -> abrir modal de produtos
           if (selectedTable) {
-            // No mobile, se houver modal com tabs, tentar ir para aba de produtos
-            try { setMobileTableTab?.('products'); } catch {}
-            // No desktop, mudar Tabs laterais para 'products'
-            try { setDesktopTab('products'); } catch {}
-            setFocusContext('panel');
-            setTimeout(() => {
-              try {
-                // Focar na lista de produtos ao invés do input
-                if (productsListRef.current) {
-                  productsListRef.current.focus();
-                  setProductFocusIndex(0);
-                }
-              } catch {}
-            }, 100);
+            setIsProductsModalOpen(true);
             return;
           }
           // Prioridade 3: sem mesa e balcão fechado -> abrir Modo Balcão e focar a busca
@@ -429,7 +421,7 @@ function VendasPage() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [anyDialogOpen, selectedTable?.id, tables, getGridColumns]);
+  }, [anyDialogOpen, selectedTable?.id, tables, getGridColumns, isProductsModalOpen]);
 
 
   // Persistir mesa selecionada por empresa
@@ -443,15 +435,40 @@ function VendasPage() {
 
   // Restaurar mesa selecionada quando as mesas carregarem
   useEffect(() => {
-    try {
-      if (!selectedTable && userProfile?.codigo_empresa && Array.isArray(tables) && tables.length > 0) {
-        const sid = localStorage.getItem(`vendas:selected:${userProfile.codigo_empresa}`);
-        if (sid) {
-          const t = tables.find(x => String(x.id) === String(sid));
-          if (t) setSelectedTable(t);
+    const restoreSelection = async () => {
+      try {
+        if (!selectedTable && userProfile?.codigo_empresa && Array.isArray(tables) && tables.length > 0) {
+          const sid = localStorage.getItem(`vendas:selected:${userProfile.codigo_empresa}`);
+          if (sid) {
+            const t = tables.find(x => String(x.id) === String(sid));
+            if (t) {
+              // Garantir que o foco fique em 'tables'
+              setFocusContext('tables');
+              
+              // Se a mesa tem comanda, carregar detalhes
+              if (t.comandaId) {
+                try {
+                  await refetchSelectedTableDetails(t);
+                  // Reforçar foco após carregar detalhes
+                  setFocusContext('tables');
+                } catch (err) {
+                  console.error('[Restore Selection] Erro ao carregar detalhes:', err);
+                  // Se falhar ao carregar detalhes, limpar localStorage e não restaurar
+                  localStorage.removeItem(`vendas:selected:${userProfile.codigo_empresa}`);
+                }
+              } else {
+                // Mesa sem comanda - não restaurar, limpar localStorage
+                localStorage.removeItem(`vendas:selected:${userProfile.codigo_empresa}`);
+              }
+            }
+          }
         }
+      } catch (err) {
+        console.error('[Restore Selection] Erro:', err);
       }
-    } catch {}
+    };
+    
+    restoreSelection();
   }, [tables, selectedTable, userProfile?.codigo_empresa]);
 
   // (moved) anyDialogOpen declarado acima
@@ -568,7 +585,22 @@ function VendasPage() {
           }
         }, 10000);
 
-        let mesas = await listMesas(codigoEmpresa);
+        // Carregar mesas e estoque reservado global em paralelo
+        const [mesas, itensReservados] = await Promise.all([
+          listMesas(codigoEmpresa),
+          listarItensDeTodasComandasAbertas({ codigoEmpresa }).catch(() => [])
+        ]);
+        
+        // Processar estoque reservado
+        if (mountedRef.current && loadReqIdRef.current === myReq) {
+          const reservedMap = new Map();
+          for (const item of itensReservados || []) {
+            const pid = item.produto_id;
+            const qty = Number(item.quantidade || 0);
+            reservedMap.set(pid, (reservedMap.get(pid) || 0) + qty);
+          }
+          setReservedStock(reservedMap);
+        }
         let openComandas = [];
         try { 
           openComandas = await listarComandasAbertas({ codigoEmpresa }); 
@@ -625,6 +657,21 @@ function VendasPage() {
         } else {
           // Salvar cache apenas se houver mesas
           try { if (cacheKey) localStorage.setItem(cacheKey, JSON.stringify(uiTables)); } catch {}
+        }
+        
+        // Limpar seleção de mesas que não têm mais comanda (foram canceladas)
+        const selKey = codigoEmpresa ? `vendas:selected:${codigoEmpresa}` : null;
+        if (selKey) {
+          try {
+            const cachedSelId = localStorage.getItem(selKey);
+            if (cachedSelId) {
+              const mesa = uiTables.find(t => String(t.id) === String(cachedSelId));
+              // Se a mesa não tem comandaId, limpar do localStorage
+              if (mesa && !mesa.comandaId) {
+                localStorage.removeItem(selKey);
+              }
+            }
+          } catch {}
         }
         
         lastTablesSizeRef.current = Array.isArray(uiTables) ? uiTables.length : 0;
@@ -725,12 +772,16 @@ function VendasPage() {
   useEffect(() => {
     const onFocus = () => { 
       if (!anyDialogOpen && !isManageClientsOpen && selectedTable?.comandaId) {
-        refetchSelectedTableDetails(selectedTable); 
+        refetchSelectedTableDetails(selectedTable);
+        // Manter foco em 'tables' após recarregar
+        setFocusContext('tables');
       }
     };
     const onVisibility = () => { 
       if (!anyDialogOpen && !isManageClientsOpen && document.visibilityState === 'visible' && selectedTable?.comandaId) {
-        refetchSelectedTableDetails(selectedTable); 
+        refetchSelectedTableDetails(selectedTable);
+        // Manter foco em 'tables' após recarregar
+        setFocusContext('tables');
       }
     };
     window.addEventListener('focus', onFocus);
@@ -815,7 +866,6 @@ function VendasPage() {
   const refetchSelectedTableDetails = async (target) => {
     try {
       if (!target?.comandaId) return;
-      console.log('[refetchSelectedTableDetails] Recarregando mesa:', target.id);
       const itens = await listarItensDaComanda({ comandaId: target.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
       const order = (itens || []).map((it) => ({ id: it.id, productId: it.produto_id, name: it.descricao || 'Item', price: Number(it.preco_unitario || 0), quantity: Number(it.quantidade || 1) }));
       let customer = target.customer || null;
@@ -823,7 +873,6 @@ function VendasPage() {
         const vinculos = await listarClientesDaComanda({ comandaId: target.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
         const nomes = (vinculos || []).map(v => v?.nome).filter(Boolean);
         customer = nomes.length ? nomes.join(', ') : null;
-        console.log('[refetchSelectedTableDetails] Clientes atualizados:', customer);
       } catch {}
       const enriched = { ...target, status: target.status === 'awaiting-payment' ? 'awaiting-payment' : 'in-use', order, customer };
       setSelectedTable(enriched);
@@ -907,13 +956,26 @@ function VendasPage() {
         return { id: m.id, number: m.numero, name: m.nome || null, status, order: [], customer, comandaId, totalHint };
       });
       const uiTables = uiTablesBase.map(t => {
+        // Se a mesa selecionada foi cancelada (não tem mais comandaId), não preservar order
         if (selectedTable && t.id === selectedTable.id) {
+          if (!t.comandaId) {
+            // Mesa foi liberada/cancelada - limpar tudo
+            return { ...t, order: [], customer: null };
+          }
           return { ...t, order: selectedTable.order || [], customer: selectedTable.customer || t.customer };
         }
         return t;
       });
       
       setTables(uiTables);
+      
+      // Se a mesa selecionada foi cancelada, atualizar selectedTable também
+      if (selectedTable) {
+        const updatedSelected = uiTables.find(t => t.id === selectedTable.id);
+        if (updatedSelected && !updatedSelected.comandaId) {
+          setSelectedTable({ ...updatedSelected, order: [], customer: null });
+        }
+      }
       
     } catch (err) {
       console.error('[refreshTablesLight] Erro fatal:', err);
@@ -1721,7 +1783,6 @@ function VendasPage() {
     if (!table) return (
       <div 
         className="flex items-center justify-center h-full text-text-muted"
-        onClick={() => setFocusContext('panel')}
       >
         <div className="text-center">
           <ShoppingBag className="mx-auto mb-4 h-12 w-12 opacity-50" />
@@ -1816,10 +1877,6 @@ function VendasPage() {
       <>
         <div 
           className="flex flex-col h-full"
-          onClick={(e) => {
-            e.stopPropagation();
-            setFocusContext('panel');
-          }}
         >
           <div className="p-3 border-b border-border flex items-center justify-between gap-2">
             {customerDisplay ? (
@@ -1865,18 +1922,39 @@ function VendasPage() {
                       </AlertDialogHeader>
                       <AlertDialogFooter>
                         <AlertDialogCancel>Voltar</AlertDialogCancel>
-                        <AlertDialogAction onClick={async () => {
-                          try {
-                            await cancelarComandaEMesa({ comandaId: table.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
-                            setSelectedTable(null);
-                            await refreshTablesLight({ showToast: true });
-                            toast({ title: 'Comanda cancelada', variant: 'success' });
-                          } catch (e) {
-                            console.error('[Cancelar Comanda] Erro:', e);
-                            toast({ title: 'Falha ao cancelar comanda', description: e?.message || 'Tente novamente', variant: 'destructive' });
-                            try { await refreshTablesLight({ showToast: true }); } catch (refreshErr) { console.error('[Cancelar Comanda] Erro ao recarregar após falha:', refreshErr); }
-                          }
-                        }}>Confirmar Cancelamento</AlertDialogAction>
+                        <AlertDialogAction 
+                          disabled={false}
+                          onClick={async (e) => {
+                            // Fechar dialog imediatamente
+                            const dialog = e.currentTarget.closest('[role="alertdialog"]');
+                            if (dialog) {
+                              const closeBtn = dialog.querySelector('[data-radix-collection-item]');
+                              closeBtn?.click();
+                            }
+                            
+                            try {
+                              // Limpar localStorage ANTES de cancelar para evitar restauração
+                              const codigoEmpresa = userProfile?.codigo_empresa;
+                              if (codigoEmpresa) {
+                                try {
+                                  localStorage.removeItem(`vendas:selected:${codigoEmpresa}`);
+                                  localStorage.removeItem(`vendas:tables:${codigoEmpresa}`);
+                                } catch {}
+                              }
+                              
+                              await cancelarComandaEMesa({ comandaId: table.comandaId, codigoEmpresa });
+                              
+                              setSelectedTable(null);
+                              await refreshTablesLight({ showToast: false });
+                              
+                              toast({ title: 'Comanda cancelada', variant: 'success' });
+                            } catch (err) {
+                              console.error('[Cancelar Comanda] Erro:', err);
+                              toast({ title: 'Falha ao cancelar comanda', description: err?.message || 'Tente novamente', variant: 'destructive' });
+                              try { await refreshTablesLight({ showToast: false }); } catch (refreshErr) { console.error('[Cancelar Comanda] Erro ao recarregar após falha:', refreshErr); }
+                            }
+                          }}
+                        >Confirmar Cancelamento</AlertDialogAction>
                       </AlertDialogFooter>
                     </AlertDialogContent>
                   </AlertDialog>
@@ -2022,30 +2100,27 @@ function VendasPage() {
   };
 
   const addProductToComanda = async (prod) => {
-    console.log('[addProductToComanda] START - Product:', prod.name);
-    console.log('[addProductToComanda] isCashierOpen:', isCashierOpen);
-    console.log('[addProductToComanda] selectedTable:', selectedTable);
     try {
       if (!isCashierOpen) {
-        console.log('[addProductToComanda] BLOCKED - Caixa fechado');
         toast({ title: 'Caixa Fechado', description: 'Abra o caixa antes de adicionar produtos.', variant: 'warning' });
         return;
       }
       if (!selectedTable?.comandaId) {
-        console.log('[addProductToComanda] BLOCKED - Sem comanda');
         toast({ title: 'Selecione uma mesa', description: 'Abra a comanda clicando na mesa primeiro.', variant: 'destructive' });
         return;
       }
       
-      // Validar estoque ANTES de adicionar
+      // Validar estoque GLOBAL ANTES de adicionar
       const currentStock = Number(prod.stock ?? prod.currentStock ?? 0);
+      const reserved = reservedStock.get(prod.id) || 0;
+      const available = Math.max(0, currentStock - reserved);
       const currentQtyInOrder = (selectedTable?.order || []).find(it => it.productId === prod.id)?.quantity || 0;
       const newQty = currentQtyInOrder + 1;
       
-      if (newQty > currentStock) {
+      if (newQty > available) {
         toast({ 
           title: 'Estoque insuficiente', 
-          description: `${prod.name} - Estoque disponível: ${currentStock}`, 
+          description: `${prod.name} - Estoque disponível: ${available} (${currentStock} total, ${reserved} reservado em outras comandas)`, 
           variant: 'destructive' 
         });
         return;
@@ -2053,7 +2128,6 @@ function VendasPage() {
       
       const price = Number(prod.salePrice ?? prod.price ?? 0);
       
-      console.log('[addProductToComanda] Persisting to backend...');
       // Persistir no backend PRIMEIRO
       const existing = (selectedTable?.order || []).find(it => it.productId === prod.id);
       let itemResult;
@@ -2063,7 +2137,6 @@ function VendasPage() {
       } else {
         itemResult = await adicionarItem({ comandaId: selectedTable.comandaId, produtoId: prod.id, descricao: prod.name, quantidade: 1, precoUnitario: price, codigoEmpresa: userProfile?.codigo_empresa });
       }
-      console.log('[addProductToComanda] Backend persist SUCCESS, reloading items...');
       
       // Recarregar itens do backend para sincronizar
       const itens = await listarItensDaComanda({ comandaId: selectedTable.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
@@ -2077,37 +2150,466 @@ function VendasPage() {
       const syncedTotal = (order || []).reduce((acc, it) => acc + Number(it.price || 0) * Number(it.quantity || 0), 0);
       
       const updatedTable = { ...selectedTable, order, totalHint: syncedTotal };
-      console.log('[addProductToComanda] UI updated with backend data');
       setSelectedTable(updatedTable);
       setTables((prevTables) => prevTables.map(t => (t.id === updatedTable.id ? updatedTable : t)));
+      
+      // Atualizar estoque reservado global após adicionar item
+      try {
+        const itensGlobal = await listarItensDeTodasComandasAbertas({ codigoEmpresa: userProfile?.codigo_empresa });
+        const reservedMap = new Map();
+        for (const item of itensGlobal || []) {
+          const pid = item.produto_id;
+          const qty = Number(item.quantidade || 0);
+          reservedMap.set(pid, (reservedMap.get(pid) || 0) + qty);
+        }
+        setReservedStock(reservedMap);
+      } catch (err) {
+        console.error('[addProductToComanda] Erro ao atualizar estoque reservado:', err);
+      }
+      
+      toast({ title: 'Produto adicionado', variant: 'success' });
     } catch (e) {
       console.error('[addProductToComanda] EXCEPTION:', e);
       toast({ title: 'Falha ao adicionar produto', description: e?.message || 'Tente novamente', variant: 'destructive' });
     }
-    console.log('[addProductToComanda] END');
   };
 
-  const ProductsPanel = () => {
+  // Modal de Produtos - Isolado e com foco próprio
+  const ProductsModal = () => {
     const [productSearch, setProductSearch] = useState('');
-    // Garantir que item focado fique visível ao navegar por setas
+    const [statusFilter, setStatusFilter] = useState('all'); // 'all', 'available', 'low', 'out'
+    const modalSearchRef = useRef(null);
+    const lastFocusedIndexRef = useRef(0);
+    const listRef = useRef(null);
+    // Usar productItemRefs do componente pai (já declarado acima)
+    // Ordenar e filtrar devem vir antes dos effects que dependem de 'filtered'
+    const sortedProducts = (products || []).slice().sort((a, b) => {
+      const codeA = a.code || '';
+      const codeB = b.code || '';
+      if (/^\d+$/.test(codeA) && /^\d+$/.test(codeB)) {
+        return parseInt(codeA, 10) - parseInt(codeB, 10);
+      }
+      return codeA.localeCompare(codeB);
+    });
+    const filtered = sortedProducts.filter(p => {
+      const q = productSearch.trim().toLowerCase();
+      const matchesSearch = !q || (p.name || '').toLowerCase().includes(q) || String(p.code || '').toLowerCase().includes(q);
+      
+      // Filtro por status
+      if (statusFilter === 'all') return matchesSearch;
+      
+      const stock = Number(p.stock ?? p.currentStock ?? 0);
+      const reserved = reservedStock.get(p.id) || 0;
+      const remaining = Math.max(0, stock - reserved);
+      
+      if (statusFilter === 'available') return matchesSearch && remaining > 0;
+      if (statusFilter === 'low') return matchesSearch && remaining > 0 && remaining <= 5;
+      if (statusFilter === 'out') return matchesSearch && remaining <= 0;
+      
+      return matchesSearch;
+    });
+    
+    // Garantir que item focado fique visível ao navegar por setas E manter foco real no DOM
     useEffect(() => {
       try {
-        const idx = productFocusIndex || 0;
+        const idx = productFocusIndex !== null && productFocusIndex !== undefined ? productFocusIndex : 0;
         const el = productItemRefs.current?.[idx];
         if (el && typeof el.scrollIntoView === 'function') {
           el.scrollIntoView({ block: 'nearest' });
         }
       } catch {}
     }, [productFocusIndex]);
+
+    // NÃO usar useEffect para restaurar foco - focar diretamente após ação
+
+    // NÃO resetar foco ao abrir modal - deixar o usuário controlar completamente
+
+    // Não resetar foco ao alterar busca - deixar o usuário navegar livremente
+
+    // Após alterações na lista/quantidades, restaurar foco no card selecionado, se existir
+    // DESABILITADO: Este useEffect estava causando o produto voltar para o primeiro
+    // useEffect(() => {
+    //   const idx = Math.min(Math.max(0, lastFocusedIndexRef.current || 0), (filtered.length || 1) - 1);
+    //   const activeEl = document.activeElement;
+    //   const isInputFocused = activeEl === modalSearchRef.current;
+    //   const isCardFocused = activeEl && activeEl.hasAttribute('data-product-card');
+    //   // Só restaurar foco no card se o input NÃO estiver focado E se já não estiver em um card
+    //   if (filtered.length > 0 && !isInputFocused && !isCardFocused) {
+    //     requestAnimationFrame(() => {
+    //       try { productItemRefs.current[idx]?.focus(); } catch {}
+    //     });
+    //   }
+    // }, [selectedTable?.order, filtered.length]);
+
+    if (!selectedTable) return null;
+
+    return (
+      <Dialog open={isProductsModalOpen} onOpenChange={(open) => {
+        setIsProductsModalOpen(open);
+        // Manter o contexto em 'panel' enquanto o modal estiver aberto
+        setFocusContext(open ? 'panel' : 'tables');
+      }}>
+        <DialogContent 
+          className="max-w-4xl w-[95vw] h-[90vh] flex flex-col p-0 gap-0 focus:outline-none focus-visible:outline-none"
+          onOpenAutoFocus={(e) => {
+            // Evitar que o foco vá para o botão de fechar do Dialog
+            e.preventDefault();
+            // NÃO focar automaticamente - deixar o usuário controlar
+          }}
+          onWheel={(e) => {
+            // Durante rolagem, garantir que setas não virem scroll do body
+            e.stopPropagation();
+          }}
+          onKeyDownCapture={(e) => {
+            // BLOQUEAR APENAS O SCROLL - não bloquear a lógica de navegação
+            if (['ArrowDown','ArrowUp','Home','End','PageDown','PageUp','Space'].includes(e.key)) {
+              e.preventDefault();
+            }
+          }}
+          onKeyDown={(e) => {
+            // Processar navegação normalmente
+            const target = e.target;
+            const isInInput = target && (target.tagName === 'INPUT' || target.closest('input'));
+            const isInCard = target && target.closest('[data-product-card]');
+            if (!['ArrowDown','ArrowUp','Home','End','Enter','Delete','Escape'].includes(e.key)) return;
+            // Se o foco está no input ou em um card, deixa o handler específico cuidar
+            if (isInInput || isInCard) return;
+
+            e.preventDefault();
+            e.stopPropagation();
+
+            const idx = productFocusIndex || 0;
+            const n = filtered.length;
+            if (e.key === 'ArrowDown') { const next = Math.min(idx + 1, n - 1); setProductFocusIndex(next); lastFocusedIndexRef.current = next; requestAnimationFrame(() => productItemRefs.current[next]?.focus()); return; }
+            if (e.key === 'ArrowUp')   { const next = Math.max(idx - 1, 0);   setProductFocusIndex(next); lastFocusedIndexRef.current = next; requestAnimationFrame(() => productItemRefs.current[next]?.focus()); return; }
+            if (e.key === 'Home')      { setProductFocusIndex(0); lastFocusedIndexRef.current = 0; requestAnimationFrame(() => productItemRefs.current[0]?.focus()); return; }
+            if (e.key === 'End')       { const next = Math.max(0, n - 1); setProductFocusIndex(next); lastFocusedIndexRef.current = next; requestAnimationFrame(() => productItemRefs.current[next]?.focus()); return; }
+            if (e.key === 'Escape')    { setIsProductsModalOpen(false); return; }
+          }}
+        >
+          <DialogHeader className="px-6 py-4 border-b border-border">
+            <DialogTitle className="text-2xl font-bold flex items-center gap-3">
+              <ShoppingBag className="w-6 h-6 text-brand" />
+              Adicionar Produtos
+            </DialogTitle>
+            <DialogDescription className="text-base mt-2">
+              Mesa {selectedTable.number} • {formatClientDisplay(selectedTable.customer) || 'Sem cliente'}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex flex-col flex-1 min-h-0">
+            {/* Campo de busca */}
+            <div className="px-6 py-4 border-b border-border bg-surface/50">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-text-muted" />
+                <input
+                  ref={modalSearchRef}
+                  type="text"
+                  className="w-full pl-10 pr-4 py-3 text-base rounded-lg bg-background border-2 border-border focus:border-brand focus:ring-2 focus:ring-brand/20 transition-all outline-none"
+                  placeholder="Digite o nome ou código do produto..."
+                  value={productSearch}
+                  onChange={(e) => setProductSearch(e.target.value)}
+                  onClick={(e) => {
+                    // Ao clicar no input, garantir que ele receba foco
+                    e.currentTarget.focus();
+                  }}
+                  onKeyDown={(e) => {
+                    e.stopPropagation();
+                    // Reforçar isolamento de handlers globais
+                    if (e.nativeEvent && typeof e.nativeEvent.stopImmediatePropagation === 'function') {
+                      e.nativeEvent.stopImmediatePropagation();
+                    }
+                    // Garantir contexto de foco apropriado
+                    setFocusContext('panel');
+                    
+                    if (['ArrowDown','ArrowUp','Home','End','Escape'].includes(e.key)) {
+                      e.preventDefault();
+                      
+                      const idx = productFocusIndex || 0;
+                      const n = filtered.length;
+                      
+                      if (e.key === 'ArrowDown') {
+                        setProductFocusIndex(Math.min(idx + 1, n - 1));
+                        return;
+                      }
+                      if (e.key === 'ArrowUp') {
+                        setProductFocusIndex(Math.max(idx - 1, 0));
+                        return;
+                      }
+                      if (e.key === 'Home') {
+                        setProductFocusIndex(0);
+                        return;
+                      }
+                      if (e.key === 'End') {
+                        setProductFocusIndex(n - 1);
+                        return;
+                      }
+                      if (e.key === 'Escape') {
+                        setIsProductsModalOpen(false);
+                        return;
+                      }
+                    }
+                  }}
+                />
+              </div>
+              
+              {/* Filtros de Status */}
+              <div className="flex items-center gap-2 mt-3">
+                <button
+                  onClick={() => setStatusFilter('all')}
+                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                    statusFilter === 'all' 
+                      ? 'bg-brand text-black' 
+                      : 'bg-surface text-text-muted hover:bg-surface-2'
+                  }`}
+                >
+                  Todos
+                </button>
+                <button
+                  onClick={() => setStatusFilter('available')}
+                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                    statusFilter === 'available' 
+                      ? 'bg-success text-white' 
+                      : 'bg-surface text-text-muted hover:bg-surface-2'
+                  }`}
+                >
+                  Disponível
+                </button>
+                <button
+                  onClick={() => setStatusFilter('low')}
+                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                    statusFilter === 'low' 
+                      ? 'bg-warning text-black' 
+                      : 'bg-surface text-text-muted hover:bg-surface-2'
+                  }`}
+                >
+                  Estoque Baixo
+                </button>
+                <button
+                  onClick={() => setStatusFilter('out')}
+                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                    statusFilter === 'out' 
+                      ? 'bg-destructive text-white' 
+                      : 'bg-surface text-text-muted hover:bg-surface-2'
+                  }`}
+                >
+                  Sem Estoque
+                </button>
+              </div>
+              
+              <div className="flex items-center gap-4 mt-3 text-sm text-text-muted">
+                <div className="flex items-center gap-2">
+                  <kbd className="px-2 py-1 bg-surface border border-border rounded text-xs font-mono">↑↓</kbd>
+                  <span>Navegar</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <kbd className="px-2 py-1 bg-surface border border-border rounded text-xs font-mono">Esc</kbd>
+                  <span>Fechar</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Lista de produtos */}
+            <div
+              ref={listRef}
+              className="flex-1 overflow-y-auto px-6 py-4 focus:outline-none"
+              tabIndex={-1}
+              onKeyDown={(e) => {
+                // Impedir scroll IMEDIATAMENTE
+                if (['ArrowDown','ArrowUp','Home','End','PageDown','PageUp','Space'].includes(e.key)) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  if (e.nativeEvent && typeof e.nativeEvent.stopImmediatePropagation === 'function') {
+                    e.nativeEvent.stopImmediatePropagation();
+                  }
+                }
+                e.stopPropagation();
+
+                // Se o alvo é um input, deixa o input tratar
+                const target = e.target;
+                const isInInput = target && (target.tagName === 'INPUT' || target.closest('input'));
+                if (!['ArrowDown','ArrowUp','Home','End','Escape'].includes(e.key)) return;
+                if (isInInput) return;
+
+                const idx = productFocusIndex || 0;
+                const n = filtered.length;
+                if (e.key === 'ArrowDown') { const next = Math.min(idx + 1, n - 1); setProductFocusIndex(next); lastFocusedIndexRef.current = next; requestAnimationFrame(() => productItemRefs.current[next]?.focus()); return; }
+                if (e.key === 'ArrowUp')   { const next = Math.max(idx - 1, 0);   setProductFocusIndex(next); lastFocusedIndexRef.current = next; requestAnimationFrame(() => productItemRefs.current[next]?.focus()); return; }
+                if (e.key === 'Home')      { setProductFocusIndex(0); lastFocusedIndexRef.current = 0; requestAnimationFrame(() => productItemRefs.current[0]?.focus()); return; }
+                if (e.key === 'End')       { const next = Math.max(0, n - 1); setProductFocusIndex(next); lastFocusedIndexRef.current = next; requestAnimationFrame(() => productItemRefs.current[next]?.focus()); return; }
+                if (e.key === 'Escape')    { setIsProductsModalOpen(false); return; }
+              }}
+            >
+              {filtered.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-full text-center py-12">
+                  <ShoppingBag className="w-16 h-16 text-text-muted mb-4" />
+                  <h3 className="text-lg font-semibold text-text-primary mb-2">Nenhum produto encontrado</h3>
+                  <p className="text-text-muted mb-4">Tente ajustar sua busca ou cadastre novos produtos</p>
+                  <Button onClick={() => { setIsProductsModalOpen(false); navigate('/produtos'); }}>
+                    <Plus className="w-4 h-4 mr-2" />
+                    Cadastrar Produtos
+                  </Button>
+                </div>
+              ) : (
+                <div className="grid gap-3">
+                  {filtered.map((prod, idx) => {
+                    const q = qtyByProductId.get(prod.id) || 0;
+                    const stock = Number(prod.stock ?? prod.currentStock ?? 0);
+                    const reserved = reservedStock.get(prod.id) || 0;
+                    const remaining = Math.max(0, stock - reserved);
+                    const isFocused = idx === productFocusIndex;
+                    
+                    return (
+                      <div
+                        key={prod.id}
+                        ref={(el) => { 
+                          console.log('[Card ref] Atribuindo ref para idx:', idx, 'prod:', prod.name, 'el:', !!el);
+                          productItemRefs.current[idx] = el;
+                          console.log('[Card ref] productItemRefs.current:', productItemRefs.current.length, 'elementos');
+                        }}
+                        data-product-card
+                        className={cn(
+                          "flex items-center gap-4 p-4 rounded-lg border-2 transition-all outline-none focus:outline-none focus-visible:outline-none",
+                          remaining === 0 && q === 0
+                            ? "opacity-50 cursor-not-allowed bg-surface-2 border-border" 
+                            : "cursor-pointer",
+                          isFocused
+                            ? "border-brand bg-brand/5 shadow-md" 
+                            : remaining > 0
+                            ? "border-border bg-surface hover:border-brand/50 hover:bg-surface-2"
+                            : q > 0
+                            ? "border-border bg-surface"
+                            : "border-border"
+                        )}
+                        tabIndex={remaining > 0 || q > 0 ? 0 : -1}
+                        onKeyDown={(e) => {
+                          // Prevenir scroll IMEDIATAMENTE e ANTES de qualquer outra coisa
+                          if (['ArrowDown','ArrowUp','Home','End','PageDown','PageUp','Space'].includes(e.key)) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            if (e.nativeEvent && typeof e.nativeEvent.stopImmediatePropagation === 'function') {
+                              e.nativeEvent.stopImmediatePropagation();
+                            }
+                          }
+                          if (!['ArrowDown','ArrowUp','Home','End','Escape'].includes(e.key)) return;
+                          e.stopPropagation();
+                          const n = filtered.length;
+                          if (e.key === 'ArrowDown') { const next = Math.min(idx + 1, n - 1); setProductFocusIndex(next); lastFocusedIndexRef.current = next; requestAnimationFrame(() => productItemRefs.current[next]?.focus()); return; }
+                          if (e.key === 'ArrowUp')   { const next = Math.max(idx - 1, 0);   setProductFocusIndex(next); lastFocusedIndexRef.current = next; requestAnimationFrame(() => productItemRefs.current[next]?.focus()); return; }
+                          if (e.key === 'Home')      { setProductFocusIndex(0); lastFocusedIndexRef.current = 0; requestAnimationFrame(() => productItemRefs.current[0]?.focus()); return; }
+                          if (e.key === 'End')       { const next = Math.max(0, n - 1); setProductFocusIndex(next); lastFocusedIndexRef.current = next; requestAnimationFrame(() => productItemRefs.current[next]?.focus()); return; }
+                          if (e.key === 'Escape')    { setIsProductsModalOpen(false); return; }
+                        }}
+                        onClick={() => {
+                          if (remaining === 0 && q === 0) return;
+                          // Seleciona visualmente o item e mantém foco no próprio card
+                          setProductFocusIndex(idx);
+                          lastFocusedIndexRef.current = idx;
+                          requestAnimationFrame(() => productItemRefs.current[idx]?.focus());
+                        }}
+                        onMouseDown={(e) => {
+                          if (remaining === 0 && q === 0) {
+                            e.preventDefault();
+                            return;
+                          }
+                          // Permitir que o card receba foco real
+                          e.currentTarget.focus();
+                        }}
+                      >
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-1">
+                            {prod.code && (
+                              <span className="px-2 py-0.5 text-xs font-mono font-semibold bg-surface-2 border border-border rounded">
+                                {prod.code}
+                              </span>
+                            )}
+                            <h4 className="font-semibold text-base text-text-primary truncate">
+                              {prod.name}
+                            </h4>
+                          </div>
+                          <div className="flex items-center gap-3 text-sm">
+                            <span className={cn("font-bold", remaining === 0 ? "text-text-muted" : "text-brand")}>
+                              {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(prod.salePrice ?? prod.price ?? 0))}
+                            </span>
+                            <span className="text-text-muted">
+                              Estoque: <span className={cn("font-semibold", remaining <= 5 ? "text-destructive" : "text-text-secondary")}>{remaining}</span>
+                            </span>
+                            {q > 0 && (
+                              <span className="px-2 py-0.5 bg-brand/10 text-brand text-xs font-semibold rounded">
+                                {q}x na comanda
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        
+                        <div className="flex items-center gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              decProduct(prod);
+                            }}
+                            disabled={q === 0}
+                            className="h-9 w-9 p-0"
+                          >
+                            <Minus className="w-4 h-4" />
+                          </Button>
+                          <Button
+                            size="sm"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              addProductToComanda(prod);
+                            }}
+                            disabled={remaining === 0}
+                            className="h-9 w-9 p-0"
+                          >
+                            <Plus className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Footer com resumo */}
+            <div className="px-6 py-4 border-t border-border bg-surface/50">
+              <div className="flex items-center justify-between">
+                <div className="text-sm text-text-muted">
+                  {filtered.length} produto{filtered.length !== 1 ? 's' : ''} • {(selectedTable.order || []).length} ite{(selectedTable.order || []).length !== 1 ? 'ns' : 'm'} na comanda
+                </div>
+                <div className="flex items-center gap-3">
+                  <div className="text-right">
+                    <div className="text-xs text-text-muted">Total</div>
+                    <div className="text-xl font-bold text-green-600">
+                      {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(selectedTable.totalHint || 0)}
+                    </div>
+                  </div>
+                  <Button onClick={() => setIsProductsModalOpen(false)} size="lg">
+                    Concluir
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    );
+  };
+
+  const ProductsPanel = () => {
+    const [productSearch, setProductSearch] = useState('');
+    const productsPanelRef = useRef(null);
+    
     // Ordenar produtos por código (somente produtos reais do catálogo)
     const sortedProducts = (products || []).slice().sort((a, b) => {
       const codeA = a.code || '';
       const codeB = b.code || '';
-      // Se ambos são números, comparar numericamente
       if (/^\d+$/.test(codeA) && /^\d+$/.test(codeB)) {
         return parseInt(codeA, 10) - parseInt(codeB, 10);
       }
-      // Caso contrário, comparar alfabeticamente
       return codeA.localeCompare(codeB);
     });
     const filtered = sortedProducts.filter(p => {
@@ -2117,7 +2619,7 @@ function VendasPage() {
     });
 
     return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full" data-products-panel="1" ref={productsPanelRef}>
        <div className="p-4 border-b border-border">
           <div className="relative">
              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted" />
@@ -2127,61 +2629,76 @@ function VendasPage() {
                value={productSearch}
                onChange={(e) => setProductSearch(e.target.value)}
                ref={productsSearchRef}
+               onClick={(e) => {
+                 e.stopPropagation();
+                 // Garantir que o input mantenha o foco
+                 e.currentTarget.focus();
+               }}
+               onFocus={(e) => {
+                 e.stopPropagation();
+                 setFocusContext('panel');
+               }}
                onKeyDown={(e) => {
+                 // BLOQUEAR propagação de TODAS as teclas para evitar atalhos globais
+                 e.stopPropagation();
+                 if (e.nativeEvent) {
+                   e.nativeEvent.stopPropagation();
+                   e.nativeEvent.stopImmediatePropagation();
+                 }
+                 
                  // Capturar teclas de navegação no input de busca
-                 if (['ArrowDown','ArrowUp','Home','End','Enter','Delete','Backspace','Escape'].includes(e.key)) {
+                 if (['ArrowDown','ArrowUp','Home','End','Enter','Delete','Escape'].includes(e.key)) {
                    e.preventDefault();
-                   e.stopPropagation();
-                   if (e.nativeEvent) {
-                     e.nativeEvent.preventDefault();
-                     e.nativeEvent.stopPropagation();
-                     e.nativeEvent.stopImmediatePropagation();
-                   }
                    
                    const idx = productFocusIndex || 0;
                    const n = filtered.length;
                    
-                   // Navegação vertical
+                   // Navegação vertical - mantém foco no input
                    if (e.key === 'ArrowDown') {
                      const next = Math.min(idx + 1, n - 1);
                      setProductFocusIndex(next);
-                     // Focar na lista após navegar
-                     setTimeout(() => { try { productsListRef.current?.focus(); } catch {} }, 0);
                      return;
                    }
                    if (e.key === 'ArrowUp') {
                      const next = Math.max(idx - 1, 0);
                      setProductFocusIndex(next);
-                     setTimeout(() => { try { productsListRef.current?.focus(); } catch {} }, 0);
                      return;
                    }
                    if (e.key === 'Home') { 
                      setProductFocusIndex(0); 
-                     setTimeout(() => { try { productsListRef.current?.focus(); } catch {} }, 0);
                      return; 
                    }
                    if (e.key === 'End') { 
                      setProductFocusIndex(n - 1); 
-                     setTimeout(() => { try { productsListRef.current?.focus(); } catch {} }, 0);
                      return; 
                    }
                    
                    // Enter: adicionar produto focado
                    if (e.key === 'Enter') {
-                     try {
-                       const prod = filtered[idx];
-                       if (prod) addProductToComanda(prod);
-                       productsListRef.current?.focus();
-                     } catch {}
+                     const prod = filtered[idx];
+                     if (prod) {
+                       addProductToComanda(prod);
+                       // Manter foco no input após operação async
+                       setTimeout(() => {
+                         if (productsSearchRef.current) {
+                           productsSearchRef.current.focus();
+                         }
+                       }, 100);
+                     }
                      return;
                    }
-                   // Delete/Backspace: remover produto focado
-                   if (e.key === 'Delete' || e.key === 'Backspace') {
-                     try {
-                       const prod = filtered[idx];
-                       if (prod) decProduct(prod);
-                       productsListRef.current?.focus();
-                     } catch {}
+                   // Delete: remover produto focado
+                   if (e.key === 'Delete') {
+                     const prod = filtered[idx];
+                     if (prod) {
+                       decProduct(prod);
+                       // Manter foco no input após operação async
+                       setTimeout(() => {
+                         if (productsSearchRef.current) {
+                           productsSearchRef.current.focus();
+                         }
+                       }, 100);
+                     }
                      return;
                    }
                    // Escape: volta para aba Comanda
@@ -2211,127 +2728,79 @@ function VendasPage() {
                  console.log('[PRODUCTS CONTAINER] Click is on button, allowing it through');
                  return;
                }
+               // NÃO bloquear cliques no input de busca
+               if (e.target.closest('input')) {
+                 console.log('[PRODUCTS CONTAINER] Click is on input, allowing it through');
+                 return;
+               }
                e.stopPropagation();
                setFocusContext('panel');
                // Auto-selecionar primeiro produto se nenhum estiver selecionado
                if (productFocusIndex === null || productFocusIndex === undefined) {
                  setProductFocusIndex(0);
                }
-               // Focar na lista para capturar teclas
-               el.focus();
+               // NÃO focar em nada - deixar foco no input naturalmente
              }, true);
            }
          }}
          onFocus={(e) => {
-           e.stopPropagation();
-           setFocusContext('panel');
-           // Auto-selecionar primeiro produto se nenhum estiver selecionado
-           if (productFocusIndex === null || productFocusIndex === undefined) {
-             setProductFocusIndex(0);
+          e.stopPropagation();
+          setFocusContext('panel');
+          if (productFocusIndex === null || productFocusIndex === undefined) {
+            setProductFocusIndex(0);
+          }
+        }}
+     onBlur={(e) => {
+      // Se o foco permanece dentro do painel (inclui o input), não reforce foco na lista
+      const relatedTarget = e.relatedTarget;
+      const staysInPanel = !!(relatedTarget && relatedTarget.closest('[data-products-panel="1"]'));
+      if (staysInPanel) {
+        return;
+      }
+      // Caso o foco saia do painel, não forçar refocus aqui
+     }}
+     onKeyDown={(e) => {
+       // Processar teclas quando lista tem foco (navegação via clique)
+       if (['ArrowDown','ArrowUp','Enter','Delete','Escape'].includes(e.key)) {
+         e.preventDefault();
+         e.stopPropagation();
+         
+         const idx = productFocusIndex || 0;
+         const n = filtered.length;
+         
+         if (e.key === 'ArrowDown') {
+           const next = Math.min(idx + 1, n - 1);
+           setProductFocusIndex(next);
+           return;
+         }
+         if (e.key === 'ArrowUp') {
+           const next = Math.max(idx - 1, 0);
+           setProductFocusIndex(next);
+           return;
+         }
+         if (e.key === 'Enter') {
+           const prod = filtered[idx];
+           if (prod) {
+             addProductToComanda(prod);
+             setTimeout(() => productsSearchRef.current?.focus(), 100);
            }
-         }}
-         onBlur={(e) => {
-           // Prevenir perda de foco para elementos fora do painel
-           const relatedTarget = e.relatedTarget;
-           if (relatedTarget && !relatedTarget.closest('[role="listbox"]')) {
-             e.preventDefault();
-             requestAnimationFrame(() => {
-               if (focusContext === 'panel') {
-                 productsListRef.current?.focus();
-               }
-             });
+           return;
+         }
+         if (e.key === 'Delete') {
+           const prod = filtered[idx];
+           if (prod) {
+             decProduct(prod);
+             setTimeout(() => productsSearchRef.current?.focus(), 100);
            }
-         }}
-         onKeyDown={(e) => {
-           // Capturar teclas de navegação na lista de produtos e impedir propagação
-           if (['ArrowDown','ArrowUp','Home','End','Enter','Delete','Backspace','Escape'].includes(e.key)) {
-             e.preventDefault();
-             e.stopPropagation();
-             if (e.nativeEvent) {
-               e.nativeEvent.stopImmediatePropagation();
-             }
-             
-             // Garantir que focusContext permaneça 'panel' ANTES de qualquer operação
-             setFocusContext('panel');
-             
-             const idx = productFocusIndex || 0;
-             const n = filtered.length;
-             
-             // Navegação: não permitir repeat
-             if (['ArrowDown','ArrowUp','Home','End','Escape'].includes(e.key) && e.repeat) {
-               return;
-             }
-             
-             if (e.key === 'ArrowDown') {
-               const next = Math.min(idx + 1, n - 1);
-               setProductFocusIndex(next);
-               requestAnimationFrame(() => { 
-                 try { 
-                   productItemRefs.current[next]?.scrollIntoView({ block: 'nearest' });
-                   productsListRef.current?.focus();
-                   setFocusContext('panel');
-                 } catch {} 
-               });
-               return;
-             }
-             if (e.key === 'ArrowUp') {
-               const next = Math.max(idx - 1, 0);
-               setProductFocusIndex(next);
-               requestAnimationFrame(() => { 
-                 try { 
-                   productItemRefs.current[next]?.scrollIntoView({ block: 'nearest' });
-                   productsListRef.current?.focus();
-                   setFocusContext('panel');
-                 } catch {} 
-               });
-               return;
-             }
-             if (e.key === 'Home') { 
-               setProductFocusIndex(0); 
-               requestAnimationFrame(() => { 
-                 try { 
-                   productItemRefs.current[0]?.scrollIntoView({ block: 'nearest' });
-                   productsListRef.current?.focus();
-                   setFocusContext('panel');
-                 } catch {} 
-               });
-               return; 
-             }
-             if (e.key === 'End') { 
-               setProductFocusIndex(n - 1); 
-               requestAnimationFrame(() => { 
-                 try { 
-                   productItemRefs.current[n-1]?.scrollIntoView({ block: 'nearest' });
-                   productsListRef.current?.focus();
-                   setFocusContext('panel');
-                 } catch {} 
-               });
-               return; 
-             }
-             // Enter e Delete: executar sem bloquear
-             if (e.key === 'Enter') {
-               const prod = filtered[idx];
-               if (prod) {
-                 addProductToComanda(prod);
-               }
-               return;
-             }
-             if (e.key === 'Delete' || e.key === 'Backspace') {
-               const prod = filtered[idx];
-               if (prod) {
-                 decProduct(prod);
-               }
-               return;
-             }
-             if (e.key === 'Escape') {
-               setDesktopTab('order');
-               setMobileTableTab('order');
-               setFocusContext('tables');
-               return;
-             }
-           }
-         }}
-       >
+           return;
+         }
+         if (e.key === 'Escape') {
+           productsSearchRef.current?.focus();
+           return;
+         }
+       }
+     }}
+   >
           <ul className="space-y-2">
               {filtered.length === 0 ? (
                 <li className="text-center text-text-muted py-8">
@@ -2341,7 +2810,8 @@ function VendasPage() {
               ) : filtered.map((prod, idx) => {
                   const q = qtyByProductId.get(prod.id) || 0;
                   const stock = Number(prod.stock ?? prod.currentStock ?? 0);
-                  const remaining = Math.max(0, stock - q);
+                  const reserved = reservedStock.get(prod.id) || 0;
+                  const remaining = Math.max(0, stock - reserved);
                   const handleOpenDetails = () => { setSelectedProduct(prod); setIsProductDetailsOpen(true); setMobileTableTab('products'); };
                   return (
                     <li
@@ -2565,7 +3035,8 @@ function VendasPage() {
                   }).map((prod) => {
             const qty = (counterItems || []).reduce((acc, it) => acc + (it.productId === prod.id ? Number(it.quantity || 0) : 0), 0);
             const stock = Number(prod.stock ?? prod.currentStock ?? 0);
-            const remaining = Math.max(0, stock - qty);
+            const reserved = reservedStock.get(prod.id) || 0;
+            const remaining = Math.max(0, stock - reserved);
             return (
               <li key={prod.id} className="flex items-center p-2 rounded-md hover:bg-surface-2 transition-colors" onClick={() => { setSelectedCounterProduct(prod); setIsCounterProductDetailsOpen(true); }}>
                 <div className="flex-1 min-w-0">
@@ -3802,8 +4273,8 @@ function VendasPage() {
         return;
       }
 
+      setLocalLoading(true);
       try {
-        setLocalLoading(true);
         
         // Comparar estado atual com inicial
         const initialIds = initialLinkedRef.current.map(l => l.id);
@@ -3874,10 +4345,9 @@ function VendasPage() {
         await refreshTablesLight({ showToast: false });
         
         toast({ title: 'Clientes atualizados', variant: 'success' });
-        setIsManageClientsOpen(false);
-      } catch (e) {
-        console.error('[confirmChanges] Erro:', e);
-        toast({ title: 'Falha ao atualizar clientes', description: e?.message || 'Tente novamente', variant: 'destructive' });
+      } catch (err) {
+        console.error('[confirmChanges] Erro:', err);
+        toast({ title: 'Falha ao atualizar clientes', description: err?.message || 'Tente novamente', variant: 'destructive' });
       } finally {
         setLocalLoading(false);
       }
@@ -4223,16 +4693,23 @@ function VendasPage() {
           </div>
 
           {/* Tabs Comanda/Produtos */}
-          <Tabs value={mobileTableTab} onValueChange={setMobileTableTab} className="flex flex-col flex-1 min-h-0">
+          <Tabs value={mobileTableTab} onValueChange={(val) => {
+            setMobileTableTab(val);
+            if (val === 'products' && selectedTable) {
+              setIsProductsModalOpen(true);
+              setMobileTableTab('order'); // Voltar para comanda
+            }
+          }} className="flex flex-col flex-1 min-h-0">
             <TabsList className="grid w-full grid-cols-2 m-2 rounded-lg">
               <TabsTrigger value="order" className="text-sm">Comanda</TabsTrigger>
-              <TabsTrigger value="products" className="text-sm">Produtos</TabsTrigger>
+              <TabsTrigger value="products" className="text-sm" onClick={() => {
+                if (selectedTable) {
+                  setIsProductsModalOpen(true);
+                }
+              }}>Produtos</TabsTrigger>
             </TabsList>
             <TabsContent value="order" className="flex-1 overflow-hidden min-h-0 m-0">
               <OrderPanel table={selectedTable} />
-            </TabsContent>
-            <TabsContent value="products" className="flex-1 overflow-hidden min-h-0 m-0">
-              <ProductsPanel />
             </TabsContent>
           </Tabs>
         </DialogContent>
@@ -4435,14 +4912,6 @@ function VendasPage() {
             {/* Painel Lateral - Apenas Desktop */}
             <div 
               className="hidden md:flex bg-surface rounded-lg border border-border flex-col min-h-0"
-              onClick={(e) => {
-                e.stopPropagation();
-                setFocusContext('panel');
-                // Focar na lista de produtos se estiver na aba produtos
-                if (desktopTab === 'products') {
-                  setTimeout(() => { try { productsListRef.current?.focus(); } catch {} }, 0);
-                }
-              }}
               style={{
                 outline: focusContext === 'panel' ? '2px solid rgba(148, 163, 184, 0.4)' : 'none',
                 outlineOffset: '-2px',
@@ -4451,18 +4920,21 @@ function VendasPage() {
             >
                 <Tabs value={desktopTab} onValueChange={(val) => {
                   setDesktopTab(val);
-                  // Focar na lista de produtos ao trocar para aba produtos
-                  if (val === 'products') {
-                    setFocusContext('panel');
-                    setTimeout(() => { try { productsListRef.current?.focus(); } catch {} }, 100);
+                  // Abrir modal ao trocar para aba produtos
+                  if (val === 'products' && selectedTable) {
+                    setIsProductsModalOpen(true);
+                    setDesktopTab('order'); // Voltar para comanda
                   }
                 }} className="flex flex-col h-full">
                     <TabsList className="grid w-full grid-cols-2 m-2">
                         <TabsTrigger value="order">Comanda</TabsTrigger>
-                        <TabsTrigger value="products">Produtos</TabsTrigger>
+                        <TabsTrigger value="products" onClick={() => {
+                          if (selectedTable) {
+                            setIsProductsModalOpen(true);
+                          }
+                        }}>Produtos</TabsTrigger>
                     </TabsList>
                     <TabsContent value="order" className="flex-1 overflow-hidden min-h-0"><OrderPanel table={selectedTable} /></TabsContent>
-                    <TabsContent value="products" className="flex-1 overflow-hidden min-h-0"><ProductsPanel/></TabsContent>
                 </Tabs>
             </div>
         </div>
@@ -4484,6 +4956,8 @@ function VendasPage() {
           </div>
         </div>
       )}
+      
+      <ProductsModal />
     </>
   );
 }

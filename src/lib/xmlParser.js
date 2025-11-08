@@ -432,6 +432,13 @@ function levenshteinDistance(str1, str2) {
  * Converte produto do XML para formato do sistema
  */
 export function convertXMLProductToSystemFormat(produtoXML, codigoEmpresa) {
+  // Preço de custo vem do XML
+  const custoUnitario = produtoXML.valorUnitario || 0;
+  
+  // Margem padrão de 30% para calcular preço de venda
+  const margemPadrao = 30; // 30%
+  const precoVenda = custoUnitario > 0 ? custoUnitario / (1 - margemPadrao / 100) : 0;
+  
   return {
     code: produtoXML.codigo || '',
     name: produtoXML.nome || '',
@@ -439,8 +446,9 @@ export function convertXMLProductToSystemFormat(produtoXML, codigoEmpresa) {
     ncm: produtoXML.ncm || '',
     cest: produtoXML.cest || '',
     unit: produtoXML.unidade || 'UN',
-    costPrice: produtoXML.valorUnitario || 0,
-    salePrice: produtoXML.valorUnitario * 1.3 || 0, // Margem padrão de 30%
+    costPrice: custoUnitario,
+    salePrice: precoVenda,
+    price: precoVenda, // Garantir que ambos os campos sejam preenchidos
     stock: 0, // Será atualizado depois
     minStock: 0,
     status: 'active',
