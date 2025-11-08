@@ -477,48 +477,76 @@ function DashboardPage() {
         console.log('[Dashboard] ✅ Vendas da loja:', comandasFechadas?.length || 0);
         setVendasLoja(comandasFechadas?.length || 0);
 
-        // 9. Dados financeiros dos últimos 14 dias
+        // 9. Dados financeiros dos últimos 14 dias (otimizado com query única)
         console.log('[Dashboard] 9. Buscando dados dos últimos 14 dias...');
+        
+        const dia14Atras = new Date();
+        dia14Atras.setDate(dia14Atras.getDate() - 13);
+        const inicio14Dias = startOfDay(dia14Atras).toISOString();
+        const fim14Dias = endOfDay(hoje).toISOString();
+
+        // Query única para todos os pagamentos dos últimos 14 dias
+        const { data: pagamentos14Dias } = await supabase
+          .from('pagamentos')
+          .select('valor, status, recebido_em')
+          .eq('codigo_empresa', codigo)
+          .gte('recebido_em', inicio14Dias)
+          .lte('recebido_em', fim14Dias);
+        console.log('[Dashboard] ✅ Pagamentos 14 dias:', pagamentos14Dias?.length || 0);
+
+        // Query única para todos os agendamentos dos últimos 14 dias
+        const { data: agendamentos14Dias } = await supabase
+          .from('agendamentos')
+          .select('id, inicio')
+          .eq('codigo_empresa', codigo)
+          .gte('inicio', inicio14Dias)
+          .lte('inicio', fim14Dias);
+        console.log('[Dashboard] ✅ Agendamentos 14 dias:', agendamentos14Dias?.length || 0);
+
+        // Query única para participantes pagos desses agendamentos
+        let participantes14Dias = [];
+        if (agendamentos14Dias && agendamentos14Dias.length > 0) {
+          const agendamentoIds = agendamentos14Dias.map(a => a.id);
+          const { data: parts } = await supabase
+            .from('agendamento_participantes')
+            .select('valor_cota, agendamento_id')
+            .eq('codigo_empresa', codigo)
+            .in('agendamento_id', agendamentoIds)
+            .eq('status_pagamento', 'Pago');
+          participantes14Dias = parts || [];
+          console.log('[Dashboard] ✅ Participantes pagos 14 dias:', participantes14Dias.length);
+        }
+
+        // Agrupar dados por dia (processamento local)
         const dados14Dias = [];
         for (let i = 13; i >= 0; i--) {
           const dia = new Date();
           dia.setDate(dia.getDate() - i);
-          const inicioDia = startOfDay(dia).toISOString();
-          const fimDia = endOfDay(dia).toISOString();
+          const inicioDia = startOfDay(dia);
+          const fimDia = endOfDay(dia);
 
-          // Pagamentos de comandas
-          const { data: pagsDia } = await supabase
-            .from('pagamentos')
-            .select('valor, status')
-            .eq('codigo_empresa', codigo)
-            .gte('recebido_em', inicioDia)
-            .lte('recebido_em', fimDia);
-
-          const receitaComandas = (pagsDia || [])
-            .filter(p => !['Cancelado', 'Estornado'].includes(p.status))
+          // Filtrar pagamentos deste dia
+          const receitaComandas = (pagamentos14Dias || [])
+            .filter(p => {
+              const dataRecebido = new Date(p.recebido_em);
+              return dataRecebido >= inicioDia && 
+                     dataRecebido <= fimDia &&
+                     !['Cancelado', 'Estornado'].includes(p.status);
+            })
             .reduce((sum, p) => sum + Number(p.valor || 0), 0);
 
-          // Pagamentos de agendamentos
-          const { data: agendsDia } = await supabase
-            .from('agendamentos')
-            .select('id')
-            .eq('codigo_empresa', codigo)
-            .gte('inicio', inicioDia)
-            .lte('inicio', fimDia);
-          
-          let receitaAgendamentos = 0;
-          if (agendsDia && agendsDia.length > 0) {
-            const idsAgendsDia = agendsDia.map(a => a.id);
-            const { data: partsPagosDia } = await supabase
-              .from('agendamento_participantes')
-              .select('valor_cota')
-              .eq('codigo_empresa', codigo)
-              .in('agendamento_id', idsAgendsDia)
-              .eq('status_pagamento', 'Pago');
-            
-            receitaAgendamentos = (partsPagosDia || [])
-              .reduce((sum, p) => sum + Number(p.valor_cota || 0), 0);
-          }
+          // Filtrar agendamentos deste dia
+          const agendamentosDoDia = (agendamentos14Dias || [])
+            .filter(a => {
+              const dataInicio = new Date(a.inicio);
+              return dataInicio >= inicioDia && dataInicio <= fimDia;
+            })
+            .map(a => a.id);
+
+          // Somar participantes pagos desses agendamentos
+          const receitaAgendamentos = participantes14Dias
+            .filter(p => agendamentosDoDia.includes(p.agendamento_id))
+            .reduce((sum, p) => sum + Number(p.valor_cota || 0), 0);
 
           const receita = receitaComandas + receitaAgendamentos;
 
