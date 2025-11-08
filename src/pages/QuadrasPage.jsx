@@ -150,13 +150,16 @@ export default function QuadrasPage() {
   const timeToMinutes = (hhmm) => {
     if (!hhmm) return 0;
     const [h, m] = String(hhmm).split(':').map(Number);
-    return (h || 0) * 60 + (m || 0);
+    // Tratar 00:00 como 24:00 (fim do dia/meia-noite)
+    const hours = (h === 0 && m === 0) ? 24 : (h || 0);
+    return hours * 60 + (m || 0);
   };
   const isValidHalfHour = (hhmm) => {
     if (!hhmm) return false;
     const parts = String(hhmm).split(':');
     if (parts.length < 2) return false;
     const mm = Number(parts[1]);
+    // Aceitar :00 ou :30 (incluindo 00:00 para meia-noite)
     return mm === 0 || mm === 30;
   };
   const snapToNearestHalfHour = (hhmm) => {

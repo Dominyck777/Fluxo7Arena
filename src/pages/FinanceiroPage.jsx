@@ -126,6 +126,7 @@ export default function FinanceiroPage() {
   const [agStatus, setAgStatus] = useState('all'); // all, Pago, Pendente, Cancelado
   const [agFinalizadora, setAgFinalizadora] = useState('all');
   const [expandedAgendamentos, setExpandedAgendamentos] = useState(new Set()); // IDs dos agendamentos expandidos
+  const [clienteSelectorOpen, setClienteSelectorOpen] = useState(false); // Controla popover de seleção de cliente
   // Modal de detalhes de recebimento
   const [recModalOpen, setRecModalOpen] = useState(false);
   const [recSelecionado, setRecSelecionado] = useState(null);
@@ -889,13 +890,37 @@ export default function FinanceiroPage() {
       const toISO = mkEnd(endDate) || undefined;
       let q = supabase
         .from('v_agendamentos_detalhado')
-        .select('agendamento_id, agendamento_codigo, inicio, fim, quadra_nome, participante_nome, valor_cota, finalizadora_nome, status_pagamento')
+        .select('agendamento_id, agendamento_codigo, inicio, fim, quadra_nome, participante_nome, cliente_id, valor_cota, finalizadora_nome, status_pagamento')
         .eq('codigo_empresa', codigo)
         .order('inicio', { ascending: false });
       if (fromISO) q = q.gte('inicio', fromISO);
       if (toISO) q = q.lte('inicio', toISO);
       const { data } = await q;
-      setAgAgendamentos(data || []);
+      
+      // Buscar dados dos clientes para identificar consumidores finais
+      const clienteIds = [...new Set((data || []).map(r => r.cliente_id).filter(Boolean))];
+      let clientesMap = {};
+      
+      if (clienteIds.length > 0) {
+        const { data: clientes } = await supabase
+          .from('clientes')
+          .select('id, is_consumidor_final, codigo')
+          .in('id', clienteIds)
+          .eq('codigo_empresa', codigo);
+        
+        if (clientes) {
+          clientesMap = Object.fromEntries(clientes.map(c => [c.id, c]));
+        }
+      }
+      
+      // Adicionar informação de consumidor final e código aos dados
+      const dataComClientes = (data || []).map(r => ({
+        ...r,
+        is_consumidor_final: clientesMap[r.cliente_id]?.is_consumidor_final || false,
+        cliente_codigo: clientesMap[r.cliente_id]?.codigo || null
+      }));
+      
+      setAgAgendamentos(dataComClientes);
     } catch (e) {
       toast({ title: 'Falha ao carregar agendamentos', description: e?.message, variant: 'destructive' });
     } finally {
@@ -1065,7 +1090,11 @@ export default function FinanceiroPage() {
           total: 0,
           totalPago: 0,
           totalPendente: 0,
-          statusGeral: 'Pendente'
+          statusGeral: 'Pendente',
+          representante: '', // Nome do primeiro participante (representante)
+          representanteClienteId: null, // ID do cliente representante
+          representanteCodigo: null, // Código do cliente representante
+          isRepresentanteConsumidor: false // Se o representante é consumidor final
         };
       }
       grupos[key].participantes.push(r);
@@ -1077,7 +1106,7 @@ export default function FinanceiroPage() {
       }
     });
     
-    // Determinar status geral de cada agendamento
+    // Determinar status geral e representante de cada agendamento
     Object.values(grupos).forEach(g => {
       const todosPagos = g.participantes.every(p => p.status_pagamento === 'Pago');
       const todosCancelados = g.participantes.every(p => p.status_pagamento === 'Cancelado');
@@ -1088,6 +1117,39 @@ export default function FinanceiroPage() {
         g.statusGeral = 'Pago';
       } else {
         g.statusGeral = 'Pendente';
+      }
+      
+      // Definir representante (primeiro participante NÃO consumidor)
+      // Mesma lógica da AgendaPage: primeiro participante é o representante
+      if (g.participantes.length > 0) {
+        // Buscar primeiro participante que NÃO seja consumidor final
+        let primeiroParticipante = g.participantes.find(p => !p.is_consumidor_final);
+        
+        // Se todos forem consumidores, pega o primeiro mesmo
+        if (!primeiroParticipante) {
+          primeiroParticipante = g.participantes[0];
+        }
+        
+        let nomeRepresentante = primeiroParticipante?.participante_nome || '';
+        
+        // Se for cliente consumidor, verificar se tem máscara personalizada
+        if (primeiroParticipante?.is_consumidor_final && nomeRepresentante) {
+          // Se o nome contém "Cliente Consumidor" (padrão), é porque não foi personalizado
+          // Caso contrário, já é a máscara personalizada do agendamento
+          const isNomePadrao = nomeRepresentante.toLowerCase().includes('cliente consumidor');
+          if (!isNomePadrao) {
+            // Já é a máscara personalizada, manter como está
+            nomeRepresentante = nomeRepresentante;
+          }
+        }
+        
+        g.representante = nomeRepresentante;
+        g.representanteClienteId = primeiroParticipante?.cliente_id || null;
+        // Se for consumidor final, garantir que o código seja 0
+        g.representanteCodigo = primeiroParticipante?.is_consumidor_final 
+          ? 0 
+          : (primeiroParticipante?.cliente_codigo ?? null);
+        g.isRepresentanteConsumidor = primeiroParticipante?.is_consumidor_final || false;
       }
     });
     
@@ -1454,7 +1516,86 @@ export default function FinanceiroPage() {
                 <div className="flex flex-col md:flex-row gap-2 md:items-center">
                   <div className="relative">
                     <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-text-muted" />
-                    <Input placeholder="Buscar (#código, participante, quadra)" value={agSearch} onChange={(e)=>setAgSearch(e.target.value)} className="pl-10 w-full md:w-[260px] bg-black border-warning/40 text-white placeholder:text-white/60" />
+                    <Input 
+                      placeholder="Buscar (#código, participante, quadra)" 
+                      value={agSearch} 
+                      onChange={(e)=>setAgSearch(e.target.value)} 
+                      className="pl-10 pr-10 w-full md:w-[260px] bg-black border-warning/40 text-white placeholder:text-white/60" 
+                    />
+                    <Popover open={clienteSelectorOpen} onOpenChange={setClienteSelectorOpen}>
+                      <PopoverTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="absolute right-1 top-1/2 transform -translate-y-1/2 h-7 w-7 p-0 hover:bg-warning/20"
+                          title="Selecionar cliente"
+                        >
+                          <svg className="h-4 w-4 text-warning" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                          </svg>
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-[280px] p-2 bg-surface border-border" align="end">
+                        <div className="space-y-1 max-h-[300px] overflow-y-auto">
+                          <div className="text-xs font-semibold text-text-secondary px-2 py-1 sticky top-0 bg-surface z-10">
+                            Selecionar Cliente
+                          </div>
+                          {(() => {
+                            // Extrair lista única de participantes
+                            const participantesUnicos = new Map();
+                            agAgendamentos.forEach(ag => {
+                              const nome = ag.participante_nome;
+                              if (nome && !participantesUnicos.has(nome)) {
+                                participantesUnicos.set(nome, {
+                                  nome,
+                                  codigo: ag.cliente_codigo || 0,
+                                  is_consumidor: ag.is_consumidor_final || false
+                                });
+                              }
+                            });
+                            
+                            // Ordenar: não-consumidores primeiro, depois por nome
+                            const lista = Array.from(participantesUnicos.values())
+                              .sort((a, b) => {
+                                if (a.is_consumidor !== b.is_consumidor) {
+                                  return a.is_consumidor ? 1 : -1;
+                                }
+                                return a.nome.localeCompare(b.nome);
+                              });
+                            
+                            if (lista.length === 0) {
+                              return (
+                                <div className="text-sm text-text-muted text-center py-4">
+                                  Nenhum participante encontrado
+                                </div>
+                              );
+                            }
+                            
+                            return lista.map((cliente, idx) => (
+                              <button
+                                key={idx}
+                                onClick={() => {
+                                  setAgSearch(cliente.nome);
+                                  setClienteSelectorOpen(false);
+                                }}
+                                className="w-full flex items-center gap-2 px-2 py-2 hover:bg-surface-2 rounded text-left transition-colors"
+                              >
+                                <span className={`inline-flex items-center justify-center min-w-[24px] h-5 px-1 rounded text-[10px] font-bold ${
+                                  cliente.codigo === 0
+                                    ? 'bg-amber-500/20 text-amber-400 ring-1 ring-amber-500/30'
+                                    : 'bg-emerald-600/20 text-emerald-400'
+                                }`}>
+                                  #{cliente.codigo}
+                                </span>
+                                <span className="text-sm text-text-primary flex-1 truncate">
+                                  {cliente.nome}
+                                </span>
+                              </button>
+                            ));
+                          })()}
+                        </div>
+                      </PopoverContent>
+                    </Popover>
                   </div>
                   <div className="flex flex-col md:flex-row gap-2">
                     <Select value={agStatus} onValueChange={setAgStatus}>
@@ -1482,53 +1623,44 @@ export default function FinanceiroPage() {
                   </div>
                   <Button variant="outline" size="sm" onClick={() => {
                     try {
-                      const headers = ['Data/Hora','Código','Quadra','Participantes','Total','Status','Participante','Finalizadora','Valor Participante','Status Participante'];
-                      const csvRows = [headers.join(';')];
+                      const sep = ';';
+                      const headers = ['Data', 'Horário', 'Código', 'Representante', 'Quadra', 'Participantes', 'Total', 'Pago', 'Pendente', 'Status'];
+                      const csvRows = [headers.join(sep)];
                       
-                      for (const ag of filteredAg) {
-                        // Linha do agendamento (resumo)
-                        const dataHora = ag.inicio && ag.fim 
-                          ? `${new Date(ag.inicio).toLocaleDateString('pt-BR')} ${new Date(ag.inicio).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} - ${new Date(ag.fim).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`
-                          : ag.inicio ? new Date(ag.inicio).toLocaleString('pt-BR') : '';
-                        const agLine = [
-                          dataHora,
-                          ag.agendamento_codigo ?? '',
-                          (ag.quadra_nome ?? '').replaceAll('"','""'),
-                          ag.participantes.length,
-                          String(fmt2(ag.total)).replace('.', ','),
-                          ag.statusGeral === 'Parcial' ? 'Pendente' : ag.statusGeral ?? '',
-                          '', // Participante (vazio na linha de resumo)
-                          '', // Finalizadora (vazio na linha de resumo)
-                          '', // Valor Participante (vazio na linha de resumo)
-                          ''  // Status Participante (vazio na linha de resumo)
-                        ].map(v => `"${String(v)}"`).join(';');
-                        csvRows.push(agLine);
+                      filteredAg.forEach(ag => {
+                        const data = ag.inicio ? new Date(ag.inicio).toLocaleDateString('pt-BR') : '';
+                        const horario = ag.inicio && ag.fim 
+                          ? `${new Date(ag.inicio).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}-${new Date(ag.fim).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`
+                          : '';
                         
-                        // Linhas dos participantes
-                        for (const p of ag.participantes) {
-                          const pLine = [
-                            '', // Data/Hora (vazio para participantes)
-                            '', // Código (vazio para participantes)
-                            '', // Quadra (vazio para participantes)
-                            '', // Participantes (vazio para participantes)
-                            '', // Total (vazio para participantes)
-                            '', // Status (vazio para participantes)
-                            (p.participante_nome ?? '').replaceAll('"','""'),
-                            (p.finalizadora_nome ?? '').replaceAll('"','""'),
-                            String(fmt2(p.valor_cota)).replace('.', ','),
-                            p.status_pagamento ?? ''
-                          ].map(v => `"${String(v)}"`).join(';');
-                          csvRows.push(pLine);
-                        }
-                      }
+                        const qtdPart = ag.participantes.length;
+                        const qtdPagos = ag.participantes.filter(p => p.status_pagamento === 'Pago').length;
+                        const qtdPendentes = ag.participantes.filter(p => p.status_pagamento === 'Pendente').length;
+                        const totalFormatado = String(fmt2(ag.total)).replace('.', ',');
+                        
+                        const row = [
+                          data,
+                          horario,
+                          ag.agendamento_codigo ?? '',
+                          (ag.representante ?? '').replace(/"/g, '""'),
+                          (ag.quadra_nome ?? '').replace(/"/g, '""'),
+                          qtdPart,
+                          totalFormatado,
+                          qtdPagos,
+                          qtdPendentes,
+                          ag.statusGeral ?? ''
+                        ].map(v => `"${v}"`).join(sep);
+                        
+                        csvRows.push(row);
+                      });
                       
                       const csvString = '\ufeff' + csvRows.join('\n');
                       const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
                       const url = URL.createObjectURL(blob);
                       const a = document.createElement('a');
                       a.href = url;
-                      const de = startDate ? new Date(startDate + 'T00:00:00').toLocaleDateString('pt-BR') : '';
-                      const ate = endDate ? new Date(endDate + 'T00:00:00').toLocaleDateString('pt-BR') : '';
+                      const de = startDate ? new Date(startDate + 'T00:00:00').toLocaleDateString('pt-BR').replace(/\//g, '-') : '';
+                      const ate = endDate ? new Date(endDate + 'T00:00:00').toLocaleDateString('pt-BR').replace(/\//g, '-') : '';
                       a.download = `agendamentos_${de}_a_${ate}.csv`;
                       document.body.appendChild(a);
                       a.click();
@@ -1561,6 +1693,7 @@ export default function FinanceiroPage() {
                           <TableHead className="w-12"></TableHead>
                           <TableHead>Data/Hora</TableHead>
                           <TableHead>Código</TableHead>
+                          <TableHead>Representante</TableHead>
                           <TableHead>Quadra</TableHead>
                           <TableHead className="text-right">Participantes</TableHead>
                           <TableHead className="text-right">Total</TableHead>
@@ -1606,6 +1739,20 @@ export default function FinanceiroPage() {
                                   ) : '—'}
                                 </TableCell>
                                 <TableCell className="font-semibold">#{ag.agendamento_codigo || '—'}</TableCell>
+                                <TableCell>
+                                  <div className="flex items-center gap-2">
+                                    {(ag.representanteCodigo !== null && ag.representanteCodigo !== undefined) && (
+                                      <span className={`inline-flex items-center justify-center min-w-[32px] h-6 px-1.5 rounded text-xs font-bold ${
+                                        ag.representanteCodigo === 0 || ag.representanteCodigo === '0'
+                                          ? 'bg-amber-500/20 text-amber-400 ring-1 ring-amber-500/30'
+                                          : 'bg-emerald-600/20 text-emerald-400'
+                                      }`}>
+                                        #{ag.representanteCodigo}
+                                      </span>
+                                    )}
+                                    <span className="text-text-primary">{ag.representante || '—'}</span>
+                                  </div>
+                                </TableCell>
                                 <TableCell>{ag.quadra_nome || '—'}</TableCell>
                                 <TableCell className="text-right">{ag.participantes.length}</TableCell>
                                 <TableCell className="text-right font-semibold">{fmtBRL(ag.total)}</TableCell>
@@ -1619,26 +1766,41 @@ export default function FinanceiroPage() {
                                   </span>
                                 </TableCell>
                               </TableRow>
-                              {isExpanded && ag.participantes.map((p, idx) => (
-                                <TableRow key={`${ag.agendamento_codigo}-${idx}`} className="bg-surface-2/50">
-                                  <TableCell></TableCell>
-                                  <TableCell className="pl-8 text-sm text-text-secondary" colSpan={2}>
-                                    {p.participante_nome || '—'}
-                                  </TableCell>
-                                  <TableCell className="text-sm">{p.finalizadora_nome || '—'}</TableCell>
-                                  <TableCell className="text-right text-sm">{fmtBRL(p.valor_cota)}</TableCell>
-                                  <TableCell className="text-sm">
-                                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs ${
-                                      p.status_pagamento === 'Pago' ? 'bg-success/20 text-success' :
-                                      p.status_pagamento === 'Cancelado' ? 'bg-danger/20 text-danger' :
-                                      'bg-warning/20 text-warning'
-                                    }`}>
-                                      {p.status_pagamento || 'Pendente'}
-                                    </span>
-                                  </TableCell>
-                                  <TableCell></TableCell>
-                                </TableRow>
-                              ))}
+                              {isExpanded && ag.participantes.map((p, idx) => {
+                                const codigoParticipante = p.is_consumidor_final ? 0 : (p.cliente_codigo ?? null);
+                                return (
+                                  <TableRow key={`${ag.agendamento_codigo}-${idx}`} className="bg-surface-2/30 hover:bg-surface-2/50 transition-colors">
+                                    <TableCell></TableCell>
+                                    <TableCell colSpan={2}></TableCell>
+                                    <TableCell className="pl-8 text-sm text-text-secondary">
+                                      <div className="flex items-center gap-2">
+                                        {(codigoParticipante !== null && codigoParticipante !== undefined) && (
+                                          <span className={`inline-flex items-center justify-center min-w-[28px] h-5 px-1 rounded text-[10px] font-bold ${
+                                            codigoParticipante === 0 || codigoParticipante === '0'
+                                              ? 'bg-amber-500/20 text-amber-400 ring-1 ring-amber-500/30'
+                                              : 'bg-emerald-600/20 text-emerald-400'
+                                          }`}>
+                                            #{codigoParticipante}
+                                          </span>
+                                        )}
+                                        <span>{p.participante_nome || '—'}</span>
+                                      </div>
+                                    </TableCell>
+                                    <TableCell className="text-sm text-text-secondary">{p.finalizadora_nome || '—'}</TableCell>
+                                    <TableCell></TableCell>
+                                    <TableCell className="text-right text-sm font-medium">{fmtBRL(p.valor_cota)}</TableCell>
+                                    <TableCell className="text-sm">
+                                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs ${
+                                        p.status_pagamento === 'Pago' ? 'bg-success/20 text-success' :
+                                        p.status_pagamento === 'Cancelado' ? 'bg-danger/20 text-danger' :
+                                        'bg-warning/20 text-warning'
+                                      }`}>
+                                        {p.status_pagamento || 'Pendente'}
+                                      </span>
+                                    </TableCell>
+                                  </TableRow>
+                                );
+                              })}
                             </React.Fragment>
                           );
                         })}
@@ -1701,6 +1863,23 @@ export default function FinanceiroPage() {
                                   ) : '—'}
                                 </span>
                               </div>
+                              <div className="flex justify-between items-center">
+                                <span className="text-text-secondary">Representante:</span>
+                                <div className="flex items-center gap-1.5">
+                                  {(ag.representanteCodigo !== null && ag.representanteCodigo !== undefined) && (
+                                    <span className={`inline-flex items-center justify-center min-w-[28px] h-5 px-1 rounded text-[10px] font-bold ${
+                                      ag.representanteCodigo === 0 || ag.representanteCodigo === '0'
+                                        ? 'bg-amber-500/20 text-amber-400 ring-1 ring-amber-500/30'
+                                        : 'bg-emerald-600/20 text-emerald-400'
+                                    }`}>
+                                      #{ag.representanteCodigo}
+                                    </span>
+                                  )}
+                                  <span className="text-text-primary font-medium">
+                                    {ag.representante || '—'}
+                                  </span>
+                                </div>
+                              </div>
                               <div className="flex justify-between">
                                 <span className="text-text-secondary">Quadra:</span>
                                 <span className="text-text-primary font-medium">
@@ -1721,25 +1900,39 @@ export default function FinanceiroPage() {
                           </div>
                           
                           {isExpanded && (
-                            <div className="border-t border-border/50 bg-black/20">
-                              {ag.participantes.map((p, idx) => (
-                                <div key={idx} className="px-4 py-3 border-b border-border/30 last:border-b-0">
-                                  <div className="flex items-center justify-between mb-2">
-                                    <div className="font-medium text-sm">{p.participante_nome || '—'}</div>
-                                    <div className={`text-xs px-2 py-0.5 rounded-full ${
-                                      p.status_pagamento === 'Pago' ? 'bg-success/20 text-success' :
-                                      p.status_pagamento === 'Cancelado' ? 'bg-danger/20 text-danger' :
-                                      'bg-warning/20 text-warning'
-                                    }`}>
-                                      {p.status_pagamento || 'Pendente'}
+                            <div className="border-t border-border/50 bg-surface-2/20">
+                              {ag.participantes.map((p, idx) => {
+                                const codigoParticipante = p.is_consumidor_final ? 0 : (p.cliente_codigo ?? null);
+                                return (
+                                  <div key={idx} className="px-4 py-3 border-b border-border/30 last:border-b-0">
+                                    <div className="flex items-center justify-between mb-2">
+                                      <div className="flex items-center gap-1.5">
+                                        {(codigoParticipante !== null && codigoParticipante !== undefined) && (
+                                          <span className={`inline-flex items-center justify-center min-w-[24px] h-4 px-1 rounded text-[9px] font-bold ${
+                                            codigoParticipante === 0 || codigoParticipante === '0'
+                                              ? 'bg-amber-500/20 text-amber-400 ring-1 ring-amber-500/30'
+                                              : 'bg-emerald-600/20 text-emerald-400'
+                                          }`}>
+                                            #{codigoParticipante}
+                                          </span>
+                                        )}
+                                        <div className="font-medium text-sm">{p.participante_nome || '—'}</div>
+                                      </div>
+                                      <div className={`text-xs px-2 py-0.5 rounded-full ${
+                                        p.status_pagamento === 'Pago' ? 'bg-success/20 text-success' :
+                                        p.status_pagamento === 'Cancelado' ? 'bg-danger/20 text-danger' :
+                                        'bg-warning/20 text-warning'
+                                      }`}>
+                                        {p.status_pagamento || 'Pendente'}
+                                      </div>
+                                    </div>
+                                    <div className="flex justify-between text-xs">
+                                      <span className="text-text-secondary">{p.finalizadora_nome || '—'}</span>
+                                      <span className="font-semibold text-success">{fmtBRL(p.valor_cota)}</span>
                                     </div>
                                   </div>
-                                  <div className="flex justify-between text-xs">
-                                    <span className="text-text-secondary">{p.finalizadora_nome || '—'}</span>
-                                    <span className="font-semibold text-success">{fmtBRL(p.valor_cota)}</span>
-                                  </div>
-                                </div>
-                              ))}
+                                );
+                              })}
                             </div>
                           )}
                         </div>

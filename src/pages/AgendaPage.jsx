@@ -154,8 +154,10 @@ const itemVariants = {
 
 // Helper function para formatar minutos em HH:MM
 const formatMinutesToTime = (minutes) => {
-  const h = Math.floor(minutes / 60);
+  let h = Math.floor(minutes / 60);
   const m = minutes % 60;
+  // Converter 24:00 para 00:00
+  if (h >= 24) h = h % 24;
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 };
 
@@ -1519,7 +1521,9 @@ function AgendaPage() {
       .map(name => courtsMap[name]?.hora_fim || '24:00:00')
       .map((t) => {
         const [h, m] = String(t).split(':').map(Number);
-        return (h || 0) * 60 + (m || 0);
+        // Tratar 00:00:00 como 24:00 (meia-noite = fim do dia)
+        const hours = (h === 0 && m === 0) ? 24 : (h || 0);
+        return hours * 60 + (m || 0);
       });
     if (!ends.length) return END_HOUR;
     const maxEndMin = Math.max(...ends);
@@ -1551,7 +1555,13 @@ function AgendaPage() {
   const BookingCard = ({ booking, courtGridStart, courtGridEnd }) => {
     const slotHeight = SLOT_HEIGHT;
     // Minutos absolutos do dia
-    const minutesFromMidnight = (date) => getHours(date) * 60 + getMinutes(date);
+    const minutesFromMidnight = (date) => {
+      const h = getHours(date);
+      const m = getMinutes(date);
+      // Se for 00:00 (meia-noite), tratar como 24:00 (1440 minutos)
+      if (h === 0 && m === 0) return 1440;
+      return h * 60 + m;
+    };
     const startAbs = minutesFromMidnight(booking.start);
     const endAbs = minutesFromMidnight(booking.end);
 
@@ -1773,7 +1783,9 @@ function AgendaPage() {
       if (!c) return { start: dayStartHour * 60, end: dayEndHourExclusive * 60 };
       const [sh, sm] = String(c.hora_inicio || '06:00:00').split(':').map(Number);
       const [eh, em] = String(c.hora_fim || '24:00:00').split(':').map(Number);
-      return { start: sh * 60 + (sm || 0), end: eh * 60 + (em || 0) };
+      // Tratar 00:00:00 como 24:00 (meia-noite)
+      const endHours = (eh === 0 && em === 0) ? 24 : eh;
+      return { start: sh * 60 + (sm || 0), end: endHours * 60 + (em || 0) };
     };
     const nearestSlot = () => {
       const h = getHours(new Date());
@@ -3640,13 +3652,21 @@ function AgendaPage() {
       if (!c) return { start: dayStartHour * 60, end: dayEndHourExclusive * 60 };
       const [sh, sm] = String(c.hora_inicio || '06:00:00').split(':').map(Number);
       const [eh, em] = String(c.hora_fim || '24:00:00').split(':').map(Number);
-      return { start: sh * 60 + (sm || 0), end: eh * 60 + (em || 0) };
+      // Tratar 00:00:00 como 24:00 (meia-noite)
+      const endHours = (eh === 0 && em === 0) ? 24 : eh;
+      return { start: sh * 60 + (sm || 0), end: endHours * 60 + (em || 0) };
     }, [courtsMap, form.court, dayStartHour, dayEndHourExclusive]);
 
     // Intervalos ocupados no dia/quadra selecionados (em minutos desde 00:00)
     const dayIntervals = useMemo(() => {
       const dayStr = format(form.date, 'yyyy-MM-dd');
-      const toMinutes = (d) => getHours(d) * 60 + getMinutes(d);
+      const toMinutes = (d) => {
+        const h = getHours(d);
+        const m = getMinutes(d);
+        // Se for 00:00 (meia-noite), tratar como 24:00 (1440 minutos)
+        if (h === 0 && m === 0) return 1440;
+        return h * 60 + m;
+      };
       return bookings
         .filter(b => b.court === form.court && format(b.start, 'yyyy-MM-dd') === dayStr && b.status !== 'canceled' && (!editingBooking || b.id !== editingBooking.id))
         .map(b => [toMinutes(b.start), toMinutes(b.end)])
@@ -3678,10 +3698,12 @@ function AgendaPage() {
     const timeOptions = useMemo(() => {
       const bounds = courtBounds;
       const opts = [];
-      for (let minutes = bounds.start; minutes <= bounds.end - SLOT_MINUTES; minutes += SLOT_MINUTES) {
+      for (let minutes = bounds.start; minutes <= bounds.end; minutes += SLOT_MINUTES) {
         const available = isRangeFree(minutes, minutes + SLOT_MINUTES);
-        const h = Math.floor(minutes / 60);
+        let h = Math.floor(minutes / 60);
         const m = minutes % 60;
+        // Converter 24:00 para 00:00
+        if (h >= 24 && minutes === 1440) h = 0;
         opts.push({ value: minutes, label: `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}` , available});
       }
       return opts;
@@ -3693,8 +3715,10 @@ function AgendaPage() {
       const opts = [];
       for (let minutes = form.startMinutes + SLOT_MINUTES; minutes <= courtBounds.end; minutes += SLOT_MINUTES) {
         const available = !!maxEnd && minutes <= maxEnd;
-        const h = Math.floor(minutes / 60);
+        let h = Math.floor(minutes / 60);
         const m = minutes % 60;
+        // Converter 24:00 para 00:00
+        if (h >= 24) h = h % 24;
         opts.push({ value: minutes, label: `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}` , available});
       }
       return opts;
@@ -3764,8 +3788,10 @@ function AgendaPage() {
       const startMin = Number(form.startMinutes);
       const endMin = Number(form.endMinutes);
       const hhmm = (mins) => {
-        const h = Math.floor(mins / 60);
+        let h = Math.floor(mins / 60);
         const m = mins % 60;
+        // Converter 24:00 para 00:00
+        if (h >= 24) h = h % 24;
         return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
       };
       if (automation.autoConfirmEnabled && form.status === 'scheduled') {
@@ -4103,7 +4129,13 @@ function AgendaPage() {
                     const e = Number(form?.endMinutes);
                     const valid = Number.isFinite(s) && Number.isFinite(e) && e > s;
                     if (!valid) return '';
-                    const hhmm = (mins) => `${String(Math.floor(mins / 60)).padStart(2,'0')}:${String(mins % 60).padStart(2,'0')}`;
+                    const hhmm = (mins) => {
+                      let h = Math.floor(mins / 60);
+                      const m = mins % 60;
+                      // Converter 24:00 para 00:00
+                      if (h >= 24) h = h % 24;
+                      return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+                    };
                     return ` • ${hhmm(s)}–${hhmm(e)}`;
                   })()}
                 </span>
@@ -5386,10 +5418,10 @@ function AgendaPage() {
       let dayBookings = bookings.filter(b => format(b.start, 'yyyy-MM-dd') === dayStr);
       // Regras de cancelados:
       // - Quando canceledOnly ativo: mostrar somente cancelados
-      // - Caso contrário: excluir cancelados da agenda
+      // - Caso contrário: excluir apenas cancelados (manter finished visível)
       dayBookings = viewFilter.canceledOnly
         ? dayBookings.filter(b => b.status === 'canceled')
-        : dayBookings.filter(b => b.status !== 'canceled');
+        : dayBookings.filter(b => b.status !== 'canceled'); // finished continua visível
       
       // Filtro de pagamentos pendentes
       if (viewFilter.pendingPayments) {
@@ -5475,12 +5507,16 @@ function AgendaPage() {
     const [startHour, startMin] = String(startTime).split(':').map(Number);
     const [endHour, endMin] = String(endTime).split(':').map(Number);
     
+    // Tratar 00:00:00 como 24:00 (meia-noite)
+    const adjustedEndHour = (endHour === 0 && endMin === 0) ? 24 : endHour;
+    const endMinutesTotal = adjustedEndHour * 60 + (endMin || 0);
+    
     // Usar exatamente os horários da quadra
     return {
       start: startHour || dayStartHour,
-      end: endHour || dayEndHourExclusive,
+      end: adjustedEndHour || dayEndHourExclusive,
       startMinutes: (startHour || 0) * 60 + (startMin || 0),
-      endMinutes: (endHour || 0) * 60 + (endMin || 0)
+      endMinutes: endMinutesTotal
     };
   }, [activeCourtFilter, courtsMap, dayStartHour, dayEndHourExclusive]);
   
@@ -5827,8 +5863,10 @@ function AgendaPage() {
               const endTime = court.hora_fim || `${dayEndHourExclusive}:00:00`;
               const [startHour] = String(startTime).split(':').map(Number);
               const [endHour, endMinute] = String(endTime).split(':').map(Number);
+              // Tratar 00:00:00 como 24:00 (meia-noite)
+              let adjustedEndHour = (endHour === 0 && endMinute === 0) ? 24 : endHour;
               // Se tem minutos no horário final (ex: 23:30), adiciona +1 hora para incluir o slot
-              const adjustedEndHour = endMinute > 0 ? endHour + 1 : endHour;
+              if (endMinute > 0 && adjustedEndHour < 24) adjustedEndHour += 1;
               return {
                 start: startHour || dayStartHour,
                 end: adjustedEndHour || dayEndHourExclusive
@@ -5996,7 +6034,9 @@ function AgendaPage() {
                     const tEnd = courtsMap[court]?.hora_fim;
                     const [sh, sm] = String(tStart || `${gridHours.start}:00:00`).split(':').map(Number);
                     const [eh, em] = String(tEnd || `${gridHours.end}:00:00`).split(':').map(Number);
-                    return { start: (sh||0)*60 + (sm||0), end: (eh||0)*60 + (em||0) };
+                    // Tratar 00:00:00 como 24:00 (meia-noite)
+                    const endHours = (eh === 0 && em === 0) ? 24 : (eh || 0);
+                    return { start: (sh||0)*60 + (sm||0), end: endHours*60 + (em||0) };
                   })();
                   
                   const startM = Math.max(bounds.start, dayStartM);
@@ -6043,9 +6083,17 @@ function AgendaPage() {
                     const t = courtsMap[court]?.hora_fim;
                     if (!t) return dayEndHourExclusive * 60;
                     const [h, m] = String(t).split(':').map(Number);
-                    return h * 60 + (m || 0);
+                    // Tratar 00:00:00 como 24:00 (meia-noite)
+                    const hours = (h === 0 && m === 0) ? 24 : h;
+                    return hours * 60 + (m || 0);
                   })();
-                  const toMinutes = (d) => getHours(d) * 60 + getMinutes(d);
+                  const toMinutes = (d) => {
+                    const h = getHours(d);
+                    const m = getMinutes(d);
+                    // Se for 00:00 (meia-noite), tratar como 24:00 (1440 minutos)
+                    if (h === 0 && m === 0) return 1440;
+                    return h * 60 + m;
+                  };
                   const dayStr = format(currentDate, 'yyyy-MM-dd');
                   const intervals = bookings
                     .filter(b => b.court === court && format(b.start, 'yyyy-MM-dd') === dayStr && b.status !== 'canceled')
@@ -6069,8 +6117,13 @@ function AgendaPage() {
                     const endSlotIndex = startSlotIndex + slotsCount;
                     const top = startSlotIndex * SLOT_HEIGHT - 1;
                     const height = (endSlotIndex - startSlotIndex) * SLOT_HEIGHT + 2;
-                    const sLabel = `${String(Math.floor(startM/60)).padStart(2,'0')}:${String(startM%60).padStart(2,'0')}`;
-                    const eLabel = `${String(Math.floor(endM/60)).padStart(2,'0')}:${String(endM%60).padStart(2,'0')}`;
+                    let sH = Math.floor(startM/60);
+                    let eH = Math.floor(endM/60);
+                    // Converter 24:00 para 00:00
+                    if (sH >= 24) sH = sH % 24;
+                    if (eH >= 24) eH = eH % 24;
+                    const sLabel = `${String(sH).padStart(2,'0')}:${String(startM%60).padStart(2,'0')}`;
+                    const eLabel = `${String(eH).padStart(2,'0')}:${String(endM%60).padStart(2,'0')}`;
                     return (
                       <div
                         className={cn(

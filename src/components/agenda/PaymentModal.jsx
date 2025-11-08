@@ -102,6 +102,9 @@ export default function PaymentModal({
   // Refs para inputs de Cliente Consumidor (para foco após limpar)
   const consumidorInputRefs = useRef({});
   
+  // Refs para inputs de valor (para navegação com Enter)
+  const valorInputRefs = useRef({});
+  
   // Ref para armazenar últimos nomes (undo)
   const lastConsumidorNames = useRef({});
   
@@ -218,7 +221,7 @@ export default function PaymentModal({
     return firstConsumidor?._originalIndex ?? null;
   }, [localParticipantsForm, paymentHiddenIndexes, isClienteConsumidor]);
   
-  // Helper para encontrar próximo input de Cliente Consumidor
+  // Helper para encontrar próximo input de Cliente Consumidor (circular)
   const getNextConsumidorInputIndex = useCallback((currentIndex) => {
     const hidden = paymentHiddenIndexes || [];
     const visibleParticipants = (localParticipantsForm || [])
@@ -230,12 +233,20 @@ export default function PaymentModal({
       isClienteConsumidor(p.cliente_id)
     );
     
+    // Se não há consumidores, retornar null
+    if (consumidores.length === 0) return null;
+    
     // Encontrar índice atual na lista de consumidores
     const currentPosition = consumidores.findIndex(p => p._originalIndex === currentIndex);
     
-    // Se encontrou e não é o último, retornar o próximo
-    if (currentPosition !== -1 && currentPosition < consumidores.length - 1) {
-      return consumidores[currentPosition + 1]._originalIndex;
+    // Se encontrou
+    if (currentPosition !== -1) {
+      // Se não é o último, retornar o próximo
+      if (currentPosition < consumidores.length - 1) {
+        return consumidores[currentPosition + 1]._originalIndex;
+      }
+      // Se é o último, retornar o primeiro (navegação circular)
+      return consumidores[0]._originalIndex;
     }
     
     return null;
@@ -1270,7 +1281,34 @@ export default function PaymentModal({
       
       // Gerar blob do PDF
       const pageInfo = totalPages > 1 ? ` (${totalPages} páginas)` : '';
-      const fileName = `relatorio-pagamento-${editingBooking?.code || 'agendamento'}${pageInfo}.pdf`;
+      
+      // Pegar nome do representante (primeiro participante não-consumidor)
+      const participantesVisiveis = (localParticipantsForm || []).filter((_, idx) => !(paymentHiddenIndexes || []).includes(idx));
+      let representante = participantesVisiveis.find(p => {
+        const cliente = localCustomers?.find(c => c.id === p.cliente_id);
+        return !cliente?.is_consumidor_final;
+      });
+      
+      // Se todos forem consumidores, pega o primeiro
+      if (!representante && participantesVisiveis.length > 0) {
+        representante = participantesVisiveis[0];
+      }
+      
+      // Pegar apenas nome e sobrenome do representante
+      const nomeCompleto = representante?.nome || 'sem-nome';
+      const partesNome = nomeCompleto.trim().split(/\s+/); // Divide por espaços
+      const primeiroNome = partesNome[0] || 'sem';
+      const sobrenome = partesNome.length > 1 ? partesNome[partesNome.length - 1] : 'nome';
+      
+      // Normalizar nome e sobrenome (remover acentos e caracteres especiais)
+      const nomeNormalizado = `${primeiroNome}-${sobrenome}`
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '') // Remove acentos
+        .replace(/[^a-z0-9-]+/g, '-') // Substitui caracteres especiais por hífen
+        .replace(/^-+|-+$/g, ''); // Remove hífens do início e fim
+      
+      const fileName = `rel-${nomeNormalizado}-${editingBooking?.code || '0'}${pageInfo}.pdf`;
       const pdfBlobData = pdf.output('blob');
       
       // Criar URL do blob (será revogada apenas ao fechar o modal)
@@ -1897,7 +1935,16 @@ export default function PaymentModal({
                                       onChange={(e) => handleUpdateConsumidorName(originalIdx, e.target.value)}
                                       onFocus={() => setFocusedInputIndex(originalIdx)}
                                       onKeyDown={(e) => {
-                                        if (e.key === 'Delete' && pf.nome && e.target === document.activeElement) {
+                                        if (e.key === 'Enter') {
+                                          e.preventDefault();
+                                          // Focar no próximo input de Cliente Consumidor
+                                          const nextIndex = getNextConsumidorInputIndex(originalIdx);
+                                          if (nextIndex !== null) {
+                                            setTimeout(() => {
+                                              consumidorInputRefs.current[nextIndex]?.focus();
+                                            }, 0);
+                                          }
+                                        } else if (e.key === 'Delete' && pf.nome && e.target === document.activeElement) {
                                           e.preventDefault();
                                           e.stopPropagation();
                                           
@@ -2105,6 +2152,9 @@ export default function PaymentModal({
                               <div className="isolate">
                                 <Label className="text-[10px] text-text-muted">Valor</Label>
                                 <Input
+                                  ref={(el) => {
+                                    if (el) valorInputRefs.current[originalIdx] = el;
+                                  }}
                                   type="text"
                                   inputMode="decimal"
                                   placeholder="R$ 0,00"
@@ -2171,7 +2221,16 @@ export default function PaymentModal({
                                       onChange={(e) => handleUpdateConsumidorName(originalIdx, e.target.value)}
                                       onFocus={() => setFocusedInputIndex(originalIdx)}
                                       onKeyDown={(e) => {
-                                        if (e.key === 'Delete' && pf.nome && e.target === document.activeElement) {
+                                        if (e.key === 'Enter') {
+                                          e.preventDefault();
+                                          // Focar no próximo input de Cliente Consumidor
+                                          const nextIndex = getNextConsumidorInputIndex(originalIdx);
+                                          if (nextIndex !== null) {
+                                            setTimeout(() => {
+                                              consumidorInputRefs.current[nextIndex]?.focus();
+                                            }, 0);
+                                          }
+                                        } else if (e.key === 'Delete' && pf.nome && e.target === document.activeElement) {
                                           e.preventDefault();
                                           e.stopPropagation();
                                           
@@ -2370,6 +2429,9 @@ export default function PaymentModal({
                             {/* Container isolado para Valor */}
                             <div className="isolate">
                               <Input
+                                ref={(el) => {
+                                  if (el) valorInputRefs.current[originalIdx] = el;
+                                }}
                                 type="text"
                                 inputMode="decimal"
                                 placeholder="R$ 0,00"
@@ -2519,6 +2581,16 @@ export default function PaymentModal({
           <div>
             <span style={{ color: '#666' }}>Valor Total:</span>
             <strong style={{ marginLeft: '10px', color: '#16a34a', fontSize: '30px' }}>R$ {maskBRL(paymentTotal || 0)}</strong>
+          </div>
+          <div>
+            <span style={{ color: '#666' }}>Diferença:</span>
+            <strong style={{ 
+              marginLeft: '10px', 
+              color: paymentSummary.diff < 0 ? '#dc2626' : '#16a34a', 
+              fontSize: '30px' 
+            }}>
+              {paymentSummary.diff < 0 ? '-' : ''}R$ {maskBRL(Math.abs(paymentSummary.diff).toFixed(2))}
+            </strong>
           </div>
         </div>
       </div>
