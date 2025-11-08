@@ -5418,10 +5418,10 @@ function AgendaPage() {
       let dayBookings = bookings.filter(b => format(b.start, 'yyyy-MM-dd') === dayStr);
       // Regras de cancelados:
       // - Quando canceledOnly ativo: mostrar somente cancelados
-      // - Caso contrário: excluir apenas cancelados (manter finished visível)
+      // - Caso contrário: excluir cancelados da agenda
       dayBookings = viewFilter.canceledOnly
         ? dayBookings.filter(b => b.status === 'canceled')
-        : dayBookings.filter(b => b.status !== 'canceled'); // finished continua visível
+        : dayBookings.filter(b => b.status !== 'canceled');
       
       // Filtro de pagamentos pendentes
       if (viewFilter.pendingPayments) {
