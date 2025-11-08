@@ -2956,12 +2956,10 @@ function AgendaPage() {
             aplicar_taxa: p.aplicar_taxa,
           })));
           
-          // Recarregar alertas após salvar agendamento
-          try {
-            await loadAlerts();
-          } catch (err) {
+          // Recarregar alertas após salvar agendamento (não bloqueia auto-save)
+          loadAlerts().catch(err => {
             console.error('[AgendaPage] Erro ao recarregar alertas:', err);
-          }
+          });
           
           // Só fecha o modal e limpa caches se NÃO for auto-save
           if (!autoSave) {
@@ -3124,12 +3122,10 @@ function AgendaPage() {
             duration: 2000
           });
           
-          // Recarregar alertas após criar agendamento
-          try {
-            await loadAlerts();
-          } catch (err) {
+          // Recarregar alertas após criar agendamento (não bloqueia fechamento do modal)
+          loadAlerts().catch(err => {
             console.error('[AgendaPage] Erro ao recarregar alertas:', err);
-          }
+          });
 
           // Participantes (não bloqueia conclusão do salvamento principal)
           try {
