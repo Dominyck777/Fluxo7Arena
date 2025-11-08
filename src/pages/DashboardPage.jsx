@@ -329,6 +329,7 @@ function DashboardPage() {
         const fimHoje = endOfDay(hoje).toISOString();
 
         // 1. Faturamento de Hoje
+        console.log('[Dashboard] 1. Buscando pagamentos...');
         
         // 1.1. Pagamentos de comandas/vendas
         const { data: pagamentos } = await supabase
@@ -337,21 +338,25 @@ function DashboardPage() {
           .eq('codigo_empresa', codigo)
           .gte('recebido_em', inicioHoje)
           .lte('recebido_em', fimHoje);
+        console.log('[Dashboard] ✅ Pagamentos carregados:', pagamentos?.length || 0);
         
         const totalComandas = (pagamentos || [])
           .filter(p => !['Cancelado', 'Estornado'].includes(p.status))
           .reduce((sum, p) => sum + Number(p.valor || 0), 0);
         
         // 1.2. Pagamentos de agendamentos
+        console.log('[Dashboard] 2. Buscando agendamentos de hoje...');
         const { data: agendamentosHoje } = await supabase
           .from('agendamentos')
           .select('id')
           .eq('codigo_empresa', codigo)
           .gte('inicio', inicioHoje)
           .lte('inicio', fimHoje);
+        console.log('[Dashboard] ✅ Agendamentos de hoje:', agendamentosHoje?.length || 0);
         
         let totalAgendamentos = 0;
         if (agendamentosHoje && agendamentosHoje.length > 0) {
+          console.log('[Dashboard] 3. Buscando participantes pagos...');
           const agendamentoIds = agendamentosHoje.map(a => a.id);
           const { data: participantesPagos } = await supabase
             .from('agendamento_participantes')
@@ -359,6 +364,7 @@ function DashboardPage() {
             .eq('codigo_empresa', codigo)
             .in('agendamento_id', agendamentoIds)
             .eq('status_pagamento', 'Pago');
+          console.log('[Dashboard] ✅ Participantes pagos:', participantesPagos?.length || 0);
           
           totalAgendamentos = (participantesPagos || [])
             .reduce((sum, p) => {
@@ -380,12 +386,14 @@ function DashboardPage() {
         setFaturamentoHoje(totalHoje);
 
         // 2. Agendamentos de Hoje
+        console.log('[Dashboard] 4. Buscando agendamentos completos...');
         const { data: agendamentos } = await supabase
           .from('agendamentos')
           .select('id, status, inicio, fim')
           .eq('codigo_empresa', codigo)
           .gte('inicio', inicioHoje)
           .lte('inicio', fimHoje);
+        console.log('[Dashboard] ✅ Agendamentos completos:', agendamentos?.length || 0);
         
         const finalizados = (agendamentos || []).filter(a => a.status === 'finished').length;
         setAgendamentosHoje({ finalizados, total: agendamentos?.length || 0 });
@@ -402,11 +410,13 @@ function DashboardPage() {
         setQuadrasEmUso(emUso);
 
         // 5. Taxa de Ocupação do Dia
+        console.log('[Dashboard] 5. Buscando quadras...');
         // Calcular slots totais disponíveis (todas as quadras x horários operacionais)
         const { data: quadras } = await supabase
           .from('quadras')
           .select('id')
           .eq('codigo_empresa', codigo);
+        console.log('[Dashboard] ✅ Quadras:', quadras?.length || 0);
         const totalQuadras = quadras?.length || 0;
         
         // Assumindo horário de operação: 6h às 23h = 17 horas
@@ -436,22 +446,27 @@ function DashboardPage() {
         setTaxaOcupacao(taxa);
 
         // 6. Comandas Abertas
+        console.log('[Dashboard] 6. Buscando comandas abertas...');
         const { data: comandas } = await supabase
           .from('comandas')
           .select('id')
           .eq('codigo_empresa', codigo)
           .eq('status', 'open');
+        console.log('[Dashboard] ✅ Comandas abertas:', comandas?.length || 0);
         setComandasAbertas(comandas?.length || 0);
 
         // 7. Mesas Ocupadas
+        console.log('[Dashboard] 7. Buscando mesas...');
         const { data: mesas } = await supabase
           .from('mesas')
           .select('id, status')
           .eq('codigo_empresa', codigo);
+        console.log('[Dashboard] ✅ Mesas:', mesas?.length || 0);
         const ocupadas = (mesas || []).filter(m => ['in-use', 'awaiting-payment'].includes(m.status)).length;
         setMesasOcupadas(ocupadas);
 
         // 8. Vendas da Loja
+        console.log('[Dashboard] 8. Buscando vendas da loja...');
         const { data: comandasFechadas } = await supabase
           .from('comandas')
           .select('id')
@@ -459,9 +474,11 @@ function DashboardPage() {
           .eq('status', 'closed')
           .gte('fechado_em', inicioHoje)
           .lte('fechado_em', fimHoje);
+        console.log('[Dashboard] ✅ Vendas da loja:', comandasFechadas?.length || 0);
         setVendasLoja(comandasFechadas?.length || 0);
 
         // 9. Dados financeiros dos últimos 14 dias
+        console.log('[Dashboard] 9. Buscando dados dos últimos 14 dias...');
         const dados14Dias = [];
         for (let i = 13; i >= 0; i--) {
           const dia = new Date();
@@ -512,6 +529,7 @@ function DashboardPage() {
             despesa: 0
           });
         }
+        console.log('[Dashboard] ✅ Dados de 14 dias carregados');
         setFinanceMiniData(dados14Dias);
 
       } catch (error) {
