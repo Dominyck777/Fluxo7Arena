@@ -594,12 +594,10 @@ export default function PaymentModal({
       // Atualizar contexto com os dados salvos
       setParticipantsForm(effectiveParticipants);
       
-      // Recarregar alertas após salvar pagamentos
-      try {
-        await loadAlerts();
-      } catch (err) {
+      // Recarregar alertas após salvar pagamentos (não bloqueia salvamento)
+      loadAlerts().catch(err => {
         console.error('[PaymentModal] Erro ao recarregar alertas:', err);
-      }
+      });
       
       // Só fecha o modal se NÃO for auto-save
       if (!autoSave) {

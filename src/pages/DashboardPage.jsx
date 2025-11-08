@@ -294,7 +294,8 @@ const itemVariants = {
 function DashboardPage() {
   const { toast } = useToast();
   const { userProfile } = useAuth();
-  const { alerts } = useAlerts(); // Usar alertas do contexto global
+  const alertsContext = useAlerts();
+  const alerts = alertsContext?.alerts || []; // Fallback seguro
   const navigate = useNavigate();
   
   // Estados para dados reais
@@ -312,7 +313,13 @@ function DashboardPage() {
   // Carregar dados do dia
   useEffect(() => {
     const loadDashboardData = async () => {
-      if (!userProfile?.codigo_empresa) return;
+      if (!userProfile?.codigo_empresa) {
+        console.log('[DashboardPage] Aguardando autenticação...');
+        setLoading(false); // Garantir que saia do loading
+        return;
+      }
+      
+      console.log('[DashboardPage] Iniciando carregamento de dados...');
       
       try {
         setLoading(true);
@@ -508,8 +515,14 @@ function DashboardPage() {
         setFinanceMiniData(dados14Dias);
 
       } catch (error) {
-        console.error('Erro ao carregar dashboard:', error);
+        console.error('[DashboardPage] ❌ Erro ao carregar dashboard:', error);
+        toast({
+          title: 'Erro ao carregar dashboard',
+          description: error?.message || 'Tente recarregar a página',
+          variant: 'destructive'
+        });
       } finally {
+        console.log('[DashboardPage] ✅ Carregamento concluído');
         setLoading(false);
       }
     };
