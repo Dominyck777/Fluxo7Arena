@@ -88,7 +88,7 @@ const buildQueryString = (params) => {
 
 // Helper para fazer request
 const supabaseFetch = async (endpoint, options = {}) => {
-  const { method = 'GET', body, headers: customHeaders = {}, params = {}, signal, timeoutMs = 8000 } = options
+  const { method = 'GET', body, headers: customHeaders = {}, params = {}, signal, timeoutMs = 20000 } = options
   
   const queryString = buildQueryString(params)
   const url = `${SUPABASE_URL}/rest/v1/${endpoint}${queryString ? `?${queryString}` : ''}`
@@ -127,8 +127,9 @@ const supabaseFetch = async (endpoint, options = {}) => {
   // Timeout com AbortController para evitar requests travados na produção
   const controller = new AbortController()
   const timer = setTimeout(() => {
+    console.warn(`[Supabase Wrapper] ⚠️ Timeout (${timeoutMs}ms) para ${endpoint}`);
     try { controller.abort('timeout') } catch {}
-  }, Math.max(2000, timeoutMs))
+  }, Math.max(5000, timeoutMs))
   // respeita o signal externo se fornecido
   const finalSignal = (() => {
     if (!signal) return controller.signal
