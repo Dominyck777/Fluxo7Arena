@@ -92,6 +92,7 @@ function VendasPage() {
   const [loading, setLoading] = useState(false);
   // Abrir mesa
   const [isCreateTableDialog, setIsCreateTableDialog] = useState(false);
+  const [isCreateMesaOpen, setIsCreateMesaOpen] = useState(false);
   const [isOpenTableDialog, setIsOpenTableDialog] = useState(false);
   const [pendingTable, setPendingTable] = useState(null);
   const [clienteNome, setClienteNome] = useState('');
@@ -2016,6 +2017,7 @@ function VendasPage() {
     const setNumeroPersist = (value) => { setNumeroVal(value); };
     const confirmCreate = async () => {
       try {
+        if (loading) return; // Prevenir múltiplas execuções
         setLoading(true);
         const raw = (numeroVal ?? '').toString().trim();
         const numero = raw ? Number(raw) : undefined;
@@ -2054,17 +2056,12 @@ function VendasPage() {
       }
     };
     return (
-      <Dialog open={isCreateTableDialog} onOpenChange={(open) => { 
-        setIsCreateTableDialog(open); 
+      <Dialog open={isCreateMesaOpen} onOpenChange={(open) => { 
+        setIsCreateMesaOpen(open); 
         if (!open) { setNumeroVal(''); setNomeVal(''); }
       }}>
         <DialogContent
           className="sm:max-w-md w-[92vw]"
-          onOpenAutoFocus={(e) => e.preventDefault()}
-          onKeyDown={(e) => e.stopPropagation()}
-          onKeyDownCapture={(e) => e.stopPropagation()}
-          onPointerDownOutside={(e) => e.stopPropagation()}
-          onInteractOutside={(e) => e.stopPropagation()}
         >
           <DialogHeader>
             <DialogTitle className="text-2xl font-bold">Nova Mesa</DialogTitle>
@@ -2075,11 +2072,16 @@ function VendasPage() {
             <Input
               id="nova-mesa-nome"
               type="text"
-              placeholder="Ex.: Mesa 1, Pátio 1, VIP..."
+              placeholder="Ex: Mesa 1, Varanda, etc."
               value={nomeVal}
-              onChange={(e) => { setNomeVal(e.target.value); }}
-              onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Enter') e.preventDefault(); }}
-              onKeyUp={(e) => e.stopPropagation()}
+              onChange={(e) => setNomeVal(e.target.value)}
+              onKeyDown={(e) => { 
+                e.stopPropagation(); 
+                if (e.key === 'Enter' && !loading) {
+                  e.preventDefault();
+                  confirmCreate(); 
+                }
+              }}
               onKeyPress={(e) => e.stopPropagation()}
             />
             {/* Campo opcional de número explícito (avançado): oculto por padrão, deixar pronto se necessário */}

@@ -1,11 +1,16 @@
 import React, { useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/components/ui/use-toast';
-import { Upload, FileText, CheckCircle, AlertCircle, Loader2, Plus, RefreshCw, Copy } from 'lucide-react';
+import { Upload, FileText, CheckCircle, AlertCircle, Loader2, Plus, RefreshCw, Copy, Link2, Trash2, ChevronDown, ChevronRight, Minus } from 'lucide-react';
 import { parseNFeXML, findExistingProduct, convertXMLProductToSystemFormat } from '@/lib/xmlParser';
 import { createProduct, adjustProductStock, listProducts, updateProduct } from '@/lib/products';
+import { findOrCreateSupplier } from '@/lib/suppliers';
+import { findPurchaseByNFeKey, createPurchase, createPurchaseItems } from '@/lib/purchases';
 import { cn } from '@/lib/utils';
+import ProductSelectionModal from './ProductSelectionModal';
+import ImportConfirmationModal from './ImportConfirmationModal';
 
 export default function XMLImportModal({ open, onOpenChange, products, codigoEmpresa, onSuccess }) {
   const { toast } = useToast();
@@ -15,10 +20,19 @@ export default function XMLImportModal({ open, onOpenChange, products, codigoEmp
   const [productsPreview, setProductsPreview] = useState([]);
   const [processing, setProcessing] = useState(false);
   const [results, setResults] = useState({ created: 0, updated: 0, errors: 0, details: [] });
+  const [editedProducts, setEditedProducts] = useState({}); // { index: { name, qty, margin, linkedProductId, updatePrice } }
+  const [expandedProducts, setExpandedProducts] = useState({});
+  const [productSelectionModal, setProductSelectionModal] = useState({ isOpen: false, productIndex: null, currentProduct: null });
+  const [confirmationModal, setConfirmationModal] = useState({ isOpen: false });
 
   const handleFileSelect = async (e) => {
     const file = e.target.files?.[0];
-    if (!file) return;
+    if (!file) {
+      console.log('[XMLImport] Nenhum arquivo selecionado');
+      return;
+    }
+
+    console.log('[XMLImport] Arquivo selecionado:', file.name);
 
     if (!file.name.endsWith('.xml')) {
       toast({ title: 'Arquivo inválido', description: 'Selecione um arquivo XML válido.', variant: 'destructive' });
@@ -28,20 +42,23 @@ export default function XMLImportModal({ open, onOpenChange, products, codigoEmp
     setXmlFile(file);
     
     try {
-      const text = await file.text();
-      const parsed = parseNFeXML(text);
+      console.log('[XMLImport] Lendo conteúdo do arquivo...');
+      const xmlContent = await file.text();
+      console.log('[XMLImport] Arquivo lido, parseando XML...');
+      const parsed = parseNFeXML(xmlContent);
+      console.log('[XMLImport] XML parseado:', parsed);
       
       if (!parsed.success) {
         toast({ title: 'Erro ao ler XML', description: parsed.error || 'XML inválido', variant: 'destructive' });
         return;
       }
 
-      if (!parsed.produtos || parsed.produtos.length === 0) {
+      if (!parsed.data?.produtos || parsed.data.produtos.length === 0) {
         toast({ title: 'Nenhum produto encontrado', description: 'O XML não contém produtos.', variant: 'warning' });
         return;
       }
 
-      setParsedData(parsed);
+      setParsedData(parsed.data);
       
       // Buscar TODOS os produtos do banco para validação precisa (incluindo inativos)
       let allProducts = products;
@@ -60,18 +77,34 @@ export default function XMLImportModal({ open, onOpenChange, products, codigoEmp
       }
       
       // Validar produtos: novos vs existentes
-      const preview = parsed.produtos.map(prodXML => {
+      const preview = parsed.data.produtos.map((prodXML, idx) => {
         const existing = findExistingProduct(prodXML, allProducts);
         return {
           xml: prodXML,
           existing: existing,
           isNew: !existing,
           willCreate: !existing,
-          willUpdate: !!existing
+          willUpdate: !!existing,
+          selected: true, // Por padrão, todos selecionados
+          index: idx
         };
       });
       
       setProductsPreview(preview);
+      
+      // Pre-populate editedProducts with XML prices to ensure they're recognized immediately
+      const initialEditedProducts = {};
+      preview.forEach((item, idx) => {
+        if (item.xml.precoVenda) {
+          initialEditedProducts[idx] = {
+            salePrice: Number(item.xml.precoVenda)
+          };
+        }
+      });
+      console.log('[XMLImport] Pré-populando editedProducts:', initialEditedProducts);
+      setEditedProducts(initialEditedProducts);
+      
+      console.log('[XMLImport] Preview preparado, mudando para step preview. Total produtos:', preview.length);
       setStep('preview');
       
     } catch (error) {
@@ -80,26 +113,115 @@ export default function XMLImportModal({ open, onOpenChange, products, codigoEmp
     }
   };
 
+  // Abrir modal de confirmação
+  const handleShowConfirmation = () => {
+    setConfirmationModal({ isOpen: true });
+  };
+
+  // Confirmar importação
   const handleConfirmImport = async () => {
+    setConfirmationModal({ isOpen: false });
+    
+    // Obter o conteúdo XML do arquivo
+    let xmlContent = '';
+    if (xmlFile) {
+      try {
+        xmlContent = await xmlFile.text();
+      } catch (error) {
+        console.error('[XMLImport] Erro ao ler XML:', error);
+        toast({ title: 'Erro ao ler XML', description: 'Não foi possível ler o arquivo XML.', variant: 'destructive' });
+        return;
+      }
+    }
+    
     setStep('processing');
     setProcessing(true);
     
-    const results = { created: 0, updated: 0, errors: 0, skipped: 0, details: [] };
+    const results = { created: 0, updated: 0, errors: 0, skipped: 0, details: [], supplierId: null };
     
-    for (const item of productsPreview) {
+    // Filtrar apenas produtos selecionados
+    const selectedProducts = productsPreview.filter(item => item.selected);
+    
+    if (selectedProducts.length === 0) {
+      toast({ title: 'Nenhum produto selecionado', description: 'Selecione ao menos um produto para importar.', variant: 'warning' });
+      setProcessing(false);
+      setStep('preview');
+      return;
+    }
+    
+    // Buscar ou criar fornecedor automaticamente
+    let supplier = null;
+    if (parsedData?.fornecedor) {
       try {
-        if (item.isNew) {
-          // Criar produto novo
+        supplier = await findOrCreateSupplier(parsedData.fornecedor, codigoEmpresa);
+        results.supplierId = supplier.id;
+        console.log('[XMLImport] Fornecedor processado:', supplier.razao_social, 'ID:', supplier.id);
+      } catch (error) {
+        console.error('[XMLImport] Erro ao processar fornecedor:', error);
+        toast({ 
+          title: 'Aviso', 
+          description: 'Não foi possível criar/vincular o fornecedor, mas os produtos serão importados.', 
+          variant: 'warning' 
+        });
+      }
+    }
+    
+    console.log('[XMLImport] Processando apenas produtos selecionados:', selectedProducts.length);
+    
+    for (const item of selectedProducts) {
+      // Aplicar edições se houver
+      const edited = editedProducts[item.index] || {};
+      const finalName = edited.name || item.xml.nome;
+      const finalQty = edited.qty !== undefined ? edited.qty : Number(item.xml.quantidade);
+      const finalMargin = edited.margin; // NULL se não definido
+      const finalSalePrice = edited.salePrice; // Preço editado manualmente
+      const linkedProductId = edited.linkedProductId;
+      try {
+        // Se vinculado manualmente, apenas atualiza estoque do produto existente
+        if (linkedProductId && linkedProductId !== 'force-new') {
+          if (finalQty > 0) {
+            await adjustProductStock({
+              productId: linkedProductId,
+              delta: finalQty,
+              codigoEmpresa
+            });
+          }
+          results.updated++;
+          results.details.push({ produto: finalName, acao: `Vinculado - Estoque atualizado (+${finalQty})`, status: 'success' });
+          continue;
+        }
+        
+        // Se é novo OU forçou criar novo (ignorando existente)
+        if (item.isNew || linkedProductId === 'force-new') {
+          // Criar produto novo com dados editados
           const productData = convertXMLProductToSystemFormat(item.xml, codigoEmpresa);
-          // Garantir que o valor_venda (price) também seja preenchido, além de preco_venda (salePrice)
-          if (productData.salePrice != null && productData.price == null) {
+          
+          // Aplicar nome editado
+          if (edited.name) {
+            productData.name = edited.name;
+          }
+          // Usar preço editado manualmente OU calcular pela margem
+          if (finalSalePrice != null) {
+            // Preço editado manualmente tem prioridade
+            productData.salePrice = finalSalePrice;
+            productData.price = finalSalePrice;
+          } else if (finalMargin != null && finalMargin > 0) {
+            // Calcular preço de venda baseado na margem (sempre markup)
+            const custoUnitario = productData.costPrice || 0;
+            if (custoUnitario > 0) {
+              const precoVenda = custoUnitario * (1 + finalMargin / 100);
+              productData.salePrice = precoVenda;
+              productData.price = precoVenda;
+            }
+          } else if (productData.salePrice != null && productData.price == null) {
             productData.price = productData.salePrice;
           }
-          // Definir estoque inicial diretamente no insert para refletir imediatamente
-          const qtyXml = Number(item.xml.quantidade) || 0;
-          productData.stock = qtyXml;
-          productData.initialStock = qtyXml;
-          productData.currentStock = qtyXml;
+          // Se nem preço nem margem definidos, deixa NULL
+          
+          // Definir estoque com quantidade editada
+          productData.stock = finalQty;
+          productData.initialStock = finalQty;
+          productData.currentStock = finalQty;
           // Garantir marcação/metadata de XML e categoria
           productData.importedViaXML = true;
           productData.category = 'Importados';
@@ -114,7 +236,7 @@ export default function XMLImportModal({ open, onOpenChange, products, codigoEmp
             // Importante: garantir codigo_empresa no insert (RLS) e refletir preço/estoque imediato
             await createProduct(productData, { codigoEmpresa });
             results.created++;
-            results.details.push({ produto: item.xml.nome, acao: 'Criado', status: 'success' });
+            results.details.push({ produto: finalName, acao: 'Criado', status: 'success' });
           } catch (createError) {
             // Se erro de duplicação, tentar encontrar o produto existente e atualizar estoque
             if (createError.message?.includes('duplicate') || createError.message?.includes('unique constraint')) {
@@ -179,27 +301,47 @@ export default function XMLImportModal({ open, onOpenChange, products, codigoEmp
             }
           }
         } else {
-          // Atualizar estoque do produto existente e garantir preço se estiver zerado
+          // Atualizar estoque do produto existente (SOMA, não substitui)
           const qty = Number(item.xml.quantidade) || 0;
           if (qty > 0) {
             await adjustProductStock({
               productId: item.existing.id,
-              delta: qty,
+              delta: qty, // SOMA ao estoque atual
               codigoEmpresa
             });
           }
-          // Se o produto existente está com preço 0 e o XML traz valor unitário, ajustar preço de venda
-          const xmlUnit = Number(item.xml.valorUnitario) || 0;
-          const currentPrice = Number(item.existing.price ?? item.existing.salePrice ?? 0);
-          if (xmlUnit > 0 && currentPrice === 0) {
-            try {
-              await updateProduct(item.existing.id, { salePrice: xmlUnit, price: xmlUnit });
-            } catch (e) {
-              console.warn('[XMLImport] Falha ao ajustar preço do produto existente', e);
+          
+          // Atualizar preço SOMENTE se checkbox individual estiver marcado
+          const shouldUpdatePrice = edited.updatePrice === true;
+          if (shouldUpdatePrice) {
+            const xmlCusto = Number(item.xml.valorUnitario) || 0;
+            if (xmlCusto > 0) {
+              try {
+                const updateData = { costPrice: xmlCusto };
+                
+                // Usar preço editado manualmente OU calcular pela margem (sempre markup)
+                if (finalSalePrice != null) {
+                  updateData.salePrice = finalSalePrice;
+                  updateData.price = finalSalePrice;
+                } else if (finalMargin != null && finalMargin > 0) {
+                  const precoVenda = xmlCusto * (1 + finalMargin / 100);
+                  updateData.salePrice = precoVenda;
+                  updateData.price = precoVenda;
+                }
+                
+                await updateProduct(item.existing.id, updateData);
+              } catch (e) {
+                console.warn('[XMLImport] Falha ao atualizar preço do produto existente', e);
+              }
             }
           }
+          
           results.updated++;
-          results.details.push({ produto: item.xml.nome, acao: qty > 0 ? 'Estoque atualizado' : 'Verificado', status: 'success' });
+          results.details.push({ 
+            produto: item.xml.nome, 
+            acao: qty > 0 ? `Estoque +${qty} (somado)` : 'Verificado', 
+            status: 'success' 
+          });
         }
       } catch (error) {
         console.error('[XMLImport] Erro ao processar produto:', item.xml.nome, error);
@@ -208,12 +350,107 @@ export default function XMLImportModal({ open, onOpenChange, products, codigoEmp
       }
     }
     
+    // Registrar a compra (NF-e) no banco
+    if (parsedData?.nfe?.chaveAcesso && supplier) {
+      try {
+        // Verificar se a NF-e já foi importada
+        const existingPurchase = await findPurchaseByNFeKey(parsedData.nfe.chaveAcesso, codigoEmpresa);
+        
+        let purchase = existingPurchase;
+        
+        if (!existingPurchase || !existingPurchase.ativo) {
+          // Criar registro da compra (primeira vez ou reativar inativa)
+          const purchaseData = {
+            codigoEmpresa,
+            fornecedorId: supplier.id,
+            chaveNfe: parsedData.nfe.chaveAcesso,
+            numeroNfe: parsedData.nfe.numero,
+            serieNfe: parsedData.nfe.serie,
+            dataEmissao: parsedData.nfe.dataEmissao,
+            tipoOperacao: parsedData.nfe.tipo || 'Entrada',
+            naturezaOperacao: parsedData.nfe.naturezaOperacao,
+            valorProdutos: parsedData.nfe.totalNota || 0,
+            valorTotal: parsedData.nfe.totalNota || 0,
+            xmlCompleto: xmlContent, // Salvar XML original
+            formaPagamento: parsedData.pagamentos && parsedData.pagamentos.length > 0 
+              ? parsedData.pagamentos.map(p => p.nome).join(', ')
+              : null,
+          };
+          
+          purchase = await createPurchase(purchaseData);
+          console.log('[XMLImport] Nova compra registrada:', purchase.numero_nfe);
+        } else {
+          console.log('[XMLImport] NF-e já existe, adicionando novos itens:', existingPurchase.numero_nfe);
+          results.purchaseAlreadyExists = true;
+        }
+        
+        // Criar itens da compra (APENAS produtos selecionados)
+        const purchaseItems = selectedProducts.map(item => {
+          const edited = editedProducts[item.index] || {};
+          const linkedProductId = edited.linkedProductId;
+          
+          // Determinar o ID do produto:
+          // 1. Se vinculou manualmente a outro produto
+          // 2. Se é produto existente (atualização de estoque)
+          // 3. Se criou novo, não temos o ID ainda (será null)
+          let productId = null;
+          if (linkedProductId && linkedProductId !== 'force-new') {
+            productId = linkedProductId;
+          } else if (item.existing && !linkedProductId) {
+            productId = item.existing.id;
+          }
+          
+          return {
+            produtoId: productId,
+            codigoProdutoXML: item.xml.codigo,
+            nomeProdutoXML: item.xml.nome,
+            eanXML: item.xml.ean,
+            ncmXML: item.xml.ncm,
+            cfopXML: item.xml.cfop,
+            unidadeXML: item.xml.unidade,
+            quantidade: edited.qty !== undefined ? edited.qty : Number(item.xml.quantidade),
+            valorUnitario: Number(item.xml.valorUnitario) || 0,
+            valorTotal: Number(item.xml.valorTotal) || 0,
+            valorDesconto: item.xml.valorDesconto || 0,
+            valorFrete: item.xml.valorFrete || 0,
+            valorSeguro: item.xml.valorSeguro || 0,
+            valorOutrasDespesas: item.xml.valorOutrasDespesas || 0,
+            icmsAliquota: item.xml.icmsAliquota,
+            icmsValor: item.xml.icmsValor,
+            ipiAliquota: item.xml.ipiAliquota,
+            ipiValor: item.xml.ipiValor,
+            pisAliquota: item.xml.pisAliquota,
+            pisValor: item.xml.pisValor,
+            cofinsAliquota: item.xml.cofinsAliquota,
+            cofinsValor: item.xml.cofinsValor,
+            vinculadoManualmente: !!edited.linkedProductId,
+            observacoes: edited.observacoes || null,
+            selecionadoNaImportacao: item.selected // Flag que indica se foi selecionado
+          };
+        });
+        
+        await createPurchaseItems(purchase.id, purchaseItems);
+        console.log('[XMLImport] Itens adicionados à compra:', purchaseItems.length);
+        
+        results.purchaseId = purchase.id;
+      } catch (error) {
+        console.error('[XMLImport] Erro ao registrar compra:', error);
+        // Não bloqueia a importação, apenas loga o erro
+      }
+    }
+    
     setResults(results);
     setProcessing(false);
     setStep('done');
     
     // Notificar sucesso
-    if (results.errors === 0) {
+    if (results.purchaseAlreadyExists) {
+      toast({ 
+        title: 'NF-e já importada!', 
+        description: `Esta NF-e já existe no sistema. ${results.created} produto(s) criado(s), ${results.updated} atualizado(s).`,
+        variant: 'warning' 
+      });
+    } else if (results.errors === 0) {
       toast({ 
         title: 'Importação concluída!', 
         description: `${results.created} produto(s) criado(s), ${results.updated} atualizado(s).`,
@@ -232,25 +469,93 @@ export default function XMLImportModal({ open, onOpenChange, products, codigoEmp
   };
 
   const handleClose = () => {
+    console.log('[XMLImport] Fechando modal');
     setStep('upload');
     setXmlFile(null);
     setParsedData(null);
     setProductsPreview([]);
+    setEditedProducts({});
+    setExpandedProducts({});
     setResults({ created: 0, updated: 0, errors: 0, details: [] });
     onOpenChange(false);
   };
+
+  // Log quando o modal abre
+  React.useEffect(() => {
+    if (open) {
+      console.log('[XMLImport] Modal aberto. Step atual:', step);
+    }
+  }, [open, step]);
 
   const handleReset = () => {
     setStep('upload');
     setXmlFile(null);
     setParsedData(null);
     setProductsPreview([]);
+    setEditedProducts({});
+    setExpandedProducts({});
+  };
+
+  const handleToggleSelect = (index) => {
+    setProductsPreview(prev => prev.map((item, idx) => 
+      idx === index ? { ...item, selected: !item.selected } : item
+    ));
+  };
+
+  const handleToggleSelectAll = () => {
+    const allSelected = productsPreview.every(item => item.selected);
+    setProductsPreview(prev => prev.map(item => ({ ...item, selected: !allSelected })));
+  };
+
+  const handleEditProduct = (index, field, value) => {
+    setEditedProducts(prev => ({
+      ...prev,
+      [index]: {
+        ...prev[index],
+        [field]: value
+      }
+    }));
+  };
+
+  const handleLinkProduct = (index, productId) => {
+    console.log('[XMLImportModal] handleLinkProduct chamado:', { index, productId });
+    console.log('[XMLImportModal] Estado editedProducts completo antes:', editedProducts);
+    console.log('[XMLImportModal] Estado editedProducts[index] antes:', editedProducts[index]);
+    setEditedProducts(prev => {
+      console.log('[XMLImportModal] Estado prev no setEditedProducts:', prev);
+      const newState = {
+        ...prev,
+        [index]: {
+          ...prev[index],
+          linkedProductId: productId
+        }
+      };
+      console.log('[XMLImportModal] Novo estado editedProducts:', newState);
+      return newState;
+    });
+  };
+
+  const calculateSalePrice = (costPrice, margin) => {
+    if (!costPrice || !margin) return 0;
+    // Sempre usar markup (multiplicação) para qualquer margem
+    return costPrice * (1 + margin / 100);
+  };
+
+  const getEditedValue = (index, field, defaultValue) => {
+    return editedProducts[index]?.[field] ?? defaultValue;
+  };
+
+  const toggleExpand = (index) => {
+    setExpandedProducts(prev => ({
+      ...prev,
+      [index]: !prev[index]
+    }));
   };
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="max-w-4xl max-h-[85vh] flex flex-col overflow-hidden">
-        <DialogHeader>
+      <DialogContent className="max-w-4xl max-h-[85vh] flex flex-col">
+        <DialogHeader className="flex-shrink-0">
           <DialogTitle className="text-2xl font-bold">Importar XML de Compra (NF-e)</DialogTitle>
           <DialogDescription>
             {step === 'upload' && 'Selecione o arquivo XML da nota fiscal de entrada'}
@@ -260,7 +565,7 @@ export default function XMLImportModal({ open, onOpenChange, products, codigoEmp
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex-1 overflow-y-auto px-2 py-1">
           {/* Step 1: Upload */}
           {step === 'upload' && (
             <div className="flex flex-col items-center justify-center py-12 px-4">
@@ -284,12 +589,6 @@ export default function XMLImportModal({ open, onOpenChange, products, codigoEmp
                     onChange={handleFileSelect}
                   />
                 </label>
-                {xmlFile && (
-                  <div className="mt-4 p-3 bg-surface-2 rounded-lg flex items-center gap-2">
-                    <FileText className="w-5 h-5 text-success" />
-                    <span className="text-sm text-text-primary">{xmlFile.name}</span>
-                  </div>
-                )}
               </div>
             </div>
           )}
@@ -299,13 +598,37 @@ export default function XMLImportModal({ open, onOpenChange, products, codigoEmp
             <div className="space-y-4">
               {parsedData?.nfe && (
                 <div className="bg-surface-2 rounded-lg p-4 border border-border">
-                  <h3 className="font-semibold mb-2">Informações da NF-e</h3>
-                  <div className="grid grid-cols-2 gap-2 text-sm">
-                    <div><span className="text-text-muted">Número:</span> <span className="font-mono">{parsedData.nfe.numero}</span></div>
-                    <div><span className="text-text-muted">Série:</span> <span className="font-mono">{parsedData.nfe.serie}</span></div>
-                    <div><span className="text-text-muted">Tipo:</span> <span>{parsedData.nfe.tipo}</span></div>
-                    <div><span className="text-text-muted">Fornecedor:</span> <span>{parsedData.fornecedor?.razaoSocial}</span></div>
+                  <div className="flex items-start justify-between gap-4 mb-3">
+                    <div className="flex-1">
+                      <h3 className="font-semibold mb-2">Informações da NF-e</h3>
+                      <div className="grid grid-cols-2 gap-2 text-sm">
+                        <div><span className="text-text-muted">Número:</span> <span className="font-mono">{parsedData.nfe.numero}</span></div>
+                        <div><span className="text-text-muted">Série:</span> <span className="font-mono">{parsedData.nfe.serie}</span></div>
+                        <div><span className="text-text-muted">Tipo:</span> <span>{parsedData.nfe.tipo}</span></div>
+                        <div><span className="text-text-muted">Fornecedor:</span> <span>{parsedData.fornecedor?.razaoSocial}</span></div>
+                      </div>
+                    </div>
+                    
+                    {/* Resumo Financeiro */}
+                    <div className="flex flex-col gap-2 min-w-[200px]">
+                      <div className="bg-brand/10 rounded-lg p-3 border border-brand/20">
+                        <p className="text-xs text-text-muted mb-1">Valor Total NF-e</p>
+                        <p className="text-xl font-bold text-brand">
+                          R$ {Number(parsedData.nfe.totalNota || 0).toFixed(2)}
+                        </p>
+                      </div>
+                      
+                      {parsedData.pagamentos && parsedData.pagamentos.length > 0 && (
+                        <div className="bg-success/10 rounded-lg p-2.5 border border-success/20">
+                          <p className="text-xs text-text-muted mb-1">Forma de Pagamento</p>
+                          <p className="text-sm font-semibold text-success">
+                            {parsedData.pagamentos.map(p => p.nome).join(', ')}
+                          </p>
+                        </div>
+                      )}
+                    </div>
                   </div>
+                  
                   {parsedData.nfe.chaveAcesso && (
                     <div className="mt-2 pt-2 border-t border-border">
                       <span className="text-text-muted text-xs">Chave de Acesso:</span>
@@ -315,55 +638,406 @@ export default function XMLImportModal({ open, onOpenChange, products, codigoEmp
                 </div>
               )}
 
-              <div className="bg-surface-2 rounded-lg p-4 border border-border flex flex-col max-h-[500px]">
-                <h3 className="font-semibold mb-3">Produtos Encontrados ({productsPreview.length})</h3>
-                <div className="space-y-2 overflow-y-auto flex-1">
-                  {productsPreview.map((item, idx) => (
-                    <div 
-                      key={idx} 
-                      className={cn(
-                        "p-3 rounded-lg border flex items-start gap-3",
-                        item.isNew ? "bg-success/10 border-success/30" : "bg-info/10 border-info/30"
-                      )}
-                    >
-                      {item.isNew ? (
-                        <Plus className="w-5 h-5 text-success flex-shrink-0 mt-0.5" />
-                      ) : (
-                        <RefreshCw className="w-5 h-5 text-info flex-shrink-0 mt-0.5" />
-                      )}
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="flex-1 min-w-0">
-                            <p className="font-semibold text-sm truncate">{item.xml.nome}</p>
-                            <p className="text-xs text-text-muted">
-                              {item.xml.codigo && `Código: ${item.xml.codigo} • `}
-                              {item.xml.ean && item.xml.ean !== 'SEM GTIN' && `EAN: ${item.xml.ean} • `}
-                              Qtd: {item.xml.quantidade} {item.xml.unidade}
-                            </p>
+              {/* Controles de seleção */}
+              <div className="flex items-center justify-between gap-4 px-2">
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={handleToggleSelectAll}
+                >
+                  {productsPreview.every(p => p.selected) ? 'Desmarcar Todos' : 'Selecionar Todos'}
+                </Button>
+                
+                <span className="text-sm text-text-muted">
+                  {productsPreview.filter(p => p.selected).length} de {productsPreview.length} selecionados
+                </span>
+              </div>
+
+              <div className="bg-surface-2 rounded-lg p-4 border border-border">
+                <h3 className="font-semibold mb-3 text-base">Produtos Encontrados</h3>
+                <div className="space-y-2">
+                  {productsPreview.map((item, idx) => {
+                    const linkedProductId = getEditedValue(idx, 'linkedProductId', null);
+                    const editedName = getEditedValue(idx, 'name', item.xml.nome);
+                    const editedQty = getEditedValue(idx, 'quantity', item.xml.quantidade);
+                    const editedMargin = getEditedValue(idx, 'margin', item.xml.margem);
+                    const editedSalePrice = getEditedValue(idx, 'salePrice', null);
+                    const costPrice = item.xml.valorUnitario || 0;
+                    
+                    
+                    // Calcular preço de venda (prioridade: editado manualmente > produto existente > calculado por margem > preço XML)
+                    let salePrice = editedSalePrice;
+                    if (salePrice == null && !item.isNew && item.existing) {
+                      // Se produto existe, usar o preço de venda do sistema
+                      salePrice = Number(item.existing.preco_venda || item.existing.salePrice || item.existing.price || 0);
+                    }
+                    if (salePrice == null && editedMargin != null) {
+                      salePrice = calculateSalePrice(costPrice, editedMargin);
+                    }
+                    if (salePrice == null && item.xml.precoVenda) {
+                      // Usar o preço de venda do XML como fallback
+                      salePrice = Number(item.xml.precoVenda);
+                    }
+                    
+                    // Calcular margem atual baseado no preço (para exibição)
+                    // Usar markup: Margem = ((Preço - Custo) / Custo) × 100
+                    let displayMargin = null;
+                    
+                    // Se há margem editada, usar ela
+                    if (editedMargin != null) {
+                      displayMargin = editedMargin;
+                    }
+                    // Senão, calcular baseado no preço final
+                    else if (salePrice != null && costPrice > 0 && salePrice > 0) {
+                      const calculatedMargin = ((salePrice - costPrice) / costPrice) * 100;
+                      displayMargin = Math.max(-999, Math.min(9999, calculatedMargin));
+                    }
+                    
+                    const isExpanded = expandedProducts[idx];
+                    
+                    return (
+                      <div 
+                        key={idx} 
+                        className={cn(
+                          "rounded-lg border transition-all",
+                          item.selected ? (
+                            item.isNew ? "bg-success/10 border-success/30" : "bg-info/10 border-info/30"
+                          ) : "bg-surface opacity-60 border-border"
+                        )}
+                      >
+                        {/* Cabeçalho compacto - sempre visível */}
+                        <div className="p-3 flex items-center gap-3">
+                          {/* Checkbox amarela */}
+                          <input 
+                            type="checkbox" 
+                            checked={item.selected} 
+                            onChange={() => handleToggleSelect(idx)}
+                            className="w-4 h-4 rounded border-border flex-shrink-0 accent-warning cursor-pointer"
+                          />
+                          
+                          {/* Botão expand/collapse */}
+                          <button
+                            onClick={() => toggleExpand(idx)}
+                            className="flex-shrink-0 p-0.5 hover:bg-surface-2 rounded transition-colors"
+                          >
+                            {isExpanded ? (
+                              <ChevronDown className="w-4 h-4 text-text-muted" />
+                            ) : (
+                              <ChevronRight className="w-4 h-4 text-text-muted" />
+                            )}
+                          </button>
+                          
+                          {/* Ícone de status */}
+                          <div className="flex-shrink-0">
+                            {linkedProductId ? (
+                              <Link2 className="w-5 h-5 text-warning" />
+                            ) : item.isNew ? (
+                              <Plus className="w-5 h-5 text-success" />
+                            ) : (
+                              <RefreshCw className="w-5 h-5 text-info" />
+                            )}
                           </div>
-                          <div className="text-right flex-shrink-0">
-                            <p className="text-sm font-semibold">
-                              R$ {item.xml.valorUnitario.toFixed(2)}
-                            </p>
-                            <p className="text-xs text-text-muted">
-                              {item.isNew ? 'Novo produto' : 'Atualizar estoque'}
-                            </p>
+                          
+                          {/* Informações principais */}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-baseline gap-2">
+                              <p className="font-semibold text-sm truncate">
+                                {linkedProductId && linkedProductId !== 'force-new' && linkedProductId !== 'new' ? (
+                                  (() => {
+                                    const linkedProduct = products?.find(p => p.id === linkedProductId);
+                                    return linkedProduct ? linkedProduct.name : editedName;
+                                  })()
+                                ) : editedName}
+                              </p>
+                              {item.xml.codigo && (
+                                <span className="text-xs text-text-muted flex-shrink-0">#{item.xml.codigo}</span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-3 text-xs text-text-muted mt-0.5">
+                              <span>Qtd: {editedQty}</span>
+                              <span>•</span>
+                              <span>R$ {costPrice.toFixed(2)} → {salePrice ? `R$ ${salePrice.toFixed(2)}` : '-'}</span>
+                              {displayMargin != null && (
+                                <>
+                                  <span>•</span>
+                                  <span className={displayMargin > 0 ? 'text-success' : displayMargin < 0 ? 'text-destructive' : 'text-text-muted'}>
+                                    {displayMargin.toFixed(1)}%
+                                  </span>
+                                </>
+                              )}
+                              {linkedProductId && linkedProductId !== 'force-new' && linkedProductId !== 'new' && (
+                                <span className="text-warning">→ Vinculado</span>
+                              )}
+                            </div>
+                          </div>
+                          
+                          {/* Badge de status */}
+                          <div className="flex-shrink-0">
+                            {linkedProductId ? (
+                              <span className="text-xs px-2 py-0.5 rounded-full bg-warning/20 text-warning font-medium">Vinculado</span>
+                            ) : item.isNew ? (
+                              <span className="text-xs px-2 py-0.5 rounded-full bg-success/20 text-success font-medium">Novo</span>
+                            ) : (
+                              <span className="text-xs px-2 py-0.5 rounded-full bg-info/20 text-info font-medium">Existente</span>
+                            )}
                           </div>
                         </div>
+                        
+                        {/* Detalhes expansíveis */}
+                        {isExpanded && (
+                          <div className="px-3 pb-3 pt-0 space-y-3 border-t border-border/50">
+                            {/* Nome editável */}
+                            <div className="mt-3">
+                              <label className="text-sm font-medium text-text-primary mb-1 block">Nome do Produto</label>
+                              <input 
+                                type="text"
+                                value={editedName}
+                                onChange={(e) => handleEditProduct(idx, 'name', e.target.value)}
+                                disabled={!item.selected}
+                                className="w-full px-3 py-2 text-sm bg-surface border border-border rounded-md focus:border-brand focus:ring-1 focus:ring-brand outline-none disabled:opacity-50 disabled:cursor-not-allowed"
+                              />
+                            </div>
+                            
+                            {/* Quantidade, Margem e Preços - tudo em uma linha */}
+                            <div className="flex items-center gap-3">
+                              <div>
+                                <label className="text-xs text-text-muted mb-1 block">Quantidade</label>
+                                <div className="flex items-center gap-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleEditProduct(idx, 'qty', Math.max(0, editedQty - 1))}
+                                    disabled={!item.selected || editedQty <= 0}
+                                    className="w-9 h-9 rounded-md border border-border bg-surface hover:bg-surface-2 disabled:opacity-30 disabled:cursor-not-allowed transition-colors flex items-center justify-center"
+                                  >
+                                    <Minus className="w-4 h-4" />
+                                  </button>
+                                  <input 
+                                    type="text"
+                                    value={editedQty}
+                                    onChange={(e) => {
+                                      const val = e.target.value.replace(/\D/g, '');
+                                      handleEditProduct(idx, 'qty', val === '' ? 0 : Number(val));
+                                    }}
+                                    disabled={!item.selected}
+                                    className="w-14 text-center px-2 py-2 text-sm bg-surface border border-border rounded-md focus:border-brand focus:ring-1 focus:ring-brand outline-none disabled:opacity-50"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => handleEditProduct(idx, 'qty', editedQty + 1)}
+                                    disabled={!item.selected}
+                                    className="w-9 h-9 rounded-md bg-warning hover:bg-warning/90 disabled:opacity-30 disabled:cursor-not-allowed transition-colors flex items-center justify-center text-black font-bold shadow-sm"
+                                  >
+                                    <Plus className="w-4 h-4" />
+                                  </button>
+                                </div>
+                              </div>
+                              <div>
+                                <label className="text-xs text-text-muted mb-1 block">Margem %</label>
+                                <div className="relative">
+                                  <input 
+                                    type="text"
+                                    value={(() => {
+                                      const margin = getEditedValue(idx, 'margin', null);
+                                      if (margin != null) {
+                                        return String(margin);
+                                      }
+                                      // Se não há margem editada, calcular baseada no preço existente
+                                      if (!item.isNew && item.existing && costPrice > 0) {
+                                        const existingSalePrice = Number(item.existing.preco_venda || item.existing.salePrice || item.existing.price || 0);
+                                        if (existingSalePrice > 0) {
+                                          const calculatedMargin = ((existingSalePrice - costPrice) / costPrice) * 100;
+                                          return calculatedMargin.toFixed(1);
+                                        }
+                                      }
+                                      return '';
+                                    })()}
+                                    onChange={(e) => {
+                                      const rawValue = e.target.value;
+                                      
+                                      // Limpar campos quando vazio
+                                      if (rawValue === '') {
+                                        handleEditProduct(idx, 'margin', null);
+                                        // Não limpar salePrice, manter o preço existente do produto
+                                        return;
+                                      }
+                                      
+                                      // Permitir apenas números, vírgula, ponto e sinal negativo
+                                      const cleanValue = rawValue.replace(/[^0-9.,\-]/g, '').replace(',', '.');
+                                      
+                                      // Se está digitando, não validar ainda
+                                      if (cleanValue === '.' || cleanValue === '-' || cleanValue === '-.') {
+                                        return;
+                                      }
+                                      
+                                      const marginVal = parseFloat(cleanValue);
+                                      if (!isNaN(marginVal)) {
+                                        handleEditProduct(idx, 'margin', marginVal);
+                                        // Calcular preço baseado na margem
+                                        if (costPrice > 0) {
+                                          const newSalePrice = calculateSalePrice(costPrice, marginVal);
+                                          handleEditProduct(idx, 'salePrice', newSalePrice);
+                                        }
+                                      }
+                                    }}
+                                    disabled={!item.selected}
+                                    placeholder="0"
+                                    className="w-24 pl-3 pr-6 py-2 text-sm bg-surface border border-border rounded-md focus:border-brand focus:ring-1 focus:ring-brand outline-none disabled:opacity-50 text-right"
+                                  />
+                                  <span className="absolute right-1.5 top-1/2 -translate-y-1/2 text-sm text-text-muted pointer-events-none">%</span>
+                                </div>
+                              </div>
+                              <div>
+                                <label className="text-xs text-text-muted mb-1 block">Custo</label>
+                                <div className="px-3 py-2 bg-surface/50 rounded-md border border-border">
+                                  <span className="text-sm font-semibold">R$ {costPrice.toFixed(2)}</span>
+                                </div>
+                              </div>
+                              <div>
+                                <label className="text-xs text-text-muted mb-1 block">Preço Venda</label>
+                                <div className="relative">
+                                  <span className="absolute left-2 top-1/2 -translate-y-1/2 text-sm text-text-muted pointer-events-none">R$</span>
+                                  <input 
+                                    type="text"
+                                    value={(() => {
+                                      const price = getEditedValue(idx, 'salePrice', salePrice);
+                                      if (price == null) return '';
+                                      return Number(price).toFixed(2).replace('.', ',');
+                                    })()}
+                                    onChange={(e) => {
+                                      // Pega apenas números
+                                      const digits = e.target.value.replace(/\D/g, '');
+                                      
+                                      if (digits === '') {
+                                        handleEditProduct(idx, 'salePrice', null);
+                                        return;
+                                      }
+                                      
+                                      // Converte centavos para reais (ex: 900 -> 9.00)
+                                      const numVal = Number(digits) / 100;
+                                      handleEditProduct(idx, 'salePrice', numVal);
+                                      
+                                      // Calcular margem reversa quando edita preço (usando markup)
+                                      if (numVal > 0 && costPrice > 0) {
+                                        const margin = ((numVal - costPrice) / costPrice) * 100;
+                                        handleEditProduct(idx, 'margin', Math.round(margin * 100) / 100);
+                                      }
+                                    }}
+                                    disabled={!item.selected}
+                                    placeholder="0,00"
+                                    className="w-28 pl-7 pr-3 py-2 text-sm bg-surface border border-border rounded-md focus:border-brand focus:ring-1 focus:ring-brand outline-none disabled:opacity-50 text-right font-semibold text-success"
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                            
+                            {/* Vinculação manual */}
+                            <div>
+                              <label className="text-sm font-medium text-text-primary mb-1 block">
+                                {item.isNew ? 'Vincular a Produto Existente (Opcional)' : 'Ação para este Produto'}
+                              </label>
+                              <div className="flex gap-2">
+                                <Select
+                                  value={linkedProductId === 'force-new' ? 'force-new' : (linkedProductId || (item.isNew ? 'new' : item.existing?.id || 'new'))}
+                                  onValueChange={(value) => {
+                                    if (value === 'new' || value === item.existing?.id) {
+                                      handleLinkProduct(idx, null);
+                                    } else if (value === 'search') {
+                                      setProductSelectionModal({
+                                        isOpen: true,
+                                        productIndex: idx,
+                                        currentProduct: item
+                                      });
+                                    } else {
+                                      handleLinkProduct(idx, value);
+                                    }
+                                  }}
+                                  disabled={!item.selected}
+                                >
+                                  <SelectTrigger className="flex-1 hover:bg-white/5 transition-colors">
+                                    <SelectValue placeholder={item.isNew ? "🆕 Criar como novo produto" : "♻️ Atualizar produto existente"}>
+                                      {linkedProductId && linkedProductId !== 'force-new' && linkedProductId !== 'new' ? (
+                                        (() => {
+                                          const linkedProduct = products?.find(p => p.id === linkedProductId);
+                                          return linkedProduct ? `🔗 Vinculado: ${linkedProduct.name}` : (item.isNew ? "🆕 Criar como novo produto" : "♻️ Atualizar produto existente");
+                                        })()
+                                      ) : linkedProductId === 'force-new' ? (
+                                        "🆕 Criar como novo produto (ignorar existente)"
+                                      ) : (
+                                        item.isNew ? "🆕 Criar como novo produto" : "♻️ Atualizar produto existente"
+                                      )}
+                                    </SelectValue>
+                                  </SelectTrigger>
+                                  <SelectContent className="max-h-[300px] overflow-y-auto">
+                                    {item.isNew ? (
+                                      <SelectItem value="new">🆕 Criar como novo produto</SelectItem>
+                                    ) : (
+                                      <SelectItem value={item.existing?.id || 'new'}>
+                                        ♻️ Atualizar: {item.existing?.name} (Estoque atual: {item.existing?.stock || 0})
+                                      </SelectItem>
+                                    )}
+                                    {!item.isNew && (
+                                      <SelectItem value="force-new">
+                                        🆕 Criar como novo produto (ignorar existente)
+                                      </SelectItem>
+                                    )}
+                                    <SelectItem value="search">
+                                      🔍 Buscar produto para vincular...
+                                    </SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            </div>
+                            
+                            {/* Checkbox para atualizar preço (apenas produtos existentes) */}
+                            {!item.isNew && (
+                              <label className="flex items-center gap-2 text-sm cursor-pointer">
+                                <input 
+                                  type="checkbox" 
+                                  checked={getEditedValue(idx, 'updatePrice', false)}
+                                  onChange={(e) => handleEditProduct(idx, 'updatePrice', e.target.checked)}
+                                  disabled={!item.selected}
+                                  className="w-4 h-4 rounded border-border bg-surface text-brand focus:ring-2 focus:ring-brand/50 disabled:opacity-50 disabled:cursor-not-allowed"
+                                />
+                                <span className="text-text-secondary">Atualizar preço de custo e venda deste produto</span>
+                              </label>
+                            )}
+                            
+                            {/* Metadados */}
+                            <div className="flex flex-wrap gap-2 text-xs">
+                              {item.xml.codigo && (
+                                <span className="px-2 py-1 bg-surface rounded border border-border">
+                                  Código: {item.xml.codigo}
+                                </span>
+                              )}
+                              {item.xml.ean && item.xml.ean !== 'SEM GTIN' && (
+                                <span className="px-2 py-1 bg-surface rounded border border-border">
+                                  EAN: {item.xml.ean}
+                                </span>
+                              )}
+                              <span className="px-2 py-1 bg-surface rounded border border-border">
+                                Unidade: {item.xml.unidade}
+                              </span>
+                            </div>
+                          </div>
+                        )}
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
 
               <div className="flex items-center gap-4 text-sm">
                 <div className="flex items-center gap-2">
                   <div className="w-3 h-3 rounded-full bg-success"></div>
-                  <span>{productsPreview.filter(p => p.isNew).length} produto(s) novo(s)</span>
+                  <span>{productsPreview.filter(p => p.isNew && p.selected).length} novos</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <div className="w-3 h-3 rounded-full bg-info"></div>
-                  <span>{productsPreview.filter(p => !p.isNew).length} produto(s) existente(s)</span>
+                  <span>{productsPreview.filter(p => !p.isNew && p.selected).length} existentes</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded-full bg-warning"></div>
+                  <span>{productsPreview.filter(p => editedProducts[p.index]?.linkedProductId).length} vinculados</span>
                 </div>
               </div>
             </div>
@@ -434,8 +1108,11 @@ export default function XMLImportModal({ open, onOpenChange, products, codigoEmp
           {step === 'preview' && (
             <>
               <Button variant="outline" onClick={handleReset}>Voltar</Button>
-              <Button onClick={handleConfirmImport}>
-                Confirmar Importação ({productsPreview.length} produtos)
+              <Button 
+                onClick={handleShowConfirmation}
+                disabled={productsPreview.filter(p => p.selected).length === 0}
+              >
+                Confirmar Importação ({productsPreview.filter(p => p.selected).length} de {productsPreview.length} produtos)
               </Button>
             </>
           )}
@@ -444,6 +1121,30 @@ export default function XMLImportModal({ open, onOpenChange, products, codigoEmp
           )}
         </DialogFooter>
       </DialogContent>
+
+      {/* Modal de seleção de produto */}
+      <ProductSelectionModal
+        isOpen={productSelectionModal.isOpen}
+        onClose={() => setProductSelectionModal({ isOpen: false, productIndex: null, currentProduct: null })}
+        onSelect={(selectedProduct) => {
+          console.log('[XMLImportModal] onSelect chamado com produto:', selectedProduct);
+          console.log('[XMLImportModal] Index do produto:', productSelectionModal.productIndex);
+          handleLinkProduct(productSelectionModal.productIndex, selectedProduct.id);
+          setProductSelectionModal({ isOpen: false, productIndex: null, currentProduct: null });
+        }}
+        currentProduct={productSelectionModal.currentProduct}
+      />
+
+      {/* Modal de confirmação de importação */}
+      <ImportConfirmationModal
+        isOpen={confirmationModal.isOpen}
+        onClose={() => setConfirmationModal({ isOpen: false })}
+        onConfirm={handleConfirmImport}
+        products={productsPreview.map((product, idx) => ({ ...product, originalIndex: idx }))}
+        editedProducts={editedProducts}
+        allProducts={products}
+        isReprocess={false}
+      />
     </Dialog>
   );
 }

@@ -91,6 +91,10 @@ function mapDbToUi(row) {
     useImei: row.usa_imei ?? false,
     stockByGrid: row.controle_estoque_por_grade ?? false,
     showInApp: row.mostrar_no_app ?? false,
+    
+    // --- Importação
+    dataImportacao: row.data_importacao ? new Date(row.data_importacao) : null,
+    importadoViaXml: row.importado_via_xml ?? false,
   }
 }
 
@@ -303,6 +307,7 @@ function mapUiToDb(data) {
 
     // --- Origem XML (novos campos)
     importado_via_xml: data.importedViaXML === true ? true : false,
+    data_importacao: data.dataImportacao ? (data.dataImportacao instanceof Date ? data.dataImportacao.toISOString() : new Date(data.dataImportacao).toISOString()) : null,
     xml_chave: data.xmlChave || null,
     xml_numero: data.xmlNumero || null,
     xml_serie: data.xmlSerie || null,
@@ -433,6 +438,11 @@ export async function createProduct(product, options = {}) {
 export async function updateProduct(id, product, options = {}) {
   // Não tocar em codigo_empresa em updates para evitar violações RLS
   const payload = mapUiToDb(product)
+  
+  // Quando o produto é editado manualmente, remove a flag de "novo"
+  // (limpa data_importacao para que o badge não apareça mais)
+  payload.data_importacao = null;
+  
   // eslint-disable-next-line no-console
   console.info('[products.api] updateProduct: id', id, 'payload', payload)
   const { data, error } = await withTimeout((signal) =>

@@ -1418,7 +1418,7 @@ function ProdutosPage() {
     const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
     const [activeFilter, setActiveFilter] = useState('all');
     const [searchTerm, setSearchTerm] = useState('');
-    const [filters, setFilters] = useState({ type: 'all', category: 'all', status: 'active' });
+    const [filters, setFilters] = useState({ type: 'all', category: 'all', status: 'active', newOnly: false });
     const [loading, setLoading] = useState(false);
     const [confirmOpen, setConfirmOpen] = useState(false);
     const [deleting, setDeleting] = useState(false);
@@ -1641,8 +1641,14 @@ function ProdutosPage() {
 
             const typeMatch = (filters.type === 'all' || p.type === filters.type);
             const categoryMatch = (filters.category === 'all' || p.category === filters.category);
+            
+            // Filtro de produtos novos (importados nos últimos 7 dias)
+            const newMatch = !filters.newOnly || (p.dataImportacao && (() => {
+              const daysSince = Math.floor((new Date() - p.dataImportacao) / (1000 * 60 * 60 * 24));
+              return daysSince <= 7;
+            })());
 
-            return cardFilterMatch && statusMatch && typeMatch && categoryMatch;
+            return cardFilterMatch && statusMatch && typeMatch && categoryMatch && newMatch;
         });
     }, [products, activeFilter, filters]);
 
@@ -2034,6 +2040,15 @@ function ProdutosPage() {
                           </SelectContent>
                         </Select>
                         
+                        <Button 
+                          variant={filters.newOnly ? "default" : "outline"} 
+                          onClick={() => handleFilterChange('newOnly', !filters.newOnly)} 
+                          className="text-xs sm:text-sm" 
+                          size="sm"
+                        >
+                          <span className="mr-1 sm:mr-2">✨</span> Novos
+                        </Button>
+                        
                         <Button variant="outline" onClick={() => setIsCategoryModalOpen(true)} className="text-xs sm:text-sm" size="sm">
                           <Tag className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2"/> Categorias
                         </Button>
@@ -2055,7 +2070,18 @@ function ProdutosPage() {
                               {/* Header: Nome + Status */}
                               <div className="flex items-start justify-between gap-3">
                                 <div className="flex-1 min-w-0">
-                                  <h3 className="font-semibold text-base text-text-primary truncate" title={p.name}>{p.name}</h3>
+                                  <div className="flex items-center gap-2">
+                                    <h3 className="font-semibold text-base text-text-primary truncate" title={p.name}>{p.name}</h3>
+                                    {p.dataImportacao && (() => {
+                                      const daysSince = Math.floor((new Date() - p.dataImportacao) / (1000 * 60 * 60 * 24));
+                                      return daysSince <= 7 ? (
+                                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-brand/20 text-brand text-xs font-medium flex-shrink-0">
+                                          <span>✨</span>
+                                          <span>Novo</span>
+                                        </span>
+                                      ) : null;
+                                    })()}
+                                  </div>
                                   <p className="text-xs text-text-muted mt-0.5">{p.category || 'Sem categoria'}</p>
                                 </div>
                                 <span className={cn(
@@ -2137,7 +2163,20 @@ function ProdutosPage() {
                                 {sortedProducts.map(p => (
                                     <tr key={p.id} className="hover:bg-surface-2 transition-colors group cursor-pointer align-middle">
                                         <td className="p-3 font-mono text-sm text-text-secondary align-middle whitespace-nowrap" onClick={() => handleEdit(p)}>{p.code || '-'}</td>
-                                        <td className="p-3 font-semibold align-middle text-text-primary whitespace-nowrap overflow-hidden text-ellipsis" onClick={() => handleEdit(p)} title={p.name}>{p.name}</td>
+                                        <td className="p-3 font-semibold align-middle text-text-primary whitespace-nowrap overflow-hidden text-ellipsis" onClick={() => handleEdit(p)} title={p.name}>
+                                          <div className="flex items-center gap-2">
+                                            <span className="truncate">{p.name}</span>
+                                            {p.dataImportacao && (() => {
+                                              const daysSince = Math.floor((new Date() - p.dataImportacao) / (1000 * 60 * 60 * 24));
+                                              return daysSince <= 7 ? (
+                                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-brand/20 text-brand text-xs font-medium flex-shrink-0">
+                                                  <span>✨</span>
+                                                  <span>Novo</span>
+                                                </span>
+                                              ) : null;
+                                            })()}
+                                          </div>
+                                        </td>
                                         <td className="p-3 text-text-secondary align-middle whitespace-nowrap" onClick={() => handleEdit(p)}>{p.category}</td>
                                         <td className="p-3 text-right font-mono tabular-nums align-middle whitespace-nowrap" onClick={() => handleEdit(p)}>R$ {p.price.toFixed(2)}</td>
                                         <td className="p-3 text-right font-mono tabular-nums align-middle whitespace-nowrap" onClick={() => handleEdit(p)}>{p.stock}</td>

@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Calendar, ShoppingCart, Users, UserCog, LifeBuoy, Settings, Trophy, Package, Wallet, ChevronDown, Layers, Building2, Banknote, Folder, CreditCard } from 'lucide-react';
+import { LayoutDashboard, Calendar, ShoppingCart, Users, UserCog, LifeBuoy, Settings, Trophy, Package, Wallet, ChevronDown, Layers, Building2, Banknote, Folder, CreditCard, ShoppingBag } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 
@@ -51,7 +51,7 @@ const NavItem = ({ to, icon: Icon, label, index, onNavigate }) => {
 
 function Sidebar({ onNavigate, isVisible, setIsVisible, sidebarPinned }) {
   const location = useLocation();
-  const groupPaths = ['/produtos', '/clientes', '/equipe', '/quadras', '/empresas', '/finalizadoras'];
+  const groupPaths = ['/produtos', '/compras', '/clientes', '/equipe', '/quadras', '/empresas', '/finalizadoras'];
   const groupActive = useMemo(() => groupPaths.includes(location.pathname), [location.pathname]);
   const [openCadastros, setOpenCadastros] = useState(groupActive);
   
@@ -189,7 +189,17 @@ function Sidebar({ onNavigate, isVisible, setIsVisible, sidebarPinned }) {
                     <Package className="h-4 w-4 mr-3" /> Produtos
                   </NavLink>
                 </li>
-                {/* 4. Equipe */}
+                {/* 4. Compras */}
+                <li>
+                  <NavLink
+                    to="/compras"
+                    onClick={handleNavClick}
+                    className={({ isActive }) => isActive ? 'flex items-center h-[40px] px-3 rounded-sm bg-brand/20 text-text-primary font-medium text-sm' : 'flex items-center h-[40px] px-3 rounded-sm text-text-secondary hover:bg-surface-2 hover:text-text-primary transition-colors text-sm'}
+                  >
+                    <ShoppingBag className="h-4 w-4 mr-3" /> Compras
+                  </NavLink>
+                </li>
+                {/* 5. Equipe */}
                 <li>
                   <NavLink
                     to="/equipe"

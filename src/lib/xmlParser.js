@@ -31,13 +31,16 @@ export function parseNFeXML(xmlText) {
     // Calcular total da nota
     const totalNota = produtos.reduce((acc, p) => acc + (p.valorTotal || 0), 0);
     
-    return {
+    const result = {
       produtos,
       fornecedor,
       pagamentos,
       nfe: { ...nfeInfo, totalNota },
       success: true
     };
+    
+    console.log('[XMLParser] Resultado final:', result);
+    return { data: result, success: true };
   } catch (error) {
     console.error('[XMLParser] Erro ao fazer parse do XML:', error);
     return {
@@ -155,6 +158,7 @@ function extractProdutos(xmlDoc) {
         
         // Valores
         valorUnitario: parseFloat(getTextContent(prod, 'vUnCom') || '0'),
+        precoVenda: parseFloat(getTextContent(prod, 'vUnCom') || '0'), // Preço de venda = valor unitário comercial
         valorTotal: parseFloat(getTextContent(prod, 'vProd') || '0'),
         desconto: parseFloat(getTextContent(prod, 'vDesc') || '0'),
         
@@ -185,15 +189,16 @@ function extractPagamentos(xmlDoc) {
     const tPag = getTextContent(pag, 'tPag'); // Código SEFAZ
     const vPag = parseFloat(getTextContent(pag, 'vPag') || '0');
     
-    if (tPag && vPag > 0) {
+    if (tPag) {
       pagamentos.push({
         codigoSefaz: tPag,
         valor: vPag,
-        descricao: mapCodigoSefazToNome(tPag)
+        nome: mapCodigoSefazToNome(tPag)
       });
     }
   });
   
+  console.log('[XMLParser] Pagamentos extraídos:', pagamentos);
   return pagamentos;
 }
 
@@ -473,6 +478,7 @@ export function convertXMLProductToSystemFormat(produtoXML, codigoEmpresa) {
 
     // Flags/metadados de origem XML (serão mapeados para colunas do BD em products.mapUiToDb)
     importedViaXML: true,
+    dataImportacao: new Date(), // Data atual da importação
     xmlChave: produtoXML?.xmlChave || null,
     xmlNumero: produtoXML?.xmlNumero || null,
     xmlSerie: produtoXML?.xmlSerie || null,
