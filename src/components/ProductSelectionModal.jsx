@@ -75,7 +75,7 @@ export default function ProductSelectionModal({ isOpen, onClose, onSelect, curre
 
   return (
     <Dialog open={isOpen} onOpenChange={handleClose}>
-      <DialogContent className="max-w-4xl max-h-[80vh] overflow-hidden flex flex-col bg-black text-white border border-neutral-700">
+      <DialogContent className="w-[95vw] sm:max-w-3xl max-h-[80vh] overflow-hidden flex flex-col bg-black text-white border border-neutral-700">
         <DialogHeader className="bg-neutral-900 -mx-6 -mt-6 mb-4 px-6 py-4 border-b border-neutral-600">
           <DialogTitle className="flex items-center gap-2 text-white">
             <Package className="h-5 w-5 text-yellow-500" />

@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger, } from "@/components/ui/alert-dialog"
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
-import { listMesas, ensureCaixaAberto, fecharCaixa, getOrCreateComandaForMesa, listarItensDaComanda, adicionarItem, atualizarQuantidadeItem, removerItem, listarFinalizadoras, registrarPagamento, fecharComandaEMesa, cancelarComandaEMesa, listarComandasAbertas, listarTotaisPorComanda, criarMesa, listarClientes, adicionarClientesAComanda, listarClientesDaComanda, getCaixaAberto, listarResumoSessaoCaixaAtual, criarMovimentacaoCaixa, listarMovimentacoesCaixa, listarItensDeTodasComandasAbertas } from '@/lib/store';
+import { listMesas, ensureCaixaAberto, fecharCaixa, getOrCreateComandaForMesa, listarItensDaComanda, adicionarItem, atualizarQuantidadeItem, removerItem, listarFinalizadoras, registrarPagamento, fecharComandaEMesa, cancelarComandaEMesa, listarComandasAbertas, listarTotaisPorComanda, criarMesa, listarClientes, adicionarClientesAComanda, listarClientesDaComanda, getCaixaAberto, listarResumoSessaoCaixaAtual, criarMovimentacaoCaixa, listarMovimentacoesCaixa, listarItensDeTodasComandasAbertas, listarPagamentosPorComandaEStatus, salvarRascunhoPagamentosComanda, promoverPagamentosRascunhoParaPago, listarComandaBalcaoAberta, getOrCreateComandaBalcao } from '@/lib/store';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -319,10 +319,14 @@ function VendasPage() {
           return;
         }
         // B e H agora são globais (movidos para App.jsx)
-        // F10: Abrir Caixa
+        // F10: Abrir Caixa (só se caixa não estiver aberto)
         if (e.key === 'F10') {
           e.preventDefault();
-          setOpenCashDialogOpen(true);
+          if (!isCashierOpen) {
+            setOpenCashDialogOpen(true);
+          } else {
+            toast({ title: 'Caixa já está aberto', description: 'Use F11 para ver detalhes do caixa.', variant: 'info' });
+          }
           return;
         }
         // F11: Detalhes do Caixa (evitar F12 que abre DevTools)
@@ -769,28 +773,9 @@ function VendasPage() {
   }, [selectedTable?.id, selectedTable?.comandaId]);
 
   // Recarregar detalhes da mesa selecionada quando a janela ganhar foco ou a página voltar a ficar visível
-  // MAS NÃO quando o modal de clientes estiver aberto
+  // (DESATIVADO: causava refresh perceptível em modais ao trocar de aba do navegador)
   useEffect(() => {
-    const onFocus = () => { 
-      if (!anyDialogOpen && !isManageClientsOpen && selectedTable?.comandaId) {
-        refetchSelectedTableDetails(selectedTable);
-        // Manter foco em 'tables' após recarregar
-        setFocusContext('tables');
-      }
-    };
-    const onVisibility = () => { 
-      if (!anyDialogOpen && !isManageClientsOpen && document.visibilityState === 'visible' && selectedTable?.comandaId) {
-        refetchSelectedTableDetails(selectedTable);
-        // Manter foco em 'tables' após recarregar
-        setFocusContext('tables');
-      }
-    };
-    window.addEventListener('focus', onFocus);
-    document.addEventListener('visibilitychange', onVisibility);
-    return () => {
-      window.removeEventListener('focus', onFocus);
-      document.removeEventListener('visibilitychange', onVisibility);
-    };
+    return () => {};
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTable?.comandaId, anyDialogOpen, isManageClientsOpen]);
 
@@ -1045,7 +1030,7 @@ function VendasPage() {
           <div className="flex items-center gap-2 flex-1 min-w-0">
             <span className="text-lg font-semibold text-text-primary truncate">{table.name ? table.name : `Mesa ${table.number}`}</span>
             {isFirstAvailable && (
-              <kbd className="hidden md:inline px-2 py-1 text-xs font-bold font-mono text-gray-400 bg-transparent border border-gray-300/50 rounded">F1</kbd>
+              <kbd className="ml-2 hidden md:inline px-2 py-1 text-xs font-bold font-mono text-white bg-gray-700 border border-gray-600 rounded">F1</kbd>
             )}
           </div>
           <span className={cn("text-[11px] font-medium px-2 py-0.5 rounded-full border flex-shrink-0", badgeClass)}>
@@ -1173,6 +1158,17 @@ function VendasPage() {
       const boot = async () => {
         try {
           if (!isPayOpen || !selectedTable?.comandaId) return;
+
+          // 1) Carregar rascunhos de pagamentos (status Pendente) do banco
+          let draftLines = [];
+          try {
+            const pendentes = await listarPagamentosPorComandaEStatus({ comandaId: selectedTable.comandaId, status: 'Pendente', codigoEmpresa: userProfile?.codigo_empresa });
+            draftLines = Array.isArray(pendentes) ? pendentes : [];
+          } catch {
+            draftLines = [];
+          }
+
+          // 2) Carregar clientes vinculados para resolver nomes
           let normalized = [];
           try {
             const vinc = await listarClientesDaComanda({ comandaId: selectedTable.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
@@ -1189,7 +1185,33 @@ function VendasPage() {
           } catch { normalized = []; }
           if (!active) return;
           setPayClients(normalized);
-          // criar linha base
+
+          // 3) Se houver rascunhos, reconstruir linhas a partir deles
+          if (Array.isArray(draftLines) && draftLines.length > 0) {
+            const mapped = draftLines.map((pg, idx) => {
+              const totalRecebido = Number(pg.valor || 0); // valor armazenado = total com taxa (se aplicada)
+              const lineId = idx + 1;
+              const lnTmp = {
+                id: lineId,
+                clientId: pg.cliente_id || null,
+                methodId: pg.finalizadora_id || null,
+                chargeFee: true,
+              };
+              const t = taxaForLine(lnTmp);
+              const base = t > 0 ? (totalRecebido / (1 + t)) : totalRecebido;
+              const shown = base * (1 + t);
+              return {
+                ...lnTmp,
+                baseValue: base,
+                value: formatBRL(shown),
+              };
+            });
+            setPaymentLines(mapped);
+            setNextPayLineId(mapped.length + 1);
+            return;
+          }
+
+          // 4) Sem rascunho: comportamento padrão atual (linha base preenchida automaticamente)
           // garante método padrão mesmo se payMethods chegar após a abertura
           let defMethod = (payMethods && payMethods[0] && payMethods[0].id) ? payMethods[0].id : null;
           let primaryId = (normalized[0]?.id) || null;
@@ -1197,9 +1219,9 @@ function VendasPage() {
           // auto-preencher SEMPRE com o valor total (independente de quantos clientes)
           try {
             const itens = await listarItensDaComanda({ comandaId: selectedTable.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
-            const total = (itens || []).reduce((acc, it) => acc + Number(it.quantidade||0) * Number(it.preco_unitario||0), 0);
-            if (total > 0) {
-              initialValue = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(total);
+            const totalItens = (itens || []).reduce((acc, it) => acc + Number(it.quantidade||0) * Number(it.preco_unitario||0), 0);
+            if (totalItens > 0) {
+              initialValue = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(totalItens);
             }
           } catch {}
           const base = parseBRL(initialValue);
@@ -1216,6 +1238,36 @@ function VendasPage() {
       return () => { active = false; };
       // inclui payMethods para rehidratar linha base quando finalizadoras carregarem
     }, [isPayOpen, selectedTable?.comandaId, payMethods]);
+
+    // Persistir rascunho de pagamento no banco enquanto o modal estiver aberto
+    useEffect(() => {
+      if (!isPayOpen) return;
+      if (!selectedTable?.comandaId) return;
+      if (!Array.isArray(paymentLines) || paymentLines.length === 0) return;
+
+      const handle = setTimeout(async () => {
+        try {
+          const linhas = (paymentLines || []).map((ln) => {
+            const v = parseBRL(ln.value);
+            const fin = (payMethods || []).find(m => String(m.id) === String(ln.methodId));
+            const metodoNome = fin?.tipo || fin?.nome || 'outros';
+            return {
+              clienteId: ln.clientId || null,
+              finalizadoraId: ln.methodId || null,
+              metodo: metodoNome,
+              valor: v,
+            };
+          });
+          await salvarRascunhoPagamentosComanda({ comandaId: selectedTable.comandaId, linhas, codigoEmpresa: userProfile?.codigo_empresa });
+        } catch (e) {
+          console.warn('[PayDialog] Falha ao salvar rascunho de pagamentos (debounced):', e);
+        }
+      }, 400);
+
+      return () => {
+        clearTimeout(handle);
+      };
+    }, [isPayOpen, selectedTable?.comandaId, paymentLines, payMethods, userProfile?.codigo_empresa]);
 
     useEffect(() => {
       let active = true;
@@ -1279,34 +1331,9 @@ function VendasPage() {
         }, 0);
         // Esperado = total de itens + taxas cobradas do cliente
         const expected = effTotal + feeSum;
-        const diff = Math.abs(totalSum - expected);
-        
-        // Se a diferença for apenas centavos (até 0.05), ajustar automaticamente na última linha
-        if (diff > 0.009 && diff <= 0.05) {
-          const adjustment = expected - totalSum;
-          setPaymentLines(prev => {
-            const lastIdx = prev.length - 1;
-            return prev.map((line, idx) => {
-              if (idx !== lastIdx) return line;
-              const currDisp = parseBRL(line.value);
-              const newDisp = Math.max(0, currDisp + adjustment);
-              const t = taxaForLine(line);
-              const charge = line.chargeFee !== false;
-              const newBase = charge && t > 0 ? (newDisp / (1 + t)) : newDisp;
-              return { ...line, baseValue: newBase, value: formatBRL(newDisp) };
-            });
-          });
-          // Não retornar - continuar com o pagamento após ajuste
-        } else if (diff > 0.05) {
-          // Diferença maior que 5 centavos - mostrar erro
-          const remaining = effTotal - totalSum;
-          if (remaining > 0) {
-            toast({ title: 'Valor insuficiente', description: `Faltam R$ ${remaining.toFixed(2)} para fechar o total.`, variant: 'warning' });
-          } else {
-            toast({ title: 'Valor excedente', description: `Excedeu em R$ ${Math.abs(remaining).toFixed(2)}. Ajuste os valores.`, variant: 'warning' });
-          }
-          return;
-        }
+        // Diferença assinada: >0 cobrando a mais, <0 cobrando a menos
+        const diffSigned = totalSum - expected;
+        const diffAbs = Math.abs(diffSigned);
         let refreshTotal = total;
         if (refreshTotal <= 0) {
           try {
@@ -1317,13 +1344,25 @@ function VendasPage() {
         }
         setPayLoading(true);
         await ensureCaixaAberto({ codigoEmpresa: userProfile?.codigo_empresa });
-        for (const ln of paymentLines) {
-          const v = parseBRL(ln.value); // já reflete a taxa (se ativa) devido aos ajustes de valor
-          const fin = payMethods.find(m => String(m.id) === String(ln.methodId));
-          const metodo = fin?.nome || fin?.tipo || 'outros';
-          await registrarPagamento({ comandaId: selectedTable.comandaId, finalizadoraId: ln.methodId, metodo, valor: v, status: 'Pago', codigoEmpresa, clienteId: ln.clientId || null });
+        // Garante que o rascunho atual esteja salvo antes de promover para Pago
+        try {
+          const linhas = (paymentLines || []).map((ln) => {
+            const v = parseBRL(ln.value);
+            const fin = (payMethods || []).find(m => String(m.id) === String(ln.methodId));
+            const metodoNome = fin?.tipo || fin?.nome || 'outros';
+            return {
+              clienteId: ln.clientId || null,
+              finalizadoraId: ln.methodId || null,
+              metodo: metodoNome,
+              valor: v,
+            };
+          });
+          await salvarRascunhoPagamentosComanda({ comandaId: selectedTable.comandaId, linhas, codigoEmpresa });
+        } catch (e) {
+          console.warn('[PayDialog] Falha ao salvar rascunho antes de promover:', e);
         }
-        await fecharComandaEMesa({ comandaId: selectedTable.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
+        await promoverPagamentosRascunhoParaPago({ comandaId: selectedTable.comandaId, codigoEmpresa });
+        await fecharComandaEMesa({ comandaId: selectedTable.comandaId, codigoEmpresa: userProfile?.codigo_empresa, diferencaPagamento: diffSigned });
         setTables((prev) => prev.map((t) => (t.id === selectedTable.id ? { ...t, status: 'available', order: [], comandaId: null, customer: null, totalHint: 0 } : t)));
         setSelectedTable((prev) => prev ? { ...prev, status: 'available', order: [], comandaId: null, customer: null, totalHint: 0 } : prev);
         try { if (userProfile?.codigo_empresa) localStorage.removeItem(`vendas:tables:${userProfile.codigo_empresa}`); } catch {}
@@ -1344,7 +1383,11 @@ function VendasPage() {
           });
           setTables(enrichedTables);
         } catch {}
-        toast({ title: 'Pagamento registrado', description: `Total R$ ${refreshTotal.toFixed(2)}`, variant: 'success' });
+        const diffMsg = diffAbs > 0.009 ? (diffSigned > 0
+          ? ` | Diferença cobrada a mais: R$ ${diffAbs.toFixed(2)}`
+          : ` | Diferença cobrada a menos: R$ ${diffAbs.toFixed(2)}`)
+          : '';
+        toast({ title: 'Pagamento registrado', description: `Total itens R$ ${refreshTotal.toFixed(2)} | Pagamentos R$ ${totalSum.toFixed(2)}${diffMsg}`, variant: 'success' });
         setIsPayOpen(false);
       } catch (e) {
         toast({ title: 'Falha ao registrar pagamento', description: e?.message || 'Tente novamente', variant: 'destructive' });
@@ -1354,6 +1397,18 @@ function VendasPage() {
     };
 
     const canConfirm = (paymentLines && paymentLines.length > 0) && !payLoading;
+
+    // CÁLCULOS PARA EXIBIÇÃO NO RODAPÉ DO MODAL
+    const uiEffTotal = total > 0 ? total : 0;
+    const uiTotalSum = (paymentLines || []).reduce((acc, ln) => acc + parseBRL(ln.value), 0);
+    const uiFeeSum = (paymentLines || []).reduce((acc, ln) => {
+      const base = Number(ln.baseValue || 0);
+      const t = taxaForLine(ln);
+      return acc + ((ln.chargeFee !== false && t > 0) ? (base * t) : 0);
+    }, 0);
+    const uiExpected = uiEffTotal + uiFeeSum;
+    const uiDiffSigned = uiTotalSum - uiExpected;
+    const uiDiffAbs = Math.abs(uiDiffSigned);
 
     return (
       <Dialog open={isPayOpen} onOpenChange={setIsPayOpen}>
@@ -1366,6 +1421,20 @@ function VendasPage() {
             <div className="flex items-center justify-between">
               <div className="text-lg font-semibold">Total</div>
               <div className="text-lg font-bold">R$ {total.toFixed(2)}</div>
+            </div>
+            <div className="flex flex-col gap-1 text-xs text-text-muted">
+              <div className="flex items-center justify-between">
+                <span>Pagamentos (com taxa)</span>
+                <span className="font-semibold">R$ {uiTotalSum.toFixed(2)}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span>Diferença</span>
+                <span className={uiDiffAbs > 0.009 ? (uiDiffSigned > 0 ? 'font-semibold text-emerald-600' : 'font-semibold text-amber-600') : 'font-semibold'}>
+                  {uiDiffAbs > 0.009
+                    ? `${uiDiffSigned > 0 ? '+' : '-'} R$ ${uiDiffAbs.toFixed(2)}`
+                    : 'R$ 0,00'}
+                </span>
+              </div>
             </div>
             <div className="flex-1 space-y-2 overflow-y-auto thin-scroll pr-1 max-h-[60vh]">
               <Label className="block">Pagamentos</Label>
@@ -1878,6 +1947,12 @@ function VendasPage() {
       <>
         <div 
           className="flex flex-col h-full"
+          onMouseDown={(e) => {
+            // Prevent losing focus when clicking on the panel
+            if (e.target === e.currentTarget) {
+              e.preventDefault();
+            }
+          }}
         >
           <div className="p-3 border-b border-border flex items-center justify-between gap-2">
             {customerDisplay ? (
@@ -2252,7 +2327,7 @@ function VendasPage() {
         setFocusContext(open ? 'panel' : 'tables');
       }}>
         <DialogContent 
-          className="max-w-4xl w-[95vw] h-[90vh] flex flex-col p-0 gap-0 focus:outline-none focus-visible:outline-none"
+          className="w-[95vw] sm:max-w-4xl max-h-[80vh] sm:max-h-[85vh] flex flex-col p-0 gap-0 focus:outline-none focus-visible:outline-none"
           onOpenAutoFocus={(e) => {
             // Evitar que o foco vá para o botão de fechar do Dialog
             e.preventDefault();
@@ -2355,8 +2430,8 @@ function VendasPage() {
                 />
               </div>
               
-              {/* Filtros de Status */}
-              <div className="flex items-center gap-2 mt-3">
+              {/* Filtros de Status + Atalhos */}
+              <div className="flex items-center justify-between gap-4 mt-3">
                 <button
                   onClick={() => setStatusFilter('all')}
                   className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
@@ -2397,16 +2472,18 @@ function VendasPage() {
                 >
                   Sem Estoque
                 </button>
-              </div>
-              
-              <div className="flex items-center gap-4 mt-3 text-sm text-text-muted">
-                <div className="flex items-center gap-2">
-                  <kbd className="px-2 py-1 bg-surface border border-border rounded text-xs font-mono">↑↓</kbd>
-                  <span>Navegar</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <kbd className="px-2 py-1 bg-surface border border-border rounded text-xs font-mono">Esc</kbd>
-                  <span>Fechar</span>
+                
+                {/* Dicas de teclado: apenas desktop */}
+                <div className="hidden sm:flex items-center gap-2 ml-auto text-xs text-text-muted flex-shrink-0">
+                  <div className="flex items-center gap-1">
+                    <kbd className="px-1.5 py-0.5 bg-surface border border-border rounded text-xs font-mono">↑↓</kbd>
+                    <span>Navegar</span>
+                  </div>
+                  <div className="w-px h-3 bg-border"></div>
+                  <div className="flex items-center gap-1">
+                    <kbd className="px-1.5 py-0.5 bg-surface border border-border rounded text-xs font-mono">Esc</kbd>
+                    <span>Fechar</span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -2453,7 +2530,7 @@ function VendasPage() {
                   </Button>
                 </div>
               ) : (
-                <div className="grid gap-3">
+                <div className="flex flex-col gap-1.5">
                   {filtered.map((prod, idx) => {
                     const q = qtyByProductId.get(prod.id) || 0;
                     const stock = Number(prod.stock ?? prod.currentStock ?? 0);
@@ -2471,7 +2548,7 @@ function VendasPage() {
                         }}
                         data-product-card
                         className={cn(
-                          "flex items-center gap-4 p-4 rounded-lg border-2 transition-all outline-none focus:outline-none focus-visible:outline-none",
+                          "flex items-center gap-2 sm:gap-4 p-2.5 sm:p-3 rounded-lg border-2 transition-all outline-none focus:outline-none focus-visible:outline-none",
                           remaining === 0 && q === 0
                             ? "opacity-50 cursor-not-allowed bg-surface-2 border-border" 
                             : "cursor-pointer",
@@ -2525,46 +2602,46 @@ function VendasPage() {
                                 {prod.code}
                               </span>
                             )}
-                            <h4 className="font-semibold text-base text-text-primary truncate">
+                            <h4 className="font-semibold text-sm sm:text-base text-text-primary truncate">
                               {prod.name}
                             </h4>
                           </div>
-                          <div className="flex items-center gap-3 text-sm">
+                          <div className="flex flex-wrap items-center gap-2 text-[11px] sm:text-xs mt-0.5">
                             <span className={cn("font-bold", remaining === 0 ? "text-text-muted" : "text-brand")}>
                               {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(prod.salePrice ?? prod.price ?? 0))}
                             </span>
-                            <span className="text-text-muted">
+                            <span className="text-text-muted whitespace-nowrap">
                               Estoque: <span className={cn("font-semibold", remaining <= 5 ? "text-destructive" : "text-text-secondary")}>{remaining}</span>
                             </span>
                             {q > 0 && (
-                              <span className="px-2 py-0.5 bg-brand/10 text-brand text-xs font-semibold rounded">
+                              <span className="px-2 py-0.5 bg-brand/10 text-brand text-[11px] font-semibold rounded whitespace-nowrap">
                                 {q}x na comanda
                               </span>
                             )}
                           </div>
                         </div>
                         
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-1.5 flex-shrink-0">
                           <Button
-                            size="sm"
+                            size="icon"
                             variant="outline"
                             onClick={(e) => {
                               e.stopPropagation();
                               decProduct(prod);
                             }}
                             disabled={q === 0}
-                            className="h-9 w-9 p-0"
+                            className="h-8 w-8 p-0"
                           >
                             <Minus className="w-4 h-4" />
                           </Button>
                           <Button
-                            size="sm"
+                            size="icon"
                             onClick={(e) => {
                               e.stopPropagation();
                               addProductToComanda(prod);
                             }}
                             disabled={remaining === 0}
-                            className="h-9 w-9 p-0"
+                            className="h-8 w-8 p-0 bg-amber-500 hover:bg-amber-400 text-black border border-amber-500/60"
                           >
                             <Plus className="w-4 h-4" />
                           </Button>
@@ -2577,19 +2654,23 @@ function VendasPage() {
             </div>
 
             {/* Footer com resumo */}
-            <div className="px-6 py-4 border-t border-border bg-surface/50">
-              <div className="flex items-center justify-between">
-                <div className="text-sm text-text-muted">
+            <div className="px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-surface/50">
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2">
+                <div className="hidden sm:block text-sm text-text-muted">
                   {filtered.length} produto{filtered.length !== 1 ? 's' : ''} • {(selectedTable.order || []).length} ite{(selectedTable.order || []).length !== 1 ? 'ns' : 'm'} na comanda
                 </div>
-                <div className="flex items-center gap-3">
-                  <div className="text-right">
+                <div className="flex items-center justify-end gap-3 w-full sm:w-auto">
+                  <div className="text-left sm:text-right">
                     <div className="text-xs text-text-muted">Total</div>
-                    <div className="text-xl font-bold text-green-600">
+                    <div className="text-lg sm:text-xl font-bold text-green-600">
                       {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(selectedTable.totalHint || 0)}
                     </div>
                   </div>
-                  <Button onClick={() => setIsProductsModalOpen(false)} size="lg">
+                  <Button
+                    onClick={() => setIsProductsModalOpen(false)}
+                    className="px-4 sm:px-6 min-w-[96px] sm:min-w-[120px]"
+                    size="sm"
+                  >
                     Concluir
                   </Button>
                 </div>
@@ -2901,11 +2982,33 @@ function VendasPage() {
   };
 
   const addProductToCounter = async (prod) => {
-    if (!counterComandaId) return;
-    const price = Number(prod.salePrice ?? prod.price ?? 0);
-    await adicionarItem({ comandaId: counterComandaId, produtoId: prod.id, descricao: prod.name, quantidade: 1, precoUnitario: price, codigoEmpresa: userProfile?.codigo_empresa });
-    await counterReloadItems(counterComandaId);
-    toast({ title: 'Produto adicionado', description: prod.name, variant: 'success' });
+    try {
+      const codigoEmpresa = userProfile?.codigo_empresa;
+      if (!codigoEmpresa) {
+        toast({ title: 'Empresa não definida', description: 'Faça login novamente.', variant: 'destructive' });
+        return;
+      }
+
+      // Garante que existe uma comanda de balcão apenas quando for realmente adicionar o primeiro produto
+      let cid = counterComandaId;
+      if (!cid) {
+        // Exigir caixa aberto antes de criar a comanda (garantido por getOrCreateComandaBalcao)
+        const cmd = await getOrCreateComandaBalcao({ codigoEmpresa });
+        cid = cmd?.id;
+        if (!cid) {
+          toast({ title: 'Falha ao iniciar venda no balcão', description: 'Não foi possível criar ou recuperar a comanda.', variant: 'destructive' });
+          return;
+        }
+        setCounterComandaId(cid);
+      }
+
+      const price = Number(prod.salePrice ?? prod.price ?? 0);
+      await adicionarItem({ comandaId: cid, produtoId: prod.id, descricao: prod.name, quantidade: 1, precoUnitario: price, codigoEmpresa });
+      await counterReloadItems(cid);
+      toast({ title: 'Produto adicionado (balcão)', description: prod.name, variant: 'success' });
+    } catch (e) {
+      toast({ title: 'Falha ao adicionar produto (balcão)', description: e?.message || 'Tente novamente', variant: 'destructive' });
+    }
   };
 
   const addClientToCounter = async (clientId) => {
@@ -2963,12 +3066,36 @@ function VendasPage() {
         if (!isCounterModeOpen) return;
         try {
           setCounterLoading(true);
-          const cmd = await getOrCreateComandaBalcao({ codigoEmpresa: userProfile?.codigo_empresa });
+          const codigoEmpresa = userProfile?.codigo_empresa;
+          if (!codigoEmpresa) {
+            if (active) toast({ title: 'Empresa não definida', description: 'Faça login novamente.', variant: 'destructive' });
+            return;
+          }
+
+          // No boot do balcão, apenas tenta encontrar uma comanda existente aberta, sem criar nova
+          const cmd = await listarComandaBalcaoAberta({ codigoEmpresa });
           if (!active) return;
-          setCounterComandaId(cmd.id);
-          await counterReloadItems(cmd.id);
+
+          if (cmd?.id) {
+            setCounterComandaId(cmd.id);
+            await counterReloadItems(cmd.id);
+            // Carregar clientes associados para sincronizar com a visão do Balcão principal
+            try {
+              const vincs = await listarClientesDaComanda({ comandaId: cmd.id, codigoEmpresa });
+              const first = Array.isArray(vincs) && vincs.length > 0 ? vincs[0] : null;
+              if (first?.cliente_id) {
+                setCounterSelectedClientId(first.cliente_id);
+              }
+            } catch {
+              // silencioso
+            }
+          } else {
+            // Nenhuma comanda aberta: inicia em estado "venda vazia" sem comandaId; será criada ao adicionar o primeiro item
+            setCounterComandaId(null);
+            setCounterItems([]);
+          }
         } catch (e) {
-          if (active) toast({ title: 'Falha ao abrir comanda de balcão', description: e?.message || 'Tente novamente', variant: 'destructive' });
+          if (active) toast({ title: 'Falha ao abrir Modo Balcão', description: e?.message || 'Tente novamente', variant: 'destructive' });
         } finally {
           if (active) setCounterLoading(false);
         }
@@ -3883,9 +4010,7 @@ function VendasPage() {
             <Unlock className="h-4 w-4" />
             <span className="ml-2 md:hidden">Abrir</span>
             <span className="ml-2 hidden md:inline">Abrir Caixa</span>
-            {!isCashierOpen && (
-              <kbd className="ml-2 hidden md:inline px-2 py-1 text-xs font-bold font-mono text-white bg-emerald-700 border border-emerald-800 rounded shadow-sm">F10</kbd>
-            )}
+            <kbd className="ml-2 hidden md:inline px-2 py-1 text-xs font-bold font-mono text-white bg-emerald-700 border border-emerald-800 rounded shadow-sm">F10</kbd>
           </Button>
       </AlertDialogTrigger>
        <AlertDialogContent 
@@ -4086,6 +4211,7 @@ function VendasPage() {
     const [pendingChanges, setPendingChanges] = useState(new Set());
     const initialLinkedRef = useRef([]);
     const loadedRef = useRef(false);
+    const isDirtyRef = useRef(false);
     const [localFocusIndex, setLocalFocusIndex] = useState(0);
     const itemRefs = useRef([]);
     const listboxRef = useRef(null);
@@ -4115,9 +4241,12 @@ function VendasPage() {
             nome: v.nome || '',
             tipo: v.tipo || (v.cliente_id ? 'cadastrado' : 'livre')
           }));
-          setLocalLinked(linked);
-          initialLinkedRef.current = JSON.parse(JSON.stringify(linked));
-          setPendingChanges(new Set());
+          // Só reseta o estado local se não houver rascunho/alterações pendentes
+          if (!isDirtyRef.current) {
+            setLocalLinked(linked);
+            initialLinkedRef.current = JSON.parse(JSON.stringify(linked));
+            setPendingChanges(new Set());
+          }
           // Carregar lista de clientes disponíveis
           const rows = await listarClientes({ searchTerm: localSearch, limit: 50 });
         if (!active) return;
@@ -4144,6 +4273,11 @@ function VendasPage() {
       return () => { active = false; };
     }, [isManageClientsOpen, selectedTable?.comandaId]);
 
+    // Mantém um espelho se o diálogo está "sujo" (com alterações pendentes)
+    useEffect(() => {
+      isDirtyRef.current = pendingChanges.size > 0;
+    }, [pendingChanges]);
+
   // Foco inicial quando o modal abre e há clientes carregados
   useEffect(() => {
     if (isManageClientsOpen && Array.isArray(localClients) && localClients.length > 0) {
@@ -4162,86 +4296,163 @@ function VendasPage() {
   }, [isManageClientsOpen, localClients.length]);
 
     const addConsumidor = () => {
-      const newEntry = {
-        id: `temp-${Date.now()}`, // ID temporário
-        cliente_id: null, // consumidor é nome_livre, não vincula a um cliente cadastrado
-        nome: 'Consumidor',
-        tipo: 'livre'
-      };
-      setLocalLinked(prev => [...prev, newEntry]);
-      setPendingChanges(prev => new Set([...prev, newEntry.id]));
-      // Abrir edição imediatamente
-      setEditingConsumidorId(newEntry.id);
-      setEditingConsumidorName('Consumidor');
+      if (!selectedTable?.comandaId) return;
+      (async () => {
+        try {
+          setLocalLoading(true);
+          const { data, error } = await supabase
+            .from('comanda_clientes')
+            .insert({
+              comanda_id: selectedTable.comandaId,
+              nome_livre: 'Consumidor',
+              codigo_empresa: userProfile?.codigo_empresa,
+            })
+            .select('id, cliente_id, nome_livre')
+            .single();
+          if (error) {
+            throw error;
+          }
+          const newEntry = {
+            id: data.id, // ID real do vínculo em comanda_clientes
+            cliente_id: data.cliente_id,
+            nome: data.nome_livre || 'Consumidor',
+            tipo: 'livre'
+          };
+          setLocalLinked(prev => [...prev, newEntry]);
+          // Abrir edição imediatamente
+          setEditingConsumidorId(newEntry.id);
+          setEditingConsumidorName(newEntry.nome || 'Consumidor');
+        } catch (e) {
+          console.error('[ManageClientsDialog] Erro ao adicionar consumidor:', e);
+          toast({
+            title: 'Falha ao adicionar consumidor',
+            description: e?.message || 'Tente novamente',
+            variant: 'destructive',
+          });
+        } finally {
+          setLocalLoading(false);
+        }
+      })();
     };
 
     const addClientFromModal = (clientId) => {
+      if (!selectedTable?.comandaId) return;
       const client = localClients.find(c => c.id === clientId);
       if (!client) return;
-      const newEntry = {
-        id: `temp-${Date.now()}`,
-        cliente_id: clientId,
-        nome: client.nome,
-        tipo: 'cadastrado'
-      };
-      setLocalLinked(prev => [...prev, newEntry]);
-      setPendingChanges(prev => new Set([...prev, newEntry.id]));
-      setIsAddClientModalOpen(false);
+      (async () => {
+        try {
+          setLocalLoading(true);
+          const { data, error } = await supabase
+            .from('comanda_clientes')
+            .insert({
+              comanda_id: selectedTable.comandaId,
+              cliente_id: clientId,
+              codigo_empresa: userProfile?.codigo_empresa,
+            })
+            .select('id, cliente_id')
+            .single();
+          if (error) {
+            throw error;
+          }
+          const newEntry = {
+            id: data.id,
+            cliente_id: data.cliente_id,
+            nome: client.nome,
+            tipo: 'cadastrado'
+          };
+          setLocalLinked(prev => [...prev, newEntry]);
+          setIsAddClientModalOpen(false);
+        } catch (e) {
+          console.error('[ManageClientsDialog] Erro ao adicionar cliente:', e);
+          toast({
+            title: 'Falha ao adicionar cliente',
+            description: e?.message || 'Tente novamente',
+            variant: 'destructive',
+          });
+        } finally {
+          setLocalLoading(false);
+        }
+      })();
     };
 
     const replaceClient = (linkedId, newClientId) => {
+      if (!selectedTable?.comandaId) return;
       const client = localClients.find(c => c.id === newClientId);
       if (!client) return;
-      
-      // Encontrar o vínculo antigo
-      const oldLink = localLinked.find(l => l.id === linkedId);
-      if (!oldLink) return;
-      
-      // Remover o antigo e adicionar o novo
-      setLocalLinked(prev => [
-        ...prev.filter(l => l.id !== linkedId),
-        {
-          id: `temp-${Date.now()}`,
-          cliente_id: newClientId,
-          nome: client.nome,
-          tipo: 'cadastrado'
+      const existing = localLinked.find(l => l.id === linkedId);
+      if (!existing) return;
+      (async () => {
+        try {
+          setLocalLoading(true);
+          const { error } = await supabase
+            .from('comanda_clientes')
+            .update({ cliente_id: newClientId })
+            .eq('id', linkedId)
+            .eq('codigo_empresa', userProfile?.codigo_empresa);
+          if (error) {
+            throw error;
+          }
+          setLocalLinked(prev => prev.map(l =>
+            l.id === linkedId
+              ? { ...l, cliente_id: newClientId, nome: client.nome, tipo: 'cadastrado' }
+              : l
+          ));
+          setEditingClientId(null);
+          setIsAddClientModalOpen(false);
+        } catch (e) {
+          console.error('[ManageClientsDialog] Erro ao trocar cliente:', e);
+          toast({
+            title: 'Falha ao trocar cliente',
+            description: e?.message || 'Tente novamente',
+            variant: 'destructive',
+          });
+        } finally {
+          setLocalLoading(false);
         }
-      ]);
-      
-      // Marcar ambos como pendentes (remoção do antigo + adição do novo)
-      setPendingChanges(prev => new Set([...prev, linkedId, newClientId]));
-      setEditingClientId(null);
-      setIsAddClientModalOpen(false);
+      })();
     };
 
     const toggleClient = (clientId) => {
+      // Mantido apenas para compatibilidade futura; atualmente não é usado na UI.
       if (!selectedTable?.comandaId) return;
-      
-      // Verificar se já está vinculado
       const existing = localLinked.find(l => l.cliente_id === clientId && l.tipo === 'cadastrado');
-      
       if (existing) {
-        // Remover
-        setLocalLinked(prev => prev.filter(l => l.id !== existing.id));
+        removeLinked(existing.id);
       } else {
-        // Adicionar cliente cadastrado
-        const client = localClients.find(c => c.id === clientId);
-        if (!client) return;
-        const newEntry = {
-          id: `temp-${Date.now()}`,
-          cliente_id: clientId,
-          nome: client.nome,
-          tipo: 'cadastrado'
-        };
-        setLocalLinked(prev => [...prev, newEntry]);
+        addClientFromModal(clientId);
       }
-      
-      setPendingChanges(prev => new Set([...prev, clientId]));
     };
 
     const removeLinked = (linkedId) => {
+      const entry = localLinked.find(l => l.id === linkedId);
+      if (!entry) return;
+      // Atualiza UI imediatamente
       setLocalLinked(prev => prev.filter(l => l.id !== linkedId));
-      setPendingChanges(prev => new Set([...prev, linkedId]));
+      if (!selectedTable?.comandaId || String(linkedId).startsWith('temp-')) return;
+      (async () => {
+        try {
+          setLocalLoading(true);
+          const { error } = await supabase
+            .from('comanda_clientes')
+            .delete()
+            .eq('id', linkedId)
+            .eq('codigo_empresa', userProfile?.codigo_empresa);
+          if (error) {
+            throw error;
+          }
+        } catch (e) {
+          console.error('[ManageClientsDialog] Erro ao remover cliente:', e);
+          toast({
+            title: 'Falha ao remover cliente',
+            description: e?.message || 'Tente novamente',
+            variant: 'destructive',
+          });
+          // Tentar restaurar entrada removida em caso de erro
+          setLocalLinked(prev => [...prev, entry]);
+        } finally {
+          setLocalLoading(false);
+        }
+      })();
     };
 
     const startEditConsumidor = (linkedId) => {
@@ -4253,14 +4464,35 @@ function VendasPage() {
     };
 
     const saveEditConsumidor = () => {
-      if (!editingConsumidorId) return;
+      if (!editingConsumidorId || !selectedTable?.comandaId) return;
       const nome = editingConsumidorName.trim() || 'Consumidor';
-      setLocalLinked(prev => prev.map(l => 
-        l.id === editingConsumidorId ? { ...l, nome } : l
-      ));
-      setPendingChanges(prev => new Set([...prev, editingConsumidorId]));
-      setEditingConsumidorId(null);
-      setEditingConsumidorName('');
+      (async () => {
+        try {
+          setLocalLoading(true);
+          const { error } = await supabase
+            .from('comanda_clientes')
+            .update({ nome_livre: nome })
+            .eq('id', editingConsumidorId)
+            .eq('codigo_empresa', userProfile?.codigo_empresa);
+          if (error) {
+            throw error;
+          }
+          setLocalLinked(prev =>
+            prev.map(l => (l.id === editingConsumidorId ? { ...l, nome } : l))
+          );
+        } catch (e) {
+          console.error('[ManageClientsDialog] Erro ao salvar consumidor:', e);
+          toast({
+            title: 'Falha ao salvar cliente',
+            description: e?.message || 'Tente novamente',
+            variant: 'destructive',
+          });
+        } finally {
+          setEditingConsumidorId(null);
+          setEditingConsumidorName('');
+          setLocalLoading(false);
+        }
+      })();
     };
 
     const confirmChanges = async () => {
@@ -4372,7 +4604,11 @@ function VendasPage() {
             {/* Clientes vinculados */}
             <div className="space-y-2">
               <div className="text-sm font-medium text-text-primary">Clientes vinculados ({localLinked.length}):</div>
-              {localLinked.length === 0 ? (
+              {localLoading && localLinked.length === 0 ? (
+                <div className="p-4 text-center text-sm text-text-muted border border-dashed rounded-md">
+                  Carregando clientes da mesa...
+                </div>
+              ) : localLinked.length === 0 ? (
                 <div className="p-4 text-center text-sm text-text-muted border border-dashed rounded-md">
                   Nenhum cliente vinculado ainda
                 </div>
@@ -4663,10 +4899,13 @@ function VendasPage() {
       <Dialog open={isMobileModalOpen} modal={!isProductDetailsOpen} onOpenChange={(open) => {
         if (!open && isProductDetailsOpen) return; // não fechar mesa se info estiver aberta
         setIsMobileModalOpen(open);
+        // Manter focusContext em 'tables' quando modal está aberto para permitir navegação por setas
+        if (open) {
+          setFocusContext('tables');
+        }
       }}>
         <DialogContent 
-          className="sm:max-w-2xl w-[90vw] max-h-[85vh] flex flex-col p-0 gap-0 animate-none"
-          onKeyDown={(e) => e.stopPropagation()}
+          className="w-[95vw] sm:max-w-2xl max-h-[85vh] flex flex-col p-0 gap-0 animate-none"
         >
           {/* Header com informações da mesa */}
           <div className="p-4 border-b border-border bg-surface-2">
@@ -4703,14 +4942,22 @@ function VendasPage() {
             }
           }} className="flex flex-col flex-1 min-h-0">
             <TabsList className="grid w-full grid-cols-2 m-2 rounded-lg">
-              <TabsTrigger value="order" className="text-sm">Comanda</TabsTrigger>
-              <TabsTrigger value="products" className="text-sm" onClick={() => {
+              <TabsTrigger value="order" className="text-sm flex items-center justify-center gap-2">Comanda</TabsTrigger>
+              <TabsTrigger value="products" className="text-sm flex items-center justify-center gap-2" onClick={() => {
                 if (selectedTable) {
                   setIsProductsModalOpen(true);
                 }
-              }}>Produtos</TabsTrigger>
+              }}>
+                Produtos
+                <kbd className="hidden md:inline px-2 py-1 text-xs font-bold font-mono text-white bg-gray-700 border border-gray-600 rounded">P</kbd>
+              </TabsTrigger>
             </TabsList>
-            <TabsContent value="order" className="flex-1 overflow-hidden min-h-0 m-0">
+            <TabsContent value="order" className="flex-1 overflow-hidden min-h-0 m-0" onKeyDown={(e) => {
+              // Keep focus context on 'tables' when arrow keys are pressed
+              if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+                setFocusContext('tables');
+              }
+            }}>
               <OrderPanel table={selectedTable} />
             </TabsContent>
           </Tabs>
@@ -4784,9 +5031,9 @@ function VendasPage() {
       <ProductDetailsDialog />
       <CounterProductDetailsDialog />
       <div className="h-full flex flex-col">
-        <div className="flex items-center justify-between mb-2 md:mb-6 gap-2 md:gap-4 flex-wrap">
-          <div className="w-full md:w-auto flex items-center gap-2 md:gap-3">
-            <Tabs value="mesas" className="w-full md:w-auto flex-1" onValueChange={(v) => {
+        <div className="flex items-center justify-between mb-2 md:mb-6 gap-2 md:gap-4">
+          <div className="flex items-center gap-2 md:gap-3">
+            <Tabs value="mesas" onValueChange={(v) => {
               if (v === 'mesas') navigate('/vendas');
               if (v === 'balcao') navigate('/balcao');
               if (v === 'historico') navigate('/historico');
@@ -4798,18 +5045,19 @@ function VendasPage() {
               </TabsList>
             </Tabs>
           </div>
-          <div className="w-full md:w-auto flex items-center gap-1.5 md:gap-3 md:ml-auto justify-end mt-1 md:mt-0">
+          <div className="flex items-center gap-1.5 md:gap-3 flex-shrink-0">
             <OpenCashierDialog />
             <CloseCashierDialog />
             <Button variant="outline" size="sm" onClick={() => setIsCashierDetailsOpen(true)} className="px-3">
               <Banknote className="h-4 w-4" />
               <span className="ml-2 md:hidden">Detalhes</span>
               <span className="ml-2 hidden md:inline">Detalhes do Caixa</span>
-              <kbd className="ml-2 hidden md:inline px-2 py-1 text-xs font-bold font-mono text-gray-400 bg-transparent border border-gray-300/50 rounded">F11</kbd>
+              <kbd className="ml-2 hidden md:inline px-2 py-1 text-xs font-bold font-mono text-white bg-gray-700 border border-gray-600 rounded">F11</kbd>
             </Button>
             <div className="hidden md:block w-px h-6 bg-border mx-1"></div>
             <Button onClick={() => setIsCreateMesaOpen(true)} className="hidden md:flex" size="sm">
               <Plus className="mr-2 h-4 w-4" /> Nova Mesa
+              <kbd className="ml-2 px-2 py-1 text-xs font-bold font-mono text-white bg-gray-700 border border-gray-600 rounded">F1</kbd>
             </Button>
           </div>
         </div>
@@ -4822,7 +5070,7 @@ function VendasPage() {
           </div>
         )}
         
-        <div className="flex-1 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 overflow-hidden min-h-0">
+        <div className="flex-1 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 overflow-visible min-h-0">
             <div 
               className="lg:col-span-2 bg-surface rounded-lg border border-border p-4 md:p-6 overflow-y-auto thin-scroll min-h-0"
               tabIndex={0}
@@ -4853,12 +5101,26 @@ function VendasPage() {
                 transition: 'outline 0.15s ease'
               }}
             >
-              <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center justify-between mb-4 gap-4">
                 <h2 className="text-xl font-bold">Mapa de Mesas</h2>
+                
+                {/* Atalhos de Navegação - Desktop */}
+                <div className="hidden md:flex items-center gap-2 text-xs text-text-muted flex-shrink-0">
+                  <div className="flex items-center gap-1">
+                    <kbd className="px-1.5 py-0.5 text-xs font-bold font-mono text-white bg-gray-700 border border-gray-600 rounded">↑↓←→</kbd>
+                    <span>Navegar</span>
+                  </div>
+                  <div className="w-px h-3 bg-border"></div>
+                  <div className="flex items-center gap-1">
+                    <kbd className="px-1.5 py-0.5 text-xs font-bold font-mono text-white bg-gray-700 border border-gray-600 rounded">Enter</kbd>
+                    <span>Selecionar</span>
+                  </div>
+                </div>
+                
                 {/* Mobile-only '+' button to create a new mesa */}
                 <Button
                   type="button"
-                  className="md:hidden h-9 w-9 p-0 bg-amber-400 text-black hover:bg-amber-300"
+                  className="md:hidden h-9 w-9 p-0 bg-amber-400 text-black hover:bg-amber-300 flex-shrink-0"
                   size="icon"
                   title="Nova Mesa"
                   onClick={() => setIsCreateMesaOpen(true)}
@@ -4913,11 +5175,9 @@ function VendasPage() {
 
             {/* Painel Lateral - Apenas Desktop */}
             <div 
-              className="hidden md:flex bg-surface rounded-lg border border-border flex-col min-h-0"
+              className="hidden md:flex bg-surface rounded-lg border border-border flex-col min-h-0 transition-all overflow-hidden"
               style={{
-                outline: focusContext === 'panel' ? '2px solid rgba(148, 163, 184, 0.4)' : 'none',
-                outlineOffset: '-2px',
-                transition: 'outline 0.15s ease'
+                boxShadow: focusContext === 'panel' ? 'inset 0 0 0 2px rgba(148, 163, 184, 0.4)' : 'none'
               }}
             >
                 <Tabs value={desktopTab} onValueChange={(val) => {
@@ -4929,12 +5189,15 @@ function VendasPage() {
                   }
                 }} className="flex flex-col h-full">
                     <TabsList className="grid w-full grid-cols-2 m-2">
-                        <TabsTrigger value="order">Comanda</TabsTrigger>
+                        <TabsTrigger value="order" className="flex items-center justify-center gap-2">Comanda</TabsTrigger>
                         <TabsTrigger value="products" onClick={() => {
                           if (selectedTable) {
                             setIsProductsModalOpen(true);
                           }
-                        }}>Produtos</TabsTrigger>
+                        }} className="flex items-center justify-center gap-2">
+                          Produtos
+                          <kbd className="hidden md:inline px-2 py-1 text-xs font-bold font-mono text-white bg-gray-700 border border-gray-600 rounded">P</kbd>
+                        </TabsTrigger>
                     </TabsList>
                     <TabsContent value="order" className="flex-1 overflow-hidden min-h-0"><OrderPanel table={selectedTable} /></TabsContent>
                 </Tabs>

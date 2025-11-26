@@ -87,7 +87,8 @@ function extractNFeInfo(xmlDoc) {
     dataEmissao: getTextContent(ide, 'dhEmi'),
     chaveAcesso: chaveAcesso,
     tipo: getTextContent(ide, 'tpNF') === '0' ? 'Entrada' : 'Saída',
-    naturezaOperacao: getTextContent(ide, 'natOp')
+    naturezaOperacao: getTextContent(ide, 'natOp'),
+    modelo: getTextContent(ide, 'mod') || null // 55 = NF-e, 65 = NFC-e
   };
 }
 

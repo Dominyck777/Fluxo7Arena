@@ -25,6 +25,13 @@ export default function XMLImportModal({ open, onOpenChange, products, codigoEmp
   const [productSelectionModal, setProductSelectionModal] = useState({ isOpen: false, productIndex: null, currentProduct: null });
   const [confirmationModal, setConfirmationModal] = useState({ isOpen: false });
 
+  const getNFeModelLabel = () => {
+    const modelo = parsedData?.nfe?.modelo;
+    if (modelo === '55') return 'NF-e';
+    if (modelo === '65') return 'NFC-e';
+    return 'NF-e / NFC-e';
+  };
+
   const handleFileSelect = async (e) => {
     const file = e.target.files?.[0];
     if (!file) {
@@ -79,8 +86,31 @@ export default function XMLImportModal({ open, onOpenChange, products, codigoEmp
       // Validar produtos: novos vs existentes
       const preview = parsed.data.produtos.map((prodXML, idx) => {
         const existing = findExistingProduct(prodXML, allProducts);
+
+        // Achatar impostos do parser em campos planos usados pelo fluxo de importação
+        const xmlWithTaxes = { ...prodXML };
+        if (prodXML.impostos) {
+          const { icms, pis, cofins, ipi } = prodXML.impostos;
+          if (icms) {
+            xmlWithTaxes.icmsAliquota = icms.aliquota ?? xmlWithTaxes.icmsAliquota;
+            xmlWithTaxes.icmsValor = icms.valor ?? xmlWithTaxes.icmsValor;
+          }
+          if (ipi) {
+            xmlWithTaxes.ipiAliquota = ipi.aliquota ?? xmlWithTaxes.ipiAliquota;
+            xmlWithTaxes.ipiValor = ipi.valor ?? xmlWithTaxes.ipiValor;
+          }
+          if (pis) {
+            xmlWithTaxes.pisAliquota = pis.aliquota ?? xmlWithTaxes.pisAliquota;
+            xmlWithTaxes.pisValor = pis.valor ?? xmlWithTaxes.pisValor;
+          }
+          if (cofins) {
+            xmlWithTaxes.cofinsAliquota = cofins.aliquota ?? xmlWithTaxes.cofinsAliquota;
+            xmlWithTaxes.cofinsValor = cofins.valor ?? xmlWithTaxes.cofinsValor;
+          }
+        }
+
         return {
-          xml: prodXML,
+          xml: xmlWithTaxes,
           existing: existing,
           isNew: !existing,
           willCreate: !existing,
@@ -554,9 +584,16 @@ export default function XMLImportModal({ open, onOpenChange, products, codigoEmp
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="max-w-4xl max-h-[85vh] flex flex-col">
+      <DialogContent className="w-[95vw] sm:max-w-4xl max-h-[85vh] flex flex-col">
         <DialogHeader className="flex-shrink-0">
-          <DialogTitle className="text-2xl font-bold">Importar XML de Compra (NF-e)</DialogTitle>
+          <DialogTitle className="flex items-center gap-2 text-2xl font-bold">
+            <span>Importar XML de Compra</span>
+            {parsedData?.nfe && (
+              <span className="inline-flex items-center rounded-full bg-surface-2 border border-border px-2 py-0.5 text-xs font-semibold text-text-muted uppercase tracking-wide">
+                {getNFeModelLabel()}
+              </span>
+            )}
+          </DialogTitle>
           <DialogDescription>
             {step === 'upload' && 'Selecione o arquivo XML da nota fiscal de entrada'}
             {step === 'preview' && 'Revise os produtos que serão importados'}
@@ -600,7 +637,9 @@ export default function XMLImportModal({ open, onOpenChange, products, codigoEmp
                 <div className="bg-surface-2 rounded-lg p-4 border border-border">
                   <div className="flex items-start justify-between gap-4 mb-3">
                     <div className="flex-1">
-                      <h3 className="font-semibold mb-2">Informações da NF-e</h3>
+                      <h3 className="font-semibold mb-2">
+                        Informações da {getNFeModelLabel()}
+                      </h3>
                       <div className="grid grid-cols-2 gap-2 text-sm">
                         <div><span className="text-text-muted">Número:</span> <span className="font-mono">{parsedData.nfe.numero}</span></div>
                         <div><span className="text-text-muted">Série:</span> <span className="font-mono">{parsedData.nfe.serie}</span></div>
@@ -706,80 +745,74 @@ export default function XMLImportModal({ open, onOpenChange, products, codigoEmp
                         )}
                       >
                         {/* Cabeçalho compacto - sempre visível */}
-                        <div className="p-3 flex items-center gap-3">
-                          {/* Checkbox amarela */}
-                          <input 
-                            type="checkbox" 
-                            checked={item.selected} 
-                            onChange={() => handleToggleSelect(idx)}
-                            className="w-4 h-4 rounded border-border flex-shrink-0 accent-warning cursor-pointer"
-                          />
-                          
-                          {/* Botão expand/collapse */}
-                          <button
-                            onClick={() => toggleExpand(idx)}
-                            className="flex-shrink-0 p-0.5 hover:bg-surface-2 rounded transition-colors"
-                          >
-                            {isExpanded ? (
-                              <ChevronDown className="w-4 h-4 text-text-muted" />
-                            ) : (
-                              <ChevronRight className="w-4 h-4 text-text-muted" />
-                            )}
-                          </button>
-                          
-                          {/* Ícone de status */}
-                          <div className="flex-shrink-0">
-                            {linkedProductId ? (
-                              <Link2 className="w-5 h-5 text-warning" />
-                            ) : item.isNew ? (
-                              <Plus className="w-5 h-5 text-success" />
-                            ) : (
-                              <RefreshCw className="w-5 h-5 text-info" />
-                            )}
+                        <div className="p-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+                          <div className="flex items-center gap-2 flex-shrink-0">
+                            {/* Checkbox amarela */}
+                            <input 
+                              type="checkbox" 
+                              checked={item.selected} 
+                              onChange={() => handleToggleSelect(idx)}
+                              className="w-4 h-4 rounded border-border accent-warning cursor-pointer"
+                            />
+                            
+                            {/* Botão expand/collapse */}
+                            <button
+                              onClick={() => toggleExpand(idx)}
+                              className="p-0.5 hover:bg-surface-2 rounded transition-colors"
+                            >
+                              {isExpanded ? (
+                                <ChevronDown className="w-4 h-4 text-text-muted" />
+                              ) : (
+                                <ChevronRight className="w-4 h-4 text-text-muted" />
+                              )}
+                            </button>
+                            
+                            {/* Ícone de status */}
+                            <div>
+                              {item.isNew ? (
+                                <Plus className="w-5 h-5 text-success" />
+                              ) : (
+                                <RefreshCw className="w-5 h-5 text-info" />
+                              )}
+                            </div>
                           </div>
-                          
+
                           {/* Informações principais */}
                           <div className="flex-1 min-w-0">
-                            <div className="flex items-baseline gap-2">
-                              <p className="font-semibold text-sm truncate">
-                                {linkedProductId && linkedProductId !== 'force-new' && linkedProductId !== 'new' ? (
-                                  (() => {
-                                    const linkedProduct = products?.find(p => p.id === linkedProductId);
-                                    return linkedProduct ? linkedProduct.name : editedName;
-                                  })()
-                                ) : editedName}
-                              </p>
-                              {item.xml.codigo && (
-                                <span className="text-xs text-text-muted flex-shrink-0">#{item.xml.codigo}</span>
-                              )}
+                            <div className="flex items-baseline justify-between gap-2">
+                              <div className="min-w-0">
+                                <p className="font-semibold text-sm truncate">
+                                  {editedName}
+                                </p>
+                                <div className="flex items-center gap-2 text-[11px] text-text-muted mt-0.5">
+                                  {item.xml.codigo && (
+                                    <span className="flex-shrink-0">#{item.xml.codigo}</span>
+                                  )}
+                                  <span>Qtd: {editedQty}</span>
+                                </div>
+                              </div>
+
+                              {/* Badge de status */}
+                              <div className="flex-shrink-0 ml-2">
+                                {item.isNew ? (
+                                  <span className="text-[11px] px-2 py-0.5 rounded-full bg-success/20 text-success font-medium">Novo</span>
+                                ) : (
+                                  <span className="text-[11px] px-2 py-0.5 rounded-full bg-info/20 text-info font-medium">Cadastrado</span>
+                                )}
+                              </div>
                             </div>
-                            <div className="flex items-center gap-3 text-xs text-text-muted mt-0.5">
-                              <span>Qtd: {editedQty}</span>
-                              <span>•</span>
-                              <span>R$ {costPrice.toFixed(2)} → {salePrice ? `R$ ${salePrice.toFixed(2)}` : '-'}</span>
+
+                            <div className="mt-1 text-[11px] text-text-muted">
+                              <span>
+                                R$ {Number(costPrice).toFixed(2)}
+                                {salePrice ? ` → R$ ${salePrice.toFixed(2)}` : ''}
+                              </span>
                               {displayMargin != null && (
-                                <>
-                                  <span>•</span>
-                                  <span className={displayMargin > 0 ? 'text-success' : displayMargin < 0 ? 'text-destructive' : 'text-text-muted'}>
-                                    {displayMargin.toFixed(1)}%
-                                  </span>
-                                </>
-                              )}
-                              {linkedProductId && linkedProductId !== 'force-new' && linkedProductId !== 'new' && (
-                                <span className="text-warning">→ Vinculado</span>
+                                <span className={"ml-2 " + (displayMargin > 0 ? 'text-success' : displayMargin < 0 ? 'text-destructive' : 'text-text-muted')}>
+                                  {displayMargin.toFixed(1)}%
+                                </span>
                               )}
                             </div>
-                          </div>
-                          
-                          {/* Badge de status */}
-                          <div className="flex-shrink-0">
-                            {linkedProductId ? (
-                              <span className="text-xs px-2 py-0.5 rounded-full bg-warning/20 text-warning font-medium">Vinculado</span>
-                            ) : item.isNew ? (
-                              <span className="text-xs px-2 py-0.5 rounded-full bg-success/20 text-success font-medium">Novo</span>
-                            ) : (
-                              <span className="text-xs px-2 py-0.5 rounded-full bg-info/20 text-info font-medium">Existente</span>
-                            )}
                           </div>
                         </div>
                         
@@ -798,8 +831,8 @@ export default function XMLImportModal({ open, onOpenChange, products, codigoEmp
                               />
                             </div>
                             
-                            {/* Quantidade, Margem e Preços - tudo em uma linha */}
-                            <div className="flex items-center gap-3">
+                            {/* Quantidade, Margem e Preços - grid 2 colunas no mobile, 4 no desktop */}
+                            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
                               <div>
                                 <label className="text-xs text-text-muted mb-1 block">Quantidade</label>
                                 <div className="flex items-center gap-1">
@@ -953,35 +986,35 @@ export default function XMLImportModal({ open, onOpenChange, products, codigoEmp
                                   }}
                                   disabled={!item.selected}
                                 >
-                                  <SelectTrigger className="flex-1 hover:bg-white/5 transition-colors">
-                                    <SelectValue placeholder={item.isNew ? "🆕 Criar como novo produto" : "♻️ Atualizar produto existente"}>
+                                  <SelectTrigger className="flex-1 hover:bg-white/5 transition-colors text-xs sm:text-sm">
+                                    <SelectValue placeholder={item.isNew ? "Criar novo" : "Atualizar existente"}>
                                       {linkedProductId && linkedProductId !== 'force-new' && linkedProductId !== 'new' ? (
                                         (() => {
                                           const linkedProduct = products?.find(p => p.id === linkedProductId);
-                                          return linkedProduct ? `🔗 Vinculado: ${linkedProduct.name}` : (item.isNew ? "🆕 Criar como novo produto" : "♻️ Atualizar produto existente");
+                                          return linkedProduct ? `Vinculado: ${linkedProduct.name}` : (item.isNew ? "Criar novo" : "Atualizar existente");
                                         })()
                                       ) : linkedProductId === 'force-new' ? (
-                                        "🆕 Criar como novo produto (ignorar existente)"
+                                        "Criar novo (ignorar)"
                                       ) : (
-                                        item.isNew ? "🆕 Criar como novo produto" : "♻️ Atualizar produto existente"
+                                        item.isNew ? "Criar novo" : "Atualizar existente"
                                       )}
                                     </SelectValue>
                                   </SelectTrigger>
-                                  <SelectContent className="max-h-[300px] overflow-y-auto">
+                                  <SelectContent className="max-h-[300px] overflow-y-auto text-xs sm:text-sm">
                                     {item.isNew ? (
-                                      <SelectItem value="new">🆕 Criar como novo produto</SelectItem>
+                                      <SelectItem value="new">Criar novo produto</SelectItem>
                                     ) : (
                                       <SelectItem value={item.existing?.id || 'new'}>
-                                        ♻️ Atualizar: {item.existing?.name} (Estoque atual: {item.existing?.stock || 0})
+                                        Atualizar: {item.existing?.name} (Estoque: {item.existing?.stock || 0})
                                       </SelectItem>
                                     )}
                                     {!item.isNew && (
                                       <SelectItem value="force-new">
-                                        🆕 Criar como novo produto (ignorar existente)
+                                        Criar novo (ignorar existente)
                                       </SelectItem>
                                     )}
                                     <SelectItem value="search">
-                                      🔍 Buscar produto para vincular...
+                                      Buscar produto para vincular
                                     </SelectItem>
                                   </SelectContent>
                                 </Select>

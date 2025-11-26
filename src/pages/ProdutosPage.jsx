@@ -5,7 +5,7 @@ import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useToast } from "@/components/ui/use-toast";
-import { Plus, Search, List, LayoutGrid, Download, Edit, Trash2, Trophy, AlertTriangle, CalendarX, Tag, Filter, Eye, EyeOff, FileText, CheckCircle } from 'lucide-react';
+import { Plus, Search, List, LayoutGrid, Download, Edit, Trash2, Trophy, AlertTriangle, CalendarX, Tag, Filter, Eye, EyeOff, FileText, CheckCircle, Settings } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -15,7 +15,8 @@ import { Calendar } from "@/components/ui/calendar";
 import { format, parseISO } from "date-fns";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Checkbox } from '@/components/ui/checkbox';
-import { listProducts, createProduct, updateProduct, deleteProduct, listCategories, createCategory, removeCategory, getMostSoldProductsToday, getSoldProductsByPeriod, adjustProductStock } from '@/lib/products';
+import { listProductsPaged, listProducts, createProduct, updateProduct, deleteProduct, listCategories, createCategory, removeCategory, getMostSoldProductsToday, getSoldProductsByPeriod, adjustProductStock, bulkUpdateProductStatus, bulkClearNewFlag } from '@/lib/products';
+import { getUserUISettings, saveUserUISettings } from '@/lib/userSettings';
 import { useAuth } from '@/contexts/AuthContext';
 import XMLImportModal from '@/components/XMLImportModal';
 
@@ -25,6 +26,8 @@ const initialCategories = [];
 
 const pageVariants = { hidden: { opacity: 0 }, visible: { opacity: 1, transition: { staggerChildren: 0.1 } } };
 const itemVariants = { hidden: { opacity: 0, y: 20 }, visible: { opacity: 1, y: 0, transition: { duration: 0.5 } } };
+
+const PRODUTOS_SETTINGS_KEY = 'produtosPage:settings';
 
 // ===== Export Helpers =====
 
@@ -202,20 +205,21 @@ function mapDbErrorToMessage(err, { action } = {}) {
 const StatCard = ({ icon, title, value, subtitle, color, onClick, isActive }) => {
     const Icon = icon;
     return (
-        <motion.div variants={itemVariants} 
+        <motion.div
+          variants={itemVariants}
           className={cn(
-            "bg-surface rounded-lg border-2 p-4 flex flex-col justify-between gap-2 cursor-pointer transition-all duration-300",
+            "bg-surface rounded-2xl border-2 p-3 sm:p-4 flex flex-col justify-between gap-2 cursor-pointer transition-all duration-300",
             isActive ? `${color}/30 border-${color}` : 'border-border hover:border-border-hover',
           )}
           onClick={onClick}
         >
-            <div className="flex items-center justify-between">
-              <p className="text-text-secondary text-sm font-semibold">{title}</p>
-              <Icon className={`w-5 h-5 ${color}`} />
+            <div className="flex items-center justify-between gap-2 min-w-0">
+              <p className="text-text-secondary text-xs sm:text-sm font-semibold leading-snug whitespace-nowrap overflow-hidden text-ellipsis">{title}</p>
+              <Icon className={cn("w-4 h-4 sm:w-5 sm:h-5 flex-shrink-0", color)} />
             </div>
             <div>
-              <p className="text-2xl font-bold text-text-primary">{value}</p>
-              <p className="text-xs text-text-muted">{subtitle}</p>
+              <p className="text-xs sm:text-sm font-semibold text-text-primary leading-tight whitespace-nowrap overflow-hidden text-ellipsis">{value}</p>
+              <p className="hidden sm:block text-xs text-text-muted">{subtitle}</p>
             </div>
         </motion.div>
     );
@@ -581,7 +585,7 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[95vw] sm:max-w-[780px] max-h-[90vh] sm:max-h-[85vh] flex flex-col" onKeyDown={(ev) => {
+      <DialogContent className="w-[90vw] sm:max-w-[780px] max-h-[80vh] sm:max-h-[85vh] flex flex-col" onKeyDown={(ev) => {
         if (ev.key === 'F5') { ev.preventDefault(); handleSave(ev); }
         if (ev.key === 'Escape') { ev.preventDefault(); onOpenChange(false); }
       }}>
@@ -798,8 +802,8 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
             </TabsContent>
 
             <TabsContent value="preco" className="space-y-3 mt-2">
-              <div className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor="costPrice" className="text-right">Preço de Custo (R$)</Label>
+              <div className="grid grid-cols-1 sm:grid-cols-4 items-start sm:items-center gap-2 sm:gap-4">
+                <Label htmlFor="costPrice" className="text-xs sm:text-right">Preço de Custo (R$)</Label>
                 <Input 
                   id="costPrice" 
                   inputMode="numeric" 
@@ -810,11 +814,11 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
                     // Mantém o último campo editado para recalcular corretamente
                   }} 
                   disabled={!editEnabled} 
-                  className="col-span-3" 
+                  className="sm:col-span-3 text-xs sm:text-sm" 
                 />
               </div>
-              <div className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor="salePrice" className="text-right">Preço de Venda (R$) {((!salePrice) || (currencyToNumber(salePrice) <= 0)) && (<span className="text-danger">*</span>)}</Label>
+              <div className="grid grid-cols-1 sm:grid-cols-4 items-start sm:items-center gap-2 sm:gap-4">
+                <Label htmlFor="salePrice" className="text-xs sm:text-right">Preço de Venda (R$) {((!salePrice) || (currencyToNumber(salePrice) <= 0)) && (<span className="text-danger">*</span>)}</Label>
                 <Input 
                   id="salePrice" 
                   inputMode="numeric" 
@@ -825,11 +829,11 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
                     setSalePrice(formatCurrencyBR(e.target.value));
                   }} 
                   disabled={!editEnabled} 
-                  className="col-span-3" 
+                  className="sm:col-span-3 text-xs sm:text-sm" 
                 />
               </div>
-              <div className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor="marginPercent" className="text-right">% de Lucro (Margem)</Label>
+              <div className="grid grid-cols-1 sm:grid-cols-4 items-start sm:items-center gap-2 sm:gap-4">
+                <Label htmlFor="marginPercent" className="text-xs sm:text-right">% de Lucro (Margem)</Label>
                 <Input 
                   id="marginPercent" 
                   type="text"
@@ -859,7 +863,7 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
                     }
                   }}
                   disabled={!editEnabled} 
-                  className="col-span-3" 
+                  className="sm:col-span-3 text-xs sm:text-sm" 
                 />
               </div>
             </TabsContent>
@@ -867,122 +871,122 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
             <TabsContent value="impostos" className="space-y-4 mt-2">
               <div className="flex items-center gap-3">
                 <Checkbox id="useCsosn" checked={useCsosn} onCheckedChange={(v)=>setUseCsosn(!!v)} disabled={!editEnabled} />
-                <Label htmlFor="useCsosn" className="cursor-pointer">Usar CSOSN (Simples Nacional)</Label>
+                <Label htmlFor="useCsosn" className="cursor-pointer text-xs sm:text-sm">Usar CSOSN (Simples Nacional)</Label>
               </div>
               {/* ICMS - Interno/Externo */}
-              <div className="grid grid-cols-2 gap-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
                 <div className="space-y-3">
-                  <p className="text-sm font-semibold">ICMS - Operação Interna</p>
-                  <div className="grid grid-cols-4 items-center gap-4">
-                    <Label className="text-right">CFOP</Label>
-                    <Input value={cfopInterno} onChange={(e)=>setCfopInterno(formatCFOP(e.target.value))} className="col-span-3" placeholder="5102" disabled={!editEnabled} />
+                  <p className="text-xs sm:text-sm font-semibold">ICMS - Operação Interna</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-4 items-start sm:items-center gap-2 sm:gap-4">
+                    <Label className="text-xs sm:text-right">CFOP</Label>
+                    <Input value={cfopInterno} onChange={(e)=>setCfopInterno(formatCFOP(e.target.value))} className="sm:col-span-3 text-xs sm:text-sm" placeholder="5102" disabled={!editEnabled} />
                   </div>
                   {!useCsosn && (
-                    <div className="grid grid-cols-4 items-center gap-4">
-                      <Label className="text-right">CST</Label>
-                      <Input value={cstIcmsInterno} onChange={(e)=>setCstIcmsInterno(e.target.value.toUpperCase())} className="col-span-3" placeholder="00, 20, 40..." disabled={!editEnabled} />
+                    <div className="grid grid-cols-1 sm:grid-cols-4 items-start sm:items-center gap-2 sm:gap-4">
+                      <Label className="text-xs sm:text-right">CST</Label>
+                      <Input value={cstIcmsInterno} onChange={(e)=>setCstIcmsInterno(e.target.value.toUpperCase())} className="sm:col-span-3 text-xs sm:text-sm" placeholder="00, 20, 40..." disabled={!editEnabled} />
                     </div>
                   )}
                   {useCsosn && (
-                    <div className="grid grid-cols-4 items-center gap-4">
-                      <Label className="text-right">CSOSN</Label>
-                      <Input value={csosnInterno} onChange={(e)=>setCsosnInterno(e.target.value.toUpperCase())} className="col-span-3" placeholder="101, 102..." disabled={!editEnabled} />
+                    <div className="grid grid-cols-1 sm:grid-cols-4 items-start sm:items-center gap-2 sm:gap-4">
+                      <Label className="text-xs sm:text-right">CSOSN</Label>
+                      <Input value={csosnInterno} onChange={(e)=>setCsosnInterno(e.target.value.toUpperCase())} className="sm:col-span-3 text-xs sm:text-sm" placeholder="101, 102..." disabled={!editEnabled} />
                     </div>
                   )}
-                  <div className="grid grid-cols-4 items-center gap-4">
-                    <Label className="text-right">Alíquota ICMS (%)</Label>
-                    <Input value={`${aliqIcmsInterno || ''}`} onChange={(e)=>setAliqIcmsInterno(formatPercent(e.target.value))} className="col-span-3" placeholder="0,00" disabled={!editEnabled} />
+                  <div className="grid grid-cols-1 sm:grid-cols-4 items-start sm:items-center gap-2 sm:gap-4">
+                    <Label className="text-xs sm:text-right">Alíquota ICMS (%)</Label>
+                    <Input value={`${aliqIcmsInterno || ''}`} onChange={(e)=>setAliqIcmsInterno(formatPercent(e.target.value))} className="sm:col-span-3 text-xs sm:text-sm" placeholder="0,00" disabled={!editEnabled} />
                   </div>
                 </div>
                 <div className="space-y-3">
-                  <p className="text-sm font-semibold">ICMS - Operação Externa</p>
-                  <div className="grid grid-cols-4 items-center gap-4">
-                    <Label className="text-right">CFOP</Label>
-                    <Input value={cfopExterno} onChange={(e)=>setCfopExterno(formatCFOP(e.target.value))} className="col-span-3" placeholder="6102" disabled={!editEnabled} />
+                  <p className="text-xs sm:text-sm font-semibold">ICMS - Operação Externa</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-4 items-start sm:items-center gap-2 sm:gap-4">
+                    <Label className="text-xs sm:text-right">CFOP</Label>
+                    <Input value={cfopExterno} onChange={(e)=>setCfopExterno(formatCFOP(e.target.value))} className="sm:col-span-3 text-xs sm:text-sm" placeholder="6102" disabled={!editEnabled} />
                   </div>
                   {!useCsosn && (
-                    <div className="grid grid-cols-4 items-center gap-4">
-                      <Label className="text-right">CST</Label>
-                      <Input value={cstIcmsExterno} onChange={(e)=>setCstIcmsExterno(e.target.value.toUpperCase())} className="col-span-3" placeholder="00, 20, 40..." disabled={!editEnabled} />
+                    <div className="grid grid-cols-1 sm:grid-cols-4 items-start sm:items-center gap-2 sm:gap-4">
+                      <Label className="text-xs sm:text-right">CST</Label>
+                      <Input value={cstIcmsExterno} onChange={(e)=>setCstIcmsExterno(e.target.value.toUpperCase())} className="sm:col-span-3 text-xs sm:text-sm" placeholder="00, 20, 40..." disabled={!editEnabled} />
                     </div>
                   )}
                   {useCsosn && (
-                    <div className="grid grid-cols-4 items-center gap-4">
-                      <Label className="text-right">CSOSN</Label>
-                      <Input value={csosnExterno} onChange={(e)=>setCsosnExterno(e.target.value.toUpperCase())} className="col-span-3" placeholder="101, 102..." disabled={!editEnabled} />
+                    <div className="grid grid-cols-1 sm:grid-cols-4 items-start sm:items-center gap-2 sm:gap-4">
+                      <Label className="text-xs sm:text-right">CSOSN</Label>
+                      <Input value={csosnExterno} onChange={(e)=>setCsosnExterno(e.target.value.toUpperCase())} className="sm:col-span-3 text-xs sm:text-sm" placeholder="101, 102..." disabled={!editEnabled} />
                     </div>
                   )}
-                  <div className="grid grid-cols-4 items-center gap-4">
-                    <Label className="text-right">Alíquota ICMS (%)</Label>
-                    <Input value={`${aliqIcmsExterno || ''}`} onChange={(e)=>setAliqIcmsExterno(formatPercent(e.target.value))} className="col-span-3" placeholder="0,00" disabled={!editEnabled} />
+                  <div className="grid grid-cols-1 sm:grid-cols-4 items-start sm:items-center gap-2 sm:gap-4">
+                    <Label className="text-xs sm:text-right">Alíquota ICMS (%)</Label>
+                    <Input value={`${aliqIcmsExterno || ''}`} onChange={(e)=>setAliqIcmsExterno(formatPercent(e.target.value))} className="sm:col-span-3 text-xs sm:text-sm" placeholder="0,00" disabled={!editEnabled} />
                   </div>
                 </div>
               </div>
 
               {/* PIS/COFINS */}
-              <div className="grid grid-cols-2 gap-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
                 <div className="space-y-3">
-                  <p className="text-sm font-semibold">PIS/COFINS</p>
-                  <div className="grid grid-cols-4 items-center gap-4">
-                    <Label className="text-right">CST PIS Entrada</Label>
-                    <Input value={cstPisEntrada} onChange={(e)=>setCstPisEntrada(e.target.value.toUpperCase())} className="col-span-3" placeholder="50, 70..." disabled={!editEnabled} />
+                  <p className="text-xs sm:text-sm font-semibold">PIS/COFINS</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-4 items-start sm:items-center gap-2 sm:gap-4">
+                    <Label className="text-xs sm:text-right">CST PIS Entrada</Label>
+                    <Input value={cstPisEntrada} onChange={(e)=>setCstPisEntrada(e.target.value.toUpperCase())} className="sm:col-span-3 text-xs sm:text-sm" placeholder="50, 70..." disabled={!editEnabled} />
                   </div>
-                  <div className="grid grid-cols-4 items-center gap-4">
-                    <Label className="text-right">CST PIS Saída</Label>
-                    <Input value={cstPisSaida} onChange={(e)=>setCstPisSaida(e.target.value.toUpperCase())} className="col-span-3" placeholder="01, 04..." disabled={!editEnabled} />
+                  <div className="grid grid-cols-1 sm:grid-cols-4 items-start sm:items-center gap-2 sm:gap-4">
+                    <Label className="text-xs sm:text-right">CST PIS Saída</Label>
+                    <Input value={cstPisSaida} onChange={(e)=>setCstPisSaida(e.target.value.toUpperCase())} className="sm:col-span-3 text-xs sm:text-sm" placeholder="01, 04..." disabled={!editEnabled} />
                   </div>
-                  <div className="grid grid-cols-4 items-center gap-4">
-                    <Label className="text-right">Alíquota PIS (%)</Label>
-                    <Input value={`${aliqPisPercent || ''}`} onChange={(e)=>setAliqPisPercent(formatPercent(e.target.value))} className="col-span-3" placeholder="0,65" disabled={!editEnabled} />
+                  <div className="grid grid-cols-1 sm:grid-cols-4 items-start sm:items-center gap-2 sm:gap-4">
+                    <Label className="text-xs sm:text-right">Alíquota PIS (%)</Label>
+                    <Input value={`${aliqPisPercent || ''}`} onChange={(e)=>setAliqPisPercent(formatPercent(e.target.value))} className="sm:col-span-3 text-xs sm:text-sm" placeholder="0,65" disabled={!editEnabled} />
                   </div>
-                  <div className="grid grid-cols-4 items-center gap-4">
-                    <Label className="text-right">Alíquota COFINS (%)</Label>
-                    <Input value={`${aliqCofinsPercent || ''}`} onChange={(e)=>setAliqCofinsPercent(formatPercent(e.target.value))} className="col-span-3" placeholder="3,00" disabled={!editEnabled} />
+                  <div className="grid grid-cols-1 sm:grid-cols-4 items-start sm:items-center gap-2 sm:gap-4">
+                    <Label className="text-xs sm:text-right">Alíquota COFINS (%)</Label>
+                    <Input value={`${aliqCofinsPercent || ''}`} onChange={(e)=>setAliqCofinsPercent(formatPercent(e.target.value))} className="sm:col-span-3 text-xs sm:text-sm" placeholder="3,00" disabled={!editEnabled} />
                   </div>
                 </div>
                 {/* IPI */}
                 <div className="space-y-3">
-                  <p className="text-sm font-semibold">IPI</p>
-                  <div className="grid grid-cols-4 items-center gap-4">
-                    <Label className="text-right">CST IPI</Label>
-                    <Input value={cstIpi} onChange={(e)=>setCstIpi(e.target.value.toUpperCase())} className="col-span-3" placeholder="50, 99..." disabled={!editEnabled} />
+                  <p className="text-xs sm:text-sm font-semibold">IPI</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-4 items-start sm:items-center gap-2 sm:gap-4">
+                    <Label className="text-xs sm:text-right">CST IPI</Label>
+                    <Input value={cstIpi} onChange={(e)=>setCstIpi(e.target.value.toUpperCase())} className="sm:col-span-3 text-xs sm:text-sm" placeholder="50, 99..." disabled={!editEnabled} />
                   </div>
-                  <div className="grid grid-cols-4 items-center gap-4">
-                    <Label className="text-right">Alíquota IPI (%)</Label>
-                    <Input value={`${aliqIpiPercent || ''}`} onChange={(e)=>setAliqIpiPercent(formatPercent(e.target.value))} className="col-span-3" placeholder="0,00" disabled={!editEnabled} />
+                  <div className="grid grid-cols-1 sm:grid-cols-4 items-start sm:items-center gap-2 sm:gap-4">
+                    <Label className="text-xs sm:text-right">Alíquota IPI (%)</Label>
+                    <Input value={`${aliqIpiPercent || ''}`} onChange={(e)=>setAliqIpiPercent(formatPercent(e.target.value))} className="sm:col-span-3 text-xs sm:text-sm" placeholder="0,00" disabled={!editEnabled} />
                   </div>
                 </div>
               </div>
 
               {/* FCP/MVA/Base Reduzida */}
-              <div className="grid grid-cols-3 gap-6">
-                <div className="grid grid-cols-2 items-center gap-4">
-                  <Label className="text-right">FCP (%)</Label>
-                  <Input value={`${fcpPercent || ''}`} onChange={(e)=>setFcpPercent(formatPercent(e.target.value))} placeholder="2,00" disabled={!editEnabled} />
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-6">
+                <div className="grid grid-cols-1 sm:grid-cols-2 items-start sm:items-center gap-2 sm:gap-4">
+                  <Label className="text-xs sm:text-right">FCP (%)</Label>
+                  <Input value={`${fcpPercent || ''}`} onChange={(e)=>setFcpPercent(formatPercent(e.target.value))} placeholder="2,00" disabled={!editEnabled} className="text-xs sm:text-sm" />
                 </div>
-                <div className="grid grid-cols-2 items-center gap-4">
-                  <Label className="text-right">MVA (%)</Label>
-                  <Input value={`${mvaPercent || ''}`} onChange={(e)=>setMvaPercent(formatPercent(e.target.value))} placeholder="40,00" disabled={!editEnabled} />
+                <div className="grid grid-cols-1 sm:grid-cols-2 items-start sm:items-center gap-2 sm:gap-4">
+                  <Label className="text-xs sm:text-right">MVA (%)</Label>
+                  <Input value={`${mvaPercent || ''}`} onChange={(e)=>setMvaPercent(formatPercent(e.target.value))} placeholder="40,00" disabled={!editEnabled} className="text-xs sm:text-sm" />
                 </div>
-                <div className="grid grid-cols-2 items-center gap-4">
-                  <Label className="text-right">Base Reduzida (%)</Label>
-                  <Input value={`${baseReduzidaPercent || ''}`} onChange={(e)=>setBaseReduzidaPercent(formatPercent(e.target.value))} placeholder="0,00" disabled={!editEnabled} />
+                <div className="grid grid-cols-1 sm:grid-cols-2 items-start sm:items-center gap-2 sm:gap-4">
+                  <Label className="text-xs sm:text-right">Base Reduzida (%)</Label>
+                  <Input value={`${baseReduzidaPercent || ''}`} onChange={(e)=>setBaseReduzidaPercent(formatPercent(e.target.value))} placeholder="0,00" disabled={!editEnabled} className="text-xs sm:text-sm" />
                 </div>
               </div>
 
               {/* NCM/CEST */}
-              <div className="grid grid-cols-3 gap-6">
-                <div className="grid grid-cols-2 items-center gap-4">
-                  <Label className="text-right">NCM</Label>
-                  <Input value={ncm} onChange={(e)=>setNcm(formatNCM(e.target.value))} placeholder="00000000" disabled={!editEnabled} />
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-6">
+                <div className="grid grid-cols-1 sm:grid-cols-2 items-start sm:items-center gap-2 sm:gap-4">
+                  <Label className="text-xs sm:text-right">NCM</Label>
+                  <Input value={ncm} onChange={(e)=>setNcm(formatNCM(e.target.value))} placeholder="00000000" disabled={!editEnabled} className="text-xs sm:text-sm" />
                 </div>
-                <div className="grid grid-cols-2 items-center gap-4">
-                  <Label className="text-right">CEST</Label>
-                  <Input value={cest} onChange={(e)=>setCest(formatCEST(e.target.value))} placeholder="0000000" disabled={!editEnabled} />
+                <div className="grid grid-cols-1 sm:grid-cols-2 items-start sm:items-center gap-2 sm:gap-4">
+                  <Label className="text-xs sm:text-right">CEST</Label>
+                  <Input value={cest} onChange={(e)=>setCest(formatCEST(e.target.value))} placeholder="0000000" disabled={!editEnabled} className="text-xs sm:text-sm" />
                 </div>
-                <div className="grid grid-cols-2 items-center gap-4 col-span-3 sm:col-span-1">
-                  <Label className="text-right">Descrição NCM</Label>
-                  <Input value={ncmDescription} onChange={(e)=>setNcmDescription(e.target.value)} placeholder="Descrição do NCM" disabled={!editEnabled} />
+                <div className="grid grid-cols-1 sm:grid-cols-2 items-start sm:items-center gap-2 sm:gap-4 sm:col-span-1">
+                  <Label className="text-xs sm:text-right">Descrição NCM</Label>
+                  <Input value={ncmDescription} onChange={(e)=>setNcmDescription(e.target.value)} placeholder="Descrição do NCM" disabled={!editEnabled} className="text-xs sm:text-sm" />
                 </div>
               </div>
             </TabsContent>
@@ -1005,25 +1009,25 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
                 </div>
               )}
               
-              <div className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor="barcode2" className="text-right">Código de Barras</Label>
-                <Input id="barcode2" value={barcode} onChange={(e)=>setBarcode(formatEAN13(e.target.value))} className="col-span-3" placeholder="EAN-13" disabled={!editEnabled} />
+              <div className="grid grid-cols-1 sm:grid-cols-4 items-start sm:items-center gap-2 sm:gap-4">
+                <Label htmlFor="barcode2" className="text-xs sm:text-right">Código de Barras</Label>
+                <Input id="barcode2" value={barcode} onChange={(e)=>setBarcode(formatEAN13(e.target.value))} className="sm:col-span-3 text-xs sm:text-sm" placeholder="EAN-13" disabled={!editEnabled} />
               </div>
-              <div className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor="barcodeBox" className="text-right">Código Barras (Caixa)</Label>
-                <Input id="barcodeBox" value={barcodeBox} onChange={(e)=>setBarcodeBox(formatEAN13(e.target.value))} className="col-span-3" placeholder="EAN-13 da caixa" disabled={!editEnabled} />
+              <div className="grid grid-cols-1 sm:grid-cols-4 items-start sm:items-center gap-2 sm:gap-4">
+                <Label htmlFor="barcodeBox" className="text-xs sm:text-right">Código Barras (Caixa)</Label>
+                <Input id="barcodeBox" value={barcodeBox} onChange={(e)=>setBarcodeBox(formatEAN13(e.target.value))} className="sm:col-span-3 text-xs sm:text-sm" placeholder="EAN-13 da caixa" disabled={!editEnabled} />
               </div>
-              <div className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor="reference" className="text-right">Referência</Label>
-                <Input id="reference" value={reference} onChange={(e)=>setReference(e.target.value)} className="col-span-3" placeholder="Ex.: REF-123" disabled={!editEnabled} />
+              <div className="grid grid-cols-1 sm:grid-cols-4 items-start sm:items-center gap-2 sm:gap-4">
+                <Label htmlFor="reference" className="text-xs sm:text-right">Referência</Label>
+                <Input id="reference" value={reference} onChange={(e)=>setReference(e.target.value)} className="sm:col-span-3 text-xs sm:text-sm" placeholder="Ex.: REF-123" disabled={!editEnabled} />
               </div>
-              <div className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor="brand" className="text-right">Marca</Label>
-                <Input id="brand" value={brand} onChange={(e)=>setBrand(e.target.value)} className="col-span-3" placeholder="Ex.: Nike" disabled={!editEnabled} />
+              <div className="grid grid-cols-1 sm:grid-cols-4 items-start sm:items-center gap-2 sm:gap-4">
+                <Label htmlFor="brand" className="text-xs sm:text-right">Marca</Label>
+                <Input id="brand" value={brand} onChange={(e)=>setBrand(e.target.value)} className="sm:col-span-3 text-xs sm:text-sm" placeholder="Ex.: Nike" disabled={!editEnabled} />
               </div>
-              <div className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor="group" className="text-right">Grupo</Label>
-                <Input id="group" value={group} onChange={(e)=>setGroup(e.target.value)} className="col-span-3" placeholder="Ex.: Calçados" disabled={!editEnabled} />
+              <div className="grid grid-cols-1 sm:grid-cols-4 items-start sm:items-center gap-2 sm:gap-4">
+                <Label htmlFor="group" className="text-xs sm:text-right">Grupo</Label>
+                <Input id="group" value={group} onChange={(e)=>setGroup(e.target.value)} className="sm:col-span-3 text-xs sm:text-sm" placeholder="Ex.: Calçados" disabled={!editEnabled} />
               </div>
             </TabsContent>
 
@@ -1161,7 +1165,7 @@ function DismemberAndMergeModal({ open, onOpenChange, product, currentPrice, all
   
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[650px] max-h-[90vh] overflow-y-auto">
+      <DialogContent className="w-[95vw] sm:max-w-[650px] max-h-[85vh] flex flex-col overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Desmembrar e Unir Produto</DialogTitle>
           <DialogDescription>
@@ -1374,7 +1378,7 @@ function CategoryManagerModal({ open, onOpenChange, categories, onAddCategory, o
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent>
+            <DialogContent className="w-[90vw] sm:max-w-[480px]">
                 <DialogHeader>
                     <DialogTitle>Gerenciar Categorias</DialogTitle>
                     <DialogDescription>Adicione ou remova categorias de produtos.</DialogDescription>
@@ -1410,6 +1414,7 @@ function ProdutosPage() {
     const location = useLocation();
     const [products, setProducts] = useState(initialProducts);
     const [categories, setCategories] = useState(initialCategories);
+    const [selectedProductIds, setSelectedProductIds] = useState([]);
 
     const [viewMode, setViewMode] = useState('list');
     const [showStats, setShowStats] = useState(true);
@@ -1432,7 +1437,65 @@ function ProdutosPage() {
     const lastLoadTsRef = useRef(0);
     const lastSizeRef = useRef(0);
     const retryOnceRef = useRef(false);
+    const [showConfig, setShowConfig] = useState(false);
+    const [listMode, setListMode] = useState('paged');
+    const usePagination = listMode === 'paged';
+    const [page, setPage] = useState(1);
+    const [pageSize] = useState(100);
+    const [totalCount, setTotalCount] = useState(0);
     useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
+
+    // Carregar configurações iniciais (modo de listagem, estatísticas) de localStorage
+    useEffect(() => {
+      try {
+        const raw = localStorage.getItem(PRODUTOS_SETTINGS_KEY);
+        if (!raw) return;
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object') {
+          if (parsed.listMode === 'paged' || parsed.listMode === 'all') {
+            setListMode(parsed.listMode);
+          }
+          if (typeof parsed.showStats === 'boolean') {
+            setShowStats(parsed.showStats);
+          }
+        }
+      } catch {
+        // ignora erros de leitura
+      }
+    }, []);
+
+    // Carregar configurações do banco (sobrepõe localStorage)
+    useEffect(() => {
+      const loadFromDb = async () => {
+        if (!userProfile?.codigo_empresa || !userProfile?.id && !userProfile?.user_id) return;
+        const userId = userProfile.id || userProfile.user_id;
+        const scope = `produtos:${userProfile.codigo_empresa}`;
+        const settings = await getUserUISettings({ userId, scope });
+        if (!settings) return;
+        if (settings.listMode === 'paged' || settings.listMode === 'all') {
+          setListMode(settings.listMode);
+        }
+        if (typeof settings.showStats === 'boolean') {
+          setShowStats(settings.showStats);
+        }
+      };
+      loadFromDb();
+    }, [userProfile?.codigo_empresa, userProfile?.id]);
+
+    // Persistir configurações sempre que mudarem
+    useEffect(() => {
+      try {
+        const payload = { listMode, showStats };
+        localStorage.setItem(PRODUTOS_SETTINGS_KEY, JSON.stringify(payload));
+      } catch {
+        // ignore
+      }
+      if (userProfile?.codigo_empresa && (userProfile?.id || userProfile?.user_id)) {
+        const userId = userProfile.id || userProfile.user_id;
+        const scope = `produtos:${userProfile.codigo_empresa}`;
+        saveUserUISettings({ userId, scope, settings: { listMode, showStats } });
+      }
+    }, [listMode, showStats, userProfile?.codigo_empresa, userProfile?.id]);
 
     const refetchProducts = async () => {
       const codigoEmpresa = userProfile?.codigo_empresa || null;
@@ -1451,11 +1514,24 @@ function ProdutosPage() {
       }, 2000);
       try {
         const includeInactive = filters.status === 'all' || filters.status === 'inactive';
-        console.log('[Produtos] refetchProducts - Filtro status:', filters.status, 'includeInactive:', includeInactive);
-        const data = await listProducts({ includeInactive, search: searchTerm, codigoEmpresa });
-        if (!mountedRef.current) return;
-        console.log('[Produtos] refetchProducts - Produtos carregados:', data.length);
-        setProducts(data);
+        let data = [];
+        if (usePagination) {
+          console.log('[Produtos] refetchProducts - modo paginado - Filtro status:', filters.status, 'includeInactive:', includeInactive, 'page:', page, 'pageSize:', pageSize);
+          const result = await listProductsPaged({ includeInactive, search: searchTerm, codigoEmpresa, page, pageSize });
+          if (!mountedRef.current) return;
+          data = result?.data || [];
+          const count = result?.count || 0;
+          console.log('[Produtos] refetchProducts - Produtos carregados (paginado):', data.length, 'de', count);
+          setProducts(data);
+          setTotalCount(count);
+        } else {
+          console.log('[Produtos] refetchProducts - modo TODOS - Filtro status:', filters.status, 'includeInactive:', includeInactive);
+          data = await listProducts({ includeInactive, search: searchTerm, codigoEmpresa });
+          if (!mountedRef.current) return;
+          console.log('[Produtos] refetchProducts - Produtos carregados (todos):', data.length);
+          setProducts(data);
+          setTotalCount(data.length);
+        }
         try { localStorage.setItem(cacheKey, JSON.stringify(data)); } catch {}
         lastSizeRef.current = data.length;
         lastLoadTsRef.current = Date.now();
@@ -1528,6 +1604,7 @@ function ProdutosPage() {
             setCategories(cats);
             try { localStorage.setItem(`produtos:cats:${userProfile.codigo_empresa}`, JSON.stringify(cats)); } catch {}
           } catch (err) {
+            // eslint-disable-next-line no-console
             console.error('[Categorias] load on mount:error', err);
           }
         })();
@@ -1560,6 +1637,7 @@ function ProdutosPage() {
 
     // Quando o filtro de status muda, refetch para incluir/ocultar inativos no backend
     useEffect(() => {
+      setPage(1);
       if (authReady) refetchProducts();
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [filters.status, authReady]);
@@ -1567,11 +1645,18 @@ function ProdutosPage() {
     // Debounce da busca
     useEffect(() => {
       const t = setTimeout(() => {
+        setPage(1);
         if (authReady) refetchProducts();
       }, 300);
       return () => clearTimeout(t);
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [searchTerm, authReady]);
+
+    useEffect(() => {
+      setPage(1);
+      if (authReady) refetchProducts();
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [listMode, authReady]);
 
     // Trazer "mais vendido do dia" do backend
     const [mostSoldToday, setMostSoldToday] = useState('N/A');
@@ -1603,6 +1688,7 @@ function ProdutosPage() {
     const [salesTo, setSalesTo] = useState(() => new Date());
     const [salesLoading, setSalesLoading] = useState(false);
     const [salesItems, setSalesItems] = useState([]); // [{id,name,total}]
+    const [isMobileFilterOpen, setIsMobileFilterOpen] = useState(false);
 
     const loadSales = async () => {
       try {
@@ -1652,6 +1738,13 @@ function ProdutosPage() {
         });
     }, [products, activeFilter, filters]);
 
+    // Helper: produto é considerado "Novo" se dataImportacao for até 7 dias atrás
+    const isProductNew = (produto) => {
+      if (!produto?.dataImportacao) return false;
+      const daysSince = Math.floor((new Date() - produto.dataImportacao) / (1000 * 60 * 60 * 24));
+      return daysSince <= 7;
+    };
+
     // Ordena os produtos filtrados conforme cabeçalho clicado
     const sortedProducts = useMemo(() => {
       const arr = [...filteredProducts];
@@ -1686,6 +1779,12 @@ function ProdutosPage() {
       });
       return arr;
     }, [filteredProducts, sort]);
+
+    const totalPages = useMemo(() => {
+      if (!pageSize) return 1;
+      const pages = Math.ceil((totalCount || 0) / pageSize);
+      return pages > 0 ? pages : 1;
+    }, [totalCount, pageSize]);
 
     const toggleSort = (by) => {
       setSort(prev => prev.by === by ? { by, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { by, dir: 'asc' });
@@ -1726,6 +1825,77 @@ function ProdutosPage() {
         // eslint-disable-next-line no-console
         console.error('[Produtos] export:error', err);
         const m = mapDbErrorToMessage(err, { action: 'export' });
+        toast({ title: m.title, description: m.description, variant: 'destructive' });
+      }
+    };
+
+    // ===== Seleção múltipla & ações em massa =====
+    const handleToggleSelectProduct = (id) => {
+      setSelectedProductIds((prev) =>
+        prev.includes(id) ? prev.filter((pid) => pid !== id) : [...prev, id]
+      );
+    };
+
+    const handleSelectAllFiltered = () => {
+      const filteredIds = sortedProducts.map((p) => p.id);
+      if (!filteredIds.length) return;
+      setSelectedProductIds(filteredIds);
+    };
+
+    const handleClearSelection = () => {
+      setSelectedProductIds([]);
+    };
+
+    const handleToggleSelectAllVisible = (checked) => {
+      if (checked) {
+        handleSelectAllFiltered();
+      } else {
+        handleClearSelection();
+      }
+    };
+
+    const selectedProducts = useMemo(
+      () => sortedProducts.filter((p) => selectedProductIds.includes(p.id)),
+      [sortedProducts, selectedProductIds]
+    );
+
+    const hasNewSelected = useMemo(
+      () => selectedProducts.some(isProductNew),
+      [selectedProducts]
+    );
+
+    const handleBulkStatusChange = async (status) => {
+      if (!selectedProductIds.length) return;
+      try {
+        await bulkUpdateProductStatus({ ids: selectedProductIds, status });
+        await refetchProducts();
+        handleClearSelection();
+        toast({
+          title: status === 'inactive' ? 'Produtos inativados' : 'Produtos atualizados',
+          description: `${selectedProductIds.length} produto(s) atualizado(s).`,
+          variant: 'success',
+          className: 'bg-amber-500 text-black shadow-xl',
+        });
+      } catch (err) {
+        const m = mapDbErrorToMessage(err, { action: 'save' });
+        toast({ title: m.title, description: m.description, variant: 'destructive' });
+      }
+    };
+
+    const handleBulkClearNewFlag = async () => {
+      if (!selectedProductIds.length || !hasNewSelected) return;
+      try {
+        await bulkClearNewFlag({ ids: selectedProductIds });
+        await refetchProducts();
+        handleClearSelection();
+        toast({
+          title: 'Novos removidos',
+          description: 'A etiqueta de novo foi removida dos produtos selecionados.',
+          variant: 'success',
+          className: 'bg-amber-500 text-black shadow-xl',
+        });
+      } catch (err) {
+        const m = mapDbErrorToMessage(err, { action: 'save' });
         toast({ title: m.title, description: m.description, variant: 'destructive' });
       }
     };
@@ -1882,29 +2052,104 @@ function ProdutosPage() {
     return (
       <>
         <motion.div variants={pageVariants} initial="hidden" animate="visible" className="flex flex-col">
-            <motion.div variants={itemVariants} className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
-                <div>
-                    <h1 className="text-3xl font-black text-text-primary tracking-tighter">Controle de Produtos</h1>
-                    <p className="text-text-secondary">Controle total sobre seu inventário e estoque.</p>
-                </div>
-                <div className="flex items-center gap-2 flex-wrap">
+	        <motion.div variants={itemVariants} className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
+	            <div className="flex items-center justify-between gap-3">
+	                <div>
+	                    <h1 className="text-3xl font-black text-text-primary tracking-tighter">Controle de Produtos</h1>
+	                    <p className="text-text-secondary hidden md:block">Controle total sobre seu inventário e estoque.</p>
+	                </div>
+	                <Button
+	                  type="button"
+	                  variant="outline"
+	                  size="icon"
+	                  className="h-9 w-9 rounded-full hidden md:flex items-center justify-center"
+	                  onClick={() => setShowConfig(true)}
+	                  aria-label="Configurações da aba"
+	                  title="Configurações da aba"
+	                >
+	                  <Settings className="h-4 w-4" />
+	                </Button>
+	            </div>
+
+                {/* Ações Desktop */}
+                <div className="hidden md:flex items-center gap-2 flex-wrap">
                     <Button variant="outline" size="icon" onClick={() => setShowStats(s => !s)} title={showStats ? 'Ocultar resumo' : 'Mostrar resumo'} aria-label={showStats ? 'Ocultar resumo' : 'Mostrar resumo'}>
                       {showStats ? <EyeOff className="h-4 w-4"/> : <Eye className="h-4 w-4"/>}
                     </Button>
-                    <Button variant="outline" onClick={handleExport} className="hidden sm:flex"><Download className="mr-2 h-4 w-4" /> Exportar</Button>
-                    <Button variant="outline" onClick={handleExport} className="sm:hidden"><Download className="h-4 w-4 mr-1" /> CSV</Button>
-                    <Button variant="secondary" onClick={() => setIsXmlImportOpen(true)} className="hidden sm:flex"><FileText className="mr-2 h-4 w-4" /> Importar XML</Button>
-                    <Button variant="secondary" onClick={() => setIsXmlImportOpen(true)} className="sm:hidden"><FileText className="h-4 w-4 mr-1" /> XML</Button>
-                    <Button onClick={handleAddNew} className="hidden sm:flex"><Plus className="mr-2 h-4 w-4" /> Novo Produto</Button>
-                    <Button onClick={handleAddNew} className="sm:hidden"><Plus className="h-4 w-4 mr-1" /> Produto</Button>
+                    <Button variant="outline" onClick={handleExport}><Download className="mr-2 h-4 w-4" /> Exportar</Button>
+                    <Button variant="secondary" onClick={() => setIsXmlImportOpen(true)}><FileText className="mr-2 h-4 w-4" /> Importar XML</Button>
+                    <Button onClick={handleAddNew}><Plus className="mr-2 h-4 w-4" /> Novo Produto</Button>
+                </div>
+
+                {/* Ações Mobile */}
+                <div className="mt-2 flex md:hidden items-center gap-2">
+                  <Button
+                    variant="outline"
+                    className="h-9 px-3 rounded-xl flex items-center gap-1 text-xs"
+                    onClick={handleExport}
+                    title="Exportar CSV"
+                    aria-label="Exportar CSV"
+                  >
+                    <Download className="h-4 w-4" />
+                    <span>CSV</span>
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    className="h-9 px-3 rounded-xl flex items-center gap-1 text-xs"
+                    onClick={() => setIsXmlImportOpen(true)}
+                    title="Importar XML"
+                    aria-label="Importar XML"
+                  >
+                    <FileText className="h-4 w-4" />
+                    <span>XML</span>
+                  </Button>
+                  <Button
+                    className="h-9 px-3 rounded-xl flex items-center gap-1 text-xs"
+                    onClick={handleAddNew}
+                    title="Novo Produto"
+                    aria-label="Novo Produto"
+                  >
+                    <Plus className="h-4 w-4" />
+                    <span>Prod</span>
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="h-9 px-3 rounded-xl flex items-center gap-1 text-xs"
+                    onClick={() => setIsCategoryModalOpen(true)}
+                    title="Gerenciar categorias"
+                    aria-label="Gerenciar categorias"
+                  >
+                    <Tag className="h-4 w-4" />
+                    <span>Cat.</span>
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-9 w-9 rounded-xl flex items-center justify-center ml-auto"
+                    onClick={() => setShowConfig(true)}
+                    title="Configurações da aba"
+                    aria-label="Configurações da aba"
+                  >
+                    <Settings className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-10 w-10 rounded-xl flex items-center justify-center ml-auto"
+                    onClick={() => setShowStats(s => !s)}
+                    title={showStats ? 'Ocultar resumo' : 'Mostrar resumo'}
+                    aria-label={showStats ? 'Ocultar resumo' : 'Mostrar resumo'}
+                  >
+                    {showStats ? <EyeOff className="h-5 w-5"/> : <Eye className="h-5 w-5"/>}
+                  </Button>
                 </div>
             </motion.div>
 
             {showStats && (
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
-                  <StatCard icon={Trophy} title="Mais Vendido (Dia)" value={stats.mostSold} subtitle="Produto com mais saídas hoje" color="text-brand" onClick={handleOpenSalesModal} />
-                  <StatCard icon={AlertTriangle} title="Estoque Baixo" value={stats.lowStock} subtitle="Produtos precisando de reposição" color="text-warning" onClick={() => handleStatCardClick('low_stock')} isActive={activeFilter === 'low_stock'} />
-                  <StatCard icon={CalendarX} title="Vencidos" value={stats.expired} subtitle="Produtos fora da data de validade" color="text-danger" onClick={() => handleStatCardClick('expired')} isActive={activeFilter === 'expired'} />
+              <div className="grid grid-cols-3 gap-3 md:gap-6 mb-6">
+                  <StatCard icon={Trophy} title={<><span className="hidden md:inline">Mais Vendido (Dia)</span><span className="md:hidden">+ vendidos</span></>} value={stats.mostSold} subtitle="Produto com mais saídas hoje" color="text-brand" onClick={handleOpenSalesModal} />
+                  <StatCard icon={AlertTriangle} title={<><span className="hidden md:inline">Estoque Baixo</span><span className="md:hidden">Est. baixo</span></>} value={stats.lowStock} subtitle="Produtos precisando de reposição" color="text-warning" onClick={() => handleStatCardClick('low_stock')} isActive={activeFilter === 'low_stock'} />
+                  <StatCard icon={CalendarX} title={<><span className="hidden md:inline">Vendidos</span><span className="md:hidden">Vencidos</span></>} value={stats.expired} subtitle="Produtos fora da data de validade" color="text-danger" onClick={() => handleStatCardClick('expired')} isActive={activeFilter === 'expired'} />
               </div>
             )}
 
@@ -1997,29 +2242,93 @@ function ProdutosPage() {
               </DialogContent>
             </Dialog>
 
+            <Dialog open={showConfig} onOpenChange={setShowConfig}>
+              <DialogContent className="max-w-2xl">
+                <DialogHeader>
+                  <DialogTitle>Configurações da aba</DialogTitle>
+                </DialogHeader>
+                <div className="space-y-3">
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-medium text-text-muted">Modo de listagem</label>
+                    <Select value={listMode} onValueChange={setListMode}>
+                      <SelectTrigger className="w-[200px] h-8 text-xs">
+                        <SelectValue placeholder="Paginado" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="paged">Paginado (100 por página)</SelectItem>
+                        <SelectItem value="all">Todos (sem paginação)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="flex items-center justify-between pt-1">
+                    <div className="flex items-center gap-2">
+                      <Checkbox
+                        id="produtos-show-stats"
+                        checked={showStats}
+                        onCheckedChange={setShowStats}
+                      />
+                      <label
+                        htmlFor="produtos-show-stats"
+                        className="text-xs font-medium text-text-primary"
+                      >
+                        Mostrar cards de resumo no topo
+                      </label>
+                    </div>
+                  </div>
+                </div>
+                <DialogFooter>
+                  <DialogClose asChild>
+                    <Button type="button" variant="secondary">Fechar</Button>
+                  </DialogClose>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+
             <motion.div variants={itemVariants} className="bg-surface rounded-lg border border-border flex flex-col">
                 <div className="p-3 pb-4 sm:p-4 border-b border-border space-y-3 flex-shrink-0">
-                    {/* Busca */}
-                    <div className="relative w-full">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted" />
-                        <Input placeholder="Buscar por nome ou código..." className="pl-9 text-sm" value={searchTerm} onChange={(e)=>setSearchTerm(e.target.value)} />
+                    {/* Busca + botão filtro (mobile) */}
+                    <div className="flex items-center gap-2">
+                      <div className="relative flex-1">
+                          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted" />
+                          <Input
+                            placeholder="Buscar por nome ou código..."
+                            className="pl-9 text-sm"
+                            value={searchTerm}
+                            onChange={(e)=>setSearchTerm(e.target.value)}
+                          />
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        className="h-9 w-9 rounded-full flex md:hidden items-center justify-center"
+                        onClick={() => setIsMobileFilterOpen(true)}
+                        aria-label="Abrir filtros"
+                        title="Filtros"
+                      >
+                        <Filter className="h-4 w-4" />
+                      </Button>
                     </div>
-                    
-                    {/* Filtros em Grid 2x2 no mobile */}
-                    <div className="grid grid-cols-2 sm:flex sm:flex-row sm:items-center gap-2">
+
+                    {/* Filtros completos - apenas desktop/tablet */}
+                    <div className="hidden md:flex w-full items-center gap-3">
+                      <div className="flex-1 min-w-[120px]">
                         <Select value={filters.type} onValueChange={v => handleFilterChange('type', v)}>
-                          <SelectTrigger className="text-xs sm:text-sm">
+                          <SelectTrigger className="w-full text-xs sm:text-sm bg-surface-2 border border-border rounded-full px-3">
                             <SelectValue/>
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="all">Todos Tipos</SelectItem>
+                            <SelectItem value="all">Tipos</SelectItem>
                             <SelectItem value="Venda">Venda</SelectItem>
                             <SelectItem value="Uso Interno">Uso Interno</SelectItem>
                           </SelectContent>
                         </Select>
-                        
+                      </div>
+
+                      <div className="flex-1 min-w-[140px]">
                         <Select value={filters.category} onValueChange={v => handleFilterChange('category', v)}>
-                          <SelectTrigger className="text-xs sm:text-sm">
+                          <SelectTrigger className="w-full text-xs sm:text-sm bg-surface-2 border border-border rounded-full px-3">
                             <SelectValue/>
                           </SelectTrigger>
                           <SelectContent>
@@ -2027,34 +2336,173 @@ function ProdutosPage() {
                             {categories.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
                           </SelectContent>
                         </Select>
-                        
+                      </div>
+
+                      <div className="flex-1 max-w-[180px]">
                         <Select value={filters.status} onValueChange={v => handleFilterChange('status', v)}>
-                          <SelectTrigger className="text-xs sm:text-sm">
+                          <SelectTrigger className="w-full text-xs sm:text-sm bg-surface-2 border border-border rounded-full px-3">
                             <SelectValue/>
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="all">Todos Status</SelectItem>
+                            <SelectItem value="all">Status</SelectItem>
                             <SelectItem value="active">Ativo</SelectItem>
                             <SelectItem value="low_stock">Estoque Baixo</SelectItem>
                             <SelectItem value="inactive">Inativo</SelectItem>
                           </SelectContent>
                         </Select>
-                        
+                      </div>
+
+                      <div className="flex-1 flex justify-end gap-2 min-w-[160px]">
                         <Button 
-                          variant={filters.newOnly ? "default" : "outline"} 
+                          variant="outline"
                           onClick={() => handleFilterChange('newOnly', !filters.newOnly)} 
-                          className="text-xs sm:text-sm" 
+                          className={cn(
+                            "text-xs sm:text-sm rounded-full px-3 border border-border bg-surface-2 hover:bg-surface flex items-center gap-1 whitespace-nowrap",
+                            filters.newOnly && "bg-amber-500 text-black border-amber-500 hover:bg-amber-400"
+                          )}
                           size="sm"
                         >
-                          <span className="mr-1 sm:mr-2">✨</span> Novos
+                          <span className="mr-1">✨</span>
+                          <span>Novos</span>
                         </Button>
                         
-                        <Button variant="outline" onClick={() => setIsCategoryModalOpen(true)} className="text-xs sm:text-sm" size="sm">
-                          <Tag className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2"/> Categorias
+                        <Button
+                          variant="outline"
+                          onClick={() => setIsCategoryModalOpen(true)}
+                          className="text-xs sm:text-sm rounded-full px-3 border border-border bg-surface-2 hover:bg-surface flex items-center gap-1 whitespace-nowrap"
+                          size="sm"
+                        >
+                          <Tag className="h-3 w-3 sm:h-4 sm:w-4"/>
+                          <span>Categorias</span>
                         </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon"
+                          className="h-9 w-9 rounded-full flex items-center justify-center"
+                          onClick={() => setShowConfig((v) => !v)}
+                          aria-label="Configurações da aba"
+                          title="Configurações da aba"
+                        >
+                          <Settings className="h-4 w-4" />
+                        </Button>
+                      </div>
                     </div>
                 </div>
-                
+
+                {selectedProductIds.length > 0 && (
+                  <>
+                    {/* Barra MOBILE: minimalista */}
+                    <div className="px-3 sm:px-4 py-2.5 border-b border-border flex md:hidden items-center gap-2 text-xs">
+                      <span className="font-medium mr-2">
+                        {selectedProductIds.length} sel.
+                      </span>
+                      <button
+                        type="button"
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-border bg-surface-2"
+                        onClick={() => {
+                          const allVisibleSelected =
+                            sortedProducts.length > 0 &&
+                            sortedProducts.every(p => selectedProductIds.includes(p.id));
+                          handleToggleSelectAllVisible(!allVisibleSelected);
+                        }}
+                      >
+                        <Checkbox
+                          checked={sortedProducts.length > 0 && sortedProducts.every(p => selectedProductIds.includes(p.id))}
+                          className="h-4 w-4"
+                        />
+                        <span>Todos</span>
+                      </button>
+                      <div className="flex items-center gap-1.5 ml-auto">
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          className="h-8 w-8"
+                          onClick={() => handleBulkStatusChange('active')}
+                        >
+                          <CheckCircle className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          className="h-8 w-8 text-danger border-danger/60 hover:bg-danger/10"
+                          onClick={() => handleBulkStatusChange('inactive')}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                        {hasNewSelected && (
+                          <Button
+                            variant="outline"
+                            size="icon"
+                            className="h-8 w-8 border-amber-500/70 text-amber-700 hover:bg-amber-500/10"
+                            onClick={handleBulkClearNewFlag}
+                          >
+                            <Tag className="h-4 w-4" />
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Barra DESKTOP: ações em massa com ícones */}
+                    <div className="hidden md:flex px-4 py-2 border-b border-border items-center gap-3 text-xs">
+                      <span className="font-medium text-text-secondary whitespace-nowrap">
+                        {selectedProductIds.length === 0
+                          ? 'Nenhum item selecionado'
+                          : `${selectedProductIds.length} produto${selectedProductIds.length > 1 ? 's' : ''} selecionado${selectedProductIds.length > 1 ? 's' : ''}`}
+                      </span>
+                      <div className="flex flex-1 flex-wrap items-center justify-end gap-2">
+                        <Button
+                          variant="outline"
+                          size="xs"
+                          className="h-7 px-3 rounded-full border border-border bg-surface-2 hover:bg-surface flex items-center gap-1"
+                          onClick={handleSelectAllFiltered}
+                        >
+                          <CheckCircle className="h-3 w-3" />
+                          <span>Marcar filtrados</span>
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="xs"
+                          className="h-7 px-3 rounded-full border border-border bg-surface-2 hover:bg-surface flex items-center gap-1"
+                          onClick={handleClearSelection}
+                        >
+                          <Filter className="h-3 w-3" />
+                          <span>Limpar seleção</span>
+                        </Button>
+                        <Button
+                          size="xs"
+                          variant="outline"
+                          className="h-7 px-3 rounded-full border-emerald-500/70 text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20 flex items-center gap-1"
+                          onClick={() => handleBulkStatusChange('active')}
+                        >
+                          <CheckCircle className="h-3 w-3" />
+                          <span>Ativar itens</span>
+                        </Button>
+                        <Button
+                          size="xs"
+                          variant="outline"
+                          className="h-7 px-3 rounded-full text-danger border-danger/60 hover:bg-danger/10 flex items-center gap-1"
+                          onClick={() => handleBulkStatusChange('inactive')}
+                        >
+                          <EyeOff className="h-3 w-3" />
+                          <span>Desativar itens</span>
+                        </Button>
+                        {hasNewSelected && (
+                          <Button
+                            size="xs"
+                            variant="outline"
+                            className="h-7 px-3 rounded-full border-amber-500/70 text-amber-500 hover:bg-amber-500/10 flex items-center gap-1"
+                            onClick={handleBulkClearNewFlag}
+                          >
+                            <Tag className="h-3 w-3" />
+                            <span>Limpar tag "Novo"</span>
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  </>
+                )}
+
                 <div>
                     {sortedProducts.length === 0 ? (
                       <div className="p-10 text-center text-text-secondary">
@@ -2064,12 +2512,34 @@ function ProdutosPage() {
                     ) : (
                       <>
                         {/* Layout Mobile - Cards */}
-                        <div className="md:hidden p-4 space-y-3">
-                          {sortedProducts.map(p => (
-                            <div key={p.id} className="rounded-lg border border-border bg-surface p-4 space-y-3">
-                              {/* Header: Nome + Status */}
-                              <div className="flex items-start justify-between gap-3">
-                                <div className="flex-1 min-w-0">
+                        <div className="md:hidden p-3 space-y-3">
+                          {sortedProducts.map(p => {
+                            const isSelected = selectedProductIds.includes(p.id);
+                            return (
+                              <div
+                                key={p.id}
+                                className={cn(
+                                  "rounded-lg border bg-surface p-4 space-y-3 cursor-pointer",
+                                  isSelected ? "border-brand/70 bg-brand/5" : "border-border"
+                                )}
+                                onClick={() => handleEdit(p)}
+                              >
+                                {/* Header: seleção + Nome + Status */}
+                                <div className="flex items-start justify-between gap-3">
+                                  <button
+                                    type="button"
+                                    className="pt-1 pr-2 -ml-1 flex items-center justify-center w-9 h-9"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleToggleSelectProduct(p.id);
+                                    }}
+                                  >
+                                    <Checkbox
+                                      checked={isSelected}
+                                      className="h-5 w-5 border-2"
+                                    />
+                                  </button>
+                                  <div className="flex-1 min-w-0">
                                   <div className="flex items-center gap-2">
                                     <h3 className="font-semibold text-base text-text-primary truncate" title={p.name}>{p.name}</h3>
                                     {p.dataImportacao && (() => {
@@ -2092,50 +2562,72 @@ function ProdutosPage() {
                                 )}>
                                   {p.status === 'active' ? 'Ativo' : p.status === 'low_stock' ? 'Estoque Baixo' : 'Inativo'}
                                 </span>
-                              </div>
+                                </div>
 
-                              {/* Código */}
-                              {p.code && (
-                                <div>
-                                  <span className="text-xs text-text-muted">Código: </span>
-                                  <span className="text-sm font-mono">{p.code}</span>
-                                </div>
-                              )}
-
-                              {/* Grid de Informações */}
-                              <div className="grid grid-cols-2 gap-3">
-                                <div>
-                                  <span className="text-xs text-text-muted block mb-1">Preço</span>
-                                  <span className="text-sm font-bold text-text-primary">R$ {p.price.toFixed(2)}</span>
-                                </div>
-                                <div>
-                                  <span className="text-xs text-text-muted block mb-1">Estoque</span>
-                                  <span className="text-sm font-medium">{p.stock}</span>
-                                </div>
+                              {/* Linha compacta: Código • Preço • Estoque */}
+                              <div className="mt-2 flex items-center gap-2 text-xs text-text-muted">
+                                {p.code && (
+                                  <span className="flex items-center gap-1">
+                                    <span>Cód.</span>
+                                    <span className="font-mono text-text-primary text-xs">{p.code}</span>
+                                  </span>
+                                )}
+                                <span className="mx-1 text-text-muted">•</span>
+                                <span className="flex items-center gap-1">
+                                  <span>R$</span>
+                                  <span className="font-semibold text-text-primary">
+                                    {p.price.toFixed(2)}
+                                  </span>
+                                </span>
+                                <span className="mx-1 text-text-muted">•</span>
+                                <span className="flex items-center gap-1">
+                                  <span>Est.</span>
+                                  <span className="font-medium text-text-primary">{p.stock}</span>
+                                </span>
                                 {p.validade && (
-                                  <div className="col-span-2">
-                                    <span className="text-xs text-text-muted block mb-1">Validade</span>
-                                    <span className="text-sm font-medium">
+                                  <span className="mx-1 text-text-muted">•</span>
+                                )}
+                                {p.validade && (
+                                  <span className="flex items-center gap-1">
+                                    <span>Val.</span>
+                                    <span className="text-text-primary">
                                       {(() => {
                                         const d = p.validade instanceof Date ? p.validade : parseISO(String(p.validade));
-                                        return isNaN(d) ? '-' : format(d, 'dd/MM/yyyy');
+                                        return isNaN(d) ? '-' : format(d, 'dd/MM/yy');
                                       })()}
                                     </span>
-                                  </div>
+                                  </span>
                                 )}
-                              </div>
 
-                              {/* Botões de Ação */}
-                              <div className="flex gap-2 pt-2">
-                                <Button variant="outline" size="sm" onClick={() => handleEdit(p)} className="flex-1">
-                                  <Edit className="h-3 w-3 mr-1" /> Editar
-                                </Button>
-                                <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); handleAskDelete(p); }} className="text-danger hover:text-danger">
-                                  <Trash2 className="h-3 w-3" />
-                                </Button>
+                                {/* Botões de Ação (mobile) */}
+                                <div className="ml-auto flex items-center gap-1">
+                                  <Button
+                                    variant="outline"
+                                    size="icon"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleEdit(p);
+                                    }}
+                                    className="h-7 w-7"
+                                  >
+                                    <Edit className="h-3.5 w-3.5" />
+                                  </Button>
+                                  <Button
+                                    variant="outline"
+                                    size="icon"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleAskDelete(p);
+                                    }}
+                                    className="h-7 w-7 text-danger hover:text-danger"
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </Button>
+                                </div>
                               </div>
-                            </div>
-                          ))}
+                              </div>
+                            );
+                          })}
                         </div>
 
                         {/* Layout Desktop - Tabela */}
@@ -2143,6 +2635,12 @@ function ProdutosPage() {
                           <table className="w-full text-sm bg-surface table-fixed">
                             <thead className="bg-surface-2 text-text-secondary">
                                 <tr className="border-b border-border">
+                                    <th className="p-3 w-10 text-center">
+                                      <Checkbox
+                                        checked={sortedProducts.length > 0 && sortedProducts.every(p => selectedProductIds.includes(p.id))}
+                                        onCheckedChange={(checked) => handleToggleSelectAllVisible(!!checked)}
+                                      />
+                                    </th>
                                     <th className="p-3 text-left font-semibold select-none cursor-pointer whitespace-nowrap w-[110px]" onClick={() => toggleSort('code')}>
                                       Código {sort.by === 'code' ? (sort.dir === 'asc' ? '▲' : '▼') : ''}
                                     </th>
@@ -2162,6 +2660,12 @@ function ProdutosPage() {
                             <tbody className="text-text-primary divide-y divide-border">
                                 {sortedProducts.map(p => (
                                     <tr key={p.id} className="hover:bg-surface-2 transition-colors group cursor-pointer align-middle">
+                                        <td className="p-3 text-center align-middle">
+                                          <Checkbox
+                                            checked={selectedProductIds.includes(p.id)}
+                                            onCheckedChange={() => handleToggleSelectProduct(p.id)}
+                                          />
+                                        </td>
                                         <td className="p-3 font-mono text-sm text-text-secondary align-middle whitespace-nowrap" onClick={() => handleEdit(p)}>{p.code || '-'}</td>
                                         <td className="p-3 font-semibold align-middle text-text-primary whitespace-nowrap overflow-hidden text-ellipsis" onClick={() => handleEdit(p)} title={p.name}>
                                           <div className="flex items-center gap-2">
@@ -2208,6 +2712,34 @@ function ProdutosPage() {
                       </>
                     )}
                 </div>
+
+                {usePagination && (
+                  <div className="flex flex-col sm:flex-row items-center justify-between mt-4 gap-2 text-xs sm:text-sm text-text-muted px-3 sm:px-4 pb-3">
+                    <span>
+                      Página {page} de {totalPages} ({totalCount} produto(s))
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+                        disabled={page <= 1}
+                      >
+                        Anterior
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
+                        disabled={page >= totalPages}
+                      >
+                        Próxima
+                      </Button>
+                    </div>
+                  </div>
+                )}
             </motion.div>
         </motion.div>
 
@@ -2242,6 +2774,8 @@ function ProdutosPage() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        {/* Importação XML */}
         <XMLImportModal
             open={isXmlImportOpen}
             onOpenChange={setIsXmlImportOpen}
@@ -2252,6 +2786,94 @@ function ProdutosPage() {
               setIsXmlImportOpen(false);
             }}
         />
+
+        {/* Filtros Mobile */}
+        <Dialog open={isMobileFilterOpen} onOpenChange={setIsMobileFilterOpen}>
+          <DialogContent className="w-[90vw] sm:max-w-[420px]">
+            <DialogHeader>
+              <DialogTitle className="text-base">Filtros de Produtos</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-3 py-2 text-xs">
+              <div className="space-y-1">
+                <Label className="text-xs">Tipo</Label>
+                <Select value={filters.type} onValueChange={v => handleFilterChange('type', v)}>
+                  <SelectTrigger className="text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todos</SelectItem>
+                    <SelectItem value="Venda">Venda</SelectItem>
+                    <SelectItem value="Uso Interno">Uso Interno</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-1">
+                <Label className="text-xs">Categoria</Label>
+                <Select value={filters.category} onValueChange={v => handleFilterChange('category', v)}>
+                  <SelectTrigger className="text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todas</SelectItem>
+                    {categories.map(c => (
+                      <SelectItem key={c} value={c}>{c}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-1">
+                <Label className="text-xs">Status</Label>
+                <Select value={filters.status} onValueChange={v => handleFilterChange('status', v)}>
+                  <SelectTrigger className="text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todos</SelectItem>
+                    <SelectItem value="active">Ativo</SelectItem>
+                    <SelectItem value="low_stock">Estoque Baixo</SelectItem>
+                    <SelectItem value="inactive">Inativo</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="flex items-center gap-2 pt-1">
+                <Checkbox
+                  id="mobileNewOnly"
+                  checked={!!filters.newOnly}
+                  onCheckedChange={(v) => handleFilterChange('newOnly', !!v)}
+                />
+                <Label htmlFor="mobileNewOnly" className="text-xs flex items-center gap-1">
+                  <span>Somente Novos</span>
+                </Label>
+              </div>
+            </div>
+            <DialogFooter className="flex justify-between mt-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="text-xs"
+                onClick={() => {
+                  setFilters({ type: 'all', category: 'all', status: 'active', newOnly: false });
+                  setIsMobileFilterOpen(false);
+                }}
+              >
+                Limpar
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                className="text-xs"
+                onClick={() => setIsMobileFilterOpen(false)}
+              >
+                Aplicar
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
         <CategoryManagerModal 
             open={isCategoryModalOpen}
             onOpenChange={setIsCategoryModalOpen}

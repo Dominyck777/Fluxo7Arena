@@ -582,6 +582,8 @@ export default function HistoricoComandasPage() {
           aberto_em: row.aberto_em || null,
           fechado_em: row.fechado_em || null,
           tipo: (row.mesa_id == null) ? 'balcao' : 'comanda',
+          status: row.statusDerived || row.status || 'open',
+          diferenca_pagamento: typeof row.diferenca_pagamento === 'number' ? row.diferenca_pagamento : 0,
         });
       } else {
         setDetailMeta(null);
@@ -932,12 +934,13 @@ export default function HistoricoComandasPage() {
                 <th className="text-left px-4 py-3">Finalizadora</th>
                 <th className="text-left px-4 py-3 whitespace-nowrap">Abertura</th>
                 <th className="text-left px-4 py-3 whitespace-nowrap">Fechamento</th>
+                <th className="text-right px-4 py-3 whitespace-nowrap">Diferença</th>
                 <th className="text-right px-4 py-3">Total</th>
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 && (
-                <tr><td colSpan={7} className="px-4 py-6 text-center text-text-muted">Nenhuma comanda encontrada no período.</td></tr>
+                <tr><td colSpan={8} className="px-4 py-6 text-center text-text-muted">Nenhuma comanda encontrada no período.</td></tr>
               )}
               {filtered.map(r => (
                 <tr
@@ -956,6 +959,15 @@ export default function HistoricoComandasPage() {
                   <td className="px-4 py-2 break-words" title={r.finalizadorasStr || ''}>{r.finalizadorasStr || '—'}</td>
                   <td className="px-4 py-2 whitespace-nowrap">{fmtDate(r.aberto_em)}</td>
                   <td className="px-4 py-2 whitespace-nowrap">{fmtDate(r.fechado_em)}</td>
+                  <td className="px-4 py-2 text-right whitespace-nowrap">
+                    {(() => {
+                      const v = typeof r.diferenca_pagamento === 'number' ? r.diferenca_pagamento : 0;
+                      if (Math.abs(v) < 0.005) return <span className="text-xs text-text-muted">R$ 0,00</span>;
+                      const cls = v > 0 ? 'text-emerald-500' : 'text-amber-500';
+                      const sign = v > 0 ? '+' : '-';
+                      return <span className={`text-xs font-semibold ${cls}`}>{`${sign} R$ ${Math.abs(v).toFixed(2)}`}</span>;
+                    })()}
+                  </td>
                   <td className="px-4 py-2 text-right font-semibold whitespace-nowrap">{fmtMoney(r.total)}</td>
                 </tr>
               ))}
@@ -993,7 +1005,18 @@ export default function HistoricoComandasPage() {
                 <div className="flex-1 min-w-0 text-[11px] text-text-muted truncate pr-2">
                   {fmtDate(r.aberto_em)}{r.fechado_em ? ` • ${fmtDate(r.fechado_em)}` : ''}
                 </div>
-                <div className="flex-shrink-0 font-mono font-semibold whitespace-nowrap text-right min-w-[84px]">{fmtMoney(r.total)}</div>
+                <div className="flex-shrink-0 text-right min-w-[84px]">
+                  <div className="text-[11px]">
+                    {(() => {
+                      const v = typeof r.diferenca_pagamento === 'number' ? r.diferenca_pagamento : 0;
+                      if (Math.abs(v) < 0.005) return <span className="text-text-muted">Dif.: R$ 0,00</span>;
+                      const cls = v > 0 ? 'text-emerald-500' : 'text-amber-500';
+                      const sign = v > 0 ? '+' : '-';
+                      return <span className={cls}>{`Dif.: ${sign} R$ ${Math.abs(v).toFixed(2)}`}</span>;
+                    })()}
+                  </div>
+                  <div className="font-mono font-semibold whitespace-nowrap">{fmtMoney(r.total)}</div>
+                </div>
               </div>
             </button>
           ))}
@@ -1280,8 +1303,9 @@ export default function HistoricoComandasPage() {
                 const totalDescontos = detail.itens.reduce((acc, it) => acc + Number(it.desconto||0), 0);
                 const totalItens = subtotalItens - totalDescontos;
                 const totalPagamentos = detail.pagamentos.reduce((acc, pg) => acc + Number(pg.valor||0), 0);
-                const diferenca = totalPagamentos - totalItens;
-                
+                const diffDb = typeof detailMeta?.diferenca_pagamento === 'number' ? detailMeta.diferenca_pagamento : null;
+                const diferenca = diffDb != null ? diffDb : (totalPagamentos - totalItens);
+
                 return (
                   <div className="bg-surface-2 rounded-lg p-4 border border-border">
                     <h3 className="font-semibold mb-3">Resumo Financeiro</h3>
@@ -1304,12 +1328,12 @@ export default function HistoricoComandasPage() {
                         <span>Total pago:</span>
                         <span className="font-mono">R$ {totalPagamentos.toFixed(2)}</span>
                       </div>
-                      {Math.abs(diferenca) > 0.01 && (
-                        <div className={cn("flex justify-between", diferenca > 0 ? "text-warning" : "text-danger")}>
-                          <span>{diferenca > 0 ? 'Troco/Excedente:' : 'Faltando:'}</span>
-                          <span className="font-mono">R$ {Math.abs(diferenca).toFixed(2)}</span>
-                        </div>
-                      )}
+                      <div className="flex justify-between">
+                        <span className="text-text-secondary">Diferença</span>
+                        <span className={cn("font-semibold", Math.abs(diferenca) < 0.005 ? 'text-text-muted' : (diferenca > 0 ? 'text-emerald-500' : 'text-amber-500'))}>
+                          {Math.abs(diferenca) < 0.005 ? 'R$ 0,00' : `${diferenca > 0 ? '+' : '-'} R$ ${Math.abs(diferenca).toFixed(2)}`}
+                        </span>
+                      </div>
                     </div>
                   </div>
                 );

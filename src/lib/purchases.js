@@ -128,55 +128,62 @@ export async function createPurchaseItems(compraId, items) {
  * Lista compras da empresa
  * @param {number} codigoEmpresa - Código da empresa
  * @param {Object} filters - Filtros opcionais
- * @returns {Array} Lista de compras
+ * @returns {Object} Lista de compras e contagem
  */
 export async function listPurchases(codigoEmpresa, filters = {}) {
-  if (!codigoEmpresa) return [];
-  
-  try {
-    let query = supabase
-      .from('compras')
-      .select(`
-        *,
-        fornecedor:fornecedor_id(id, nome, cnpj)
-      `)
-      .eq('codigo_empresa', codigoEmpresa);
-    
-    // Filtro de ativo/inativo
-    if (filters.apenasInativas) {
-      query = query.eq('ativo', false);
-    } else if (filters.incluirInativas) {
-      // Mostra todas (ativas e inativas)
-    } else {
-      query = query.eq('ativo', true);
-    }
-    
-    if (filters.status) {
-      query = query.eq('status', filters.status);
-    }
-    
-    if (filters.fornecedorId) {
-      query = query.eq('fornecedor_id', filters.fornecedorId);
-    }
-    
-    if (filters.dataInicio) {
-      query = query.gte('data_emissao', filters.dataInicio);
-    }
-    
-    if (filters.dataFim) {
-      query = query.lte('data_emissao', filters.dataFim);
-    }
-    
-    query = query.order('data_emissao', { ascending: false });
-    
-    const { data, error } = await query;
-    
-    if (error) throw error;
-    return data || [];
-  } catch (error) {
-    console.error('[Purchases] Erro ao listar compras:', error);
-    return [];
-  }
+	if (!codigoEmpresa) return { data: [], count: 0 };
+	
+	try {
+		const page = filters.page && filters.page > 0 ? filters.page : 1;
+		const pageSize = filters.pageSize && filters.pageSize > 0 ? filters.pageSize : 100;
+		const from = (page - 1) * pageSize;
+		const to = from + pageSize - 1;
+
+		let query = supabase
+			.from('compras')
+			.select(`
+				*,
+				fornecedor:fornecedor_id(id, nome, cnpj)
+			`, { count: 'exact' })
+			.eq('codigo_empresa', codigoEmpresa);
+		
+		// Filtro de ativo/inativo
+		if (filters.apenasInativas) {
+			query = query.eq('ativo', false);
+		} else if (filters.incluirInativas) {
+			// Mostra todas (ativas e inativas)
+		} else {
+			query = query.eq('ativo', true);
+		}
+		
+		if (filters.status) {
+			query = query.eq('status', filters.status);
+		}
+		
+		if (filters.fornecedorId) {
+			query = query.eq('fornecedor_id', filters.fornecedorId);
+		}
+		
+		if (filters.dataInicio) {
+			query = query.gte('data_emissao', filters.dataInicio);
+		}
+		
+		if (filters.dataFim) {
+			query = query.lte('data_emissao', filters.dataFim);
+		}
+		
+		query = query
+			.order('data_emissao', { ascending: false })
+			.range(from, to);
+		
+		const { data, error, count } = await query;
+		
+		if (error) throw error;
+		return { data: data || [], count: count ?? 0 };
+	} catch (error) {
+		console.error('[Purchases] Erro ao listar compras:', error);
+		return { data: [], count: 0 };
+	}
 }
 
 /**

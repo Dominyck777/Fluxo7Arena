@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Search, FileText, Package, Calendar as CalendarIcon, DollarSign, User, Eye, Download, Filter, TrendingUp, BarChart3, X, Trash2, Edit, RefreshCw } from 'lucide-react';
+import { Search, FileText, Package, Calendar as CalendarIcon, DollarSign, User, Eye, Download, Filter, TrendingUp, BarChart3, X, Trash2, Edit, RefreshCw, Settings } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { listPurchases, getPurchaseItems, deactivatePurchase, updatePurchase } from '@/lib/purchases';
 import { listProducts } from '@/lib/products';
@@ -13,9 +14,12 @@ import XMLReprocessModal from '@/components/XMLReprocessModal';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar as CalendarPicker } from '@/components/ui/calendar';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogClose } from '@/components/ui/dialog';
+import { getUserUISettings, saveUserUISettings } from '@/lib/userSettings';
+
+const COMPRAS_SETTINGS_KEY = 'comprasPage:settings';
 
 export default function ComprasPage() {
-  const { userProfile } = useAuth();
+  const { user, userProfile } = useAuth();
   const [purchases, setPurchases] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -36,6 +40,13 @@ export default function ComprasPage() {
   const [editFormData, setEditFormData] = useState({});
   const [reprocessModal, setReprocessModal] = useState({ show: false, purchase: null });
   const [products, setProducts] = useState([]);
+  const [isMobileFilterOpen, setIsMobileFilterOpen] = useState(false);
+  const [showConfig, setShowConfig] = useState(false);
+  const [listMode, setListMode] = useState('paged');
+  const usePagination = listMode === 'paged';
+  const [page, setPage] = useState(1);
+  const [pageSize] = useState(100);
+  const [totalCount, setTotalCount] = useState(0);
 
   // Função para formatar moeda brasileira
   const formatCurrencyBR = (value) => {
@@ -97,12 +108,66 @@ export default function ComprasPage() {
     return parseFloat(normalized) || 0;
   };
 
+  // Carregar configurações salvas (modo de listagem, estatísticas) do localStorage
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(COMPRAS_SETTINGS_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') {
+        if (parsed.listMode === 'paged' || parsed.listMode === 'all') {
+          setListMode(parsed.listMode);
+        }
+        if (typeof parsed.showStats === 'boolean') {
+          setShowStats(parsed.showStats);
+        }
+      }
+    } catch {
+      // ignora erros de leitura
+    }
+  }, []);
+
+  // Carregar configurações do banco (sobrepõe localStorage)
+  useEffect(() => {
+    const loadFromDb = async () => {
+      if (!user?.id || !userProfile?.codigo_empresa) return;
+      const scope = `compras:${userProfile.codigo_empresa}`;
+      const settings = await getUserUISettings({ userId: user.id, scope });
+      if (!settings) return;
+      if (settings.listMode === 'paged' || settings.listMode === 'all') {
+        setListMode(settings.listMode);
+      }
+      if (typeof settings.showStats === 'boolean') {
+        setShowStats(settings.showStats);
+      }
+    };
+    loadFromDb();
+  }, [user?.id, userProfile?.codigo_empresa]);
+
+  // Persistir configurações sempre que mudarem (localStorage + Supabase)
+  useEffect(() => {
+    try {
+      const payload = { listMode, showStats };
+      localStorage.setItem(COMPRAS_SETTINGS_KEY, JSON.stringify(payload));
+    } catch {
+      // ignore
+    }
+    if (user?.id && userProfile?.codigo_empresa) {
+      const scope = `compras:${userProfile.codigo_empresa}`;
+      saveUserUISettings({ userId: user.id, scope, settings: { listMode, showStats } });
+    }
+  }, [listMode, showStats, user?.id, userProfile?.codigo_empresa]);
+
   useEffect(() => {
     if (userProfile?.codigo_empresa) {
       loadPurchases();
       loadProducts();
     }
-  }, [userProfile, inactiveFilter]);
+  }, [userProfile, inactiveFilter, supplierFilter, dateFrom, dateTo, page, listMode]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [inactiveFilter, supplierFilter, dateFrom, dateTo, listMode]);
 
   const loadProducts = async () => {
     try {
@@ -116,12 +181,36 @@ export default function ComprasPage() {
   const loadPurchases = async () => {
     try {
       setLoading(true);
+      let dataInicio = null;
+      let dataFim = null;
+
+      if (dateFrom) {
+        const d = new Date(dateFrom);
+        d.setHours(0, 0, 0, 0);
+        dataInicio = d.toISOString();
+      }
+
+      if (dateTo) {
+        const d = new Date(dateTo);
+        d.setHours(23, 59, 59, 999);
+        dataFim = d.toISOString();
+      }
+
+      const effectivePage = usePagination ? page : 1;
+      const effectivePageSize = usePagination ? pageSize : 10000;
+
       const filters = {
         incluirInativas: inactiveFilter === 'all' || inactiveFilter === 'inactive',
-        apenasInativas: inactiveFilter === 'inactive'
+        apenasInativas: inactiveFilter === 'inactive',
+        fornecedorId: supplierFilter !== 'all' ? supplierFilter : undefined,
+        dataInicio,
+        dataFim,
+        page: effectivePage,
+        pageSize: effectivePageSize,
       };
-      const data = await listPurchases(userProfile.codigo_empresa, filters);
-      setPurchases(data || []);
+      const result = await listPurchases(userProfile.codigo_empresa, filters);
+      setPurchases(result?.data || []);
+      setTotalCount(result?.count || 0);
     } catch (error) {
       console.error('[Compras] Erro ao carregar compras:', error);
     } finally {
@@ -198,38 +287,21 @@ export default function ComprasPage() {
     return Array.from(uniqueSuppliers.values());
   }, [purchases]);
 
-  // Filtros aplicados
+  // Filtros aplicados (apenas busca; demais filtros já vão para o backend)
   const filteredPurchases = useMemo(() => {
     return purchases.filter(p => {
-      // Filtro de busca
       if (searchTerm) {
         const term = searchTerm.toLowerCase();
-        const matchSearch = 
+        const matchSearch =
           p.numero_nfe?.toLowerCase().includes(term) ||
           p.fornecedor?.nome?.toLowerCase().includes(term) ||
           p.chave_nfe?.toLowerCase().includes(term);
         if (!matchSearch) return false;
       }
 
-      // Filtro de fornecedor
-      if (supplierFilter !== 'all' && p.fornecedor?.id !== supplierFilter) {
-        return false;
-      }
-
-      // Filtro de período por data
-      if (p.data_emissao) {
-        const emissionDate = new Date(p.data_emissao);
-        if (dateFrom && emissionDate < dateFrom) return false;
-        if (dateTo) {
-          const endOfDay = new Date(dateTo);
-          endOfDay.setHours(23, 59, 59, 999);
-          if (emissionDate > endOfDay) return false;
-        }
-      }
-
       return true;
     });
-  }, [purchases, searchTerm, supplierFilter, dateFrom, dateTo]);
+  }, [purchases, searchTerm]);
 
   // Estatísticas
   const stats = useMemo(() => {
@@ -255,6 +327,12 @@ export default function ComprasPage() {
 
     return { total, count, avgTicket, topSuppliers };
   }, [filteredPurchases]);
+
+  const totalPages = useMemo(() => {
+    if (!pageSize) return 1;
+    const pages = Math.ceil((totalCount || 0) / pageSize);
+    return pages > 0 ? pages : 1;
+  }, [totalCount, pageSize]);
 
   // Exportar para CSV
   const exportToCSV = () => {
@@ -283,20 +361,30 @@ export default function ComprasPage() {
   };
 
   return (
-    <div className="p-6 max-w-7xl mx-auto">
-      {/* Header com Filtros de Data */}
-      <div className="mb-6">
-        <div className="flex items-start justify-between gap-4 mb-2">
-          <div>
+    <div className="px-3 py-4 md:p-6 max-w-7xl mx-auto">
+      {/* Header com Título e Filtros de Data */}
+      <div className="mb-4">
+        <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3 md:gap-4 mb-2">
+          <div className="flex items-center justify-between gap-3">
             <h1 className="text-3xl font-bold text-text-primary">Compras (NF-e)</h1>
-            <p className="text-text-muted">Histórico de notas fiscais de entrada importadas</p>
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              className="h-9 w-9 rounded-full flex items-center justify-center"
+              onClick={() => setShowConfig(true)}
+              aria-label="Configurações da aba"
+              title="Configurações da aba"
+            >
+              <Settings className="h-4 w-4" />
+            </Button>
           </div>
-          <div className="flex items-center gap-3">
-            <div className="space-y-1">
-              <label className="text-sm font-medium text-text-muted block">Período Inicial</label>
+          <div className="flex flex-row flex-wrap items-end gap-2">
+            <div className="flex-1 min-w-[140px]">
+              <label className="text-xs font-medium text-text-muted block mb-1">Período Inicial</label>
               <Popover modal={true}>
                 <PopoverTrigger asChild>
-                  <Button variant="outline" className="w-[140px] justify-start text-left font-normal">
+                  <Button variant="outline" className="w-full justify-start text-left font-normal h-9 text-sm">
                     <CalendarIcon className="mr-2 h-4 w-4" />
                     {dateFrom ? format(dateFrom, 'dd/MM/yyyy') : <span>Selecionar</span>}
                   </Button>
@@ -311,11 +399,11 @@ export default function ComprasPage() {
                 </PopoverContent>
               </Popover>
             </div>
-            <div className="space-y-1">
-              <label className="text-sm font-medium text-text-muted block">Período Final</label>
+            <div className="flex-1 min-w-[140px]">
+              <label className="text-xs font-medium text-text-muted block mb-1">Período Final</label>
               <Popover modal={true}>
                 <PopoverTrigger asChild>
-                  <Button variant="outline" className="w-[140px] justify-start text-left font-normal">
+                  <Button variant="outline" className="w-full justify-start text-left font-normal h-9 text-sm">
                     <CalendarIcon className="mr-2 h-4 w-4" />
                     {dateTo ? format(dateTo, 'dd/MM/yyyy') : <span>Selecionar</span>}
                   </Button>
@@ -335,7 +423,7 @@ export default function ComprasPage() {
                 variant="ghost"
                 size="sm"
                 onClick={() => { setDateFrom(null); setDateTo(null); }}
-                className="mt-5"
+                className="h-8 px-3 text-xs"
               >
                 Limpar
               </Button>
@@ -346,30 +434,32 @@ export default function ComprasPage() {
 
       {/* Estatísticas */}
       {showStats && filteredPurchases.length > 0 && (
-        <div className="mb-6 space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="bg-surface rounded-lg border border-border p-4">
-              <div className="flex items-center gap-2 text-text-muted text-sm mb-1">
-                <FileText className="h-4 w-4" />
-                <span>Total de NF-es</span>
+        <div className="mb-4 space-y-4">
+          <div className="grid grid-cols-3 gap-2">
+            <div className="bg-surface rounded-lg border border-border px-2 py-3 flex flex-col items-center justify-center text-center">
+              <div className="flex items-center gap-1 text-text-muted text-[11px] mb-1">
+                <FileText className="h-3.5 w-3.5" />
+                <span>NF-es</span>
               </div>
-              <p className="text-2xl font-bold text-text-primary">{stats.count}</p>
+              <p className="text-lg md:text-2xl font-bold text-text-primary leading-none">{stats.count}</p>
             </div>
             
-            <div className="bg-surface rounded-lg border border-border p-4">
-              <div className="flex items-center gap-2 text-text-muted text-sm mb-1">
-                <DollarSign className="h-4 w-4" />
-                <span>Valor Total</span>
+            <div className="bg-surface rounded-lg border border-border px-2 py-3 flex flex-col items-center justify-center text-center">
+              <div className="flex items-center gap-1 text-text-muted text-[11px] mb-1">
+                <DollarSign className="h-3.5 w-3.5" />
+                <span>Total</span>
               </div>
-              <p className="text-2xl font-bold text-success">R$ {stats.total.toFixed(2)}</p>
+              <p className="text-base md:text-2xl font-bold text-success leading-none whitespace-nowrap">
+                R$ {stats.total.toFixed(2)}
+              </p>
             </div>
             
-            <div className="bg-surface rounded-lg border border-border p-4">
-              <div className="flex items-center gap-2 text-text-muted text-sm mb-1">
-                <User className="h-4 w-4" />
-                <span>Fornecedores</span>
+            <div className="bg-surface rounded-lg border border-border px-2 py-3 flex flex-col items-center justify-center text-center">
+              <div className="flex items-center gap-1 text-text-muted text-[11px] mb-1">
+                <User className="h-3.5 w-3.5" />
+                <span>Fornec.</span>
               </div>
-              <p className="text-2xl font-bold text-info">{suppliers.length}</p>
+              <p className="text-lg md:text-2xl font-bold text-info leading-none">{suppliers.length}</p>
             </div>
           </div>
 
@@ -418,67 +508,152 @@ export default function ComprasPage() {
 
       {/* Filtros */}
       <div className="mb-6 space-y-4">
-        <div className="flex items-center gap-4 flex-wrap">
-          <div className="relative flex-1 min-w-[250px]">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted" />
-            <Input
-              placeholder="Buscar por NF-e, fornecedor ou chave..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-10"
-            />
+        <div className="flex flex-col md:flex-row md:items-center gap-3 md:gap-4 md:flex-wrap">
+          {/* Busca + botão Filtros (mobile) */}
+          <div className="flex items-center gap-2 w-full md:flex-1 md:min-w-[250px]">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted" />
+              <Input
+                placeholder="Buscar por NF-e, fornecedor ou chave..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-10"
+              />
+            </div>
+            {/* Botão Filtros - apenas mobile */}
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              className="h-9 w-9 rounded-full flex md:hidden items-center justify-center"
+              onClick={() => setIsMobileFilterOpen((v) => !v)}
+              aria-label="Filtros"
+            >
+              <Filter className="h-4 w-4" />
+            </Button>
           </div>
 
-          <Select value={supplierFilter} onValueChange={setSupplierFilter}>
-            <SelectTrigger className="w-[220px]">
-              <User className="h-4 w-4 mr-2 flex-shrink-0" />
-              <div className="truncate">
-                <SelectValue placeholder="Fornecedor" />
+          {/* Bloco de filtros - apenas mobile (abaixo da busca) */}
+          {isMobileFilterOpen && (
+            <div className="md:hidden mt-1 space-y-3 px-0.5">
+              {/* Fornecedor */}
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-text-muted">Fornecedor</label>
+                <Select value={supplierFilter} onValueChange={setSupplierFilter}>
+                  <SelectTrigger className="w-full text-sm">
+                    <User className="h-4 w-4 mr-2 flex-shrink-0" />
+                    <div className="truncate">
+                      <SelectValue placeholder="Todos" />
+                    </div>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todos</SelectItem>
+                    {suppliers.map(supplier => (
+                      <SelectItem key={supplier.id} value={supplier.id}>
+                        <div className="truncate max-w-[220px]" title={supplier.nome}>
+                          {supplier.nome}
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todos</SelectItem>
-              {suppliers.map(supplier => (
-                <SelectItem key={supplier.id} value={supplier.id}>
-                  <div className="truncate max-w-[180px]" title={supplier.nome}>
-                    {supplier.nome}
-                  </div>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
 
-          <Button
-            variant="outline"
-            onClick={exportToCSV}
-            disabled={filteredPurchases.length === 0}
-            className="gap-2"
-          >
-            <Download className="h-4 w-4" />
-            Exportar CSV
-          </Button>
+              {/* Status */}
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-text-muted">Status</label>
+                <Select value={inactiveFilter} onValueChange={setInactiveFilter}>
+                  <SelectTrigger className="w-full text-sm">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="active">Apenas ativas</SelectItem>
+                    <SelectItem value="all">Todas</SelectItem>
+                    <SelectItem value="inactive">Apenas inativas</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
 
-          <div className="flex items-center gap-2">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setShowStats(!showStats)}
-              className="gap-2"
-            >
-              <BarChart3 className="h-4 w-4" />
-              {showStats ? 'Ocultar' : 'Mostrar'}
-            </Button>
+              {/* Estatísticas e CSV */}
+              <div className="flex items-center justify-between gap-2 pt-1 border-t border-border/60">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="gap-2 text-xs px-2"
+                  onClick={() => setShowStats(!showStats)}
+                >
+                  <BarChart3 className="h-4 w-4" />
+                  {showStats ? 'Ocultar estatísticas' : 'Mostrar estatísticas'}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={exportToCSV}
+                  disabled={filteredPurchases.length === 0}
+                  className="gap-1 text-xs px-3"
+                >
+                  <Download className="h-4 w-4" />
+                  CSV
+                </Button>
+              </div>
+            </div>
+          )}
 
-            <Select value={inactiveFilter} onValueChange={setInactiveFilter}>
-              <SelectTrigger className="w-[140px]">
-                <SelectValue />
+          {/* Filtros completos - apenas desktop/tablet */}
+          <div className="hidden md:flex md:items-center md:gap-4 md:flex-wrap w-full">
+            <Select value={supplierFilter} onValueChange={setSupplierFilter}>
+              <SelectTrigger className="w-full md:w-[220px]">
+                <User className="h-4 w-4 mr-2 flex-shrink-0" />
+                <div className="truncate">
+                  <SelectValue placeholder="Fornecedor" />
+                </div>
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="active">Apenas ativas</SelectItem>
-                <SelectItem value="all">Todas</SelectItem>
-                <SelectItem value="inactive">Apenas inativas</SelectItem>
+                <SelectItem value="all">Todos</SelectItem>
+                {suppliers.map(supplier => (
+                  <SelectItem key={supplier.id} value={supplier.id}>
+                    <div className="truncate max-w-[180px]" title={supplier.nome}>
+                      {supplier.nome}
+                    </div>
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
+
+            <Button
+              variant="outline"
+              onClick={exportToCSV}
+              disabled={filteredPurchases.length === 0}
+              className="gap-2 w-full sm:w-auto justify-center"
+            >
+              <Download className="h-4 w-4" />
+              Exportar CSV
+            </Button>
+
+            <div className="flex items-center gap-2 flex-wrap">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowStats(!showStats)}
+                className="gap-2"
+              >
+                <BarChart3 className="h-4 w-4" />
+                {showStats ? 'Ocultar' : 'Mostrar'}
+              </Button>
+
+              <Select value={inactiveFilter} onValueChange={setInactiveFilter}>
+                <SelectTrigger className="w-[140px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="active">Apenas ativas</SelectItem>
+                  <SelectItem value="all">Todas</SelectItem>
+                  <SelectItem value="inactive">Apenas inativas</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
         </div>
 
@@ -486,11 +661,6 @@ export default function ComprasPage() {
 
       {/* Lista de Compras */}
       {loading ? (
-        <div className="text-center py-12">
-          <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-brand"></div>
-          <p className="mt-4 text-text-muted">Carregando compras...</p>
-        </div>
-      ) : filteredPurchases.length === 0 ? (
         <div className="text-center py-12 bg-surface rounded-lg border border-border">
           <Package className="h-12 w-12 mx-auto text-text-muted mb-4" />
           <p className="text-text-muted">
@@ -501,116 +671,212 @@ export default function ComprasPage() {
           </p>
         </div>
       ) : (
-        <div className="grid gap-3">
-          {filteredPurchases.map((purchase) => (
-            <div
-              key={purchase.id}
-              className={`rounded-lg border overflow-hidden transition-all hover:shadow-lg ${
-                purchase.ativo === false 
-                  ? 'bg-gray-900/60 border-red-500 shadow-red-500/20' 
-                  : 'bg-surface border-border hover:border-brand/50'
-              }`}
-            >
-              <div className="p-4">
-                <div className="flex items-start justify-between">
-                  <div className="flex items-start gap-4 flex-1">
+        <>
+          <div className="grid gap-3">
+            {filteredPurchases.map((purchase) => (
+              <div
+                key={purchase.id}
+                className={`rounded-lg border overflow-hidden transition-all hover:shadow-lg ${
+                  purchase.ativo === false 
+                    ? 'bg-gray-900/60 border-red-500 shadow-red-500/20' 
+                    : 'bg-surface border-border hover:border-brand/50'
+                }`}
+                onClick={() => openModal(purchase)}
+              >
+                <div className="p-4">
+                  <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 sm:gap-4">
+                    <div className="flex items-start gap-4 flex-1">
 
-                    {/* Informações Principais */}
-                    <div className="flex-1">
-                      <div className="flex items-center gap-3 mb-2">
-                        <FileText className="h-5 w-5 text-brand" />
-                        <h3 className={`font-semibold ${
-                          purchase.ativo === false ? 'text-red-600' : 'text-text-primary'
-                        }`}>
-                          NF-e {purchase.numero_nfe} / Série {purchase.serie_nfe}
-                          {purchase.ativo === false && (
-                            <span className="ml-2 px-2 py-1 bg-red-100 text-red-700 text-xs rounded-full font-medium">
-                              INATIVA
-                            </span>
-                          )}
-                        </h3>
-                      </div>
-
-                      <div className="space-y-1.5">
-                        <div className="flex items-center gap-2 min-w-0">
-                          <User className="h-4 w-4 flex-shrink-0 text-brand" />
-                          <span className="font-medium text-text-primary text-base truncate" title={purchase.fornecedor?.nome || 'Fornecedor não identificado'}>
-                            {purchase.fornecedor?.nome || 'Fornecedor não identificado'}
-                          </span>
-                        </div>
-                        
-                        <div className="flex items-center gap-4 text-sm text-text-muted">
-                          <div className="flex items-center gap-1.5">
-                            <CalendarIcon className="h-4 w-4" />
-                            <span>
-                              {purchase.data_emissao
-                                ? format(new Date(purchase.data_emissao), "dd/MM/yyyy", { locale: ptBR })
-                                : 'Data não informada'}
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-1.5">
-                            <Package className="h-4 w-4" />
-                            <span>{purchase.tipo_operacao || 'Entrada'}</span>
-                          </div>
-                          {purchase.chave_nfe && (
-                            <div className="text-xs">
-                              <span className="font-medium">Chave:</span> {purchase.chave_nfe.substring(0, 16)}...
+                      {/* Informações Principais */}
+                      <div className="flex-1">
+                        <div className="flex items-start justify-between gap-3 mb-3">
+                          <div className="flex items-start gap-3 flex-1 min-w-0">
+                            <FileText className="h-6 w-6 text-brand mt-0.5 flex-shrink-0" />
+                            <div className="min-w-0">
+                              <h3
+                                className={`font-semibold text-sm md:text-base leading-snug ${
+                                  purchase.ativo === false ? 'text-red-600' : 'text-text-primary'
+                                }`}
+                              >
+                                NF-e {purchase.numero_nfe} / Série {purchase.serie_nfe}
+                                {purchase.ativo === false && (
+                                  <span className="ml-2 inline-flex items-center px-2 py-0.5 bg-red-100 text-red-700 text-[10px] rounded-full font-medium align-middle">
+                                    INATIVA
+                                  </span>
+                                )}
+                              </h3>
                             </div>
+                          </div>
+                          {/* Valor alinhado com o título - apenas mobile */}
+                          <div className="sm:hidden flex items-center">
+                            <span className="text-success font-semibold text-xs whitespace-nowrap pr-2">
+                              R$ {Number(purchase.valor_total || 0).toFixed(2)}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="space-y-2.5">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <User className="h-5 w-5 flex-shrink-0 text-brand" />
+                            <span
+                              className="font-medium text-text-primary text-sm md:text-base overflow-hidden truncate"
+                              title={purchase.fornecedor?.nome || 'Fornecedor não identificado'}
+                            >
+                              {purchase.fornecedor?.nome || 'Fornecedor não identificado'}
+                            </span>
+                          </div>
+                          
+                          <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs md:text-sm text-text-muted">
+                            <div className="flex items-center gap-2">
+                              <CalendarIcon className="h-4 w-4" />
+                              <span>
+                                {purchase.data_emissao
+                                  ? format(new Date(purchase.data_emissao), "dd/MM/yyyy", { locale: ptBR })
+                                  : 'Data não informada'}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Package className="h-4 w-4" />
+                              <span>{purchase.tipo_operacao || 'Entrada'}</span>
+                            </div>
+                            {purchase.chave_nfe && (
+                              <div className="text-[10px] md:text-xs max-w-[180px] md:max-w-xs overflow-hidden whitespace-nowrap truncate">
+                                <span className="font-medium">Chave:</span>{' '}
+                                {purchase.chave_nfe.length > 20
+                                  ? purchase.chave_nfe.slice(0, 20) + '...'
+                                  : purchase.chave_nfe}
+                              </div>
+                            )}
+                          </div>
+
+                          {purchase.natureza_operacao && (
+                            <p className="text-[10px] md:text-xs text-text-muted overflow-hidden whitespace-nowrap truncate" title={purchase.natureza_operacao}>
+                              {purchase.natureza_operacao}
+                            </p>
                           )}
                         </div>
-
-                        {purchase.natureza_operacao && (
-                          <p className="text-xs text-text-muted truncate" title={purchase.natureza_operacao}>
-                            {purchase.natureza_operacao}
-                          </p>
-                        )}
                       </div>
-                    </div>
 
-                    {/* Valores e Botão */}
-                    <div className="text-right flex flex-col items-end gap-3">
-                      <div>
-                        <div className="flex items-center gap-2 text-success font-semibold text-lg">
-                          <DollarSign className="h-5 w-5" />
-                          <span>R$ {Number(purchase.valor_total || 0).toFixed(2)}</span>
+                      {/* Valores e botões - apenas desktop */}
+                      <div className="hidden sm:flex sm:flex-col sm:gap-3 sm:mt-0 sm:w-auto">
+                        <div className="w-full flex justify-end">
+                          <div className="text-right text-text-muted">
+                            <span className="text-success font-semibold text-base md:text-lg whitespace-nowrap">
+                              R$ {Number(purchase.valor_total || 0).toFixed(2)}
+                            </span>
+                            <p className="text-[11px] md:text-xs mt-0.5">
+                              Produtos: R$ {Number(purchase.valor_produtos || 0).toFixed(2)}
+                            </p>
+                          </div>
                         </div>
-                        <p className="text-xs text-text-muted mt-1">
-                          Produtos: R$ {Number(purchase.valor_produtos || 0).toFixed(2)}
-                        </p>
-                      </div>
-                      <div className="flex gap-2">
-                        <Button
-                          onClick={() => openModal(purchase)}
-                          size="sm"
-                          className="gap-2"
-                        >
-                          <Eye className="h-4 w-4" />
-                          Ver Detalhes
-                        </Button>
-                        {purchase.ativo && (
+                        {/* Botões na coluna da direita - apenas desktop */}
+                        <div className="grid grid-cols-2 gap-2 w-full justify-end">
                           <Button
-                            onClick={() => openEditModal(purchase)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openModal(purchase);
+                            }}
                             size="sm"
-                            variant="outline"
-                            className="gap-2"
+                            className="gap-2 w-full justify-center"
                           >
-                            <Edit className="h-4 w-4" />
-                            Editar
+                            <Eye className="h-4 w-4" />
+                            <span className="text-xs sm:text-sm">Detalhes</span>
                           </Button>
-                        )}
+                          {purchase.ativo && (
+                            <Button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openEditModal(purchase);
+                              }}
+                              size="sm"
+                              variant="outline"
+                              className="gap-2 w-full justify-center"
+                            >
+                              <Edit className="h-4 w-4" />
+                              <span className="text-xs sm:text-sm">Editar</span>
+                            </Button>
+                          )}
+                        </div>
                       </div>
                     </div>
                   </div>
                 </div>
+                {/* Faixa de valor total - apenas mobile (removida, valor já está no título) */}
+              </div>
+            ))}
+          </div>
+
+          {usePagination && (
+            <div className="flex flex-col sm:flex-row items-center justify-between mt-4 gap-2 text-xs sm:text-sm text-text-muted">
+              <span>
+                Página {page} de {totalPages} ({totalCount} NF-es)
+              </span>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+                  disabled={page <= 1}
+                >
+                  Anterior
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
+                  disabled={page >= totalPages}
+                >
+                  Próxima
+                </Button>
               </div>
             </div>
-          ))}
-        </div>
+          )}
+        </>
       )}
+
+      {/* Modal de Configurações da Aba */}
+      <Dialog open={showConfig} onOpenChange={setShowConfig}>
+        <DialogContent className="w-[90vw] sm:max-w-md max-h-[80vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle>Configurações de Compras</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 text-sm">
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-text-muted">Modo de listagem</label>
+              <Select value={listMode} onValueChange={setListMode}>
+                <SelectTrigger className="w-full h-9 text-sm">
+                  <SelectValue placeholder="Paginado" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="paged">Paginado (100 por página)</SelectItem>
+                  <SelectItem value="all">Todos (sem paginação)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="compras-show-stats"
+                  checked={showStats}
+                  onCheckedChange={setShowStats}
+                />
+                <label
+                  htmlFor="compras-show-stats"
+                  className="text-xs font-medium text-text-primary"
+                >
+                  Mostrar cards de estatísticas
+                </label>
+              </div>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Modal de Inativação */}
       <Dialog open={deactivateModal.show} onOpenChange={(open) => setDeactivateModal({ show: open, purchase: null })}>
-        <DialogContent>
+        <DialogContent className="w-[90vw] sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Inativar NF-e</DialogTitle>
           </DialogHeader>
@@ -682,7 +948,7 @@ export default function ComprasPage() {
 
       {/* Modal Todos os Fornecedores */}
       <Dialog open={showAllSuppliersModal} onOpenChange={setShowAllSuppliersModal}>
-        <DialogContent className="max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
+        <DialogContent className="w-[90vw] sm:max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
           <DialogHeader>
             <DialogTitle>Todos os Fornecedores</DialogTitle>
           </DialogHeader>
@@ -737,12 +1003,15 @@ export default function ComprasPage() {
 
       {/* Modal de Edição */}
       <Dialog open={editModal.show} onOpenChange={(open) => setEditModal({ show: open, purchase: null })}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent
+          className="w-[90vw] sm:max-w-2xl max-h-[80vh] flex flex-col"
+          onOpenAutoFocus={(e) => e.preventDefault()}
+        >
           <DialogHeader>
             <DialogTitle>Editar NF-e</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="text-sm font-medium">Número NF-e</label>
                 <Input

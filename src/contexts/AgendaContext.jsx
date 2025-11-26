@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 
 const AgendaContext = createContext();
 
@@ -48,6 +49,7 @@ export const AgendaProvider = ({ children }) => {
   
   // Ref para callback de substituição de participante
   const onParticipantReplacedRef = useRef(null);
+  const location = useLocation();
   
   // Função para proteger modal de pagamentos de fechamento acidental
   const protectPaymentModal = useCallback((durationMs = 2000) => {
@@ -113,8 +115,13 @@ export const AgendaProvider = ({ children }) => {
     // A proteção configurada por protectPaymentModal() irá expirar automaticamente
   }, []);
   
-  // Listener para rastrear mudanças de visibilidade
+  // Listener para rastrear mudanças de visibilidade (apenas na rota de Agenda)
   useEffect(() => {
+    const pathname = location?.pathname || '';
+    const isOnAgenda = pathname.startsWith('/agenda');
+    if (!isOnAgenda) {
+      return () => {};
+    }
     const handleVisibilityChange = () => {
       const newTime = Date.now();
       const wasHidden = document.hidden;
@@ -158,7 +165,7 @@ export const AgendaProvider = ({ children }) => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('focus', handleFocus);
     };
-  }, [isPaymentModalOpen]);
+  }, [isPaymentModalOpen, location?.pathname]);
   
   const value = {
     // Estados dos modais

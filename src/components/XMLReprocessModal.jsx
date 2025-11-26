@@ -25,6 +25,13 @@ export default function XMLReprocessModal({ open, onOpenChange, purchase, produc
   const [productSelectionModal, setProductSelectionModal] = useState({ isOpen: false, productIndex: null, currentProduct: null });
   const [confirmationModal, setConfirmationModal] = useState({ isOpen: false });
 
+  const getNFeModelLabel = () => {
+    const modelo = parsedData?.nfe?.modelo || purchase?.modelo_nfe;
+    if (modelo === '55') return 'NF-e';
+    if (modelo === '65') return 'NFC-e';
+    return 'NF-e / NFC-e';
+  };
+
   const getEditedValue = (index, field, defaultValue) => {
     return editedProducts[index]?.[field] ?? defaultValue;
   };
@@ -591,11 +598,15 @@ export default function XMLReprocessModal({ open, onOpenChange, purchase, produc
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+      <DialogContent className="w-[95vw] sm:max-w-4xl max-h-[85vh] overflow-hidden flex flex-col">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <RefreshCw className="h-5 w-5" />
-            Reprocessar XML da NF-e {purchase?.numero_nfe}
+            <span>Reprocessar XML</span>
+            <span className="inline-flex items-center rounded-full bg-surface-2 border border-border px-2 py-0.5 text-xs font-semibold text-text-muted uppercase tracking-wide">
+              {getNFeModelLabel()}
+            </span>
+            <span className="text-sm text-text-muted">{purchase?.numero_nfe}</span>
           </DialogTitle>
           <DialogDescription>
             Reimporte o XML para atualizar os produtos e itens desta NF-e. 
@@ -639,6 +650,9 @@ export default function XMLReprocessModal({ open, onOpenChange, purchase, produc
                   </div>
                   <div>
                     <span className="text-text-muted">Série:</span> {parsedData.nfe.serie}
+                  </div>
+                  <div>
+                    <span className="text-text-muted">Modelo:</span> {getNFeModelLabel()}
                   </div>
                   <div>
                     <span className="text-text-muted">Fornecedor:</span> {parsedData.fornecedor?.nome}
@@ -699,76 +713,79 @@ export default function XMLReprocessModal({ open, onOpenChange, purchase, produc
                         )}
                       >
                         {/* Cabeçalho compacto - sempre visível */}
-                        <div className="p-3 flex items-center gap-3">
-                          {/* Checkbox amarela */}
-                          <input 
-                            type="checkbox" 
-                            checked={item.selected} 
-                            onChange={() => handleToggleSelect(idx)}
-                            className="w-4 h-4 rounded border-border flex-shrink-0 accent-warning cursor-pointer"
-                          />
-                          
-                          {/* Botão expand/collapse */}
-                          <button
-                            onClick={() => toggleExpand(idx)}
-                            className="flex-shrink-0 p-0.5 hover:bg-surface-2 rounded transition-colors"
-                          >
-                            {isExpanded ? (
-                              <ChevronDown className="w-4 h-4 text-text-muted" />
-                            ) : (
-                              <ChevronRight className="w-4 h-4 text-text-muted" />
-                            )}
-                          </button>
-                          
-                          {/* Ícone de status */}
-                          <div className="flex-shrink-0">
-                            {linkedProductId ? (
-                              <Link2 className="w-5 h-5 text-warning" />
-                            ) : (
-                              <RefreshCw className="w-5 h-5 text-info" />
-                            )}
+                        <div className="p-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+                          <div className="flex items-center gap-2 flex-shrink-0">
+                            {/* Checkbox amarela */}
+                            <input 
+                              type="checkbox" 
+                              checked={item.selected} 
+                              onChange={() => handleToggleSelect(idx)}
+                              className="w-4 h-4 rounded border-border accent-warning cursor-pointer"
+                            />
+
+                            {/* Botão expand/collapse */}
+                            <button
+                              onClick={() => toggleExpand(idx)}
+                              className="p-0.5 hover:bg-surface-2 rounded transition-colors"
+                            >
+                              {isExpanded ? (
+                                <ChevronDown className="w-4 h-4 text-text-muted" />
+                              ) : (
+                                <ChevronRight className="w-4 h-4 text-text-muted" />
+                              )}
+                            </button>
+
+                            {/* Ícone de status */}
+                            <div>
+                              {linkedProductId ? (
+                                <Link2 className="w-5 h-5 text-warning" />
+                              ) : (
+                                <RefreshCw className="w-5 h-5 text-info" />
+                              )}
+                            </div>
                           </div>
-                          
+
                           {/* Informações principais */}
                           <div className="flex-1 min-w-0">
-                            <div className="flex items-baseline gap-2">
-                              <p className="font-semibold text-sm truncate">
-                                {linkedProductId && linkedProductId !== 'force-new' && linkedProductId !== 'new' ? (
-                                  (() => {
-                                    const linkedProduct = products.find(p => p.id === linkedProductId);
-                                    return linkedProduct ? linkedProduct.name : editedName;
-                                  })()
-                                ) : editedName}
-                              </p>
-                              {item.xml.codigo && (
-                                <span className="text-xs text-text-muted flex-shrink-0">#{item.xml.codigo}</span>
-                              )}
+                            <div className="flex items-baseline justify-between gap-2">
+                              <div className="min-w-0">
+                                <p className="font-semibold text-sm truncate">
+                                  {linkedProductId && linkedProductId !== 'force-new' && linkedProductId !== 'new' ? (
+                                    (() => {
+                                      const linkedProduct = products.find(p => p.id === linkedProductId);
+                                      return linkedProduct ? linkedProduct.name : editedName;
+                                    })()
+                                  ) : editedName}
+                                </p>
+                                <div className="flex items-center gap-2 text-[11px] text-text-muted mt-0.5">
+                                  {item.xml.codigo && (
+                                    <span className="flex-shrink-0">#{item.xml.codigo}</span>
+                                  )}
+                                  <span>Qtd: {editedQty}</span>
+                                </div>
+                              </div>
+
+                              {/* Badge de status */}
+                              <div className="flex-shrink-0 ml-2">
+                                {linkedProductId ? (
+                                  <span className="text-[11px] px-2 py-0.5 rounded-full bg-warning/20 text-warning font-medium">Vinculado</span>
+                                ) : (
+                                  <span className="text-[11px] px-2 py-0.5 rounded-full bg-info/20 text-info font-medium">Cadastrado</span>
+                                )}
+                              </div>
                             </div>
-                            <div className="flex items-center gap-3 text-xs text-text-muted mt-0.5">
-                              <span>Qtd: {editedQty}</span>
-                              <span>•</span>
-                              <span>R$ {costPrice.toFixed(2)} → {salePrice ? `R$ ${salePrice.toFixed(2)}` : '-'}</span>
+
+                            <div className="mt-1 text-[11px] text-text-muted">
+                              <span>
+                                R$ {costPrice.toFixed(2)}
+                                {salePrice ? ` → R$ ${salePrice.toFixed(2)}` : ''}
+                              </span>
                               {displayMargin != null && (
-                                <>
-                                  <span>•</span>
-                                  <span className={displayMargin > 0 ? 'text-success' : displayMargin < 0 ? 'text-destructive' : 'text-text-muted'}>
-                                    {displayMargin.toFixed(1)}%
-                                  </span>
-                                </>
-                              )}
-                              {linkedProductId && linkedProductId !== 'force-new' && linkedProductId !== 'new' && (
-                                <span className="text-warning">→ Vinculado</span>
+                                <span className={"ml-2 " + (displayMargin > 0 ? 'text-success' : displayMargin < 0 ? 'text-destructive' : 'text-text-muted')}>
+                                  {displayMargin.toFixed(1)}%
+                                </span>
                               )}
                             </div>
-                          </div>
-                          
-                          {/* Badge de status */}
-                          <div className="flex-shrink-0">
-                            {linkedProductId ? (
-                              <span className="text-xs px-2 py-0.5 rounded-full bg-warning/20 text-warning font-medium">Vinculado</span>
-                            ) : (
-                              <span className="text-xs px-2 py-0.5 rounded-full bg-info/20 text-info font-medium">Cadastrado</span>
-                            )}
                           </div>
                         </div>
                         
@@ -787,8 +804,8 @@ export default function XMLReprocessModal({ open, onOpenChange, purchase, produc
                               />
                             </div>
                             
-                            {/* Quantidade, Margem e Preços - tudo em uma linha */}
-                            <div className="flex items-center gap-3">
+                            {/* Quantidade, Margem e Preços - grid 2 colunas no mobile, 4 no desktop */}
+                            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
                               <div>
                                 <label className="text-xs text-text-muted mb-1 block">Quantidade</label>
                                 <div className="flex items-center gap-1">
@@ -850,8 +867,11 @@ export default function XMLReprocessModal({ open, onOpenChange, purchase, produc
                                       const marginVal = parseFloat(cleanValue);
                                       if (!isNaN(marginVal)) {
                                         handleEditProduct(idx, 'margin', marginVal);
-                                        // Limpar preço editado para recalcular pela margem
-                                        handleEditProduct(idx, 'salePrice', null);
+                                        // Calcular preço baseado na margem, igual ao XMLImportModal
+                                        if (costPrice > 0) {
+                                          const newSalePrice = calculateSalePrice(costPrice, marginVal);
+                                          handleEditProduct(idx, 'salePrice', newSalePrice);
+                                        }
                                       }
                                     }}
                                     disabled={!item.selected}

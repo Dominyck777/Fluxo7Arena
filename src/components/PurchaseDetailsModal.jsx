@@ -16,16 +16,13 @@ export default function PurchaseDetailsModal({ purchase, items, onClose, onEdit,
     const daysSinceImport = differenceInDays(new Date(), new Date(produto.data_importacao));
     return daysSinceImport <= 7;
   };
-
-  const showDanfe = false;
-
   const handleOpenDanfe = () => {
     if (typeof window === 'undefined') return;
 
     const danfeWindow = window.open('', '_blank');
     if (!danfeWindow) return;
 
-    const emissionDate = purchase.data_emissao
+    let emissionDate = purchase.data_emissao
       ? format(new Date(purchase.data_emissao), 'dd/MM/yyyy', { locale: ptBR })
       : 'Não informada';
 
@@ -54,6 +51,35 @@ export default function PurchaseDetailsModal({ purchase, items, onClose, onEdit,
     let protocoloNumero = '';
     let protocoloDataHora = '';
 
+    // Frete por conta (modFrete)
+    let fretePorContaDescricao = '0 - Por conta do Remetente';
+
+    // Bases de cálculo de ICMS por item (vBC do XML, na ordem dos itens)
+    const icmsBasesPorItem = [];
+
+    // Totais de imposto e valores agregados (nota)
+    let baseICMS = 0;
+    let valorICMS = 0;
+    let baseICMSST = 0;
+    let valorICMSST = 0;
+    let valorIPI = 0;
+    let valorPIS = 0;
+    let valorCOFINS = 0;
+    let valorFrete = 0;
+    let valorSeguro = 0;
+    let valorDesconto = 0;
+    let valorOutrasDespesas = 0;
+
+    // Totais adicionais da seção ICMSTot do XML (II, DIFAL/FCP, total tributos)
+    let valorII = 0;
+    let valorICMSUfRemet = 0;
+    let valorICMSUfDest = 0;
+    let valorFCPUfDest = 0;
+    let valorTotTrib = 0;
+
+    // Valor total da nota fiscal (vNF) da NF-e. Fallback: valor_total da compra.
+    let valorTotalNotaNFe = Number(purchase.valor_total || 0);
+
     const escapeHtml = (value) => {
       const str = String(value ?? '');
       return str
@@ -67,13 +93,17 @@ export default function PurchaseDetailsModal({ purchase, items, onClose, onEdit,
     // Enriquecer dados usando o XML completo (quando disponível)
     if (purchase.xml_completo) {
       try {
+        // xmlDoc bruto para campos que o parser não expõe diretamente
+        const domParser = new DOMParser();
+        const xmlDoc = domParser.parseFromString(purchase.xml_completo, 'text/xml');
+
         const parsed = parseNFeXML(purchase.xml_completo);
         if (parsed?.success && parsed.data) {
           const { fornecedor, nfe } = parsed.data;
 
           if (nfe) {
             if (nfe.dataEmissao) {
-              // dataEmissao vem em ISO, usar para sobrescrever emissão da DANFE
+              // dataEmissao vem em ISO, usar para sobrescrever data de emissão exibida
               try {
                 const d = new Date(nfe.dataEmissao);
                 if (!Number.isNaN(d.getTime())) {
@@ -107,10 +137,55 @@ export default function PurchaseDetailsModal({ purchase, items, onClose, onEdit,
           }
         }
 
-        // DOMParser para dados que o parser atual não expõe (destinatário, IE, protocolo)
-        const parser = new DOMParser();
-        const xmlDoc = parser.parseFromString(purchase.xml_completo, 'text/xml');
+        // Frete por conta (modFrete) - 0,1,2,9 conforme manual da NF-e
+        const transp = xmlDoc.querySelector('transp');
+        if (transp) {
+          const modFreteEl = transp.querySelector('modFrete');
+          if (modFreteEl) {
+            const codigo = modFreteEl.textContent.trim();
+            switch (codigo) {
+              case '0':
+                fretePorContaDescricao = '0 - Por conta do Remetente';
+                break;
+              case '1':
+                fretePorContaDescricao = '1 - Por conta do Destinatário/Remetente';
+                break;
+              case '2':
+                fretePorContaDescricao = '2 - Por conta de Terceiros';
+                break;
+              case '9':
+                fretePorContaDescricao = '9 - Sem cobrança de frete';
+                break;
+              default:
+                fretePorContaDescricao = `${codigo} - Frete (modFrete)`;
+                break;
+            }
+          }
+        }
 
+        // vBC por item (det) para B. CÁLC. ICMS
+        const detElements = xmlDoc.querySelectorAll('det');
+        detElements.forEach((det) => {
+          let vBCItem = null;
+          const imposto = det.querySelector('imposto');
+          if (imposto) {
+            const icms = imposto.querySelector('ICMS');
+            if (icms && icms.children[0]) {
+              const icmsType = icms.children[0];
+              const vBCEl = icmsType.querySelector('vBC');
+              if (vBCEl) {
+                const raw = vBCEl.textContent.trim().replace(',', '.');
+                const num = Number(raw);
+                if (!Number.isNaN(num)) {
+                  vBCItem = num;
+                }
+              }
+            }
+          }
+          icmsBasesPorItem.push(vBCItem);
+        });
+
+        // Dados do emitente/destinatário/protocolo direto do XML bruto
         const emit = xmlDoc.querySelector('emit');
         if (emit) {
           const ieEl = emit.querySelector('IE');
@@ -164,50 +239,133 @@ export default function PurchaseDetailsModal({ purchase, items, onClose, onEdit,
             }
           }
         }
+
+        // Totais gerais de impostos a partir da seção ICMSTot (quando disponível)
+        const icmsTot = xmlDoc.querySelector('ICMSTot');
+        if (icmsTot) {
+          const getTot = (tag) => {
+            const el = icmsTot.querySelector(tag);
+            return el ? Number(el.textContent.trim().replace(',', '.')) || 0 : 0;
+          };
+
+          // Base e valor de ICMS / ST
+          const vBC = getTot('vBC');
+          const vICMS = getTot('vICMS');
+          const vBCST = getTot('vBCST');
+          const vST = getTot('vST');
+
+          if (vBC || vICMS) {
+            baseICMS = vBC;
+            valorICMS = vICMS;
+          }
+          if (vBCST || vST) {
+            baseICMSST = vBCST;
+            valorICMSST = vST;
+          }
+
+          // Outros totais de imposto
+          valorII = getTot('vII');
+          valorICMSUfRemet = getTot('vICMSUFRemet');
+          valorICMSUfDest = getTot('vICMSUFDest');
+          valorFCPUfDest = getTot('vFCPUFDest');
+          valorTotTrib = getTot('vTotTrib');
+
+          // PIS / COFINS / IPI totais da nota (se presentes) sobrescrevem o somatório de itens
+          const vPIS = getTot('vPIS');
+          const vCOFINS = getTot('vCOFINS');
+          const vIPI = getTot('vIPI');
+          if (vPIS) valorPIS = vPIS;
+          if (vCOFINS) valorCOFINS = vCOFINS;
+          if (vIPI) valorIPI = vIPI;
+
+          // Valor total da NF-e (vNF) - padrão utilizado em DANFE oficial
+          const vNF = getTot('vNF');
+          if (vNF) valorTotalNotaNFe = vNF;
+
+          // Frete / Seguro / Desconto / Outras despesas totais da nota
+          const vFrete = getTot('vFrete');
+          const vSeg = getTot('vSeg');
+          const vDesc = getTot('vDesc');
+          const vOutro = getTot('vOutro');
+          if (vFrete) valorFrete = vFrete;
+          if (vSeg) valorSeguro = vSeg;
+          if (vDesc) valorDesconto = vDesc;
+          if (vOutro) valorOutrasDespesas = vOutro;
+        }
       } catch (error) {
-        console.error('[DANFE] Erro ao interpretar XML completo da compra:', error);
+        console.error('[NFeViewer] Erro ao interpretar XML completo da compra:', error);
       }
     }
 
-    // Totais por imposto a partir dos itens (quando disponíveis)
-    let baseICMS = 0;
-    let valorICMS = 0;
-    let baseICMSST = 0;
-    let valorICMSST = 0;
-    let valorIPI = 0;
-    let valorPIS = 0;
-    let valorCOFINS = 0;
-    let valorFrete = 0;
-    let valorSeguro = 0;
-    let valorDesconto = 0;
-    let valorOutrasDespesas = 0;
+    // Totais por imposto a partir dos itens (fallback caso XML não traga os totais)
+    const shouldUseItemsTotals =
+      baseICMS === 0 &&
+      valorICMS === 0 &&
+      baseICMSST === 0 &&
+      valorICMSST === 0 &&
+      valorPIS === 0 &&
+      valorCOFINS === 0 &&
+      valorIPI === 0 &&
+      valorFrete === 0 &&
+      valorSeguro === 0 &&
+      valorDesconto === 0 &&
+      valorOutrasDespesas === 0;
 
-    items.forEach((item) => {
-      const vTotal = Number(item.valor_total || 0);
-      const icmsValor = Number(item.icms_valor || 0);
-      const icmsAliquota = Number(item.icms_aliquota || 0);
-      const ipiValor = Number(item.ipi_valor || 0);
-      const pisValor = Number(item.pis_valor || 0);
-      const cofinsValor = Number(item.cofins_valor || 0);
+    if (shouldUseItemsTotals) {
+      items.forEach((item) => {
+        const vTotal = Number(item.valor_total || 0);
+        const icmsValor = Number(item.icms_valor || 0);
+        const icmsAliquota = Number(item.icms_aliquota || 0);
+        const ipiValor = Number(item.ipi_valor || 0);
+        const pisValor = Number(item.pis_valor || 0);
+        const cofinsValor = Number(item.cofins_valor || 0);
 
-      // Como não temos base separada na tabela, usamos valor_total como aproximação da base
-      if (icmsValor > 0 || icmsAliquota > 0) {
-        baseICMS += vTotal;
-        valorICMS += icmsValor;
-      }
+        // Como não temos base separada na tabela, usamos valor_total como aproximação da base
+        if (icmsValor > 0 || icmsAliquota > 0) {
+          baseICMS += vTotal;
+          valorICMS += icmsValor;
+        }
 
-      valorIPI += ipiValor;
-      valorPIS += pisValor;
-      valorCOFINS += cofinsValor;
+        valorIPI += ipiValor;
+        valorPIS += pisValor;
+        valorCOFINS += cofinsValor;
 
-      valorFrete += Number(item.valor_frete || item.valorFrete || 0);
-      valorSeguro += Number(item.valor_seguro || item.valorSeguro || 0);
-      valorDesconto += Number(item.valor_desconto || item.valorDesconto || 0);
-      valorOutrasDespesas += Number(item.valor_outras_despesas || item.valorOutrasDespesas || 0);
-    });
+        valorFrete += Number(item.valor_frete || item.valorFrete || 0);
+        valorSeguro += Number(item.valor_seguro || item.valorSeguro || 0);
+        valorDesconto += Number(item.valor_desconto || item.valorDesconto || 0);
+        valorOutrasDespesas += Number(item.valor_outras_despesas || item.valorOutrasDespesas || 0);
+      });
+    }
+
+    const formatMoney = (value) => {
+      const num = Number(value || 0);
+      return num.toLocaleString('pt-BR', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      });
+    };
+
+    const baseICMSStr = formatMoney(baseICMS);
+    const valorICMSStr = formatMoney(valorICMS);
+    const baseICMSSTStr = formatMoney(baseICMSST);
+    const valorICMSSTStr = formatMoney(valorICMSST);
+    const valorIPIStr = formatMoney(valorIPI);
+    const valorPISStr = formatMoney(valorPIS);
+    const valorCOFINSStr = formatMoney(valorCOFINS);
+    const valorFreteStr = formatMoney(valorFrete);
+    const valorSeguroStr = formatMoney(valorSeguro);
+    const valorDescontoStr = formatMoney(valorDesconto);
+    const valorOutrasDespesasStr = formatMoney(valorOutrasDespesas);
+    const valorIIStr = formatMoney(valorII);
+    const valorICMSUfRemetStr = formatMoney(valorICMSUfRemet);
+    const valorICMSUfDestStr = formatMoney(valorICMSUfDest);
+    const valorFCPUfDestStr = formatMoney(valorFCPUfDest);
+    const valorTotTribStr = formatMoney(valorTotTrib);
+    const totalProdutosStr = formatMoney(totalProdutos);
+    const totalNotaStr = formatMoney(valorTotalNotaNFe);
 
     const rows = items
-      .map((item) => {
+      .map((item, idx) => {
         const codigo = item.produto?.codigo_produto || item.codigo_produto_xml || '';
         const descricao = item.produto?.nome || item.nome_produto_xml || '';
         const ncm = item.ncm_xml || '';
@@ -221,11 +379,13 @@ export default function PurchaseDetailsModal({ purchase, items, onClose, onEdit,
           minimumFractionDigits: 2,
           maximumFractionDigits: 2,
         });
-        const valorTotal = Number(item.valor_total || 0).toLocaleString('pt-BR', {
+        const valorTotalNumero = Number(item.valor_total || 0);
+        const valorTotal = valorTotalNumero.toLocaleString('pt-BR', {
           minimumFractionDigits: 2,
           maximumFractionDigits: 2,
         });
-        const baseCalcICMS = Number(item.valor_total || 0).toLocaleString('pt-BR', {
+        const vBCItem = icmsBasesPorItem[idx] != null ? icmsBasesPorItem[idx] : valorTotalNumero;
+        const baseCalcICMS = vBCItem.toLocaleString('pt-BR', {
           minimumFractionDigits: 2,
           maximumFractionDigits: 2,
         });
@@ -266,11 +426,25 @@ export default function PurchaseDetailsModal({ purchase, items, onClose, onEdit,
       })
       .join('');
 
+    const destinatarioResumo = (() => {
+      let linha = destRazaoSocial || '';
+      const partesEndereco = [];
+      if (destEndereco) partesEndereco.push(destEndereco);
+      const cidadeUf = [destMunicipio, destUf].filter(Boolean).join('-');
+      if (destBairro) partesEndereco.push(destBairro);
+      if (cidadeUf) partesEndereco.push(cidadeUf);
+      if (destCep) partesEndereco.push(destCep);
+      if (partesEndereco.length > 0) {
+        linha += ' - ' + partesEndereco.join(', ');
+      }
+      return linha;
+    })();
+
     const html = `<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
   <meta charset="utf-8" />
-  <title>DANFE - NF-e ${escapeHtml(purchase.numero_nfe || '')}</title>
+  <title>NF-e - Visualização ${escapeHtml(purchase.numero_nfe || '')}</title>
   <style>
     body { font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin: 16px; background: #ffffff; color: #000000; }
     .container { max-width: 980px; margin: 0 auto; border: 1px solid #000000; padding: 10px; font-size: 11px; }
@@ -301,8 +475,8 @@ export default function PurchaseDetailsModal({ purchase, items, onClose, onEdit,
       <div class="col" style="font-size:9px;">
         <div class="receipt-box">
           <div>RECEBEMOS DE ${escapeHtml(emitRazaoSocial)} OS PRODUTOS E/OU SERVIÇOS CONSTANTES DA NOTA FISCAL ELETRÔNICA INDICADA ABAIXO.</div>
-          <div>EMISSÃO: ${escapeHtml(emissionDate)} - VALOR TOTAL: R$ ${Number(purchase.valor_total || 0).toFixed(2)}</div>
-          <div>DESTINATÁRIO: ${escapeHtml(destRazaoSocial)}</div>
+          <div>EMISSÃO: ${escapeHtml(emissionDate)} VALOR TOTAL: R$ ${totalNotaStr}</div>
+          <div>DESTINATÁRIO: ${escapeHtml(destinatarioResumo)}</div>
           <div style="margin-top:8px;">DATA DE RECEBIMENTO ______________________ IDENTIFICAÇÃO E ASSINATURA DO RECEBEDOR</div>
         </div>
       </div>
@@ -310,15 +484,17 @@ export default function PurchaseDetailsModal({ purchase, items, onClose, onEdit,
 
     <div class="row" style="margin-bottom:4px;">
       <div class="col" style="border:1px solid #000;padding:4px;font-size:9px;">
-        <div class="title">DANFE</div>
-        <div class="subtitle">Documento Auxiliar da Nota Fiscal Eletrônica</div>
+        <div class="title">NF-e</div>
+        <div class="subtitle">Visualização da Nota Fiscal Eletrônica</div>
         <div style="margin-top:4px;">${operationTypeCode}</div>
+        ${naturezaOperacao ? `<div style="margin-top:4px;"><span class="label">NATUREZA DA OPERAÇÃO</span> ${escapeHtml(naturezaOperacao)}</div>` : ''}
         <div style="margin-top:4px;">Consulta de autenticidade no portal nacional da NF-e www.nfe.fazenda.gov.br/portal ou no site da Sefaz Autorizadora</div>
       </div>
       <div class="col" style="border-top:1px solid #000;border-right:1px solid #000;border-bottom:1px solid #000;padding:4px;font-size:9px;">
         <div><span class="label">NF-e Nº.</span> ${escapeHtml(purchase.numero_nfe || '')}</div>
         <div><span class="label">Série</span> ${escapeHtml(purchase.serie_nfe || '')}</div>
         ${purchase.chave_nfe ? `<div style="margin-top:4px;"><span class="label">CHAVE DE ACESSO</span><br/><span class="access-key">${escapeHtml(purchase.chave_nfe)}</span></div>` : ''}
+        ${protocoloNumero ? `<div style="margin-top:4px;"><span class="label">PROTOCOLO DE AUTORIZAÇÃO DE USO</span><br/>${escapeHtml(protocoloNumero)}${protocoloDataHora ? ' - ' + escapeHtml(protocoloDataHora) : ''}</div>` : ''}
       </div>
     </div>
 
@@ -349,24 +525,28 @@ export default function PurchaseDetailsModal({ purchase, items, onClose, onEdit,
       <div class="section-body">
         <div class="row">
           <div class="col">
-            <div><span class="label">BASE DE CÁLCULO DO ICMS</span> ${baseICMS.toFixed(2)}</div>
-            <div><span class="label">VALOR DO ICMS</span> ${valorICMS.toFixed(2)}</div>
-            <div><span class="label">BASE DE CÁLC. ICMS S.T.</span> ${baseICMSST.toFixed(2)}</div>
-            <div><span class="label">VALOR DO ICMS SUBST.</span> ${valorICMSST.toFixed(2)}</div>
+            <div><span class="label">BASE DE CÁLCULO DO ICMS</span> ${baseICMSStr}</div>
+            <div><span class="label">VALOR DO ICMS</span> ${valorICMSStr}</div>
+            <div><span class="label">BASE DE CÁLC. ICMS S.T.</span> ${baseICMSSTStr}</div>
+            <div><span class="label">VALOR DO ICMS SUBST.</span> ${valorICMSSTStr}</div>
           </div>
           <div class="col">
-            <div><span class="label">VALOR IMP. IMPORTAÇÃO</span> 0,00</div>
-            <div><span class="label">VALOR DO PIS</span> ${valorPIS.toFixed(2)}</div>
-            <div><span class="label">VALOR DA COFINS</span> ${valorCOFINS.toFixed(2)}</div>
+            <div><span class="label">VALOR IMP. IMPORTAÇÃO</span> ${valorIIStr}</div>
+            <div><span class="label">V. ICMS UF REMET.</span> ${valorICMSUfRemetStr}</div>
+            <div><span class="label">V. ICMS UF DEST.</span> ${valorICMSUfDestStr}</div>
+            <div><span class="label">V. FCP UF DEST.</span> ${valorFCPUfDestStr}</div>
+            <div><span class="label">VALOR DO PIS</span> ${valorPISStr}</div>
+            <div><span class="label">VALOR DA COFINS</span> ${valorCOFINSStr}</div>
           </div>
           <div class="col">
-            <div><span class="label">VALOR TOTAL DOS PRODUTOS</span> ${Number(totalProdutos || 0).toFixed(2)}</div>
-            <div><span class="label">VALOR DO FRETE</span> ${valorFrete.toFixed(2)}</div>
-            <div><span class="label">VALOR DO SEGURO</span> ${valorSeguro.toFixed(2)}</div>
-            <div><span class="label">DESCONTO</span> ${valorDesconto.toFixed(2)}</div>
-            <div><span class="label">OUTRAS DESPESAS</span> ${valorOutrasDespesas.toFixed(2)}</div>
-            <div><span class="label">VALOR TOTAL DO IPI</span> ${valorIPI.toFixed(2)}</div>
-            <div><span class="label">VALOR TOTAL DA NOTA</span> ${Number(purchase.valor_total || 0).toFixed(2)}</div>
+            <div><span class="label">VALOR TOTAL DOS PRODUTOS</span> ${totalProdutosStr}</div>
+            <div><span class="label">VALOR DO FRETE</span> ${valorFreteStr}</div>
+            <div><span class="label">VALOR DO SEGURO</span> ${valorSeguroStr}</div>
+            <div><span class="label">DESCONTO</span> ${valorDescontoStr}</div>
+            <div><span class="label">OUTRAS DESPESAS</span> ${valorOutrasDespesasStr}</div>
+            <div><span class="label">VALOR TOTAL DO IPI</span> ${valorIPIStr}</div>
+            <div><span class="label">V. TOT. TRIB.</span> ${valorTotTribStr}</div>
+            <div><span class="label">VALOR TOTAL DA NOTA</span> ${totalNotaStr}</div>
           </div>
         </div>
       </div>
@@ -376,7 +556,7 @@ export default function PurchaseDetailsModal({ purchase, items, onClose, onEdit,
       <div class="section-title">TRANSPORTADOR / VOLUMES TRANSPORTADOS</div>
       <div class="section-body">
         <div><span class="label">NOME / RAZÃO SOCIAL</span> ________________________________</div>
-        <div><span class="label">FRETE POR CONTA</span> 0 - Por conta do Remetente</div>
+        <div><span class="label">FRETE POR CONTA</span> ${escapeHtml(fretePorContaDescricao)}</div>
         <div><span class="label">QUANTIDADE</span> 1 <span class="label">ESPÉCIE</span> Volumes</div>
       </div>
     </div>
@@ -427,8 +607,8 @@ export default function PurchaseDetailsModal({ purchase, items, onClose, onEdit,
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-      <div className="relative w-full max-w-4xl max-h-[90vh] bg-surface rounded-xl shadow-2xl border border-border overflow-hidden flex flex-col">
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-3 py-4 bg-black/60 backdrop-blur-sm">
+      <div className="relative w-[95vw] sm:w-full sm:max-w-4xl max-h-[85vh] bg-surface rounded-xl shadow-2xl border border-border overflow-hidden flex flex-col">
         {/* Header Simples */}
         <div className="relative bg-surface border-b border-border p-4">
           <button
@@ -438,7 +618,7 @@ export default function PurchaseDetailsModal({ purchase, items, onClose, onEdit,
             <X className="h-4 w-4 text-text-muted" />
           </button>
           
-          <div className="flex items-start justify-between gap-4 pr-10">
+          <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 sm:gap-4 pr-0 sm:pr-10">
             <div className="flex items-start gap-3">
               <div className="p-2 bg-brand/10 rounded-lg">
                 <FileText className="h-5 w-5 text-brand" />
@@ -453,9 +633,9 @@ export default function PurchaseDetailsModal({ purchase, items, onClose, onEdit,
                 </p>
               </div>
             </div>
-            <div className="text-right">
+            <div className="mt-3 sm:mt-0 sm:text-right">
               <p className="text-text-muted text-xs mb-0.5">Valor Total</p>
-              <p className="text-2xl font-bold text-success">
+              <p className="text-xl sm:text-2xl font-bold text-success whitespace-nowrap">
                 R$ {Number(purchase.valor_total || 0).toFixed(2)}
               </p>
             </div>
@@ -463,7 +643,7 @@ export default function PurchaseDetailsModal({ purchase, items, onClose, onEdit,
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-6">
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6">
           <>
               {/* Informações Gerais */}
               <div className="bg-surface-2 rounded-lg border border-border p-4">
@@ -667,8 +847,8 @@ export default function PurchaseDetailsModal({ purchase, items, onClose, onEdit,
         </div>
 
         {/* Footer */}
-        <div className="p-4 bg-surface-2 border-t border-border flex justify-between">
-          <div className="flex gap-2">
+        <div className="p-3 sm:p-4 bg-surface-2 border-t border-border flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex flex-wrap gap-2">
             {purchase.ativo && (
               <>
                 <Button
@@ -701,15 +881,6 @@ export default function PurchaseDetailsModal({ purchase, items, onClose, onEdit,
                       <Download className="h-4 w-4" />
                       XML
                     </Button>
-                    <Button
-                      onClick={handleOpenDanfe}
-                      size="sm"
-                      variant="outline"
-                      className="gap-2"
-                    >
-                      <FileText className="h-4 w-4" />
-                      DANFE
-                    </Button>
                   </>
                 )}
                 <Button
@@ -724,7 +895,11 @@ export default function PurchaseDetailsModal({ purchase, items, onClose, onEdit,
               </>
             )}
           </div>
-          <Button onClick={onClose} variant="outline">
+          <Button
+            onClick={onClose}
+            variant="outline"
+            className="w-full sm:w-auto"
+          >
             Fechar
           </Button>
         </div>

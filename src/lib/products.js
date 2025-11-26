@@ -363,6 +363,63 @@ export async function listProducts(options = {}) {
   return mapped
 }
 
+// Versão paginada da listagem de produtos, para telas com muitas linhas (ex.: ProdutosPage)
+// Retorna { data, count } já mapeados para o formato de UI
+export async function listProductsPaged(options = {}) {
+  const { includeInactive = false, search = '', codigoEmpresa, page = 1, pageSize = 100 } = options
+  if (!codigoEmpresa) return { data: [], count: 0 }
+
+  const safePage = page > 0 ? page : 1
+  const safePageSize = pageSize > 0 ? pageSize : 100
+  const from = (safePage - 1) * safePageSize
+  const to = from + safePageSize - 1
+
+  // eslint-disable-next-line no-console
+  console.log('[products.api] ====== listProductsPaged INICIO ======', { includeInactive, search, codigoEmpresa, page: safePage, pageSize: safePageSize })
+
+  try {
+    const { data, error, count } = await withTimeout((signal) => {
+      let q = supabase
+        .from('produtos')
+        .select('*', { count: 'exact' })
+        .eq('codigo_empresa', codigoEmpresa)
+        .order('nome', { ascending: true })
+        .range(from, to)
+        .abortSignal(signal)
+
+      // Filtrar por status (se includeInactive = false, exclui inativos)
+      if (!includeInactive) {
+        // status != 'inactive' AND (ativo IS NULL OR ativo = true)
+        q = q.neq('status', 'inactive')
+        q = q.or('ativo.is.null,ativo.eq.true')
+      }
+
+      if (search && search.trim().length > 0) {
+        const term = search.trim()
+        // Busca por nome OU código (case-insensitive)
+        q = q.or(`nome.ilike.%${term}%,codigo_produto.ilike.%${term}%`)
+      }
+
+      return q
+    }, 20000, 'Timeout listProductsPaged (20s)')
+
+    if (error) {
+      // eslint-disable-next-line no-console
+      console.error('[products.api] listProductsPaged:error', error)
+      throw error
+    }
+
+    const mapped = (data || []).map(mapDbToUi)
+    // eslint-disable-next-line no-console
+    console.log('[products.api] listProductsPaged RETORNOU:', mapped.length, 'produtos de', count || 0)
+    return { data: mapped, count: count || 0 }
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('[products.api] listProductsPaged:exception', err)
+    return { data: [], count: 0 }
+  }
+}
+
 export async function createProduct(product, options = {}) {
   const { codigoEmpresa } = options
   const payload = mapUiToDb(product)
@@ -503,6 +560,64 @@ export async function deleteProduct(id) {
   }
   // eslint-disable-next-line no-console
   console.info('[products.api] deleteProduct: ok (inativado)')
+  return true
+}
+
+// ===== Ações em massa =====
+// Atualiza o status/ativo de vários produtos (ex.: ativar/inativar em massa)
+export async function bulkUpdateProductStatus({ ids, status }) {
+  const targetIds = Array.isArray(ids) ? ids.filter(Boolean) : []
+  if (!targetIds.length) throw new Error('Nenhum produto selecionado para atualização em massa')
+  if (!['active', 'inactive', 'low_stock'].includes(status)) throw new Error('Status inválido para atualização em massa')
+
+  const activeFlag = status === 'inactive' ? false : true
+
+  // eslint-disable-next-line no-console
+  console.info('[products.api] bulkUpdateProductStatus:start', { count: targetIds.length, status })
+
+  const { error } = await withTimeout((signal) =>
+    supabase
+      .from('produtos')
+      .update({ status, ativo: activeFlag })
+      .in('id', targetIds)
+      .abortSignal(signal)
+  , 20000, 'Timeout bulkUpdateProductStatus (20s)')
+
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.error('[products.api] bulkUpdateProductStatus:error', error)
+    throw error
+  }
+
+  // eslint-disable-next-line no-console
+  console.info('[products.api] bulkUpdateProductStatus:ok', { count: targetIds.length, status })
+  return true
+}
+
+// Remove a flag de "Novo" de vários produtos (limpa data_importacao)
+export async function bulkClearNewFlag({ ids }) {
+  const targetIds = Array.isArray(ids) ? ids.filter(Boolean) : []
+  if (!targetIds.length) throw new Error('Nenhum produto selecionado para limpar flag de novo')
+
+  // eslint-disable-next-line no-console
+  console.info('[products.api] bulkClearNewFlag:start', { count: targetIds.length })
+
+  const { error } = await withTimeout((signal) =>
+    supabase
+      .from('produtos')
+      .update({ data_importacao: null })
+      .in('id', targetIds)
+      .abortSignal(signal)
+  , 20000, 'Timeout bulkClearNewFlag (20s)')
+
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.error('[products.api] bulkClearNewFlag:error', error)
+    throw error
+  }
+
+  // eslint-disable-next-line no-console
+  console.info('[products.api] bulkClearNewFlag:ok', { count: targetIds.length })
   return true
 }
 

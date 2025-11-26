@@ -25,8 +25,8 @@ const navItemVariants = {
 };
 
 const NavItem = ({ to, icon: Icon, label, index, onNavigate }) => {
-  const activeLink = "flex items-center h-[52px] px-4 rounded-sm bg-brand text-primary-foreground font-bold shadow-lg shadow-brand/10 border-l-4 border-brand";
-  const inactiveLink = "flex items-center h-[52px] px-4 rounded-sm text-text-secondary hover:bg-surface-2 hover:text-text-primary transition-all duration-200 border-l-4 border-transparent";
+  const activeLink = "flex items-center h-[52px] px-4 rounded-sm bg-brand text-primary-foreground font-bold shadow-lg shadow-brand/10 border-l-4 border-brand w-full";
+  const inactiveLink = "flex items-center h-[52px] px-4 rounded-sm text-text-secondary hover:bg-surface-2 hover:text-text-primary transition-all duration-200 border-l-4 border-transparent w-full";
 
   return (
     <motion.li

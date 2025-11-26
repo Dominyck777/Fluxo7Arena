@@ -77,40 +77,51 @@ function PrivateApp() {
     <ModalsProvider>
       <AlertsProvider>
         <AgendaProvider>
-          <div className="flex h-screen bg-background text-text-primary">
-        <Helmet>
-            <title>F7 Arena</title>
-            <meta name="description" content="Software para gestão de quadras esportivas." />
-        </Helmet>
+          <div className="relative flex h-screen bg-background text-text-primary">
+            <Helmet>
+              <title>F7 Arena</title>
+              <meta name="description" content="Software para gestão de quadras esportivas." />
+            </Helmet>
         
-        <Sidebar isVisible={sidebarVisible} setIsVisible={setSidebarVisible} sidebarPinned={sidebarPinned} />
-        <div className="flex-1 flex flex-col overflow-hidden">
-          <Header onToggleSidebar={handleSidebarButton} sidebarVisible={sidebarVisible} sidebarPinned={sidebarPinned} />
-          <main className={cn("flex-1 overflow-x-hidden overflow-y-auto bg-background", isAgendaPage ? "p-0 md:p-8" : "p-8")}>
-          <Routes>
-            <Route path="/" element={<DashboardPage />} />
-            <Route path="/agenda" element={<AgendaPage />} />
-            <Route path="/vendas" element={<VendasPage />} />
-            <Route path="/balcao" element={<BalcaoPage />} />
-            <Route path="/produtos" element={<ProdutosPage />} />
-            <Route path="/compras" element={<ComprasPage />} />
-            <Route path="/clientes" element={<ClientesPage />} />
-            <Route path="/equipe" element={<EquipePage />} />
-            <Route path="/financeiro" element={<FinanceiroPage />} />
-            <Route path="/caixa" element={<Navigate to="/financeiro?tab=caixa" replace />} />
-            <Route path="/quadras" element={<QuadrasPage />} />
-            <Route path="/empresas" element={<EmpresasPage />} />
-            <Route path="/finalizadoras" element={<FinalizadorasPage />} />
-            <Route path="/test-page" element={<TestPage />} />
-            <Route path="/historico" element={<HistoricoComandasPage />} />
-            <Route path="/suporte" element={<SuportePage />} />
-          </Routes>
-        </main>
+            <Sidebar isVisible={sidebarVisible} setIsVisible={setSidebarVisible} sidebarPinned={sidebarPinned} />
+
+            {/* Overlay mobile: fecha sidebar ao clicar fora */}
+            {sidebarVisible && (
+              <button
+                type="button"
+                onClick={() => setSidebarVisible(false)}
+                className="md:hidden absolute inset-y-0 left-[280px] right-0 z-30"
+                aria-label="Fechar menu lateral"
+              />
+            )}
+
+            <div className="flex-1 flex flex-col overflow-hidden">
+              <Header onToggleSidebar={handleSidebarButton} sidebarVisible={sidebarVisible} sidebarPinned={sidebarPinned} />
+              <main className={cn("flex-1 overflow-x-hidden overflow-y-auto bg-background", isAgendaPage ? "p-0 md:p-8" : "p-8")}>
+              <Routes>
+                <Route path="/" element={<DashboardPage />} />
+                <Route path="/agenda" element={<AgendaPage />} />
+                <Route path="/vendas" element={<VendasPage />} />
+                <Route path="/balcao" element={<BalcaoPage />} />
+                <Route path="/produtos" element={<ProdutosPage />} />
+                <Route path="/compras" element={<ComprasPage />} />
+                <Route path="/clientes" element={<ClientesPage />} />
+                <Route path="/equipe" element={<EquipePage />} />
+                <Route path="/financeiro" element={<FinanceiroPage />} />
+                <Route path="/caixa" element={<Navigate to="/financeiro?tab=caixa" replace />} />
+                <Route path="/quadras" element={<QuadrasPage />} />
+                <Route path="/empresas" element={<EmpresasPage />} />
+                <Route path="/finalizadoras" element={<FinalizadorasPage />} />
+                <Route path="/test-page" element={<TestPage />} />
+                <Route path="/historico" element={<HistoricoComandasPage />} />
+                <Route path="/suporte" element={<SuportePage />} />
+              </Routes>
+            </main>
+          </div>
         </div>
-      </div>
-        </AgendaProvider>
-      </AlertsProvider>
-    </ModalsProvider>
+      </AgendaProvider>
+    </AlertsProvider>
+  </ModalsProvider>
   );
 }
 

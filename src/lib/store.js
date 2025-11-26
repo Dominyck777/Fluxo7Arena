@@ -385,7 +385,7 @@ export async function listarComandas({ status, from, to, search = '', limit = 50
   const codigo = codigoEmpresa || getCachedCompanyCode()
   let q = supabase
     .from('comandas')
-    .select('id, mesa_id, status, aberto_em, fechado_em')
+    .select('id, mesa_id, status, aberto_em, fechado_em, diferenca_pagamento')
     .order('fechado_em', { ascending: false, nullsFirst: false })
     .order('aberto_em', { ascending: false })
     .range(offset, offset + limit - 1)
@@ -754,6 +754,60 @@ export async function listMesas(codigoEmpresa) {
     // Retorna array vazio em vez de propagar erro
     return []
   }
+}
+
+// Lista pagamentos por comanda filtrando por status (ex.: 'Pendente')
+export async function listarPagamentosPorComandaEStatus({ comandaId, status, codigoEmpresa } = {}) {
+  if (!comandaId) throw new Error('comandaId é obrigatório')
+  let q = supabase
+    .from('pagamentos')
+    .select('*')
+    .eq('comanda_id', comandaId)
+  if (status) q = q.eq('status', status)
+  // garantir ordem estável das linhas de rascunho
+  q = q.order('created_at', { ascending: true })
+  const { data, error } = await q
+  if (error) throw error
+  return data || []
+}
+
+// Salva o rascunho de pagamentos de uma comanda: apaga Pendente atuais e recria a partir das linhas
+export async function salvarRascunhoPagamentosComanda({ comandaId, linhas, codigoEmpresa } = {}) {
+  if (!comandaId) throw new Error('comandaId é obrigatório')
+  const codigo = codigoEmpresa || getCachedCompanyCode()
+  if (!Array.isArray(linhas)) return
+  // Remove rascunhos atuais (status Pendente)
+  await supabase.from('pagamentos').delete().eq('comanda_id', comandaId).eq('status', 'Pendente')
+  // Recria cada linha como pagamento Pendente
+  for (const ln of linhas) {
+    const v = Number(ln?.valor || 0)
+    if (v <= 0) continue
+    const metodo = ln?.metodo || ln?.metodoNome || 'outros'
+    await registrarPagamento({
+      comandaId,
+      finalizadoraId: ln?.finalizadoraId || ln?.methodId || null,
+      metodo,
+      valor: v,
+      status: 'Pendente',
+      codigoEmpresa: codigo,
+      clienteId: ln?.clienteId || ln?.clientId || null,
+    })
+  }
+}
+
+// Promove todos pagamentos Pendente de uma comanda para Pago
+export async function promoverPagamentosRascunhoParaPago({ comandaId, codigoEmpresa } = {}) {
+  if (!comandaId) throw new Error('comandaId é obrigatório')
+  const codigo = codigoEmpresa || getCachedCompanyCode()
+  let q = supabase
+    .from('pagamentos')
+    .update({ status: 'Pago', recebido_em: new Date().toISOString() })
+    .eq('comanda_id', comandaId)
+    .eq('status', 'Pendente')
+  if (codigo) q = q.eq('codigo_empresa', codigo)
+  const { error } = await q
+  if (error) throw error
+  return true
 }
 
 // Cria uma nova mesa com o próximo número disponível (ou número específico)
@@ -2111,8 +2165,10 @@ export async function registrarPagamento({ comandaId, finalizadoraId, metodo, va
     recebido_em: new Date().toISOString(),
     codigo_empresa: codigo // Sempre inclui o código da empresa
   }
-  
-  // Não enviar cliente_id (coluna não existe no seu schema atual). Evita 400/PGRST204.
+  // cliente_id é opcional e só será persistido se a coluna existir no schema
+  if (clienteId) {
+    payload.cliente_id = clienteId
+  }
   
   console.log('[registrarPagamento] Iniciando registro de pagamento:', {
     comandaId,
@@ -2136,7 +2192,7 @@ export async function registrarPagamento({ comandaId, finalizadoraId, metodo, va
       // Downgrade de log para evitar ruído quando coluna não existe
       console.warn('[registrarPagamento] Primeira tentativa falhou:', { code: error.code, message: error.message })
       const msg = `${error?.message || ''} ${error?.details || ''}`.toLowerCase()
-      const isUndefinedColumn = (error?.code === '42703') || msg.includes("column") && msg.includes("cliente_id")
+      const isUndefinedColumn = (error?.code === '42703') || (msg.includes('column') && msg.includes('cliente_id'))
       if (isUndefinedColumn) {
         // Retry sem cliente_id
         const { cliente_id, ...withoutCliente } = payload
@@ -2195,7 +2251,7 @@ export async function registrarPagamento({ comandaId, finalizadoraId, metodo, va
 }
 
 // Fecha comanda e marca mesa como disponível
-export async function fecharComandaEMesa({ comandaId, codigoEmpresa }) {
+export async function fecharComandaEMesa({ comandaId, codigoEmpresa, diferencaPagamento }) {
   const codigo = codigoEmpresa || getCachedCompanyCode()
   const trace = '[fecharComandaEMesa]'
   
@@ -2228,18 +2284,35 @@ export async function fecharComandaEMesa({ comandaId, codigoEmpresa }) {
     
     // 3. Estratégia para fechar a comanda
     console.log(`${trace} Atualizando comanda...`)
-    
-    // Fechar comanda corretamente: status closed + fechado_em + codigo_empresa
-    console.log(`${trace} Fechando comanda com status closed + fechado_em...`)
-    const { error } = await supabase
+
+    // Monta payload base de fechamento
+    const updatePayload = {
+      status: 'closed',
+      fechado_em: nowIso,
+    }
+    // Se informado, envia diferença de pagamento para ser persistida na comanda
+    if (typeof diferencaPagamento === 'number' && Number.isFinite(diferencaPagamento)) {
+      updatePayload.diferenca_pagamento = diferencaPagamento
+    }
+
+    console.log(`${trace} Fechando comanda com status closed + fechado_em${updatePayload.diferenca_pagamento != null ? ' + diferenca_pagamento' : ''}...`)
+    let { error } = await supabase
       .from('comandas')
-      .update({ 
-        status: 'closed', 
-        fechado_em: nowIso 
-      })
+      .update(updatePayload)
       .eq('id', comandaId)
       .eq('codigo_empresa', codigo)
-    
+
+    // Compatibilidade: se coluna diferenca_pagamento ainda não existir, tenta novamente sem ela
+    if (error && error.code === '42703') {
+      console.warn(`${trace} Coluna diferenca_pagamento ausente no schema, tentando novamente sem ela...`)
+      const fallbackPayload = { status: 'closed', fechado_em: nowIso }
+      ;({ error } = await supabase
+        .from('comandas')
+        .update(fallbackPayload)
+        .eq('id', comandaId)
+        .eq('codigo_empresa', codigo))
+    }
+
     if (error) {
       console.error(`${trace} Erro ao fechar comanda:`, error)
       throw error

@@ -475,9 +475,10 @@ export default function BalcaoPage() {
       <AlertDialogTrigger asChild>
         <Button
           variant="success"
+          size="sm"
           disabled={isCashierOpen}
           onClick={() => setOpenCashDialogOpen(true)}
-          className="h-9 rounded-md px-3 sm:h-10"
+          className="px-3"
         >
           <Unlock className="h-4 w-4" />
           <span className="ml-2 md:hidden">Abrir</span>
@@ -515,9 +516,10 @@ export default function BalcaoPage() {
         <AlertDialogTrigger asChild>
           <Button
             variant="destructive"
+            size="sm"
             disabled={!isCashierOpen}
             onClick={handlePrepareClose}
-            className="h-9 rounded-md px-3 sm:h-10"
+            className="px-3"
           >
             <Lock className="h-4 w-4" />
             <span className="ml-2">Fechar Caixa</span>
@@ -1474,30 +1476,204 @@ export default function BalcaoPage() {
 
   return (
     <div className="h-full flex flex-col">
-      <div className="mb-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-        <Tabs value="balcao" onValueChange={(v) => {
-          if (v === 'mesas') navigate('/vendas');
-          if (v === 'balcao') navigate('/balcao');
-          if (v === 'historico') navigate('/historico');
-        }}>
-          <TabsList className="w-full grid grid-cols-3 sm:w-auto sm:inline-flex">
-            <TabsTrigger value="mesas">Mesas</TabsTrigger>
-            <TabsTrigger value="balcao">Balcão</TabsTrigger>
-            <TabsTrigger value="historico">Histórico</TabsTrigger>
-          </TabsList>
-        </Tabs>
-        <div className="flex items-center gap-2">
+      <div className="flex items-center justify-between mb-2 md:mb-6 gap-2 md:gap-4 flex-wrap">
+        <div className="w-full md:w-auto flex items-center gap-2 md:gap-3">
+          <Tabs value="balcao" className="w-full md:w-auto flex-1" onValueChange={(v) => {
+            if (v === 'mesas') navigate('/vendas');
+            if (v === 'balcao') navigate('/balcao');
+            if (v === 'historico') navigate('/historico');
+          }}>
+            <TabsList className="!grid w-full grid-cols-3">
+              <TabsTrigger value="mesas" className="text-xs sm:text-sm">Mesas</TabsTrigger>
+              <TabsTrigger value="balcao" className="text-xs sm:text-sm">Balcão</TabsTrigger>
+              <TabsTrigger value="historico" className="text-xs sm:text-sm">Histórico</TabsTrigger>
+            </TabsList>
+          </Tabs>
+        </div>
+        <div className="w-full md:w-auto flex items-center gap-1.5 md:gap-3 md:ml-auto justify-end mt-1 md:mt-0">
           <OpenCashierDialog />
           <CloseCashierDialog />
-          <Button
-            variant="outline"
-            onClick={() => setIsCashierDetailsOpen(true)}
-            className="h-9 rounded-md px-3 sm:h-10"
-          >
+          <Button variant="outline" size="sm" onClick={() => setIsCashierDetailsOpen(true)} className="px-3">
             <Banknote className="h-4 w-4" />
             <span className="ml-2 md:hidden">Detalhes</span>
             <span className="ml-2 hidden md:inline">Detalhes do Caixa</span>
           </Button>
+        </div>
+      </div>
+
+      {/* Mobile: fluxo guiado - primeiro iniciar venda (cliente), depois produtos / cancelar / finalizar */}
+      <div className="md:hidden flex-1 flex flex-col">
+        <div className="flex flex-col border rounded-lg border-border overflow-hidden bg-surface flex-1 min-h-0">
+          <div className="p-3 border-b border-border flex items-center justify-between gap-2">
+            <div className="min-w-0 flex-1">
+              <div className="text-xs text-text-secondary">Comanda</div>
+              <div className="text-base font-bold truncate">Balcão</div>
+              {clientChosen && customerName && (
+                <div className="text-[11px] text-text-muted truncate mt-0.5">{customerName}</div>
+              )}
+            </div>
+            <div className="flex flex-col items-end gap-1">
+              {/* Antes de escolher cliente: CTA claro para iniciar venda */}
+              {!clientChosen ? (
+                <Button
+                  size="sm"
+                  className="h-8 px-3 text-xs bg-amber-500 hover:bg-amber-400 text-black border border-amber-500/60"
+                  disabled={!isCashierOpen}
+                  onClick={() => {
+                    if (!isCashierOpen) {
+                      toast({ title: 'Caixa Fechado', description: 'Abra o caixa antes de iniciar uma venda.', variant: 'warning' });
+                      return;
+                    }
+                    setIsClientWizardOpen(true);
+                  }}
+                >
+                  Iniciar venda
+                </Button>
+              ) : (
+                <>
+                  <div className="flex items-center gap-1">
+                    <Button
+                      size="sm"
+                      className="h-8 px-2 text-xs bg-amber-500 hover:bg-amber-400 text-black border border-amber-500/60"
+                      disabled={!isCashierOpen}
+                      onClick={() => {
+                        if (!isCashierOpen) {
+                          toast({ title: 'Caixa Fechado', description: 'Abra o caixa antes de adicionar produtos.', variant: 'warning' });
+                          return;
+                        }
+                        setIsProductPickerOpen(true);
+                      }}
+                    >
+                      <Plus className="h-4 w-4 mr-1" /> Produto
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-8 px-2 text-xs"
+                      onClick={() => setIsClientWizardOpen(true)}
+                    >
+                      + Cliente
+                    </Button>
+                  </div>
+                  <span className="text-xs text-text-muted whitespace-nowrap">
+                    Total: R$ {total.toFixed(2)}
+                  </span>
+                </>
+              )}
+            </div>
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-3 thin-scroll min-h-0">
+            {!clientChosen ? (
+              <div className="text-center pt-8 text-xs text-text-muted space-y-2">
+                <div>Para começar, toque em <span className="font-semibold">Iniciar venda</span> e selecione o cliente.</div>
+              </div>
+            ) : items.length === 0 ? (
+              <div className="text-center pt-8 text-xs text-text-muted space-y-2">
+                <div>Comanda criada para o cliente.</div>
+                <div>Use o botão <span className="font-semibold">Produto</span> para adicionar itens.</div>
+              </div>
+            ) : (
+              <ul className="space-y-2">
+                {items.map(it => (
+                  <li key={it.id} className="p-2 rounded-md border border-border/40 bg-surface-2">
+                    <div className="text-sm font-medium truncate" title={it.name}>{it.name}</div>
+                    <div className="mt-1 flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1">
+                        <Button
+                          size="icon"
+                          variant="outline"
+                          className="h-7 w-7"
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            const codigoEmpresa = userProfile?.codigo_empresa;
+                            if (!codigoEmpresa) { toast({ title: 'Empresa não definida', variant: 'destructive' }); return; }
+                            const next = Number(it.quantity || 1) - 1;
+                            try {
+                              if (next <= 0) {
+                                await removerItem({ itemId: it.id, codigoEmpresa });
+                                setItems(prev => prev.filter(n => n.id !== it.id));
+                              } else {
+                                await atualizarQuantidadeItem({ itemId: it.id, quantidade: next, codigoEmpresa });
+                                setItems(prev => prev.map(n => n.id === it.id ? { ...n, quantity: next } : n));
+                              }
+                            } catch (err) {
+                              toast({ title: 'Falha ao atualizar item', description: err?.message || 'Tente novamente', variant: 'destructive' });
+                            }
+                          }}
+                        >
+                          -
+                        </Button>
+                        <span className="w-7 text-center text-sm font-semibold">{it.quantity}</span>
+                        <Button
+                          size="icon"
+                          variant="outline"
+                          className="h-7 w-7"
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            const codigoEmpresa = userProfile?.codigo_empresa;
+                            if (!codigoEmpresa) { toast({ title: 'Empresa não definida', variant: 'destructive' }); return; }
+                            const next = Number(it.quantity || 1) + 1;
+                            try {
+                              await atualizarQuantidadeItem({ itemId: it.id, quantidade: next, codigoEmpresa });
+                              setItems(prev => prev.map(n => n.id === it.id ? { ...n, quantity: next } : n));
+                            } catch (err) {
+                              toast({ title: 'Falha ao atualizar item', description: err?.message || 'Tente novamente', variant: 'destructive' });
+                            }
+                          }}
+                        >
+                          +
+                        </Button>
+                      </div>
+                      <span className="text-sm font-semibold whitespace-nowrap">
+                        R$ {(Number(it.quantity) * Number(it.price)).toFixed(2)}
+                      </span>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          <div className="p-3 border-t border-border flex gap-2">
+            {!clientChosen ? (
+              <Button
+                className="flex-1"
+                size="sm"
+                variant="outline"
+                disabled={!isCashierOpen}
+                onClick={() => {
+                  if (!isCashierOpen) {
+                    toast({ title: 'Caixa Fechado', description: 'Abra o caixa antes de iniciar uma venda.', variant: 'warning' });
+                    return;
+                  }
+                  setIsClientWizardOpen(true);
+                }}
+              >
+                Iniciar venda
+              </Button>
+            ) : (
+              <>
+                <Button
+                  className="flex-1"
+                  variant="outline"
+                  size="sm"
+                  onClick={cancelSale}
+                  disabled={items.length === 0}
+                >
+                  Cancelar
+                </Button>
+                <Button
+                  className="flex-1"
+                  size="sm"
+                  disabled={total <= 0}
+                  onClick={openPay}
+                >
+                  Finalizar
+                </Button>
+              </>
+            )}
+          </div>
         </div>
       </div>
       {/* Detalhes do Caixa renderizado via componente único */}
@@ -1620,6 +1796,7 @@ export default function BalcaoPage() {
         </DialogContent>
       </Dialog>
 
+      {/* Layout principal: desktop usa painéis lado a lado; mobile foca na comanda + botão Produto */}
       <div ref={containerRef} className="hidden md:flex gap-0 h-full overflow-hidden relative">
         <div 
           className="flex flex-col border rounded-lg border-border overflow-hidden"
