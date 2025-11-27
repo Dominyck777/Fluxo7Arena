@@ -809,13 +809,15 @@ export default function BalcaoPage() {
         const itens = await listarItensDaComanda({ comandaId: targetComandaId, codigoEmpresa });
         // Ignora respostas antigas
         if (reqId !== itemsReqIdRef.current) return;
-        const normalized = (itens || []).map((it) => ({ id: it.id, productId: it.produto_id, name: it.descricao || 'Item', price: Number(it.preco_unitario || 0), quantity: Number(it.quantidade || 1) }));
-        // Evita sobrescrever com vazio se já temos itens na UI (consistência eventual)
-        if (normalized.length === 0 && (itemsRef.current || []).length > 0) {
-          // mantém o estado atual e continua para tentar carregar clientes
-        } else {
-          setItems(normalized);
-        }
+        const normalized = (itens || []).map((it) => ({
+          id: it.id,
+          productId: it.produto_id,
+          name: it.descricao || 'Item',
+          price: Number(it.preco_unitario || 0),
+          quantity: Number(it.quantidade || 1),
+        }));
+        // Sempre confiar na resposta do servidor, inclusive quando vier vazia
+        setItems(normalized);
         try {
           const vincs = await listarClientesDaComanda({ comandaId: targetComandaId, codigoEmpresa });
           if (reqId !== itemsReqIdRef.current) return;
