@@ -154,6 +154,7 @@ export default function EmpresasPage() {
     try {
       setLoading(true);
       const payload = {
+        nome: form.nome_fantasia || form.razao_social || 'Empresa', // Campo obrigatório
         razao_social: form.razao_social || null,
         nome_fantasia: form.nome_fantasia || null,
         cnpj: form.cnpj?.replace(/\D/g, '') || null,
@@ -162,13 +163,23 @@ export default function EmpresasPage() {
         endereco: form.endereco || null,
         logo_url: form.logo_url || null,
       };
+      
+      // 🔧 Contornar trigger de updated_at: usar UPSERT ao invés de UPDATE
+      // UPSERT não ativa o mesmo trigger que UPDATE
       const { error } = await supabase
         .from('empresas')
-        .update(payload)
-        .eq('codigo_empresa', userProfile.codigo_empresa)
+        .upsert(
+          {
+            codigo_empresa: userProfile.codigo_empresa,
+            ...payload,
+          },
+          { onConflict: 'codigo_empresa' }
+        )
         .select('id')
         .single();
+      
       if (error) throw error;
+      
       // Recarrega dados da empresa no contexto para refletir no header (logo/nome)
       await reloadCompany?.();
       toast({ title: 'Dados salvos', description: 'As informações da empresa foram atualizadas.' });

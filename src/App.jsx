@@ -22,8 +22,10 @@ import EmpresasPage from '@/pages/EmpresasPage';
 import FinalizadorasPage from '@/pages/FinalizadorasPage';
 import TestPage from '@/pages/TestPage';
 import ResetPasswordPage from '@/pages/ResetPasswordPage';
+import IsisPremiumPage from '@/pages/IsisPremiumPage';
 import HistoricoComandasPage from '@/pages/HistoricoComandasPage';
 import CreateCompanyPage from '@/pages/CreateCompanyPage';
+import IsisBookingPage from '@/pages/IsisBookingPage';
 import { Helmet } from 'react-helmet';
 
 function PrivateApp() {
@@ -88,7 +90,8 @@ function PrivateApp() {
           <main className={cn("flex-1 overflow-x-hidden overflow-y-auto bg-background", isAgendaPage ? "p-0 md:p-8" : "p-8")}>
           <Routes>
             <Route path="/" element={<DashboardPage />} />
-            <Route path="/agenda" element={<AgendaPage />} />
+            <Route path="/agenda" element={<AgendaPage sidebarVisible={sidebarVisible} />} />
+            <Route path="/isis" element={<IsisPremiumPage />} />
             <Route path="/vendas" element={<VendasPage />} />
             <Route path="/balcao" element={<BalcaoPage />} />
             <Route path="/produtos" element={<ProdutosPage />} />
@@ -118,6 +121,7 @@ function App() {
       {/* Rotas públicas */}
       <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="/40028922" element={<CreateCompanyPage />} />
+      <Route path="/agendar/:nomeFantasia" element={<IsisBookingPage />} />
       
       {/* Todas as demais rotas protegidas */}
       <Route path="/*" element={

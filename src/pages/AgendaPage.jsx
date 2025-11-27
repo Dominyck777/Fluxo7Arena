@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
-import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Plus, Lock, Search, SlidersHorizontal, Clock, CheckCircle, XCircle, CalendarPlus, Users, DollarSign, Repeat, Trash2, GripVertical, Sparkles, Ban, AlertTriangle, ChevronDown, Play, PlayCircle, Flag, UserX, X, Settings } from 'lucide-react';
+import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Plus, Lock, Search, SlidersHorizontal, Clock, CheckCircle, XCircle, CalendarPlus, Users, DollarSign, Repeat, Trash2, GripVertical, Sparkles, Ban, AlertTriangle, ChevronDown, Play, PlayCircle, Flag, UserX, X, Settings, Maximize2, Minimize2 } from 'lucide-react';
 import { useToast } from "@/components/ui/use-toast";
 import { format, addDays, subDays, startOfDay, addHours, getHours, getMinutes, setHours, setMinutes, addMinutes, startOfWeek, isSameDay } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -24,6 +24,7 @@ import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import ClientFormModal from '@/components/clients/ClientFormModal';
 import PaymentModal from '@/components/agenda/PaymentModal';
 import EditParticipantModal from '@/components/agenda/EditParticipantModal';
+import WeeklyGrid from '@/components/agenda/WeeklyGrid';
 
 // Grade fixa de 30 em 30 minutos (constantes usadas por toda a página)
 const SLOT_MINUTES = 30;
@@ -70,6 +71,33 @@ const timeSlots = Array.from({ length: (END_HOUR - START_HOUR) * (60 / SLOT_MINU
 const modalities = ['Futebol', 'Beach Tennis', 'Futevôlei', 'Treino'];
 // Novos status alinhados ao statusConfig
 const statuses = ['scheduled', 'confirmed', 'in_progress', 'finished', 'canceled', 'absent'];
+
+// Funções auxiliares para visão semanal
+function getWeekStart(date) {
+  return startOfWeek(date, { weekStartsOn: 1 }); // segunda-feira
+}
+
+function getWeekDays(date) {
+  const start = getWeekStart(date);
+  return Array.from({ length: 7 }, (_, i) => addDays(start, i));
+}
+
+function getDayLabel(date) {
+  const labels = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sab', 'Dom'];
+  return labels[date.getDay() === 0 ? 6 : date.getDay() - 1];
+}
+
+function getWeekRangeLabel(date) {
+  const start = getWeekStart(date);
+  const end = addDays(start, 6);
+  // Se a semana está no mesmo mês, mostra: "24-30 de novembro de 2025"
+  // Se está em meses diferentes, mostra: "28 de outubro - 3 de novembro de 2025"
+  if (start.getMonth() === end.getMonth()) {
+    return `${format(start, 'dd')}-${format(end, 'dd')} de ${format(end, 'MMMM', { locale: ptBR })} de ${format(end, 'yyyy')}`;
+  } else {
+    return `${format(start, 'dd')} de ${format(start, 'MMMM', { locale: ptBR })} - ${format(end, 'dd')} de ${format(end, 'MMMM', { locale: ptBR })} de ${format(end, 'yyyy')}`;
+  }
+}
 
 function createBooking(baseDate, court, startHour, startMin, durationMin, status, modality, customer, id) {
   const start = setMinutes(setHours(startOfDay(baseDate), startHour), startMin);
@@ -161,7 +189,7 @@ const formatMinutesToTime = (minutes) => {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 };
 
-function AgendaPage() {
+function AgendaPage({ sidebarVisible = false }) {
   const { toast } = useToast();
   const { loadAlerts } = useAlerts();
   const location = useLocation();
@@ -275,7 +303,63 @@ function AgendaPage() {
   const { userProfile, authReady, company } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const [currentDate, setCurrentDate] = useState(new Date());
+  const [viewMode, setViewMode] = useState('day'); // 'day' | 'week'
+  const [isGridExpanded, setIsGridExpanded] = useState(false); // expandir grid em tela cheia
+  const [diasFuncionamento, setDiasFuncionamento] = useState({});
+  const [loadingDiasFuncionamento, setLoadingDiasFuncionamento] = useState(false);
+  const [weekDiasFuncionamento, setWeekDiasFuncionamento] = useState({}); // Funcionamento para toda a semana
   
+  
+  // Listener de teclado: Escape fecha expandido • F10 alterna modo expandir
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      // Fechar com ESC quando expandido
+      if (e.key === 'Escape' && isGridExpanded) {
+        setIsGridExpanded(false);
+        return;
+      }
+      // Alternar expandir com F10
+      if (e.key === 'F10') {
+        try { e.preventDefault(); } catch {}
+        setIsGridExpanded((prev) => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isGridExpanded]);
+
+  // Controlar orientação da tela no mobile quando expandir
+  useEffect(() => {
+    if (isGridExpanded && window.innerWidth < 768) {
+      // Tentar forçar orientação landscape
+      if (screen.orientation && screen.orientation.lock) {
+        screen.orientation.lock('landscape').catch(() => {
+          // Fallback: atualizar meta tag
+          const metaTag = document.getElementById('screen-orientation-meta');
+          if (metaTag) {
+            metaTag.setAttribute('content', 'landscape');
+          }
+        });
+      } else {
+        // Fallback se screen.orientation não existir
+        const metaTag = document.getElementById('screen-orientation-meta');
+        if (metaTag) {
+          metaTag.setAttribute('content', 'landscape');
+        }
+      }
+    } else if (!isGridExpanded && window.innerWidth < 768) {
+      // Voltar para orientação automática
+      if (screen.orientation && screen.orientation.unlock) {
+        screen.orientation.unlock();
+      }
+      // Atualizar meta tag
+      const metaTag = document.getElementById('screen-orientation-meta');
+      if (metaTag) {
+        metaTag.setAttribute('content', 'portrait-primary');
+      }
+    }
+  }, [isGridExpanded]);
+
   // Ler parâmetro date da URL ao carregar
   useEffect(() => {
     const dateParam = searchParams.get('date');
@@ -393,6 +477,13 @@ function AgendaPage() {
   const prevFiltersRef = useRef({ scheduled: true, canceledOnly: false });
   // Prefill ao clicar em um slot livre
   const [prefill, setPrefill] = useState(null);
+  
+  // Debug prefill changes
+  useEffect(() => {
+    if (prefill) {
+      console.log('Prefill state changed:', prefill);
+    }
+  }, [prefill]);
   // Busca
   const [searchQuery, setSearchQuery] = useState("");
   // Janela de proteção extra para restaurar seleção se algum efeito concorrente limpar o array
@@ -410,12 +501,13 @@ function AgendaPage() {
     try { localStorage.setItem('agenda:hideCanceledInfo', hideCanceledInfo ? '1' : '0'); } catch {}
   }, [hideCanceledInfo]);
 
-  // Chave de cache por empresa/data (yyyy-mm-dd)
+  // Chave de cache por empresa/data (yyyy-mm-dd) ou semana (prefixo week:yyyy-mm-dd do início da semana)
   const bookingsCacheKey = useMemo(() => {
     if (!userProfile?.codigo_empresa) return null;
-    const dayStr = format(currentDate, 'yyyy-MM-dd');
-    return `agenda:bookings:${userProfile.codigo_empresa}:${dayStr}`;
-  }, [userProfile?.codigo_empresa, currentDate]);
+    const keyDate = viewMode === 'week' ? format(getWeekStart(currentDate), 'yyyy-MM-dd') : format(currentDate, 'yyyy-MM-dd');
+    const prefix = viewMode === 'week' ? 'week' : 'day';
+    return `agenda:bookings:${userProfile.codigo_empresa}:${prefix}:${keyDate}`;
+  }, [userProfile?.codigo_empresa, currentDate, viewMode]);
 
   // Cache local específico dos participantes por empresa/data
   const participantsCacheKey = useMemo(() => {
@@ -1062,8 +1154,10 @@ function AgendaPage() {
     }
     dbg('fetchBookings:start', { date: format(currentDate, 'yyyy-MM-dd'), empresa: userProfile?.codigo_empresa });
     pulseLog('fetch:start', { day: format(currentDate, 'yyyy-MM-dd') });
+    // Seleciona o período conforme a visão (dia ou semana)
     const dayStart = startOfDay(currentDate);
-    const dayEnd = addDays(dayStart, 1);
+    const periodStart = viewMode === 'week' ? getWeekStart(currentDate) : dayStart;
+    const periodEnd = viewMode === 'week' ? addDays(periodStart, 7) : addDays(periodStart, 1);
     const { data, error } = await supabase
       .from('agendamentos')
       .select(`
@@ -1071,8 +1165,8 @@ function AgendaPage() {
         quadra:quadra_id ( nome )
       `)
       .eq('codigo_empresa', userProfile.codigo_empresa)
-      .gte('inicio', dayStart.toISOString())
-      .lt('inicio', dayEnd.toISOString())
+      .gte('inicio', periodStart.toISOString())
+      .lt('inicio', periodEnd.toISOString())
       .order('inicio', { ascending: true });
     if (error) {
       dbg('fetchBookings:error', { message: error?.message, code: error?.code, status: error?.status });
@@ -1119,6 +1213,13 @@ function AgendaPage() {
         const participants = participantsByAgendamento[row.id];
         if (Array.isArray(participants) && participants.length > 0) {
           customerName = participants[0]?.nome || '';
+          
+          console.log('[DEBUG REPRESENTANTE] 🏷️ GRID (participantes):', {
+            id: row.id,
+            nomeExibido: customerName,
+            todosParticipantes: participants.map((p, i) => `${i+1}. ${p.nome}`),
+            primeiroParticipante: participants[0]?.nome
+          });
         }
       }
       
@@ -1128,6 +1229,11 @@ function AgendaPage() {
           const clientesArray = typeof row.clientes === 'string' ? JSON.parse(row.clientes) : row.clientes;
           if (Array.isArray(clientesArray) && clientesArray.length > 0) {
             customerName = clientesArray[0]?.nome || clientesArray[0] || '';
+            
+            console.log('[DEBUG REPRESENTANTE] 🏷️ GRID (clientes):', {
+              id: row.id,
+              nome: customerName
+            });
           }
         } catch {}
       }
@@ -1341,7 +1447,8 @@ function AgendaPage() {
       const { data, error } = await supabase
         .from('agendamento_participantes')
         .select('id, agendamento_id, codigo_empresa, cliente_id, nome, valor_cota, status_pagamento, finalizadora_id, aplicar_taxa, cliente:clientes!agendamento_participantes_cliente_id_fkey(nome, codigo)')
-        .in('agendamento_id', ids);
+        .in('agendamento_id', ids)
+        .order('ordem', { ascending: true }); // Ordena por campo ordem explícito
       // Ignora respostas atrasadas
       if (participantsReqIdRef.current !== reqId) return;
       if (error) {
@@ -1376,6 +1483,183 @@ function AgendaPage() {
     };
     loadParticipants();
   }, [authReady, userProfile?.codigo_empresa, bookings, currentDate, participantsCacheKey, dbg]);
+
+  // Carregar dias de funcionamento das quadras para a data atual
+  useEffect(() => {
+    const loadDiasFuncionamento = async () => {
+      if (!authReady || !userProfile?.codigo_empresa || !availableCourts.length) return;
+      
+      setLoadingDiasFuncionamento(true);
+      
+      try {
+        const dataFormatada = format(currentDate, 'yyyy-MM-dd');
+        const diaSemana = currentDate.getDay();
+        
+        // Buscar configurações para todas as quadras
+        const { data: configuracoes, error } = await supabase
+          .from('quadras_dias_funcionamento')
+          .select('*')
+          .eq('codigo_empresa', userProfile.codigo_empresa)
+          .or(`and(tipo.eq.data_fechamento,data_fechamento.eq.${dataFormatada}),and(tipo.eq.dia_semana,dia_semana.eq.${diaSemana})`);
+        
+        if (error) {
+          console.error('Erro ao carregar dias de funcionamento:', error);
+          return;
+        }
+        
+        const funcionamentoPorQuadra = {};
+        
+        // Para cada quadra, verificar se funciona
+        availableCourts.forEach(quadraNome => {
+          const quadra = courtsMap[quadraNome];
+          if (!quadra) return;
+          
+          // Verificar fechamento específico para esta data
+          const fechamentoEspecifico = configuracoes?.find(
+            config => config.quadra_id === quadra.id && 
+                     config.tipo === 'data_fechamento' && 
+                     config.data_fechamento === dataFormatada
+          );
+          
+          if (fechamentoEspecifico && !fechamentoEspecifico.funciona) {
+            funcionamentoPorQuadra[quadraNome] = {
+              funciona: false,
+              motivo: 'data_especifica',
+              observacao: fechamentoEspecifico.observacao || 'Fechamento especial'
+            };
+            return;
+          }
+          
+          // Verificar funcionamento do dia da semana
+          const funcionamentoSemanal = configuracoes?.find(
+            config => config.quadra_id === quadra.id && 
+                     config.tipo === 'dia_semana' && 
+                     config.dia_semana === diaSemana
+          );
+          
+          if (funcionamentoSemanal) {
+            funcionamentoPorQuadra[quadraNome] = {
+              funciona: funcionamentoSemanal.funciona,
+              motivo: funcionamentoSemanal.funciona ? 'normal' : 'dia_semana',
+              observacao: funcionamentoSemanal.funciona ? null : 'Fechado neste dia da semana'
+            };
+          } else {
+            // Se não tem configuração, assume que funciona
+            funcionamentoPorQuadra[quadraNome] = {
+              funciona: true,
+              motivo: 'normal',
+              observacao: null
+            };
+          }
+        });
+        
+        setDiasFuncionamento(funcionamentoPorQuadra);
+        
+      } catch (error) {
+        console.error('Erro ao verificar dias de funcionamento:', error);
+      } finally {
+        setLoadingDiasFuncionamento(false);
+      }
+    };
+    
+    loadDiasFuncionamento();
+  }, [authReady, userProfile?.codigo_empresa, currentDate, availableCourts, courtsMap]);
+
+  // Carregar funcionamento para toda a semana (para a visão semanal)
+  useEffect(() => {
+    if (!authReady || !userProfile?.codigo_empresa || availableCourts.length === 0) return;
+
+    const loadWeekDiasFuncionamento = async () => {
+      try {
+        // Obter início da semana
+        const weekStart = new Date(currentDate);
+        weekStart.setDate(weekStart.getDate() - weekStart.getDay());
+
+        // Buscar configurações para toda a semana
+        const { data: configuracoes, error } = await supabase
+          .from('quadras_dias_funcionamento')
+          .select('*')
+          .eq('codigo_empresa', userProfile.codigo_empresa);
+
+        if (error) {
+          console.error('Erro ao carregar funcionamento da semana:', error);
+          return;
+        }
+
+        const weekFuncionamento = {};
+
+        // Para cada dia da semana
+        for (let i = 0; i < 7; i++) {
+          const dayDate = new Date(weekStart);
+          dayDate.setDate(dayDate.getDate() + i);
+          const dataFormatada = format(dayDate, 'yyyy-MM-dd');
+          const diaSemana = dayDate.getDay();
+
+          const dayFuncionamento = {};
+
+          // Para cada quadra
+          availableCourts.forEach(quadraNome => {
+            const quadra = courtsMap[quadraNome];
+            if (!quadra) return;
+
+            // Verificar fechamento específico para esta data
+            const fechamentoEspecifico = configuracoes?.find(
+              config => config.quadra_id === quadra.id &&
+                       config.tipo === 'data_fechamento' &&
+                       config.data_fechamento === dataFormatada
+            );
+
+            if (fechamentoEspecifico && !fechamentoEspecifico.funciona) {
+              dayFuncionamento[quadraNome] = {
+                funciona: false,
+                motivo: 'data_especifica',
+                observacao: fechamentoEspecifico.observacao || 'Fechamento especial'
+              };
+              return;
+            }
+
+            // Verificar funcionamento do dia da semana
+            const funcionamentoSemanal = configuracoes?.find(
+              config => config.quadra_id === quadra.id &&
+                       config.tipo === 'dia_semana' &&
+                       config.dia_semana === diaSemana
+            );
+
+            if (funcionamentoSemanal) {
+              dayFuncionamento[quadraNome] = {
+                funciona: funcionamentoSemanal.funciona,
+                motivo: funcionamentoSemanal.funciona ? 'normal' : 'dia_semana',
+                observacao: funcionamentoSemanal.funciona ? null : 'Fechado neste dia da semana'
+              };
+            } else {
+              dayFuncionamento[quadraNome] = {
+                funciona: true,
+                motivo: 'normal',
+                observacao: null
+              };
+            }
+          });
+
+          weekFuncionamento[dataFormatada] = dayFuncionamento;
+        }
+
+        setWeekDiasFuncionamento(weekFuncionamento);
+      } catch (error) {
+        console.error('Erro ao carregar funcionamento da semana:', error);
+      }
+    };
+
+    loadWeekDiasFuncionamento();
+  }, [authReady, userProfile?.codigo_empresa, currentDate, availableCourts, courtsMap]);
+
+  // Rolar para o topo quando mudar para um dia com quadras fechadas
+  useEffect(() => {
+    const hasClosedCourts = Object.values(diasFuncionamento).some(info => !info.funciona);
+    
+    if (hasClosedCourts && scrollRef.current) {
+      // Não alterar o scroll automaticamente; manter posição (geralmente próxima do horário atual)
+    }
+  }, [diasFuncionamento]);
 
   // Carregar quadras do banco por empresa (inclui modalidades e horários)
   useEffect(() => {
@@ -1654,6 +1938,14 @@ function AgendaPage() {
         )}
         style={{ top: `${adjTop}px`, height: `${adjHeight}px` }}
         onClick={async () => {
+          console.log('[DEBUG REPRESENTANTE] 🎯 CLIQUE NO AGENDAMENTO:', {
+            id: booking.id,
+            customer: booking.customer,
+            clientes: booking.clientes,
+            todosParticipantes: participantsByAgendamento[booking.id]?.map((p, i) => `${i+1}. ${p.nome}`) || [],
+            primeiroParticipante: participantsByAgendamento[booking.id]?.[0]?.nome || 'N/A'
+          });
+          
           // Executa o vigia com pequena janela de até 600ms; não bloqueia por muito tempo a UX
           const guard = ensureFreshOnEdit(booking);
           const timeout = new Promise((resolve) => setTimeout(resolve, 600));
@@ -1661,6 +1953,14 @@ function AgendaPage() {
           try { result = await Promise.race([guard, timeout]); } catch {}
           // Prefira o booking atualizado retornado; senão busque do estado; fallback para o original
           const picked = (result && result.booking) || (bookings.find(b => b.id === booking.id) || booking);
+          
+          console.log('[DEBUG REPRESENTANTE] 📋 AGENDAMENTO SELECIONADO:', {
+            id: picked.id,
+            customer: picked.customer,
+            clientes: picked.clientes,
+            participantesDisponiveis: participantsByAgendamento[picked.id]?.map((p, i) => `${i+1}. ${p.nome}`) || []
+          });
+          
           setEditingBooking(picked);
           openBookingModal();
         }}
@@ -1818,9 +2118,17 @@ function AgendaPage() {
           try { userSelectedOnceRef.current = true; } catch {}
         }
       } catch {}
+      // Encontrar primeira quadra disponível (que não esteja fechada)
+      const getAvailableCourt = () => {
+        const firstAvailable = availableCourts.find(court => 
+          !diasFuncionamento[court] || diasFuncionamento[court].funciona
+        );
+        return firstAvailable || availableCourts[0] || '';
+      };
+      
       return {
         selectedClients: initialSelected, // [{id, nome, codigo?}]
-        court: availableCourts[0] || '',
+        court: getAvailableCourt(),
         modality: modalities[0],
         status: 'scheduled',
         date: currentDate,
@@ -2789,8 +3097,100 @@ function AgendaPage() {
             }
           } catch {}
         }
-        const primaryClient = selNow[0];
-        const clientesArr = selNow.map(getCustomerName).filter(Boolean);
+        
+        // Para agendamentos existentes, reordena participantes para manter ordem original (representante primeiro)
+        // MAS: Não reordena se estamos vindo do modal de pagamentos (substituição de participantes)
+        let selNowFinal = selNow;
+        if (editingBooking?.id) {
+          // 🔧 NÃO reordenar se os nomes mudaram (indicativo de substituição no modal de pagamentos)
+          // Comparar nomes atuais com o campo 'clientes' do agendamento
+          const nomesAtuais = selNow.map(p => p.nome).sort().join('|');
+          let nomesOriginais = '';
+          
+          if (editingBooking.clientes) {
+            try {
+              const clientes = Array.isArray(editingBooking.clientes) 
+                ? editingBooking.clientes 
+                : JSON.parse(editingBooking.clientes);
+              nomesOriginais = Array.isArray(clientes) ? clientes.sort().join('|') : '';
+            } catch {
+              nomesOriginais = '';
+            }
+          }
+          
+          const houveMudancaDeParticipantes = nomesAtuais !== nomesOriginais;
+          
+          console.log('[DEBUG REPRESENTANTE] 🔍 VERIFICAÇÃO DE MUDANÇA:', {
+            editingBookingId: editingBooking.id,
+            nomesAtuais: selNow.map(p => p.nome),
+            nomesOriginais: nomesOriginais ? nomesOriginais.split('|') : [],
+            houveMudanca: houveMudancaDeParticipantes
+          });
+          
+          if (!houveMudancaDeParticipantes) {
+            // Prioriza o campo 'clientes' do agendamento (salvo pela Isis) sobre os participantes carregados
+            let ordemReferencia = [];
+            
+            // Tenta usar o campo 'clientes' do agendamento primeiro (mais confiável)
+            if (editingBooking.clientes) {
+              try {
+                // Pode ser array ou string JSON
+                ordemReferencia = Array.isArray(editingBooking.clientes) 
+                  ? editingBooking.clientes 
+                  : JSON.parse(editingBooking.clientes);
+              } catch {
+                // Se falhar o parse, usa participantes carregados
+                const loadedParts = participantsByAgendamento[editingBooking.id] || [];
+                ordemReferencia = loadedParts.map(p => p.nome);
+              }
+            } else {
+              // Fallback: usa participantes carregados
+              const loadedParts = participantsByAgendamento[editingBooking.id] || [];
+              ordemReferencia = loadedParts.map(p => p.nome);
+            }
+            
+            console.log('[DEBUG REPRESENTANTE] 🔄 REORDENAÇÃO NO SAVE:', {
+              editingBookingId: editingBooking.id,
+              selNowOriginal: selNow.map((p, i) => `${i+1}. ${p.nome}`),
+              ordemReferencia: ordemReferencia.map((nome, i) => `${i+1}. ${nome}`),
+              fonte: editingBooking.clientes ? 'campo_clientes' : 'participantes_carregados'
+            });
+            
+            if (ordemReferencia.length > 0) {
+              selNowFinal = [...selNow].sort((a, b) => {
+                const indexA = ordemReferencia.findIndex(nome => nome === a.nome);
+                const indexB = ordemReferencia.findIndex(nome => nome === b.nome);
+                
+                // Se ambos existem na ordem original, manter essa ordem
+                if (indexA !== -1 && indexB !== -1) {
+                  return indexA - indexB;
+                }
+                // Se apenas A existe na ordem original, A vem primeiro
+                if (indexA !== -1) return -1;
+                // Se apenas B existe na ordem original, B vem primeiro  
+                if (indexB !== -1) return 1;
+                // Se nenhum existe na ordem original, manter ordem atual
+                return 0;
+              });
+              
+              console.log('[DEBUG REPRESENTANTE] ✅ RESULTADO DA REORDENAÇÃO:', {
+                selNowFinal: selNowFinal.map((p, i) => `${i+1}. ${p.nome}`),
+                primeiroParticipante: selNowFinal[0]?.nome
+              });
+            }
+          } else {
+            console.log('[DEBUG REPRESENTANTE] ⏭️ PULANDO REORDENAÇÃO: Houve mudança de participantes (substituição)');
+          }
+        }
+        
+        const primaryClient = selNowFinal[0];
+        const clientesArr = selNowFinal.map(getCustomerName).filter(Boolean);
+        
+        console.log('[DEBUG REPRESENTANTE] 📝 DADOS FINAIS PARA SALVAR:', {
+          primaryClient: { id: primaryClient?.id, nome: primaryClient?.nome },
+          clientesArr: clientesArr.map((nome, i) => `${i+1}. ${nome}`),
+          primeiroNomeArray: clientesArr[0]
+        });
 
         // Validação: para NOVO agendamento é obrigatório selecionar pelo menos 1 cliente
         if (!editingBooking?.id) {
@@ -2851,7 +3251,8 @@ function AgendaPage() {
             .from('agendamento_participantes')
             .select('*')
             .eq('codigo_empresa', userProfile.codigo_empresa)
-            .eq('agendamento_id', editingBooking.id);
+            .eq('agendamento_id', editingBooking.id)
+            .order('ordem', { ascending: true }); // Mantém ordem de inserção original
           
           // ⚠️ IMPORTANTE: Não usar Map por cliente_id pois sobrescreve duplicados!
           // Usar array indexado para preservar cada participante individualmente
@@ -2867,8 +3268,8 @@ function AgendaPage() {
           if (deleteError) console.error('Erro ao deletar participantes:', deleteError);
           
           // Insere novos participantes PRESERVANDO dados de pagamento quando já existiam
-          if (selNow && selNow.length > 0) {
-            const participantesRows = selNow.map((c, index) => {
+          if (selNowFinal && selNowFinal.length > 0) {
+            const participantesRows = selNowFinal.map((c, index) => {
               // Buscar participante correspondente pelo ÍNDICE, não por cliente_id
               // Isso preserva duplicados corretamente
               const existing = currentArray[index];
@@ -2881,6 +3282,7 @@ function AgendaPage() {
                 agendamento_id: editingBooking.id,
                 cliente_id: c.id,
                 nome: c.nome,
+                ordem: index + 1, // Campo ordem baseado na posição (1, 2, 3...)
                 // Preserva dados de pagamento se já existir no mesmo índice
                 valor_cota: shouldPreserve ? (existing.valor_cota ?? 0) : 0,
                 status_pagamento: shouldPreserve ? (existing.status_pagamento ?? 'Pendente') : 'Pendente',
@@ -2938,6 +3340,7 @@ function AgendaPage() {
               status_pagamento: shouldPreserve ? (existing.status_pagamento ?? 'Pendente') : 'Pendente',
               finalizadora_id: shouldPreserve ? (existing.finalizadora_id ?? null) : null,
               aplicar_taxa: shouldPreserve ? (existing.aplicar_taxa ?? false) : false,
+              ordem: index + 1, // Campo ordem baseado na posição (1, 2, 3...)
             };
           });
           setParticipantsByAgendamento(prev => ({
@@ -3047,13 +3450,15 @@ function AgendaPage() {
           // Criar participantes para cada agendamento
           const todosParticipantes = [];
           for (const agendamento of agendamentosCriados) {
-            const participantesRows = (form.selectedClients || []).map((c) => ({
+            // IMPORTANTE: Usar selNowFinal (mesma ordem do campo clientes) ao invés de form.selectedClients
+            const participantesRows = selNowFinal.map((c, index) => ({
               codigo_empresa: userProfile.codigo_empresa,
               agendamento_id: agendamento.id,
               cliente_id: c.id,
               nome: c.nome,
               valor_cota: 0,
               status_pagamento: 'Pendente',
+              ordem: index + 1, // Campo ordem baseado na posição (1, 2, 3...)
             }));
             todosParticipantes.push(...participantesRows);
             
@@ -3129,14 +3534,22 @@ function AgendaPage() {
 
           // Participantes (não bloqueia conclusão do salvamento principal)
           try {
-            const rows = (form.selectedClients || []).map((c) => ({
+            // IMPORTANTE: Usar selNowFinal (mesma ordem do campo clientes) ao invés de form.selectedClients
+            const rows = selNowFinal.map((c, index) => ({
               codigo_empresa: userProfile.codigo_empresa,
               agendamento_id: data.id,
               cliente_id: c.id,
               nome: c.nome,
               valor_cota: 0,
               status_pagamento: 'Pendente',
+              ordem: index + 1, // Campo ordem baseado na posição (1, 2, 3...)
             }));
+            
+            console.log('[DEBUG REPRESENTANTE] 🆕 CRIANDO PARTICIPANTES:', {
+              agendamentoId: data.id,
+              ordemInsercao: rows.map((r, i) => ({ index: i, nome: r.nome })),
+              clientesArray: clientesArr
+            });
             if (rows.length > 0) {
               const { error: perr } = await supabase
                 .from('agendamento_participantes')
@@ -3146,10 +3559,11 @@ function AgendaPage() {
                 const participantsForState = rows.map(row => ({
                   agendamento_id: row.agendamento_id,
                   cliente_id: row.cliente_id,
-                  nome: form.selectedClients.find(c => c.id === row.cliente_id)?.nome || '',
-                  codigo: form.selectedClients.find(c => c.id === row.cliente_id)?.codigo || null,
+                  nome: row.nome,
+                  codigo: selNowFinal.find(c => c.id === row.cliente_id)?.codigo || null,
                   valor_cota: row.valor_cota,
-                  status_pagamento: row.status_pagamento
+                  status_pagamento: row.status_pagamento,
+                  ordem: row.ordem
                 }));
                 setParticipantsByAgendamento(prev => ({
                   ...prev,
@@ -3385,6 +3799,14 @@ function AgendaPage() {
       if (initializedRef.current) return;
 
       if (editingBooking) {
+        console.log('[DEBUG REPRESENTANTE] 🔄 PREENCHENDO MODAL:', {
+          id: editingBooking.id,
+          customer: editingBooking.customer,
+          clientes: editingBooking.clientes,
+          participantesCarregados: participantsByAgendamento[editingBooking.id]?.map((p, i) => `${i+1}. ${p.nome}`) || [],
+          primeiroCarregado: participantsByAgendamento[editingBooking.id]?.[0]?.nome || 'N/A'
+        });
+        
         const startM = getHours(editingBooking.start) * 60 + getMinutes(editingBooking.start);
         const endM = getHours(editingBooking.end) * 60 + getMinutes(editingBooking.end);
         // Extrai participantes carregados para este agendamento
@@ -3432,7 +3854,8 @@ function AgendaPage() {
                 .from('agendamento_participantes')
                 .select(`cliente_id, nome, valor_cota, status_pagamento, finalizadora_id, aplicar_taxa, cliente:clientes!agendamento_participantes_cliente_id_fkey ( nome, codigo )`)
                 .eq('codigo_empresa', userProfile.codigo_empresa)
-                .eq('agendamento_id', editingBooking.id);
+                .eq('agendamento_id', editingBooking.id)
+                .order('ordem', { ascending: true }); // Ordena por campo ordem explícito
               if (!error && Array.isArray(data)) {
                 const sel = data
                   .filter(p => p && p.cliente_id)
@@ -3482,7 +3905,8 @@ function AgendaPage() {
         const safeCourt = (availableCourts || []).includes(prefill.court)
           ? prefill.court
           : ((availableCourts || [])[0] || '');
-        setForm({
+        console.log('Prefill received in modal', { prefill, safeCourt, availableCourts, 'prefill.court': prefill.court });
+        const newForm = {
           selectedClients: userSelectedOnceRef.current ? (Array.isArray(form.selectedClients) ? form.selectedClients : []) : [],
           court: safeCourt,
           modality: (() => { const c = safeCourt; const allowed = courtsMap[c]?.modalidades || modalities; return allowed[0] || ''; })(),
@@ -3490,7 +3914,9 @@ function AgendaPage() {
           date: prefill.date ?? currentDate,
           startMinutes: prefill.startMinutes ?? nearestSlot(),
           endMinutes: prefill.endMinutes ?? (nearestSlot() + 60),
-        });
+        };
+        console.log('Form set with prefill', newForm);
+        setForm(newForm);
         setParticipantsForm([]);
         suppressAutoAdjustRef.current = true;
         initializedRef.current = true;
@@ -3725,9 +4151,11 @@ function AgendaPage() {
       // [DEBUG-PaymentModal] silenciado
       if (suppressAutoAdjustRef.current) {
         // Não ajustar na primeira renderização após aplicar prefill manual
+        console.log('Auto-adjust suppressed, skipping');
         suppressAutoAdjustRef.current = false;
         return;
       }
+      console.log('Auto-adjust running', { startMinutes: form.startMinutes, court: form.court, date: form.date });
       const ensureValidStart = () => {
         if (isRangeFree(form.startMinutes, form.startMinutes + SLOT_MINUTES)) return form.startMinutes;
         for (let s = Math.max(courtBounds.start, form.startMinutes); s <= courtBounds.end - SLOT_MINUTES; s += SLOT_MINUTES) {
@@ -3764,6 +4192,39 @@ function AgendaPage() {
         setForm(f => ({ ...f, modality: allowed[0] || '' }));
       }
     }, [form.court, courtsMap]);
+
+    // Garante que quadra fechada não fique selecionada
+    useEffect(() => {
+      // Não alterar quadra se acabamos de aplicar um prefill
+      if (suppressAutoAdjustRef.current) {
+        console.log('Court closed check suppressed (prefill applied)');
+        return;
+      }
+      
+      // Só verificar fechamento se a data do formulário é hoje (currentDate)
+      // Se for outro dia, o diasFuncionamento pode estar desatualizado
+      const isFormDateToday = isSameDay(form.date, currentDate);
+      console.log('Checking if court is closed', { court: form.court, isFormDateToday, formDate: form.date, currentDate, diasFuncionamento });
+      
+      if (!isFormDateToday) {
+        console.log('Form date is not today, skipping court closed check');
+        return;
+      }
+      
+      const isCurrentCourtClosed = diasFuncionamento[form.court] && !diasFuncionamento[form.court].funciona;
+      
+      if (isCurrentCourtClosed) {
+        // Encontrar primeira quadra disponível
+        const availableCourt = availableCourts.find(court => 
+          !diasFuncionamento[court] || diasFuncionamento[court].funciona
+        );
+        console.log('Court is closed, changing to', { availableCourt });
+        
+        if (availableCourt) {
+          setForm(f => ({ ...f, court: availableCourt }));
+        }
+      }
+    }, [form.court, form.date, diasFuncionamento, availableCourts, currentDate]);
 
     const durationLabel = useMemo(() => {
       const d = Math.max(0, form.endMinutes - form.startMinutes);
@@ -4817,17 +5278,33 @@ function AgendaPage() {
                     </SelectValue>
                   </SelectTrigger>
                   <SelectContent className="z-[60]">
-                    {availableCourts.map((name) => (
-                      <SelectItem key={name} value={name}>
-                        <div className="flex items-center gap-2">
-                          <span
-                            className="inline-block w-2.5 h-2.5 rounded-full"
-                            style={{ backgroundColor: getCourtColor(name) }}
-                          />
-                          <span>{name}</span>
-                        </div>
-                      </SelectItem>
-                    ))}
+                    {availableCourts.map((name) => {
+                      // Usar weekDiasFuncionamento se disponível, senão usar diasFuncionamento
+                      const dateKey = format(form.date, 'yyyy-MM-dd');
+                      const dayFuncionamento = weekDiasFuncionamento[dateKey] || {};
+                      const isDisabled = dayFuncionamento[name] && !dayFuncionamento[name].funciona;
+                      return (
+                        <SelectItem 
+                          key={name} 
+                          value={name}
+                          disabled={isDisabled}
+                          className={isDisabled ? "opacity-50 cursor-not-allowed" : ""}
+                        >
+                          <div className="flex items-center gap-2">
+                            <span
+                              className="inline-block w-2.5 h-2.5 rounded-full"
+                              style={{ backgroundColor: getCourtColor(name) }}
+                            />
+                            <span>{name}</span>
+                            {isDisabled && (
+                              <span className="text-xs text-text-muted ml-auto">
+                                (Fechada)
+                              </span>
+                            )}
+                          </div>
+                        </SelectItem>
+                      );
+                    })}
                   </SelectContent>
                 </Select>
               </div>
@@ -5439,6 +5916,65 @@ function AgendaPage() {
       return (viewFilter.scheduled || viewFilter.canceledOnly || viewFilter.pendingPayments) ? dayBookings : [];
     }, [bookings, currentDate, viewFilter.scheduled, viewFilter.canceledOnly, viewFilter.pendingPayments, searchQuery, participantsByAgendamento]);
 
+  // Calcular estatísticas do dia para o header (filtrado pela quadra ativa)
+  const dayStats = useMemo(() => {
+    const dayStr = format(currentDate, 'yyyy-MM-dd');
+    const courtFilter = activeCourtFilter || selectedCourts[0];
+    const dayBookings = bookings.filter(b => 
+      format(b.start, 'yyyy-MM-dd') === dayStr && 
+      b.status !== 'canceled' &&
+      b.court === courtFilter
+    );
+    
+    let totalPendingPayments = 0;
+    dayBookings.forEach(booking => {
+      const participants = participantsByAgendamento[booking.id] || [];
+      const pendingCount = participants.filter(p => String(p.status_pagamento || '').toLowerCase() !== 'pago').length;
+      totalPendingPayments += pendingCount;
+    });
+    
+    return {
+      totalBookings: dayBookings.length,
+      totalPendingPayments
+    };
+  }, [bookings, currentDate, participantsByAgendamento, activeCourtFilter, selectedCourts]);
+
+  // Agendamentos da semana (para visão semanal)
+  const weekBookings = useMemo(() => {
+    const weekStart = getWeekStart(currentDate);
+    const weekEnd = addDays(weekStart, 6);
+    let weekBookingsData = bookings.filter(b => {
+      const bookingDate = startOfDay(b.start);
+      const start = startOfDay(weekStart);
+      const end = startOfDay(weekEnd);
+      return bookingDate >= start && bookingDate <= end;
+    });
+    
+    // Aplicar mesmos filtros que o dia
+    weekBookingsData = viewFilter.canceledOnly
+      ? weekBookingsData.filter(b => b.status === 'canceled')
+      : weekBookingsData.filter(b => b.status !== 'canceled');
+    
+    if (viewFilter.pendingPayments) {
+      weekBookingsData = weekBookingsData.filter(b => {
+        const participants = participantsByAgendamento[b.id] || [];
+        const hasPending = participants.some(p => String(p.status_pagamento || '').toLowerCase() !== 'pago');
+        return hasPending && participants.length > 0;
+      });
+    }
+    
+    if (searchQuery.trim()) {
+      const q = searchQuery.trim().toLowerCase();
+      weekBookingsData = weekBookingsData.filter(b =>
+        (b.customer || '').toLowerCase().includes(q)
+        || (b.court || '').toLowerCase().includes(q)
+        || (statusConfig[b.status]?.label || '').toLowerCase().includes(q)
+      );
+    }
+    
+    return (viewFilter.scheduled || viewFilter.canceledOnly || viewFilter.pendingPayments) ? weekBookingsData : [];
+  }, [bookings, currentDate, viewFilter.scheduled, viewFilter.canceledOnly, viewFilter.pendingPayments, searchQuery, participantsByAgendamento]);
+
   // Após computar os resultados, rola até o primeiro match quando houver busca
   useEffect(() => {
     if (!searchQuery.trim()) return;
@@ -5530,71 +6066,103 @@ function AgendaPage() {
 
   return (
     <>
-      <motion.div variants={isModalOpen ? undefined : pageVariants} initial={isModalOpen ? false : "hidden"} animate={isModalOpen ? false : "visible"} className="h-full flex flex-col md:px-0">
+      <motion.div variants={isModalOpen ? undefined : pageVariants} initial={isModalOpen ? false : "hidden"} animate={isModalOpen ? false : "visible"} className={cn("h-full w-full flex flex-col md:px-0", isGridExpanded && "fixed inset-0 z-40 bg-surface")}>
 
         {/* Controls */}
         <motion.div variants={itemVariants} className="p-3 bg-surface mb-6 md:rounded-lg">
-          <div className="max-w-[1200px] mx-auto w-full flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div className="max-w-[1200px] mx-auto w-full flex flex-col gap-3 md:flex-row md:items-center md:gap-4">
             {/* Navegação de data */}
             <div className="flex items-center gap-2">
-              <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => setCurrentDate(subDays(currentDate, 1))}><ChevronLeft className="h-5 w-5" /></Button>
+              <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => viewMode === 'day' ? setCurrentDate(subDays(currentDate, 1)) : setCurrentDate(subDays(currentDate, 7))}><ChevronLeft className="h-5 w-5" /></Button>
               <Popover>
                 <PopoverTrigger asChild>
                   <Button variant="ghost" className="w-full sm:w-auto max-w-full justify-center text-base font-semibold whitespace-nowrap truncate">
                     <CalendarIcon className="mr-2 h-5 w-5" />
-                    {/* Mobile: Terça-feira, 21/09/2025 | Desktop: Terça-feira, 21 de setembro de 2025 */}
-                    <span className="hidden sm:inline">{format(currentDate, "EEEE, dd 'de' MMMM 'de' yyyy", { locale: ptBR })}</span>
-                    <span className="sm:hidden">{format(currentDate, "EEEE, dd/MM/yyyy", { locale: ptBR })}</span>
+                    {viewMode === 'day' ? (
+                      <>
+                        <span className="hidden sm:inline">{format(currentDate, "EEE, dd 'de' MMMM 'de' yyyy", { locale: ptBR })}</span>
+                        <span className="sm:hidden">{format(currentDate, "EEE, dd/MM/yyyy", { locale: ptBR })}</span>
+                      </>
+                    ) : (
+                      <>
+                        <span className="hidden sm:inline">{getWeekRangeLabel(currentDate)}</span>
+                        <span className="sm:hidden">{format(getWeekStart(currentDate), 'dd/MM/yyyy')} - {format(addDays(getWeekStart(currentDate), 6), 'dd/MM/yyyy')}</span>
+                      </>
+                    )}
                   </Button>
                 </PopoverTrigger>
                 <PopoverContent className="w-auto p-0">
                   <Calendar mode="single" selected={currentDate} onSelect={(date) => date && setCurrentDate(date)} initialFocus />
                 </PopoverContent>
               </Popover>
-              <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => setCurrentDate(addDays(currentDate, 1))}><ChevronRight className="h-5 w-5" /></Button>
+              <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => viewMode === 'day' ? setCurrentDate(addDays(currentDate, 1)) : setCurrentDate(addDays(currentDate, 7))}><ChevronRight className="h-5 w-5" /></Button>
             </div>
-            {/* Filtros e ações */}
-            <div className="flex items-center flex-wrap gap-3 justify-end">
-              <div className="relative w-full sm:w-56">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted" />
-                <Input
-                  placeholder="Buscar agendamento..."
-                  className="pl-9"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  onBlur={() => setSearchQuery("")}
-                />
-                {searchQuery && (
-                  <button
-                    type="button"
-                    aria-label="Limpar busca"
-                    className="absolute right-2 top-1/2 -translate-y-1/2 px-2 py-0.5 rounded text-xs font-medium text-primary hover:bg-surface-2"
-                    onClick={() => setSearchQuery("")}
-                  >
-                    Limpar
-                  </button>
+
+            {/* Desktop: Select de Quadras (entre data e filtros) */}
+            {selectedCourts.length > 0 && (
+              <div className="hidden md:flex md:justify-center md:flex-1">
+                {selectedCourts.length === 1 ? (
+                  // Badge quando há apenas uma quadra (mesmo estilo do select)
+                  <div className="flex items-center gap-3 px-4 py-2 rounded-lg w-52 h-10 border-2 border-brand/30 bg-gradient-to-r from-brand/5 to-brand/10">
+                    <div
+                      className="h-3 w-3 rounded-full shadow-sm"
+                      style={{ backgroundColor: getCourtColor(selectedCourts[0]) }}
+                    />
+                    <span className="font-semibold text-sm">{selectedCourts[0]}</span>
+                  </div>
+                ) : (
+                  // Select quando há múltiplas quadras
+                  <Select value={activeCourtFilter || selectedCourts[0]} onValueChange={(court) => {
+                    setActiveCourtFilter(court);
+                  }}>
+                    <SelectTrigger className="w-52 h-10 border-2 border-brand/30 bg-gradient-to-r from-brand/5 to-brand/10 hover:border-brand/50 hover:bg-gradient-to-r hover:from-brand/10 hover:to-brand/15 transition-all shadow-sm">
+                      <SelectValue placeholder="Selecionar quadra" />
+                    </SelectTrigger>
+                    <SelectContent className="border-brand/30">
+                      {selectedCourts.map((court) => {
+                        const color = getCourtColor(court);
+                        return (
+                          <SelectItem key={court} value={court}>
+                            <div className="flex items-center gap-3">
+                              <div
+                                className="h-3 w-3 rounded-full shadow-sm"
+                                style={{ backgroundColor: color }}
+                              />
+                              <span className="font-semibold">{court}</span>
+                            </div>
+                          </SelectItem>
+                        );
+                      })}
+                    </SelectContent>
+                  </Select>
                 )}
               </div>
-              <Button 
-                size="sm" 
-                onClick={() => {
-                  // Limpa estado antes de abrir novo agendamento
-                  setEditingBooking(null);
-                  setPrefill(null);
-                  // Limpa sessionStorage que pode ter dados antigos
-                  try {
-                    sessionStorage.removeItem('agenda:customerPicker:closing');
-                    sessionStorage.removeItem('agenda:customerPicker:closingAt');
-                  } catch {}
-                  openBookingModal();
-                }} 
-                aria-label="Novo agendamento" 
-                className="gap-2" 
-                disabled={availableCourts.length === 0}
-              >
-                <Plus className="h-4 w-4" /> Agendar
-              </Button>
-              <DropdownMenu>
+            )}
+
+            {/* Filtros e ações - Reorganizado para mobile */}
+            <div className="flex flex-col gap-3 w-full md:w-auto md:ml-auto">
+              {/* Linha 1 (Mobile): Toggle Dia/Semana, Filtros, Expandir e Configurações */}
+              <div className="flex items-center gap-3 justify-center md:hidden">
+                {/* Toggle Dia/Semana */}
+                <div className="flex items-center border border-border rounded-lg bg-surface-2/30 p-0.5">
+                  <Button
+                    variant={viewMode === 'day' ? 'default' : 'ghost'}
+                    size="sm"
+                    className="h-8 px-3 text-xs font-medium"
+                    onClick={() => setViewMode('day')}
+                  >
+                    Dia
+                  </Button>
+                  <Button
+                    variant={viewMode === 'week' ? 'default' : 'ghost'}
+                    size="sm"
+                    className="h-8 px-3 text-xs font-medium"
+                    onClick={() => setViewMode('week')}
+                  >
+                    Semana
+                  </Button>
+                </div>
+                <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="outline" size="sm" className="gap-2" disabled={availableCourts.length === 0}>
                     <SlidersHorizontal className="h-4 w-4" /> Filtros
@@ -5672,10 +6240,26 @@ function AgendaPage() {
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
+              <div className="relative inline-block group">
+                <Button
+                  variant={isGridExpanded ? "default" : "ghost"}
+                  size="icon"
+                  className="h-8 w-8"
+                  onClick={() => setIsGridExpanded(!isGridExpanded)}
+                  aria-label={isGridExpanded ? "Minimizar grid" : "Expandir grid"}
+                >
+                  {isGridExpanded ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+                </Button>
+                <div className="hidden group-hover:block absolute right-0 mt-1 z-50 pointer-events-none">
+                  <div className="px-2 py-1 rounded-md bg-surface-2 text-xs text-text-primary border border-border shadow">
+                    {isGridExpanded ? "Minimizar (F10)" : "Expandir (F10)"}
+                  </div>
+                </div>
+              </div>
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-10 w-10"
+                className="h-8 w-8"
                 onClick={() => setIsSettingsOpen(true)}
                 disabled={availableCourts.length === 0}
                 aria-label="Configurar agenda"
@@ -5683,29 +6267,248 @@ function AgendaPage() {
               >
                 <Settings className="h-5 w-5" />
               </Button>
+              </div>
+
+              {/* Linha 2: Busca e Agendar */}
+              <div className="flex items-center gap-3 justify-end flex-shrink-0">
+                <div className="relative w-full sm:w-56">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted" />
+                  <Input
+                    placeholder="Buscar agendamento..."
+                    className="pl-9"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    onBlur={() => setSearchQuery("")}
+                  />
+                  {searchQuery && (
+                    <button
+                      type="button"
+                      aria-label="Limpar busca"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 px-2 py-0.5 rounded text-xs font-medium text-primary hover:bg-surface-2"
+                      onClick={() => setSearchQuery("")}
+                    >
+                      Limpar
+                    </button>
+                  )}
+                </div>
+                <Button 
+                  size="sm" 
+                  onClick={() => {
+                    // Limpa estado antes de abrir novo agendamento
+                    setEditingBooking(null);
+                    setPrefill(null);
+                    // Limpa sessionStorage que pode ter dados antigos
+                    try {
+                      sessionStorage.removeItem('agenda:customerPicker:closing');
+                      sessionStorage.removeItem('agenda:customerPicker:closingAt');
+                    } catch {}
+                    openBookingModal();
+                  }} 
+                  aria-label="Novo agendamento" 
+                  className="gap-2" 
+                  disabled={
+                    availableCourts.length === 0 || 
+                    selectedCourts.every(court => diasFuncionamento[court] && !diasFuncionamento[court].funciona)
+                  }
+                >
+                  <Plus className="h-4 w-4" /> Agendar
+                </Button>
+              </div>
+
+              {/* Linha 3 (Mobile): Select de Quadras */}
+              {selectedCourts.length > 0 && (
+                <div className="md:hidden flex justify-center">
+                  {selectedCourts.length === 1 ? (
+                    // Badge quando há apenas uma quadra (mesmo estilo do select)
+                    <div className="flex items-center gap-3 px-4 py-2 rounded-lg w-full h-10 border-2 border-brand/30 bg-gradient-to-r from-brand/5 to-brand/10">
+                      <div
+                        className="h-3 w-3 rounded-full shadow-sm"
+                        style={{ backgroundColor: getCourtColor(selectedCourts[0]) }}
+                      />
+                      <span className="font-semibold text-sm">{selectedCourts[0]}</span>
+                    </div>
+                  ) : (
+                    // Select quando há múltiplas quadras
+                    <Select value={selectedCourts[mobileCourtIndex % selectedCourts.length]} onValueChange={(court) => {
+                      const index = selectedCourts.indexOf(court);
+                      if (index !== -1) {
+                        setMobileCourtIndex(index);
+                      }
+                    }}>
+                      <SelectTrigger className="w-48 h-10 border-2 border-brand/30 bg-gradient-to-r from-brand/5 to-brand/10 hover:border-brand/50 hover:bg-gradient-to-r hover:from-brand/10 hover:to-brand/15 transition-all shadow-sm">
+                        <SelectValue placeholder="Selecionar quadra" />
+                      </SelectTrigger>
+                      <SelectContent className="border-brand/30">
+                        {selectedCourts.map((court) => {
+                          const color = getCourtColor(court);
+                          return (
+                            <SelectItem key={court} value={court}>
+                              <div className="flex items-center gap-3">
+                                <div
+                                  className="h-3 w-3 rounded-full shadow-sm"
+                                  style={{ backgroundColor: color }}
+                                />
+                                <span className="font-semibold">{court}</span>
+                              </div>
+                            </SelectItem>
+                          );
+                        })}
+                      </SelectContent>
+                    </Select>
+                  )}
+                </div>
+              )}
+
+              {/* Desktop: Toggle Dia/Semana e Filtros (mantém layout original) */}
+              <div className="hidden md:flex items-center gap-3 justify-end">
+                {/* Toggle Dia/Semana */}
+                <div className="flex items-center border border-border rounded-lg bg-surface-2/30 p-0.5">
+                  <Button
+                    variant={viewMode === 'day' ? 'default' : 'ghost'}
+                    size="sm"
+                    className="h-8 px-3 text-xs font-medium"
+                    onClick={() => setViewMode('day')}
+                  >
+                    Dia
+                  </Button>
+                  <Button
+                    variant={viewMode === 'week' ? 'default' : 'ghost'}
+                    size="sm"
+                    className="h-8 px-3 text-xs font-medium"
+                    onClick={() => setViewMode('week')}
+                  >
+                    Semana
+                  </Button>
+                </div>
+                <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm" className="gap-2" disabled={availableCourts.length === 0}>
+                    <SlidersHorizontal className="h-4 w-4" /> Filtros
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-64">
+                  <div className="flex items-center justify-between px-2 py-1.5">
+                    <DropdownMenuLabel className="p-0">Exibição</DropdownMenuLabel>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 text-xs text-text-muted hover:text-text-primary"
+                      onClick={() => setViewFilter({ scheduled: true, available: true, canceledOnly: false, pendingPayments: false })}
+                    >
+                      Limpar
+                    </Button>
+                  </div>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={(e) => e.preventDefault()}>
+                    <div className="flex items-center justify-between gap-3 w-full">
+                      <div className="flex items-center gap-2">
+                        <CalendarIcon className="h-4 w-4 text-text-muted" />
+                        <span>Agendados</span>
+                      </div>
+                      <Checkbox
+                        checked={viewFilter.scheduled}
+                        onCheckedChange={(checked) => setViewFilter(prev => ({ ...prev, scheduled: !!checked, canceledOnly: checked ? false : prev.canceledOnly }))}
+                      />
+                    </div>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={(e) => e.preventDefault()}>
+                    <div className="flex items-center justify-between gap-3 w-full">
+                      <div className="flex items-center gap-2">
+                        <Sparkles className="h-4 w-4 text-text-muted" />
+                        <span>Livres</span>
+                      </div>
+                      <Checkbox
+                        checked={viewFilter.available}
+                        onCheckedChange={(checked) => setViewFilter(prev => ({ ...prev, available: !!checked, canceledOnly: checked ? false : prev.canceledOnly }))}
+                      />
+                    </div>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={(e) => e.preventDefault()}>
+                    <div className="flex items-center justify-between gap-3 w-full">
+                      <div className="flex items-center gap-2">
+                        <XCircle className="h-4 w-4 text-rose-400" />
+                        <span>Cancelados</span>
+                      </div>
+                      <Checkbox
+                        checked={viewFilter.canceledOnly}
+                        onCheckedChange={(checked) => {
+                          const isOn = !!checked;
+                          setViewFilter(prev => ({
+                            ...prev,
+                            canceledOnly: isOn,
+                            scheduled: isOn ? false : prev.scheduled,
+                            available: isOn ? false : prev.available,
+                          }));
+                          if (isOn && !hideCanceledInfo) setShowCanceledInfo(true);
+                        }}
+                      />
+                    </div>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={(e) => e.preventDefault()}>
+                    <div className="flex items-center justify-between gap-3 w-full">
+                      <div className="flex items-center gap-2">
+                        <DollarSign className="h-4 w-4 text-warning" />
+                        <span>Pagamentos Pendentes</span>
+                      </div>
+                      <Checkbox
+                        checked={viewFilter.pendingPayments}
+                        onCheckedChange={(checked) => setViewFilter(prev => ({ ...prev, pendingPayments: !!checked }))}
+                      />
+                    </div>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <div className="relative inline-block group">
+                <Button
+                  variant={isGridExpanded ? "default" : "ghost"}
+                  size="icon"
+                  className="h-8 w-8"
+                  onClick={() => setIsGridExpanded(!isGridExpanded)}
+                  aria-label={isGridExpanded ? "Minimizar grid" : "Expandir grid"}
+                >
+                  {isGridExpanded ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+                </Button>
+                <div className="hidden group-hover:block absolute right-0 mt-1 z-50 pointer-events-none">
+                  <div className="px-2 py-1 rounded-md bg-surface-2 text-xs text-text-primary border border-border shadow">
+                    {isGridExpanded ? "Minimizar (F10)" : "Expandir (F10)"}
+                  </div>
+                </div>
+              </div>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                onClick={() => setIsSettingsOpen(true)}
+                disabled={availableCourts.length === 0}
+                aria-label="Configurar agenda"
+                title="Configurar agenda"
+              >
+                <Settings className="h-5 w-5" />
+              </Button>
+              </div>
             </div>
           </div>
         </motion.div>
 
         {/* Modal de Configurações da Agenda */}
-        <Dialog open={isSettingsOpen} onOpenChange={(open) => {
-          if (!open) {
-            // Ao fechar o modal, resetar para o último estado salvo
-            setAutomation(savedAutomation);
-          }
-          setIsSettingsOpen(open);
-        }}>
-          <DialogContent className="sm:max-w-[680px]" onOpenAutoFocus={(e) => e.preventDefault()}>
-            <DialogHeader className="pb-3 border-b border-border bg-surface-2/40 rounded-t-lg px-2 -mx-2 -mt-2">
-              <DialogTitle className="text-base font-semibold tracking-tight">Configurações da Agenda</DialogTitle>
-            </DialogHeader>
-            <div className="space-y-8">
-              {/* Grupo: Confirmação */}
-              <div className="space-y-3">
-                <div className="flex items-center gap-2 text-text-secondary">
-                  <CheckCircle className="h-4 w-4" style={{ color: statusConfig.confirmed.hex }} />
-                  <span className="text-sm font-medium">Confirmação automática</span>
-                </div>
+      <Dialog open={isSettingsOpen} onOpenChange={(open) => {
+        if (!open) {
+          // Ao fechar o modal, resetar para o último estado salvo
+          setAutomation(savedAutomation);
+        }
+        setIsSettingsOpen(open);
+      }}>
+        <DialogContent className="sm:max-w-[680px]" onOpenAutoFocus={(e) => e.preventDefault()}>
+          <DialogHeader className="pb-3 border-b border-border bg-surface-2/40 rounded-t-lg px-2 -mx-2 -mt-2">
+            <DialogTitle className="text-base font-semibold tracking-tight">Configurações da Agenda</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-8">
+            {/* Grupo: Confirmação */}
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 text-text-secondary">
+                <CheckCircle className="h-4 w-4" style={{ color: statusConfig.confirmed.hex }} />
+                <span className="text-sm font-medium">Confirmação automática</span>
+              </div>
                 {/* Card confirmação */}
                 <div className="rounded-lg border border-border bg-surface-2/40 p-4 space-y-3" style={{ borderLeftWidth: 3, borderLeftColor: statusConfig.confirmed.hex }}>
                   <div className="flex items-center justify-between">
@@ -5838,8 +6641,86 @@ function AgendaPage() {
           </div>
         )}
 
-        {/* Calendar Grid */}
-        {selectedCourts.length > 0 && (() => {
+        {/* Calendar Grid - Visão Semanal */}
+        {selectedCourts.length > 0 && viewMode === 'week' && (() => {
+          // Filtrar agendamentos da semana pela quadra ativa
+          const courtFilter = activeCourtFilter || selectedCourts[0];
+          const filteredWeekBookings = weekBookings.filter(b => b.court === courtFilter);
+          
+          return (
+            <>
+              <WeeklyGrid
+                key={`weekly-${courtFilter}`}
+                weekStart={getWeekStart(currentDate)}
+                weekBookings={filteredWeekBookings}
+                activeCourtFilter={courtFilter}
+                courtsMap={courtsMap}
+                participantsByAgendamento={participantsByAgendamento}
+                onBookingClick={(booking) => {
+                  setEditingBooking(booking);
+                  setIsModalOpen(true);
+                }}
+                onSlotClick={(slotDate, court) => {
+                  // Limpa estado antes de abrir novo agendamento
+                  setEditingBooking(null);
+                  const startMinutes = slotDate.getHours() * 60 + slotDate.getMinutes();
+                  const chosenCourt = court || activeCourtFilter || selectedCourts[0];
+                  const dayKey = format(slotDate, 'yyyy-MM-dd');
+                  const nextStart = (() => {
+                    try {
+                      return (bookings || [])
+                        .filter(b => b.court === chosenCourt && format(b.start, 'yyyy-MM-dd') === dayKey && b.status !== 'canceled')
+                        .map(b => getHours(b.start) * 60 + getMinutes(b.start))
+                        .filter(m => m > startMinutes)
+                        .sort((a,b) => a - b)[0];
+                    } catch {}
+                    return undefined;
+                  })();
+                  const courtEnd = (() => {
+                    const t = courtsMap[chosenCourt]?.hora_fim;
+                    if (!t) return dayEndHourExclusive * 60;
+                    const [h, m] = String(t).split(':').map(Number);
+                    const hours = (h === 0 && (m || 0) === 0) ? 24 : h;
+                    return hours * 60 + (m || 0);
+                  })();
+                  const extendLimit = typeof nextStart === 'number' ? nextStart : courtEnd;
+                  let endMinutes = Math.min(startMinutes + 60, extendLimit);
+                  if (endMinutes - startMinutes < 30) {
+                    const minStartForThirty = extendLimit - 30;
+                    if (minStartForThirty >= startMinutes) {
+                      endMinutes = extendLimit;
+                    } else {
+                      endMinutes = Math.min(courtEnd, startMinutes + 30);
+                    }
+                  }
+                  const prefillData = {
+                    date: startOfDay(slotDate),
+                    court: chosenCourt,
+                    startMinutes,
+                    endMinutes,
+                  };
+                  console.log('onSlotClick in AgendaPage - BEFORE setPrefill', { slotDate, court, activeCourtFilter, selectedCourts, startMinutes, endMinutes, prefillData });
+                  setPrefill(prefillData);
+                  console.log('onSlotClick in AgendaPage - AFTER setPrefill (state not updated yet)');
+                  // Limpa sessionStorage que pode ter dados antigos
+                  try {
+                    sessionStorage.removeItem('agenda:customerPicker:closing');
+                    sessionStorage.removeItem('agenda:customerPicker:closingAt');
+                  } catch {}
+                  openBookingModal();
+                }}
+                statusConfig={statusConfig}
+                dayStartHour={dayStartHour}
+                dayEndHourExclusive={dayEndHourExclusive}
+                weekDiasFuncionamento={weekDiasFuncionamento}
+                sidebarVisible={sidebarVisible}
+              />
+            </>
+          );
+        })()}
+
+        {/* Calendar Grid - Visão Diária */}
+        {selectedCourts.length > 0 && viewMode === 'day' && (() => {
           // Mobile: mostrar apenas uma quadra por vez
           const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
           
@@ -5878,9 +6759,23 @@ function AgendaPage() {
           
           const displayTotalGridHeight = Math.max(0, (gridHours.end - gridHours.start)) * (60 / SLOT_MINUTES) * SLOT_HEIGHT;
           
+          // Verificar se alguma quadra está fechada
+          const hasClosedCourts = courtsToShow.some(court => 
+            diasFuncionamento[court] && !diasFuncionamento[court].funciona
+          );
+          
           return (
             <>
-              <motion.div variants={isModalOpen ? undefined : itemVariants} className={cn("flex-1 overflow-auto bg-surface fx-scroll", isMobile ? "" : "rounded-lg border border-border")} ref={scrollRef}>
+              <motion.div 
+                variants={isModalOpen ? undefined : itemVariants} 
+                className={cn(
+                  "bg-surface fx-scroll", 
+                  "overflow-auto",
+                  isMobile ? "" : "rounded-lg border border-border"
+                )} 
+                ref={scrollRef}
+                style={{ flex: '1 1 auto', minWidth: 0 }}
+              >
                 <div
                   className={cn("grid", !isMobile && "mx-auto")}
                   style={{
@@ -5940,84 +6835,61 @@ function AgendaPage() {
             </div>
 
           {/* Court Columns */}
-          {courtsToShow.map(court => (
+          {courtsToShow.map((court, courtIndex) => (
             <div key={court} className="relative border-r border-border">
-              {/* Header com Tabs de Navegação - Desktop */}
-              {!isMobile && selectedCourts.length > 1 ? (
-                <div className="h-14 border-b border-border sticky top-0 bg-surface z-10 flex items-center justify-center gap-2 px-3 overflow-x-auto">
-                  {/* Tabs das Quadras */}
-                  {selectedCourts.map(c => (
-                    <button
-                      key={c}
-                      onClick={() => setActiveCourtFilter(c)}
-                      className={cn(
-                        "px-4 py-2 rounded-lg font-semibold text-base transition-all duration-200 whitespace-nowrap flex items-center gap-2.5 flex-shrink-0",
-                        activeCourtFilter === c
-                          ? "bg-surface-2 text-text-primary border-2 border-brand/60"
-                          : c === court
-                          ? "bg-surface-2/50 text-text-primary hover:bg-surface-2"
-                          : "hover:bg-surface-2/60 text-text-muted hover:text-text-primary"
-                      )}
-                    >
-                      <span
-                        className={cn(
-                          "inline-block w-2.5 h-2.5 rounded-full shadow-sm",
-                          activeCourtFilter === c && "ring-2 ring-brand/40"
-                        )}
-                        style={{ backgroundColor: getCourtColor(c) }}
-                      />
-                      <span className="tracking-tight font-bold">{c}</span>
-                    </button>
-                  ))}
-                </div>
-              ) : (
-                <div className="h-14 border-b border-border sticky top-0 bg-surface z-10 flex items-center justify-center">
-                  {/* Mobile: Dropdown para trocar de quadra */}
-                  {isMobile && selectedCourts.length > 1 ? (
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <button className="flex items-center gap-2 px-4 py-2 rounded-lg hover:bg-surface-2 transition-colors">
-                          <span
-                            className="inline-block w-2.5 h-2.5 rounded-full"
-                            style={{ backgroundColor: getCourtColor(court) }}
-                          />
-                          <span className="font-semibold text-lg tracking-tight">{court}</span>
-                          <ChevronDown className="h-4 w-4 text-text-muted" />
-                        </button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="center" className="w-56">
-                        {selectedCourts.map((c, idx) => (
-                          <DropdownMenuItem
-                            key={c}
-                            onClick={() => setMobileCourtIndex(idx)}
-                            className={cn(
-                              "flex items-center gap-2",
-                              c === court && "bg-surface-2"
-                            )}
-                          >
-                            <span
-                              className="inline-block w-2.5 h-2.5 rounded-full"
-                              style={{ backgroundColor: getCourtColor(c) }}
-                            />
-                            <span className="font-semibold">{c}</span>
-                            {c === court && <span className="ml-auto text-brand">✓</span>}
-                          </DropdownMenuItem>
-                        ))}
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  ) : (
-                    <div className="flex items-center gap-2">
-                      <span
-                        className="inline-block w-2.5 h-2.5 rounded-full"
-                        style={{ backgroundColor: getCourtColor(court), boxShadow: '0 0 0 2px rgba(255,255,255,0.06)' }}
-                      />
-                      <span className="font-semibold text-lg tracking-tight">{court}</span>
-                    </div>
-                  )}
-                </div>
-              )}
+              {/* Header simples sem tabs */}
+              <div className="h-14 border-b border-border sticky top-0 bg-surface z-10 flex items-center justify-center">
+                {/* Mostrar estatísticas apenas na primeira coluna de quadras */}
+                {courtIndex === 0 && (
+                  <div className="flex items-center gap-4">
+                    {dayStats.totalBookings > 0 && (
+                      <div className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-surface-2/50">
+                        <span className="text-lg">📅</span>
+                        <span className="font-bold text-text-primary">{dayStats.totalBookings}</span>
+                        <span className="font-semibold text-xs text-text-muted">agendamento{dayStats.totalBookings !== 1 ? 's' : ''}</span>
+                      </div>
+                    )}
+                    {dayStats.totalPendingPayments > 0 && (
+                      <div className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-surface-2/50">
+                        <span className="text-lg">💰</span>
+                        <span className="font-bold text-text-primary">{dayStats.totalPendingPayments}</span>
+                        <span className="font-semibold text-xs text-text-muted">pendente{dayStats.totalPendingPayments !== 1 ? 's' : ''}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
               {/* Container relativo para posicionar reservas */}
-              <div className="relative" style={{ height: displayTotalGridHeight }}>
+              <div 
+                className={cn(
+                  "relative"
+                )} 
+                style={{ height: displayTotalGridHeight }}
+              >
+                {/* Blocos de 1 hora para quadra fechada */}
+                {diasFuncionamento[court] && !diasFuncionamento[court].funciona ? (() => {
+                  return displayHoursList.map((hour) => (
+                    <div
+                      key={`closed-${court}-${hour}`}
+                      className="absolute w-full cursor-not-allowed bg-surface/60 flex items-center justify-center border-b border-border/30 transition-colors"
+                      style={{
+                        height: SLOT_HEIGHT * 2,
+                        top: (displayHoursList.indexOf(hour)) * SLOT_HEIGHT * 2,
+                      }}
+                    >
+                      <div className="text-center pointer-events-none">
+                        <Ban className="h-5 w-5 text-text-primary mx-auto mb-1" />
+                        <div className="text-xs font-medium text-text-primary mb-1">Fechada</div>
+                        {diasFuncionamento[court].observacao && (
+                          <div className="text-xs text-text-muted">
+                            {diasFuncionamento[court].observacao}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ));
+                })() : null}
                 {/* Linhas base por quadra: exibe apenas durante o horário de funcionamento dessa quadra */}
                 {(viewFilter.scheduled || viewFilter.canceledOnly || viewFilter.pendingPayments) && (() => {
                   // Usar horários do grid atual (já calculados no escopo externo)
@@ -6067,7 +6939,7 @@ function AgendaPage() {
                   .map(b => <BookingCard key={b.id} booking={b} courtGridStart={gridHours.start * 60} courtGridEnd={gridHours.end * 60} />)
                 }
                 {/* Livres */}
-                {viewFilter.available && (() => {
+                {(viewFilter.available && !(diasFuncionamento[court] && !diasFuncionamento[court].funciona)) && (() => {
                   // calcular intervalos livres para o dia/quadra
                   const courtStart = (() => {
                     const t = courtsMap[court]?.hora_inicio;

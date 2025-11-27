@@ -1,0 +1,2 @@
+[functions.parse-participants]
+verify_jwt = false

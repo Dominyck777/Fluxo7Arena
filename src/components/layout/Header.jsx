@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Bell, LogOut, Menu, X, Eye, EyeOff, PanelLeft, PanelLeftClose, Lock, Unlock, Building, ArrowUpRight, Package, DollarSign, CalendarCheck, Clock, ShoppingCart, Store, Users, CalendarPlus, AlertTriangle, Info } from 'lucide-react';
+import { IsisAvatar } from '@/components/isis/IsisAvatar';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -115,6 +116,7 @@ function Header({ onToggleSidebar, sidebarVisible, sidebarPinned }) {
       if (pathname === '/' || pathname.startsWith('/dashboard')) return '';
       const map = [
         { key: '/agenda', label: 'Agenda' },
+        { key: '/isis', label: 'Ísis' },
         { key: '/clientes', label: 'Clientes & Fornecedores' },
         { key: '/produtos', label: 'Produtos' },
         { key: '/vendas', label: 'Vendas' },
@@ -139,6 +141,8 @@ function Header({ onToggleSidebar, sidebarVisible, sidebarPinned }) {
     } catch {}
     return '';
   }, [location?.pathname]);
+
+  const isIsis = React.useMemo(() => String(location?.pathname || '').startsWith('/isis'), [location?.pathname]);
 
   return (
     <motion.header
@@ -176,13 +180,38 @@ function Header({ onToggleSidebar, sidebarVisible, sidebarPinned }) {
       </div>
 
       {/* Título central da aba atual (overlay centralizado) - Oculto em mobile */}
-      {pageTitle ? (
+      {isIsis ? (
+        <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 hidden md:block">
+          <div className="flex items-center gap-3">
+            <div className="rounded-full p-[2px] bg-gradient-to-r from-fuchsia-500 via-violet-500 to-emerald-400 shadow-[0_0_12px_rgba(168,85,247,0.35)] w-8 h-8">
+              <div className="rounded-full overflow-hidden bg-background w-full h-full">
+                <IsisAvatar size="xs" className="w-8 h-8" />
+              </div>
+            </div>
+            <h1 className="text-lg md:text-xl font-bold tracking-tight text-text-primary">Ísis</h1>
+          </div>
+        </div>
+      ) : pageTitle ? (
         <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 hidden md:block">
           <h1 className="text-lg md:text-xl font-bold tracking-tight text-text-primary">{pageTitle}</h1>
         </div>
       ) : null}
 
       <div className="flex items-center gap-1 md:gap-2">
+        {!isIsis && (
+          <Button
+            variant="ghost"
+            onClick={() => navigate('/isis')}
+            className="hidden md:inline-flex items-center gap-2 px-2.5 py-1.5 rounded-full border border-white/10 bg-surface/60 hover:bg-surface-2/70 hover:border-white/20 transition-all duration-200 hover:-translate-y-px hover:shadow-[0_4px_16px_rgba(0,0,0,0.25)]"
+          >
+            <span className="inline-flex items-center justify-center rounded-full p-[2px] bg-gradient-to-r from-fuchsia-500 via-violet-500 to-emerald-400">
+              <span className="rounded-full overflow-hidden bg-background">
+                <IsisAvatar size="xs" />
+              </span>
+            </span>
+            <span className="text-sm font-semibold text-text-primary">Ísis</span>
+          </Button>
+        )}
         <Button 
           variant="ghost" 
           size="icon" 
