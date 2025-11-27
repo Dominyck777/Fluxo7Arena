@@ -1476,21 +1476,36 @@ export default function BalcaoPage() {
 
   return (
     <div className="h-full flex flex-col">
-      <div className="flex items-center justify-between mb-2 md:mb-6 gap-2 md:gap-4 flex-wrap">
-        <div className="w-full md:w-auto flex items-center gap-2 md:gap-3">
-          <Tabs value="balcao" className="w-full md:w-auto flex-1" onValueChange={(v) => {
+      {/* Tabs - Mobile em cima, Desktop na mesma linha */}
+      <div className="md:hidden mb-2 w-full">
+        <Tabs value="balcao" onValueChange={(v) => {
+          if (v === 'mesas') navigate('/vendas');
+          if (v === 'balcao') navigate('/balcao');
+          if (v === 'historico') navigate('/historico');
+        }}>
+          <TabsList className="grid w-full grid-cols-3">
+            <TabsTrigger value="mesas" className="text-xs">Mesas</TabsTrigger>
+            <TabsTrigger value="balcao" className="text-xs">Balcão</TabsTrigger>
+            <TabsTrigger value="historico" className="text-xs">Histórico</TabsTrigger>
+          </TabsList>
+        </Tabs>
+      </div>
+
+      <div className="flex items-center justify-between mb-2 md:mb-6 gap-2 md:gap-4">
+        <div className="hidden md:flex items-center gap-2 md:gap-3">
+          <Tabs value="balcao" onValueChange={(v) => {
             if (v === 'mesas') navigate('/vendas');
             if (v === 'balcao') navigate('/balcao');
             if (v === 'historico') navigate('/historico');
           }}>
-            <TabsList className="!grid w-full grid-cols-3">
-              <TabsTrigger value="mesas" className="text-xs sm:text-sm">Mesas</TabsTrigger>
-              <TabsTrigger value="balcao" className="text-xs sm:text-sm">Balcão</TabsTrigger>
-              <TabsTrigger value="historico" className="text-xs sm:text-sm">Histórico</TabsTrigger>
+            <TabsList className="inline-flex">
+              <TabsTrigger value="mesas" className="text-sm">Mesas</TabsTrigger>
+              <TabsTrigger value="balcao" className="text-sm">Balcão</TabsTrigger>
+              <TabsTrigger value="historico" className="text-sm">Histórico</TabsTrigger>
             </TabsList>
           </Tabs>
         </div>
-        <div className="w-full md:w-auto flex items-center gap-1.5 md:gap-3 md:ml-auto justify-end mt-1 md:mt-0">
+        <div className="flex items-center gap-1.5 md:gap-3 md:ml-auto">
           <OpenCashierDialog />
           <CloseCashierDialog />
           <Button variant="outline" size="sm" onClick={() => setIsCashierDetailsOpen(true)} className="px-3">

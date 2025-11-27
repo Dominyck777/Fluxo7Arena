@@ -394,7 +394,7 @@ export async function listarComandas({ status, from, to, search = '', limit = 50
 
   if (status && Array.isArray(status) && status.length) {
     q = q.in('status', status)
-  } else if (typeof status === 'string') {
+  } else if (typeof status === 'string' && status !== 'all') {
     if (status === 'closed') {
       // Considera como fechadas tanto as com status 'closed' quanto as que possuem fechado_em preenchido
       // PostgREST OR syntax
@@ -403,6 +403,7 @@ export async function listarComandas({ status, from, to, search = '', limit = 50
       q = q.eq('status', status)
     }
   }
+  // Se status === 'all', não aplicar filtro de status (mostrar todos)
 
   const mkStart = (d) => {
     if (!d) return null
@@ -427,11 +428,32 @@ export async function listarComandas({ status, from, to, search = '', limit = 50
 
   const s = (search || '').trim()
   if (s) {
-    // pesquisa por id (numérico ou uuid) ou por status
+    // pesquisa por id (numérico ou uuid), mesa_id ou por status
     const isNumeric = /^\d+$/.test(s)
     const isUUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(s)
-    if (isNumeric || isUUID) {
-      // tenta por id e também por status como fallback
+    if (isUUID) {
+      // Para UUID, fazer duas queries separadas e combinar
+      const q1 = supabase
+        .from('comandas')
+        .select('id, mesa_id, status, aberto_em, fechado_em, diferenca_pagamento')
+        .eq('id', s)
+        .eq('codigo_empresa', codigo)
+      
+      const q2 = supabase
+        .from('comandas')
+        .select('id, mesa_id, status, aberto_em, fechado_em, diferenca_pagamento')
+        .eq('mesa_id', s)
+        .eq('codigo_empresa', codigo)
+      
+      const [r1, r2] = await Promise.all([q1, q2])
+      const data1 = r1.data || []
+      const data2 = r2.data || []
+      
+      // Combinar e remover duplicatas
+      const combined = [...data1, ...data2]
+      const unique = Array.from(new Map(combined.map(item => [item.id, item])).values())
+      return unique.sort((a, b) => new Date(b.fechado_em || b.aberto_em) - new Date(a.fechado_em || a.aberto_em))
+    } else if (isNumeric) {
       q = q.or(`id.eq.${s},status.ilike.%${s}%`)
     } else {
       q = q.or(`status.ilike.%${s}%`)
@@ -677,7 +699,7 @@ export async function listarComandasAbertas({ codigoEmpresa } = {}) {
     // CONSULTA MAIS AMPLA: buscar todas as comandas sem fechado_em, independente do status
     let query = supabase
       .from('comandas')
-      .select('id, mesa_id, status, aberto_em, fechado_em')
+      .select('id, mesa_id, status, aberto_em, fechado_em, observacoes, observacoes_atualizadas_em')
       .is('fechado_em', null)
       .neq('status', 'cancelled')
       .order('aberto_em', { ascending: false })
@@ -2492,4 +2514,424 @@ export async function corrigirComandasFantasmas({ codigoEmpresa } = {}) {
     } catch {}
   }
   return { fechadas }
+}
+
+// =====================
+// DESCONTOS
+// =====================
+
+/**
+ * Aplica desconto a um item da comanda
+ * @param {Object} options
+ * @param {string} options.itemId - ID do item
+ * @param {string} options.desconto_tipo - 'percentual' ou 'fixo'
+ * @param {number} options.desconto_valor - Valor do desconto
+ * @param {string} options.desconto_motivo - Motivo do desconto
+ * @param {number} options.codigoEmpresa - Código da empresa
+ */
+export async function aplicarDescontoItem({
+  itemId,
+  desconto_tipo,
+  desconto_valor,
+  desconto_motivo,
+  codigoEmpresa
+} = {}) {
+  const codigo = codigoEmpresa || getCachedCompanyCode()
+  
+  // Validações
+  if (!itemId) throw new Error('itemId é obrigatório')
+  if (!['percentual', 'fixo'].includes(desconto_tipo)) {
+    throw new Error('Tipo de desconto deve ser "percentual" ou "fixo"')
+  }
+  if (desconto_valor < 0) {
+    throw new Error('Desconto não pode ser negativo')
+  }
+  if (desconto_tipo === 'percentual' && desconto_valor > 100) {
+    throw new Error('Desconto percentual não pode ser maior que 100%')
+  }
+  
+  // Atualizar item
+  let q = supabase
+    .from('comanda_itens')
+    .update({
+      desconto_tipo,
+      desconto_valor: Number(desconto_valor),
+      desconto_motivo: desconto_motivo || null
+    })
+    .eq('id', itemId)
+  
+  if (codigo) q = q.eq('codigo_empresa', codigo)
+  
+  const { data, error } = await q.select('*').single()
+  if (error) throw error
+  
+  return data
+}
+
+/**
+ * Aplica desconto à comanda inteira
+ */
+export async function aplicarDescontoComanda({
+  comandaId,
+  desconto_tipo,
+  desconto_valor,
+  desconto_motivo,
+  codigoEmpresa
+} = {}) {
+  const codigo = codigoEmpresa || getCachedCompanyCode()
+  
+  // Validações
+  if (!comandaId) throw new Error('comandaId é obrigatório')
+  if (!['percentual', 'fixo'].includes(desconto_tipo)) {
+    throw new Error('Tipo de desconto deve ser "percentual" ou "fixo"')
+  }
+  if (desconto_valor < 0) {
+    throw new Error('Desconto não pode ser negativo')
+  }
+  if (desconto_tipo === 'percentual' && desconto_valor > 100) {
+    throw new Error('Desconto percentual não pode ser maior que 100%')
+  }
+  
+  // Atualizar comanda
+  let q = supabase
+    .from('comandas')
+    .update({
+      desconto_tipo,
+      desconto_valor: Number(desconto_valor),
+      desconto_motivo: desconto_motivo || null
+    })
+    .eq('id', comandaId)
+  
+  if (codigo) q = q.eq('codigo_empresa', codigo)
+  
+  const { data, error } = await q.select('*').single()
+  if (error) throw error
+  
+  return data
+}
+
+/**
+ * Remove desconto de um item
+ */
+export async function removerDescontoItem({
+  itemId,
+  codigoEmpresa
+} = {}) {
+  const codigo = codigoEmpresa || getCachedCompanyCode()
+  
+  if (!itemId) throw new Error('itemId é obrigatório')
+  
+  let q = supabase
+    .from('comanda_itens')
+    .update({
+      desconto_tipo: null,
+      desconto_valor: 0,
+      desconto_motivo: null
+    })
+    .eq('id', itemId)
+  
+  if (codigo) q = q.eq('codigo_empresa', codigo)
+  
+  const { data, error } = await q.select('*').single()
+  if (error) throw error
+  
+  return data
+}
+
+/**
+ * Remove desconto da comanda
+ */
+export async function removerDescontoComanda({
+  comandaId,
+  codigoEmpresa
+} = {}) {
+  const codigo = codigoEmpresa || getCachedCompanyCode()
+  
+  if (!comandaId) throw new Error('comandaId é obrigatório')
+  
+  let q = supabase
+    .from('comandas')
+    .update({
+      desconto_tipo: null,
+      desconto_valor: 0,
+      desconto_motivo: null
+    })
+    .eq('id', comandaId)
+  
+  if (codigo) q = q.eq('codigo_empresa', codigo)
+  
+  const { data, error } = await q.select('*').single()
+  if (error) throw error
+  
+  return data
+}
+
+// =====================
+// OBSERVAÇÕES
+// =====================
+
+/**
+ * Adiciona ou atualiza observações da comanda
+ */
+export async function adicionarObservacaoComanda({
+  comandaId,
+  observacoes,
+  codigoEmpresa
+} = {}) {
+  if (!comandaId) throw new Error('comandaId é obrigatório')
+
+  // Atualizar diretamente a tabela comandas apenas pelo ID
+  const { error } = await supabase
+    .from('comandas')
+    .update({
+      observacoes: (observacoes || '').trim() || null,
+      observacoes_atualizadas_em: new Date().toISOString()
+    })
+    .eq('id', comandaId)
+
+  if (error) throw error
+
+  return { id: comandaId }
+}
+
+// =====================
+// HISTÓRICO DE ALTERAÇÕES
+// =====================
+
+/**
+ * Registra alteração manual no histórico
+ */
+export async function registrarAlteracaoHistorico({
+  comandaId,
+  tipo_alteracao,
+  descricao,
+  usuario_id,
+  codigoEmpresa
+} = {}) {
+  const codigo = codigoEmpresa || getCachedCompanyCode()
+  
+  if (!comandaId) throw new Error('comandaId é obrigatório')
+  if (!tipo_alteracao) throw new Error('tipo_alteracao é obrigatório')
+  
+  const { data, error } = await supabase
+    .from('comanda_historico')
+    .insert({
+      codigo_empresa: codigo,
+      comanda_id: comandaId,
+      tipo_alteracao,
+      descricao: descricao || null,
+      usuario_id: usuario_id || null
+    })
+    .select('*')
+    .single()
+  
+  if (error) throw error
+  
+  return data
+}
+
+/**
+ * Lista histórico de alterações de uma comanda
+ */
+export async function listarHistoricoComanda({
+  comandaId,
+  codigoEmpresa
+} = {}) {
+  const codigo = codigoEmpresa || getCachedCompanyCode()
+  
+  if (!comandaId) throw new Error('comandaId é obrigatório')
+  
+  let q = supabase
+    .from('comanda_historico')
+    .select('*')
+    .eq('comanda_id', comandaId)
+    .order('criado_em', { ascending: false })
+  
+  if (codigo) q = q.eq('codigo_empresa', codigo)
+  
+  const { data, error } = await q
+  if (error) throw error
+  
+  return data || []
+}
+
+// =====================
+// ESTOQUE RESERVADO
+// =====================
+
+/**
+ * Reserva estoque para uma comanda (lock pessimista)
+ */
+export async function reservarEstoque({
+  comandaId,
+  produto_id,
+  quantidade,
+  codigoEmpresa
+} = {}) {
+  const codigo = codigoEmpresa || getCachedCompanyCode()
+  
+  if (!comandaId) throw new Error('comandaId é obrigatório')
+  if (!produto_id) throw new Error('produto_id é obrigatório')
+  if (quantidade <= 0) throw new Error('quantidade deve ser positiva')
+  
+  // Verificar estoque disponível
+  const { data: produto, error: errProd } = await supabase
+    .from('produtos')
+    .select('estoque, estoque_atual')
+    .eq('id', produto_id)
+    .eq('codigo_empresa', codigo)
+    .single()
+  
+  if (errProd || !produto) throw new Error('Produto não encontrado')
+  
+  const estoque_total = Number(produto.estoque ?? produto.estoque_atual ?? 0)
+  
+  // Calcular estoque já reservado
+  const { data: reservas, error: errRes } = await supabase
+    .from('estoque_reservado')
+    .select('quantidade')
+    .eq('produto_id', produto_id)
+    .is('liberado_em', null)
+  
+  if (errRes) throw errRes
+  
+  const reservado_total = (reservas || []).reduce((sum, r) => sum + Number(r.quantidade || 0), 0)
+  const disponivel = estoque_total - reservado_total
+  
+  if (quantidade > disponivel) {
+    throw new Error(`Estoque insuficiente. Disponível: ${disponivel}, Solicitado: ${quantidade}`)
+  }
+  
+  // Registrar reserva
+  const { data, error } = await supabase
+    .from('estoque_reservado')
+    .insert({
+      codigo_empresa: codigo,
+      comanda_id: comandaId,
+      produto_id,
+      quantidade: Number(quantidade)
+    })
+    .select('*')
+    .single()
+  
+  if (error) throw error
+  
+  return data
+}
+
+/**
+ * Libera estoque reservado
+ */
+export async function liberarEstoque({
+  reserva_id,
+  codigoEmpresa
+} = {}) {
+  const codigo = codigoEmpresa || getCachedCompanyCode()
+  
+  if (!reserva_id) throw new Error('reserva_id é obrigatório')
+  
+  const { data, error } = await supabase
+    .from('estoque_reservado')
+    .update({ liberado_em: new Date().toISOString() })
+    .eq('id', reserva_id)
+    .eq('codigo_empresa', codigo)
+    .select('*')
+    .single()
+  
+  if (error) throw error
+  
+  return data
+}
+
+/**
+ * Lista estoque reservado por comanda
+ */
+export async function listarEstoqueReservadoComanda({
+  comandaId,
+  codigoEmpresa
+} = {}) {
+  const codigo = codigoEmpresa || getCachedCompanyCode()
+  
+  if (!comandaId) throw new Error('comandaId é obrigatório')
+  
+  let q = supabase
+    .from('estoque_reservado')
+    .select('*')
+    .eq('comanda_id', comandaId)
+    .is('liberado_em', null)
+  
+  if (codigo) q = q.eq('codigo_empresa', codigo)
+  
+  const { data, error } = await q
+  if (error) throw error
+  
+  return data || []
+}
+
+// =====================
+// VENDEDOR E COMISSÃO
+// =====================
+
+/**
+ * Vincula vendedor à comanda
+ */
+export async function vincularVendedorComanda({
+  comandaId,
+  vendedor_id,
+  comissao_percentual,
+  codigoEmpresa
+} = {}) {
+  const codigo = codigoEmpresa || getCachedCompanyCode()
+  
+  if (!comandaId) throw new Error('comandaId é obrigatório')
+  
+  const payload = { vendedor_id: vendedor_id || null }
+  
+  if (comissao_percentual !== undefined && comissao_percentual !== null) {
+    if (comissao_percentual < 0 || comissao_percentual > 100) {
+      throw new Error('Comissão deve estar entre 0 e 100%')
+    }
+    payload.comissao_percentual = Number(comissao_percentual)
+  }
+  
+  let q = supabase
+    .from('comandas')
+    .update(payload)
+    .eq('id', comandaId)
+  
+  if (codigo) q = q.eq('codigo_empresa', codigo)
+  
+  const { data, error } = await q.select('*').single()
+  if (error) throw error
+  
+  return data
+}
+
+// =====================
+// AGENDAMENTOS
+// =====================
+
+/**
+ * Vincula agendamento à comanda
+ */
+export async function vincularAgendamentoComanda({
+  comandaId,
+  agendamento_id,
+  codigoEmpresa
+} = {}) {
+  const codigo = codigoEmpresa || getCachedCompanyCode()
+  
+  if (!comandaId) throw new Error('comandaId é obrigatório')
+  
+  let q = supabase
+    .from('comandas')
+    .update({ agendamento_id: agendamento_id || null })
+    .eq('id', comandaId)
+  
+  if (codigo) q = q.eq('codigo_empresa', codigo)
+  
+  const { data, error } = await q.select('*').single()
+  if (error) throw error
+  
+  return data
 }

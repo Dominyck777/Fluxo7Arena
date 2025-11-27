@@ -24,6 +24,7 @@ import FinalizadorasPage from '@/pages/FinalizadorasPage';
 import TestPage from '@/pages/TestPage';
 import ResetPasswordPage from '@/pages/ResetPasswordPage';
 import HistoricoComandasPage from '@/pages/HistoricoComandasPage';
+import PrintComandaPage from '@/pages/PrintComandaPage';
 import CreateCompanyPage from '@/pages/CreateCompanyPage';
 import { Helmet } from 'react-helmet';
 
@@ -85,12 +86,12 @@ function PrivateApp() {
         
             <Sidebar isVisible={sidebarVisible} setIsVisible={setSidebarVisible} sidebarPinned={sidebarPinned} />
 
-            {/* Overlay mobile: fecha sidebar ao clicar fora */}
+            {/* Overlay mobile: fecha sidebar ao clicar fora (sidebar agora sobrepõe conteúdo) */}
             {sidebarVisible && (
               <button
                 type="button"
                 onClick={() => setSidebarVisible(false)}
-                className="md:hidden absolute inset-y-0 left-[280px] right-0 z-30"
+                className="md:hidden fixed inset-0 z-30 bg-black/40"
                 aria-label="Fechar menu lateral"
               />
             )}
@@ -131,6 +132,13 @@ function App() {
       {/* Rotas públicas */}
       <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="/40028922" element={<CreateCompanyPage />} />
+      
+      {/* Rota de impressão sem layout */}
+      <Route path="/print-comanda" element={
+        <ProtectedRoute>
+          <PrintComandaPage />
+        </ProtectedRoute>
+      } />
       
       {/* Todas as demais rotas protegidas */}
       <Route path="/*" element={

@@ -114,12 +114,16 @@ function Sidebar({ onNavigate, isVisible, setIsVisible, sidebarPinned }) {
 
   return (
     <>
-      {/* Sidebar - empurra conteúdo */}
+      {/* Sidebar
+         - Mobile: sobrepõe o conteúdo (fixed, z-index alto)
+         - Desktop: continua empurrando conteúdo (flex-shrink-0)
+      */}
       <motion.aside
         ref={sidebarRef}
         initial={false}
         animate={{ width: (sidebarPinned || isVisible) ? 280 : 0 }}
-        className="h-screen flex-shrink-0 bg-surface flex flex-col border-r border-border shadow-xl shadow-black/20 overflow-hidden"
+        className="h-screen bg-surface flex flex-col border-r border-border shadow-xl shadow-black/20 overflow-hidden
+                   fixed inset-y-0 left-0 z-40 md:static md:flex-shrink-0"
       >
       <motion.div 
         initial={{ opacity: 0, y: -20 }}

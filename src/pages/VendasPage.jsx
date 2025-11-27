@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { DragDropContext, Droppable, Draggable } from 'react-beautiful-dnd';
 import { Button } from '@/components/ui/button';
 import { useToast } from "@/components/ui/use-toast";
-import { Plus, GripVertical, Search, CheckCircle, Clock, FileText, ShoppingBag, Trash2, DollarSign, X, Store, Lock, Unlock, Minus, Banknote, ArrowDownCircle, ArrowUpCircle, CalendarDays, Users, ChevronRight, AlertCircle, Edit } from 'lucide-react';
+import { Plus, GripVertical, Search, CheckCircle, Clock, FileText, ShoppingBag, Trash2, DollarSign, X, Store, Lock, Unlock, Minus, Banknote, ArrowDownCircle, ArrowUpCircle, CalendarDays, Users, ChevronRight, AlertCircle, Edit, Printer } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -19,6 +19,9 @@ import { useAuth } from '@/contexts/AuthContext';
 
 import { listProducts } from '@/lib/products';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { DescontoItemDialog } from '@/components/DescontoItemDialog';
+import { DescontoComandaDialog } from '@/components/DescontoComandaDialog';
+import { aplicarDescontoItem, removerDescontoItem, aplicarDescontoComanda, removerDescontoComanda, adicionarObservacaoComanda } from '@/lib/store';
 
 // Mock Data
 const initialTablesData = [
@@ -88,6 +91,9 @@ function VendasPage() {
   const [isProductDetailsOpen, setIsProductDetailsOpen] = useState(false);
   const [isOrderDetailsOpen, setIsOrderDetailsOpen] = useState(false);
   const [isManageClientsOpen, setIsManageClientsOpen] = useState(false);
+  // Modal de confirmação de remoção de item
+  const [itemToRemove, setItemToRemove] = useState(null);
+  const [isRemoveConfirmOpen, setIsRemoveConfirmOpen] = useState(false);
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(false);
   // Abrir mesa
@@ -121,6 +127,11 @@ function VendasPage() {
   const [isMobileView, setIsMobileView] = useState(() => {
     try { return typeof window !== 'undefined' && window.innerWidth <= 640; } catch { return false; }
   });
+  
+  // Estados para Desconto
+  const [selectedItemForDesconto, setSelectedItemForDesconto] = useState(null);
+  const [isDescontoComandaDialogOpen, setIsDescontoComandaDialogOpen] = useState(false);
+  
   // Construir mapa de quantidades atuais na comanda
   const qtyByProductId = useMemo(() => {
     const map = new Map();
@@ -636,13 +647,15 @@ function VendasPage() {
           let comandaId = null;
           let customer = null;
           let totalHint = 0;
+          let aberto_em = null;
           if (c) {
             status = (c.status === 'awaiting-payment' || c.status === 'awaiting_payment') ? 'awaiting-payment' : 'in-use';
             comandaId = c.id;
             customer = namesByComanda[c.id] || null;
             totalHint = totals[c.id] || 0;
+            aberto_em = c.aberto_em || null;
           }
-          return { id: m.id, number: m.numero, name: m.nome || null, status, order: [], customer, comandaId, totalHint };
+          return { id: m.id, number: m.numero, name: m.nome || null, status, order: [], customer, comandaId, totalHint, aberto_em };
         });
         // Preserva a ordem/cliente da mesa selecionada para não zerar durante o PayDialog
         const uiTables = uiTablesBase.map(t => {
@@ -696,13 +709,36 @@ function VendasPage() {
           if (!isPayOpen) {
             setSelectedTable((prev) => {
               const found = prev ? uiTables.find(t => t.id === prev.id) : null;
-              // mantém 'order' atual do prev se encontrado
-              const merged = found && prev ? { ...found, order: prev.order || found.order, customer: prev.customer || found.customer } : found;
-              return merged || (uiTables[0] || null);
+              if (!found) return uiTables[0] || null;
+              // mantém campos enriquecidos do estado anterior (itens, cliente, observações, descontos)
+              const merged = {
+                ...found,
+                order: prev.order || found.order || [],
+                customer: prev.customer || found.customer || null,
+                observacoes: prev.observacoes ?? found.observacoes ?? null,
+                desconto_tipo: prev.desconto_tipo ?? found.desconto_tipo ?? null,
+                desconto_valor: prev.desconto_valor ?? found.desconto_valor ?? 0,
+                desconto_motivo: prev.desconto_motivo ?? found.desconto_motivo ?? null,
+              };
+              return merged;
             });
           }
         } else {
-          if (!isPayOpen) setSelectedTable(nextSelected);
+          if (!isPayOpen) {
+            setSelectedTable((prev) => {
+              if (!prev || prev.id !== nextSelected.id) return nextSelected;
+              // Se é a mesma mesa, preservar campos enriquecidos
+              return {
+                ...nextSelected,
+                order: prev.order || nextSelected.order || [],
+                customer: prev.customer || nextSelected.customer || null,
+                observacoes: prev.observacoes ?? nextSelected.observacoes ?? null,
+                desconto_tipo: prev.desconto_tipo ?? nextSelected.desconto_tipo ?? null,
+                desconto_valor: prev.desconto_valor ?? nextSelected.desconto_valor ?? 0,
+                desconto_motivo: prev.desconto_motivo ?? nextSelected.desconto_motivo ?? null,
+              };
+            });
+          }
         }
         // (removido) hooks aninhados: refreshCashierStatus e efeitos — agora definidos no topo do componente
         try {
@@ -798,7 +834,17 @@ function VendasPage() {
       // recarrega itens da comanda para garantir total correto e evitar lista vazia
       try {
         const itens = await listarItensDaComanda({ comandaId: selectedTable.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
-        const order = (itens || []).map((it) => ({ id: it.id, productId: it.produto_id, name: it.descricao || 'Item', price: Number(it.preco_unitario || 0), quantity: Number(it.quantidade || 1) }));
+        const order = (itens || []).map((it) => ({ 
+          id: it.id, 
+          productId: it.produto_id, 
+          name: it.descricao || 'Item', 
+          price: Number(it.preco_unitario || 0), 
+          quantity: Number(it.quantidade || 1),
+          // Incluir campos de desconto
+          desconto_tipo: it.desconto_tipo || null,
+          desconto_valor: Number(it.desconto_valor || 0),
+          desconto_motivo: it.desconto_motivo || null
+        }));
         const updated = { ...selectedTable, order };
         setSelectedTable(updated);
         setTables((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
@@ -824,7 +870,32 @@ function VendasPage() {
     toast({ title: "Layout das mesas atualizado!", description: "As posições foram salvas temporariamente.", variant: 'success' });
   };
 
-  const calculateTotal = (order) => (order || []).reduce((acc, item) => acc + (item.price * item.quantity), 0);
+  const calculateTotal = (order, comanda) => {
+    let subtotal = 0;
+    
+    // Calcular subtotal com descontos por item
+    for (const item of (order || [])) {
+      let valor = (item.price || 0) * (item.quantity || 1);
+      
+      if (item.desconto_tipo === 'percentual' && item.desconto_valor > 0) {
+        valor *= (1 - item.desconto_valor / 100);
+      } else if (item.desconto_tipo === 'fixo' && item.desconto_valor > 0) {
+        valor -= item.desconto_valor;
+      }
+      
+      subtotal += Math.max(0, valor);
+    }
+    
+    // Aplicar desconto da comanda
+    let total = subtotal;
+    if (comanda?.desconto_tipo === 'percentual' && comanda?.desconto_valor > 0) {
+      total *= (1 - comanda.desconto_valor / 100);
+    } else if (comanda?.desconto_tipo === 'fixo' && comanda?.desconto_valor > 0) {
+      total -= comanda.desconto_valor;
+    }
+    
+    return Math.max(0, total);
+  };
   
   // Trunca nome para mostrar apenas os 2 primeiros nomes completos
   const truncateClientName = (fullName) => {
@@ -853,14 +924,41 @@ function VendasPage() {
     try {
       if (!target?.comandaId) return;
       const itens = await listarItensDaComanda({ comandaId: target.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
-      const order = (itens || []).map((it) => ({ id: it.id, productId: it.produto_id, name: it.descricao || 'Item', price: Number(it.preco_unitario || 0), quantity: Number(it.quantidade || 1) }));
+      const order = (itens || []).map((it) => ({ 
+        id: it.id, 
+        productId: it.produto_id, 
+        name: it.descricao || 'Item', 
+        price: Number(it.preco_unitario || 0), 
+        quantity: Number(it.quantidade || 1),
+        // Incluir campos de desconto
+        desconto_tipo: it.desconto_tipo || null,
+        desconto_valor: Number(it.desconto_valor || 0),
+        desconto_motivo: it.desconto_motivo || null
+      }));
       let customer = target.customer || null;
       try {
         const vinculos = await listarClientesDaComanda({ comandaId: target.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
         const nomes = (vinculos || []).map(v => v?.nome).filter(Boolean);
         customer = nomes.length ? nomes.join(', ') : null;
       } catch {}
-      const enriched = { ...target, status: target.status === 'awaiting-payment' ? 'awaiting-payment' : 'in-use', order, customer };
+      
+      // Também recarregar dados da comanda (desconto da comanda e observações)
+      let comandaData = target;
+      try {
+        const cmd = await listarComandasAbertas({ codigoEmpresa: userProfile?.codigo_empresa });
+        const found = cmd?.find(c => c.id === target.comandaId);
+        if (found) {
+          comandaData = {
+            ...target,
+            desconto_tipo: found.desconto_tipo || null,
+            desconto_valor: Number(found.desconto_valor || 0),
+            desconto_motivo: found.desconto_motivo || null,
+            observacoes: found.observacoes || null
+          };
+        }
+      } catch {}
+      
+      const enriched = { ...comandaData, status: target.status === 'awaiting-payment' ? 'awaiting-payment' : 'in-use', order, customer };
       setSelectedTable(enriched);
       setTables((prev) => prev.map((t) => (t.id === enriched.id ? enriched : t)));
     } catch (e) {
@@ -1033,9 +1131,35 @@ function VendasPage() {
               <kbd className="ml-2 hidden md:inline px-2 py-1 text-xs font-bold font-mono text-white bg-gray-700 border border-gray-600 rounded">F1</kbd>
             )}
           </div>
-          <span className={cn("text-[11px] font-medium px-2 py-0.5 rounded-full border flex-shrink-0", badgeClass)}>
-            {config.label}
-          </span>
+          <div className="flex items-center gap-1 flex-shrink-0">
+            {(table.status === 'in-use' || table.status === 'awaiting-payment') && table.aberto_em && (
+              <div className="flex items-center gap-0.5 text-xs text-text-secondary">
+                <Clock className="w-3.5 h-3.5 text-text-muted" />
+                <span className="font-medium">
+                  {(() => {
+                    try {
+                      const opened = new Date(table.aberto_em);
+                      const now = new Date();
+                      const diffMs = now - opened;
+                      const diffMinTotal = Math.floor(diffMs / 60000);
+                      const hours = Math.floor(diffMinTotal / 60);
+                      const mins = diffMinTotal % 60;
+
+                      if (diffMinTotal < 1) return 'agora';
+                      if (hours === 0) return `${mins}m`;
+                      if (hours > 0 && mins === 0) return `${hours}h`;
+                      return `${hours}h${mins}m`;
+                    } catch {
+                      return '';
+                    }
+                  })()}
+                </span>
+              </div>
+            )}
+            <span className={cn("text-[11px] font-medium px-2 py-0.5 rounded-full border flex-shrink-0", badgeClass)}>
+              {config.label}
+            </span>
+          </div>
         </div>
         
         {/* Área central com ícone da mesa baseado no status */}
@@ -1069,29 +1193,54 @@ function VendasPage() {
             </div>
           )}
         </div>
-        {(table.status === 'in-use' || table.status === 'awaiting-payment') ? (
-          <div className="w-full mt-auto">
-            <div className="flex items-center gap-1 mb-1">
-              <Users className="w-3 h-3 text-text-muted flex-shrink-0" />
-              <div className="text-sm sm:text-base font-medium text-text-primary truncate" title={table.customer || ''}>{formatClientDisplay(table.customer) || '—'}</div>
+
+        <div className="w-full mt-auto">
+          {(table.status === 'in-use' || table.status === 'awaiting-payment') ? (
+            <>
+              <div className="flex items-center gap-1 mb-1">
+                <Users className="w-3 h-3 text-text-muted flex-shrink-0" />
+                <div className="text-sm sm:text-base font-medium text-text-primary truncate" title={table.customer || ''}>{formatClientDisplay(table.customer) || '—'}</div>
+              </div>
+              <div className="flex items-center gap-1 justify-between">
+                <div className="flex items-center gap-1">
+                  <DollarSign className="w-3 h-3 text-text-muted flex-shrink-0" />
+                  <div className="text-sm font-bold text-text-secondary">R$ {displayTotal.toFixed(2)}</div>
+                </div>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    navigate(`/historico?mesa=${table.id}`);
+                  }}
+                  className="p-1 hover:bg-surface-2 rounded transition-colors"
+                  title="Ver histórico desta mesa"
+                >
+                  <FileText className="w-4 h-4 text-text-secondary hover:text-text-primary" />
+                </button>
+              </div>
+            </>
+          ) : (
+            <div className="flex items-center justify-between">
+              <div className="text-xs text-text-muted">Sem comanda</div>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  navigate(`/historico?mesa=${table.id}`);
+                }}
+                className="p-1 hover:bg-surface-2 rounded transition-colors"
+                title="Ver histórico desta mesa"
+              >
+                <FileText className="w-4 h-4 text-text-secondary hover:text-text-primary" />
+              </button>
             </div>
-            <div className="flex items-center gap-1">
-              <DollarSign className="w-3 h-3 text-text-muted flex-shrink-0" />
-              <div className="text-sm font-bold text-text-secondary">R$ {displayTotal.toFixed(2)}</div>
-            </div>
-          </div>
-        ) : (
-          <div className="w-full">
-            <div className="text-xs text-text-muted text-center">Sem comanda</div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     );
   };
 
   // Define PayDialog before OrderPanel to avoid reference errors
   const PayDialog = () => {
-    const total = selectedTable ? calculateTotal(selectedTable.order) : 0;
+    const total = selectedTable ? calculateTotal(selectedTable.order, selectedTable) : 0;
     const [payLoading, setPayLoading] = useState(false);
     const [paymentLines, setPaymentLines] = useState([]); // {id, clientId, methodId, value}
     const [nextPayLineId, setNextPayLineId] = useState(1);
@@ -1379,7 +1528,7 @@ function VendasPage() {
           }));
           const enrichedTables = (mesas || []).map((mesa) => {
             const comanda = (openComandas || []).find((c) => c.mesa_id === mesa.id);
-            return { id: mesa.id, name: mesa.nome || `Mesa ${mesa.numero}`, status: comanda ? 'in-use' : 'available', comandaId: comanda?.id || null, customer: comanda ? namesByComanda[comanda.id] : null, order: [], totalHint: 0 };
+            return { id: mesa.id, name: mesa.nome || `Mesa ${mesa.numero}`, status: comanda ? 'in-use' : 'available', comandaId: comanda?.id || null, customer: comanda ? namesByComanda[comanda.id] : null, order: [], totalHint: 0, aberto_em: comanda?.aberto_em || null };
           });
           setTables(enrichedTables);
         } catch {}
@@ -1417,17 +1566,64 @@ function VendasPage() {
             <DialogTitle className="text-2xl font-bold">Fechar Conta</DialogTitle>
             <DialogDescription>Divida o pagamento entre clientes e várias finalizadoras, se necessário.</DialogDescription>
           </DialogHeader>
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="text-lg font-semibold">Total</div>
-              <div className="text-lg font-bold">R$ {total.toFixed(2)}</div>
-            </div>
-            <div className="flex flex-col gap-1 text-xs text-text-muted">
-              <div className="flex items-center justify-between">
-                <span>Pagamentos (com taxa)</span>
+          <div className="space-y-2">
+            {/* Cálculo de descontos - Compacto */}
+            {(() => {
+              let subtotalItens = 0;
+              let descontoItens = 0;
+              let descontoComanda = 0;
+              
+              // Calcular subtotal e descontos por item
+              for (const item of (selectedTable?.order || [])) {
+                const valor = (item.price || 0) * (item.quantity || 1);
+                subtotalItens += valor;
+                
+                if (item.desconto_tipo === 'percentual' && item.desconto_valor > 0) {
+                  descontoItens += valor * (item.desconto_valor / 100);
+                } else if (item.desconto_tipo === 'fixo' && item.desconto_valor > 0) {
+                  descontoItens += item.desconto_valor;
+                }
+              }
+              
+              // Calcular desconto da comanda
+              const subtotalComDescItens = subtotalItens - descontoItens;
+              if (selectedTable?.desconto_tipo === 'percentual' && selectedTable?.desconto_valor > 0) {
+                descontoComanda = subtotalComDescItens * (selectedTable.desconto_valor / 100);
+              } else if (selectedTable?.desconto_tipo === 'fixo' && selectedTable?.desconto_valor > 0) {
+                descontoComanda = selectedTable.desconto_valor;
+              }
+              
+              const totalDescontos = descontoItens + descontoComanda;
+              
+              return (
+                <>
+                  <div className="flex items-center gap-8 text-sm">
+                    <div className="flex items-center gap-2">
+                      <span className="text-text-secondary">Subtotal</span>
+                      <span className="font-semibold">R$ {subtotalItens.toFixed(2)}</span>
+                    </div>
+                    {totalDescontos > 0 && (
+                      <div className="flex items-center gap-2 text-destructive">
+                        <span>Descontos</span>
+                        <span className="font-semibold">-R$ {totalDescontos.toFixed(2)}</span>
+                      </div>
+                    )}
+                  </div>
+                  
+                  <div className="border-t border-border pt-1 flex items-center justify-between">
+                    <div className="font-semibold">Total</div>
+                    <div className="font-bold text-lg">R$ {total.toFixed(2)}</div>
+                  </div>
+                </>
+              );
+            })()}
+            
+            <div className="flex items-center gap-8 text-xs text-text-muted pt-1">
+              <div className="flex items-center gap-2">
+                <span>Pagamentos</span>
                 <span className="font-semibold">R$ {uiTotalSum.toFixed(2)}</span>
               </div>
-              <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
                 <span>Diferença</span>
                 <span className={uiDiffAbs > 0.009 ? (uiDiffSigned > 0 ? 'font-semibold text-emerald-600' : 'font-semibold text-amber-600') : 'font-semibold'}>
                   {uiDiffAbs > 0.009
@@ -1800,10 +1996,46 @@ function VendasPage() {
     );
   });
 
+  // Modal de confirmação de remoção de item
+  const RemoveItemConfirmDialog = () => {
+    const handleConfirm = async () => {
+      if (!itemToRemove) return;
+      try {
+        await removerItem({ itemId: itemToRemove.id, codigoEmpresa: userProfile?.codigo_empresa });
+        toast({ title: 'Item removido', description: itemToRemove.name, variant: 'warning' });
+      } catch (e) {
+        toast({ title: 'Falha ao remover item', description: e?.message || 'Tente novamente', variant: 'destructive' });
+      } finally {
+        setIsRemoveConfirmOpen(false);
+        setItemToRemove(null);
+      }
+    };
+
+    return (
+      <AlertDialog open={isRemoveConfirmOpen} onOpenChange={setIsRemoveConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remover item?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Tem certeza que deseja remover "{itemToRemove?.name}" da comanda? Esta ação não pode ser desfeita.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirm} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              Remover
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    );
+  };
+
   const OrderDetailsDialog = () => {
     const tbl = selectedTable;
     const items = tbl?.order || [];
     const total = tbl ? calculateTotal(items) : 0;
+    console.log('[OrderDetailsDialog] tbl:', tbl, 'comandaId:', tbl?.comandaId);
     return (
       <Dialog open={isOrderDetailsOpen} onOpenChange={setIsOrderDetailsOpen}>
         <DialogContent
@@ -1839,6 +2071,11 @@ function VendasPage() {
           <DialogFooter>
             <div className="mr-auto text-sm font-semibold">Total: R$ {total.toFixed(2)}</div>
             <Button variant="secondary" onClick={() => setIsOrderDetailsOpen(false)}>Fechar</Button>
+            {tbl?.comandaId && (
+              <Button variant="outline" onClick={() => window.open(`/print-comanda?comanda=${tbl.comandaId}`, '_blank')}>
+                <Printer className="mr-2 h-4 w-4" /> Imprimir
+              </Button>
+            )}
             <Button onClick={async () => { setIsOrderDetailsOpen(false); await openPayDialog(); }} disabled={!tbl || (items.length === 0)}>
               <DollarSign className="mr-2 h-4 w-4" /> Fechar Conta
               <kbd className="ml-2 hidden md:inline px-2 py-1 text-xs font-bold font-mono text-white bg-amber-600 border border-amber-700 rounded shadow-sm">F2</kbd>
@@ -1846,6 +2083,171 @@ function VendasPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    );
+  };
+
+  const OrderDetailsPanel = ({ table }) => {
+    const [localObservacoes, setLocalObservacoes] = useState('');
+    const [savingObs, setSavingObs] = useState(false);
+    const [showItemDiscounts, setShowItemDiscounts] = useState(false);
+
+    const handleSaveObservacoes = async () => {
+      if (!table?.comandaId || savingObs) return;
+      try {
+        setSavingObs(true);
+        await adicionarObservacaoComanda({
+          comandaId: table.comandaId,
+          observacoes: localObservacoes,
+          codigoEmpresa: Number(userProfile?.codigo_empresa)
+        });
+        toast({
+          title: 'Observações salvas',
+          description: 'As observações da comanda foram atualizadas.',
+        });
+        // Recarregar detalhes da comanda para trazer observações atualizadas do banco
+        try {
+          await refetchSelectedTableDetails(table);
+        } catch (err) {
+          console.error('Erro ao recarregar detalhes da comanda após salvar observações:', err);
+        }
+      } catch (err) {
+        if (err?.code !== '42804') {
+          console.error('Erro ao salvar observação:', err);
+          toast({
+            title: 'Erro ao salvar observações',
+            description: 'Tente novamente mais tarde.',
+            variant: 'destructive',
+          });
+        }
+      } finally {
+        setSavingObs(false);
+      }
+    };
+
+    // Sincronizar observações locais com os dados da comanda
+    // Sempre que a comanda (ou observações dela) mudar, refletir no estado local.
+    // Isso garante que desktop e mobile vejam o mesmo texto salvo.
+    useEffect(() => {
+      if (!table?.comandaId) {
+        setLocalObservacoes('');
+        return;
+      }
+      setLocalObservacoes(table.observacoes || '');
+    }, [table?.comandaId, table?.observacoes]);
+
+    if (!table) return (
+      <div className="flex items-center justify-center h-full text-text-muted">
+        <div className="text-center">
+          <FileText className="mx-auto mb-4 h-12 w-12 opacity-50" />
+          <p>Selecione uma mesa</p>
+        </div>
+      </div>
+    );
+
+    return (
+      <div className="flex flex-col h-full p-4 space-y-4 overflow-y-auto thin-scroll">
+        {/* Itens com Desconto (recolhível) */}
+        {table.order && table.order.length > 0 && (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <Label className="text-sm font-semibold">Descontos por Item</Label>
+              <Button
+                size="xs"
+                variant="ghost"
+                className="h-6 px-2 text-[11px]"
+                onClick={() => setShowItemDiscounts((prev) => !prev)}
+              >
+                {showItemDiscounts ? 'Esconder' : `Mostrar (${table.order.length})`}
+              </Button>
+            </div>
+            {showItemDiscounts && (
+              <div className="space-y-2 max-h-48 overflow-y-auto">
+                {table.order.map((item) => (
+                  <button
+                    key={item.id}
+                    onClick={() => setSelectedItemForDesconto(item)}
+                    className="w-full p-3 rounded border border-border bg-surface hover:bg-surface-2 transition text-left"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-semibold truncate">{item.name}</p>
+                        <p className="text-xs text-text-secondary">Qtd: {item.quantity} × R$ {(item.price || 0).toFixed(2)}</p>
+                      </div>
+                      <div className="text-right flex-shrink-0">
+                        {item.desconto_valor > 0 ? (
+                          <span className="text-xs font-bold text-destructive">
+                            -{item.desconto_tipo === 'percentual' ? item.desconto_valor + '%' : 'R$' + (item.desconto_valor || 0).toFixed(2)}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-text-muted">Sem desconto</span>
+                        )}
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Observações */}
+        {table.comandaId && (
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between gap-3">
+              <Label className="text-sm font-semibold">Observações</Label>
+              {savingObs && (
+                <span className="text-[11px] text-text-secondary">Salvando...</span>
+              )}
+            </div>
+            <textarea
+              className="border border-border rounded p-3 text-sm resize-none bg-background min-h-20"
+              placeholder="Ex: sem cebola, urgente, etc."
+              value={localObservacoes}
+              onChange={(e) => {
+                const newValue = e.target.value;
+                setLocalObservacoes(newValue);
+              }}
+              onKeyDown={async (e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  await handleSaveObservacoes();
+                }
+              }}
+            />
+          </div>
+        )}
+
+        {/* Desconto da Comanda */}
+        {table.comandaId && (
+          <div className="space-y-2">
+            <Label className="text-sm font-semibold">Desconto da Comanda</Label>
+            <Button
+              size="sm"
+              variant={table.desconto_valor > 0 ? "default" : "outline"}
+              onClick={() => setIsDescontoComandaDialogOpen(true)}
+              className="w-full gap-2"
+            >
+              {table.desconto_valor > 0 ? (
+                <>
+                  <span>Desconto Ativo:</span>
+                  <span className="font-bold">
+                    -{table.desconto_tipo === 'percentual' 
+                      ? table.desconto_valor + '%' 
+                      : 'R$' + table.desconto_valor.toFixed(2)}
+                  </span>
+                </>
+              ) : (
+                'Aplicar Desconto'
+              )}
+            </Button>
+            {table.desconto_motivo && (
+              <div className="text-xs text-text-secondary bg-surface p-2 rounded border border-border">
+                <strong>Motivo:</strong> {table.desconto_motivo}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     );
   };
 
@@ -1884,7 +2286,7 @@ function VendasPage() {
       </div>
     );
 
-    const total = calculateTotal(table.order);
+    const total = calculateTotal(table.order, table);
     const customerDisplay = formatClientDisplay(table.customer);
     const reloadItems = async () => {
       if (!table?.comandaId) return;
@@ -1908,13 +2310,14 @@ function VendasPage() {
         const current = Number(item.quantity || 1);
         const next = current + delta;
         if (next <= 0) {
-          // Ajuste otimista do totalHint (remoção total da linha)
-          const dec = Number(item.price || 0) * Number(item.quantity || 0);
-          setSelectedTable((prev) => prev ? { ...prev, totalHint: Math.max(0, Number(prev.totalHint || 0) - dec) } : prev);
-          setTables((prev) => prev.map(t => t.id === (selectedTable?.id) ? { ...t, totalHint: Math.max(0, Number(t.totalHint || 0) - dec) } : t));
-          await removerItem({ itemId: item.id, codigoEmpresa: userProfile?.codigo_empresa });
-          await reloadItems();
-          toast({ title: 'Item removido', description: item.name, variant: 'warning' });
+          setItemToRemove(item);
+          setIsRemoveConfirmOpen(true);
+          // Após o modal fechar, recarregar itens
+          setTimeout(async () => {
+            if (!isRemoveConfirmOpen) {
+              await reloadItems();
+            }
+          }, 100);
           return;
         }
         // Ajuste otimista do totalHint (delta unidades)
@@ -1931,17 +2334,14 @@ function VendasPage() {
       }
     };
     const removeLine = async (item) => {
-      try {
-        // Ajuste otimista do totalHint antes de persistir
-        const dec = Number(item.price || 0) * Number(item.quantity || 0);
-        setSelectedTable((prev) => prev ? { ...prev, totalHint: Math.max(0, Number(prev.totalHint || 0) - dec) } : prev);
-        setTables((prev) => prev.map(t => t.id === (selectedTable?.id) ? { ...t, totalHint: Math.max(0, Number(t.totalHint || 0) - dec) } : t));
-        await removerItem({ itemId: item.id, codigoEmpresa: userProfile?.codigo_empresa });
-        await reloadItems();
-        toast({ title: 'Item removido', description: item.name, variant: 'warning' });
-      } catch (e) {
-        toast({ title: 'Falha ao remover item', description: e?.message || 'Tente novamente', variant: 'destructive' });
-      }
+      setItemToRemove(item);
+      setIsRemoveConfirmOpen(true);
+      // Após o modal fechar, recarregar itens
+      setTimeout(async () => {
+        if (!isRemoveConfirmOpen) {
+          await reloadItems();
+        }
+      }, 100);
     };
     return (
       <>
@@ -1954,9 +2354,10 @@ function VendasPage() {
             }
           }}
         >
-          <div className="p-3 border-b border-border flex items-center justify-between gap-2">
+          <div className="p-3 border-b border-border flex items-center justify-center md:justify-between gap-2">
             {customerDisplay ? (
-              <div className="text-sm font-medium text-text-primary leading-none truncate" title={table.customer || ''}>{customerDisplay}</div>
+              // Mostrar nome do cliente em telas >= sm; esconder só no mobile bem pequeno para não cortar
+              <div className="hidden sm:block text-sm font-medium text-text-primary leading-none truncate" title={table.customer || ''}>{customerDisplay}</div>
             ) : <div className="h-0 w-0" aria-hidden="true" />}
             <div className="flex items-center gap-2">
               {table.comandaId ? (
@@ -2059,8 +2460,16 @@ function VendasPage() {
                         <Button variant="outline" size="icon" className="h-7 w-7" onClick={() => changeQty(item, +1)}><Plus size={12} /></Button>
                       </div>
                       <div className="flex items-center gap-2">
-                        <span className="font-bold text-text-primary whitespace-nowrap">R$ {(item.price * item.quantity).toFixed(2)}</span>
-                        <span className="inline-flex items-center justify-center text-[11px] px-1.5 py-0.5 rounded-full bg-surface text-text-secondary border border-border">x{item.quantity}</span>
+                        <div className="text-right flex-1">
+                          <div className="flex items-center justify-end gap-2">
+                            <span className="font-bold text-text-primary">R$ {(item.price * item.quantity).toFixed(2)}</span>
+                            {item.desconto_valor > 0 && (
+                              <span className="text-xs font-semibold text-destructive">
+                                -{item.desconto_tipo === 'percentual' ? item.desconto_valor + '%' : 'R$' + (item.desconto_valor || 0).toFixed(2)}
+                              </span>
+                            )}
+                          </div>
+                        </div>
                         <Button variant="ghost" size="icon" className="text-danger/80 hover:text-danger h-7 w-7" onClick={() => removeLine(item)}><Trash2 size={14}/></Button>
                       </div>
                     </div>
@@ -2069,11 +2478,14 @@ function VendasPage() {
               </ul>
             )}
           </div>
-          <div className="p-4 border-t border-border mt-auto">
-            <div className="flex justify-between items-center text-sm font-semibold text-text-secondary mb-2">
+          <div className="p-4 border-t border-border mt-auto space-y-3">
+            {/* Total */}
+            <div className="flex justify-between items-center text-sm font-semibold text-text-secondary">
               <span>Total</span>
               <span>R$ {total.toFixed(2)}</span>
             </div>
+            
+            {/* Fechar Conta */}
             <Button size="lg" className="w-full" onClick={openPayDialog}>
               <DollarSign className="mr-2" /> Fechar Conta
               <kbd className="ml-2 hidden md:inline px-2 py-1 text-xs font-bold font-mono text-white bg-amber-600 border border-amber-700 rounded shadow-sm">F2</kbd>
@@ -3030,7 +3442,7 @@ function VendasPage() {
   const payCounter = async () => {
     if (!counterComandaId) return;
     try {
-      const total = calculateTotal(counterItems);
+      const total = calculateTotal(counterItems, null);
       if (total <= 0) {
         toast({ title: 'Sem itens', description: 'Adicione itens antes de pagar.', variant: 'warning' });
         return;
@@ -3122,7 +3534,7 @@ function VendasPage() {
       return () => { active = false; clearTimeout(t); };
     }, [showCounterClientPicker, counterSearch]);
 
-    const total = calculateTotal(counterItems);
+    const total = calculateTotal(counterItems, null);
     return (
       <Dialog open={isCounterModeOpen} onOpenChange={setIsCounterModeOpen}>
         <DialogContent
@@ -3214,14 +3626,21 @@ function VendasPage() {
                           <div className="font-semibold mr-2">R$ {(Number(it.price || 0) * Number(it.quantity || 0)).toFixed(2)}</div>
                           <Button variant="outline" size="icon" className="h-8 w-8" onClick={async () => {
                             const next = Number(it.quantity||1) - 1;
-                            try {
-                              if (next <= 0) {
-                                await removerItem({ itemId: it.id, codigoEmpresa: userProfile?.codigo_empresa });
-                              } else {
+                            if (next <= 0) {
+                              setItemToRemove(it);
+                              setIsRemoveConfirmOpen(true);
+                              // Após o modal fechar, recarregar itens do balcão
+                              setTimeout(async () => {
+                                if (!isRemoveConfirmOpen) {
+                                  await counterReloadItems(counterComandaId);
+                                }
+                              }, 100);
+                            } else {
+                              try {
                                 await atualizarQuantidadeItem({ itemId: it.id, quantidade: next, codigoEmpresa: userProfile?.codigo_empresa });
-                              }
-                              await counterReloadItems(counterComandaId);
-                            } catch (e) { toast({ title: 'Falha ao atualizar', description: e?.message || 'Tente novamente', variant: 'destructive' }); }
+                                await counterReloadItems(counterComandaId);
+                              } catch (e) { toast({ title: 'Falha ao atualizar', description: e?.message || 'Tente novamente', variant: 'destructive' }); }
+                            }
                           }}><Minus size={14} /></Button>
                           <span className="w-8 text-center font-semibold">{it.quantity}</span>
                           <Button variant="outline" size="icon" className="h-8 w-8" onClick={async () => {
@@ -3476,8 +3895,14 @@ function VendasPage() {
         const clienteIds = Array.isArray(baseIds) ? Array.from(new Set(baseIds)) : [];
         
         // Criar array de nomes livres de forma simples
-        const nomesLivres = [];
-        const count = Math.max(0, Number(consumidorCount || 0));
+        let nomesLivres = [];
+        let count = Math.max(0, Number(consumidorCount || 0));
+        
+        // Se não há clientes selecionados E não há consumidores, adicionar 1 consumidor comum automaticamente
+        if (clienteIds.length === 0 && count === 0) {
+          count = 1;
+        }
+        
         for (let i = 0; i < count; i++) {
           nomesLivres.push('Consumidor');
         }
@@ -3508,8 +3933,9 @@ function VendasPage() {
           const clientsArray = Array.isArray(clients) ? clients : [];
           displayName = clientIdsArray.length
             ? clientIdsArray.map(cid => clientsArray.find(c => c.id === cid)?.nome).filter(Boolean).join(', ')
-            : (nomesLivres[0] || '');
+            : (nomesLivres.length > 0 ? nomesLivres.join(', ') : '');
         }
+        console.log('[confirmOpen] displayName calculado:', { displayName, nomesLivres, clienteIds });
         const enriched = { ...pendingTable, comandaId: comanda.id, status: 'in-use', customer: displayName || null, order: [] };
         setSelectedTable(enriched);
         setTables(prev => prev.map(t => t.id === enriched.id ? enriched : t));
@@ -3533,6 +3959,7 @@ function VendasPage() {
               const nomesArray = Array.isArray(vincs) ? vincs : [];
               const nomes = nomesArray.map(v => v?.nome).filter(Boolean);
               namesByComanda[c.id] = nomes.length ? nomes.join(', ') : null;
+              console.log('[confirmOpen] Clientes da comanda', c.id, ':', { vincs, nomes, resultado: namesByComanda[c.id] });
               
               // Calcular total da comanda
               const itens = await listarItensDaComanda({ comandaId: c.id, codigoEmpresa: userProfile?.codigo_empresa });
@@ -3552,14 +3979,19 @@ function VendasPage() {
           
           const enrichedTables = (mesas || []).map((mesa) => {
             const comanda = (openComandas || []).find((c) => c.mesa_id === mesa.id);
+            // Se a comanda é a que acabamos de abrir, manter o displayName
+            const customerName = comanda 
+              ? (namesByComanda[comanda.id] !== null ? namesByComanda[comanda.id] : displayName)
+              : null;
             return {
               id: mesa.id,
               name: mesa.nome || `Mesa ${mesa.numero}`,
               status: comanda ? 'in-use' : 'available',
               comandaId: comanda?.id || null,
-              customer: comanda ? namesByComanda[comanda.id] : null,
+              customer: customerName,
               order: [],
               totalHint: comanda ? totalsByComanda[comanda.id] || 0 : 0,
+              aberto_em: comanda?.aberto_em || null,
             };
           });
           
@@ -4234,6 +4666,7 @@ function VendasPage() {
           // Carregar clientes vinculados à comanda (retorna {id, tipo, nome, cliente_id})
           const vincs = await listarClientesDaComanda({ comandaId: selectedTable.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
           if (!active) return;
+          console.log('[ManageClientsDialog] Clientes da comanda:', vincs);
           // Mapear para formato interno: {id, cliente_id, nome, tipo}
           const linked = (vincs || []).map(v => ({
             id: v.id, // ID do registro em comanda_clientes
@@ -4241,6 +4674,7 @@ function VendasPage() {
             nome: v.nome || '',
             tipo: v.tipo || (v.cliente_id ? 'cadastrado' : 'livre')
           }));
+          console.log('[ManageClientsDialog] Linked mapeado:', linked);
           // Só reseta o estado local se não houver rascunho/alterações pendentes
           if (!isDirtyRef.current) {
             setLocalLinked(linked);
@@ -4817,7 +5251,7 @@ function VendasPage() {
           </div>
         ) : (
           tables.map((table) => {
-            const total = calculateTotal(table.order || []);
+            const total = calculateTotal(table.order || [], table);
             const displayTotal = table.totalHint > 0 ? table.totalHint : total;
             
             return (
@@ -4899,6 +5333,10 @@ function VendasPage() {
       <Dialog open={isMobileModalOpen} modal={!isProductDetailsOpen} onOpenChange={(open) => {
         if (!open && isProductDetailsOpen) return; // não fechar mesa se info estiver aberta
         setIsMobileModalOpen(open);
+        if (!open) {
+          // Garantir que qualquer modal de desconto de item seja fechado junto com o modal mobile
+          setSelectedItemForDesconto(null);
+        }
         // Manter focusContext em 'tables' quando modal está aberto para permitir navegação por setas
         if (open) {
           setFocusContext('tables');
@@ -4933,16 +5371,19 @@ function VendasPage() {
             )}
           </div>
 
-          {/* Tabs Comanda/Produtos */}
+          {/* Tabs Comanda/Detalhes/Produtos (mobile) */}
           <Tabs value={mobileTableTab} onValueChange={(val) => {
             setMobileTableTab(val);
+            // Sempre fechar desconto de item ao trocar de aba, para não ficar "preso" por trás
+            setSelectedItemForDesconto(null);
             if (val === 'products' && selectedTable) {
               setIsProductsModalOpen(true);
               setMobileTableTab('order'); // Voltar para comanda
             }
           }} className="flex flex-col flex-1 min-h-0">
-            <TabsList className="grid w-full grid-cols-2 m-2 rounded-lg">
+            <TabsList className="grid w-full grid-cols-3 m-2 rounded-lg">
               <TabsTrigger value="order" className="text-sm flex items-center justify-center gap-2">Comanda</TabsTrigger>
+              <TabsTrigger value="details" className="text-sm flex items-center justify-center gap-2">Detalhes</TabsTrigger>
               <TabsTrigger value="products" className="text-sm flex items-center justify-center gap-2" onClick={() => {
                 if (selectedTable) {
                   setIsProductsModalOpen(true);
@@ -4959,6 +5400,9 @@ function VendasPage() {
               }
             }}>
               <OrderPanel table={selectedTable} />
+            </TabsContent>
+            <TabsContent value="details" className="flex-1 overflow-hidden min-h-0 m-0">
+              <OrderDetailsPanel table={selectedTable} />
             </TabsContent>
           </Tabs>
         </DialogContent>
@@ -5031,17 +5475,32 @@ function VendasPage() {
       <ProductDetailsDialog />
       <CounterProductDetailsDialog />
       <div className="h-full flex flex-col">
+        {/* Tabs - Mobile em cima, Desktop na mesma linha */}
+        <div className="md:hidden mb-2 w-full">
+          <Tabs value="mesas" onValueChange={(v) => {
+            if (v === 'mesas') navigate('/vendas');
+            if (v === 'balcao') navigate('/balcao');
+            if (v === 'historico') navigate('/historico');
+          }}>
+            <TabsList className="grid w-full grid-cols-3">
+              <TabsTrigger value="mesas" className="text-xs" title="Pressione B para alternar">Mesas</TabsTrigger>
+              <TabsTrigger value="balcao" className="text-xs" title="Pressione B para alternar">Balcão</TabsTrigger>
+              <TabsTrigger value="historico" className="text-xs" title="Pressione H para ir ao histórico">Histórico</TabsTrigger>
+            </TabsList>
+          </Tabs>
+        </div>
+
         <div className="flex items-center justify-between mb-2 md:mb-6 gap-2 md:gap-4">
-          <div className="flex items-center gap-2 md:gap-3">
+          <div className="hidden md:flex items-center gap-2 md:gap-3">
             <Tabs value="mesas" onValueChange={(v) => {
               if (v === 'mesas') navigate('/vendas');
               if (v === 'balcao') navigate('/balcao');
               if (v === 'historico') navigate('/historico');
             }}>
-              <TabsList className="!grid w-full grid-cols-3">
-                <TabsTrigger value="mesas" className="text-xs sm:text-sm" title="Pressione B para alternar">Mesas</TabsTrigger>
-                <TabsTrigger value="balcao" className="text-xs sm:text-sm" title="Pressione B para alternar">Balcão</TabsTrigger>
-                <TabsTrigger value="historico" className="text-xs sm:text-sm" title="Pressione H para ir ao histórico">Histórico</TabsTrigger>
+              <TabsList className="inline-flex">
+                <TabsTrigger value="mesas" className="text-sm" title="Pressione B para alternar">Mesas</TabsTrigger>
+                <TabsTrigger value="balcao" className="text-sm" title="Pressione B para alternar">Balcão</TabsTrigger>
+                <TabsTrigger value="historico" className="text-sm" title="Pressione H para ir ao histórico">Histórico</TabsTrigger>
               </TabsList>
             </Tabs>
           </div>
@@ -5188,18 +5647,20 @@ function VendasPage() {
                     setDesktopTab('order'); // Voltar para comanda
                   }
                 }} className="flex flex-col h-full">
-                    <TabsList className="grid w-full grid-cols-2 m-2">
-                        <TabsTrigger value="order" className="flex items-center justify-center gap-2">Comanda</TabsTrigger>
+                    <TabsList className="grid w-full grid-cols-3 m-2">
+                        <TabsTrigger value="order" className="flex items-center justify-center gap-2 text-xs">Comanda</TabsTrigger>
+                        <TabsTrigger value="details" className="flex items-center justify-center gap-2 text-xs">Detalhes</TabsTrigger>
                         <TabsTrigger value="products" onClick={() => {
                           if (selectedTable) {
                             setIsProductsModalOpen(true);
                           }
-                        }} className="flex items-center justify-center gap-2">
+                        }} className="flex items-center justify-center gap-2 text-xs">
                           Produtos
-                          <kbd className="hidden md:inline px-2 py-1 text-xs font-bold font-mono text-white bg-gray-700 border border-gray-600 rounded">P</kbd>
+                          <kbd className="hidden md:inline px-1 py-0.5 text-[10px] font-bold font-mono text-white bg-gray-700 border border-gray-600 rounded">P</kbd>
                         </TabsTrigger>
                     </TabsList>
                     <TabsContent value="order" className="flex-1 overflow-hidden min-h-0"><OrderPanel table={selectedTable} /></TabsContent>
+                    <TabsContent value="details" className="flex-1 overflow-hidden min-h-0"><OrderDetailsPanel table={selectedTable} /></TabsContent>
                 </Tabs>
             </div>
         </div>
@@ -5209,6 +5670,7 @@ function VendasPage() {
       <CounterModeModal />
       <CashierDetailsDialog open={isCashierDetailsOpen} onOpenChange={setIsCashierDetailsOpen} cashSummary={cashSummary} />
       <OrderDetailsDialog />
+      <RemoveItemConfirmDialog />
       <ManageClientsDialog />
       <OpenTableDialog />
       <CreateMesaDialog />
@@ -5220,6 +5682,39 @@ function VendasPage() {
             <div className="text-sm font-semibold leading-snug drop-shadow-[0_1px_0_rgba(255,255,255,0.25)]">{mobileWarnMsg || 'Atenção'}</div>
           </div>
         </div>
+      )}
+      
+      {/* Dialog de Desconto de Item */}
+      {selectedItemForDesconto && (
+        <DescontoItemDialog
+          item={selectedItemForDesconto}
+          onApply={() => {
+            // Recarregar detalhes completos da mesa selecionada
+            if (selectedTable) {
+              refetchSelectedTableDetails(selectedTable)
+            }
+          }}
+          onClose={() => {
+            setSelectedItemForDesconto(null)
+          }}
+          codigoEmpresa={userProfile?.codigo_empresa}
+        />
+      )}
+
+      {/* Dialog de Desconto de Comanda */}
+      {selectedTable && isDescontoComandaDialogOpen && (
+        <DescontoComandaDialog
+          comanda={selectedTable}
+          subtotal={calculateTotal(selectedTable.order || [], selectedTable)}
+          onApply={() => {
+            // Recarregar detalhes completos da mesa selecionada
+            if (selectedTable) {
+              refetchSelectedTableDetails(selectedTable)
+            }
+          }}
+          onClose={() => setIsDescontoComandaDialogOpen(false)}
+          codigoEmpresa={userProfile?.codigo_empresa}
+        />
       )}
       
       <ProductsModal />

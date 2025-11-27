@@ -12,7 +12,7 @@ import { CalendarDays, FileText, Search, Loader2, Copy, Download } from 'lucide-
 import { listarComandas, listarItensDaComanda, listarTotaisPorComanda, listarPagamentos, listMesas, listarClientesDaComanda, listarFechamentosCaixa, listarResumoPeriodo, getCaixaResumo, listarMovimentacoesCaixa, listarClientesPorComandas, listarFinalizadorasPorComandas } from '@/lib/store';
 import { gerarXMLNFe, downloadXML } from '@/lib/nfe';
 import { cn } from '@/lib/utils';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import XMLSalesImportModal from '@/components/XMLSalesImportModal';
 
@@ -252,16 +252,20 @@ export default function HistoricoComandasPage() {
   const { toast } = useToast();
   const navigate = useNavigate();
   const { userProfile } = useAuth();
+  const [searchParams] = useSearchParams();
+  const mesaIdFromUrl = searchParams.get('mesa');
+  
   const [loading, setLoading] = useState(false);
   const [rows, setRows] = useState([]);
-  const [from, setFrom] = useState(() => new Date().toISOString().slice(0,10));
-  const [to, setTo] = useState(() => new Date().toISOString().slice(0,10));
-  const [status, setStatus] = useState('closed');
+  const [from, setFrom] = useState(() => mesaIdFromUrl ? '' : new Date().toISOString().slice(0,10));
+  const [to, setTo] = useState(() => mesaIdFromUrl ? '' : new Date().toISOString().slice(0,10));
+  const [status, setStatus] = useState(() => mesaIdFromUrl ? 'all' : 'closed');
   const [search, setSearch] = useState('');
   const debouncedSearch = useDebounced(search, 350);
   const [tipo, setTipo] = useState('all'); // all | comanda | balcao
   const [tab, setTab] = useState('comandas'); // comandas | fechamentos
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
+  const [mesaFilterLabel, setMesaFilterLabel] = useState('');
 
   const [detailId, setDetailId] = useState(null);
   const [detail, setDetail] = useState({ loading: false, itens: [], pagamentos: [] });
@@ -446,7 +450,9 @@ export default function HistoricoComandasPage() {
         const searching = !!(debouncedSearch && debouncedSearch.trim());
         const effLimit = searching ? 1000 : PAGE_LIMIT;
         const effOffset = searching ? 0 : offset;
-        const list = await listarComandas({ status, from, to, limit: effLimit, offset: effOffset });
+        console.log('[HistoricoComandasPage] Carregando com:', { status, from, to, search: debouncedSearch, mesaId: mesaIdFromUrl, searching, effLimit });
+        const list = await listarComandas({ status, from, to, search: mesaIdFromUrl || debouncedSearch, limit: effLimit, offset: effOffset });
+        console.log('[HistoricoComandasPage] Resultado:', list?.length || 0, 'comandas');
         // Carrega totais em lote
         const ids = (list || []).map(r => r.id);
         let totals = {};
@@ -498,6 +504,22 @@ export default function HistoricoComandasPage() {
       lastLoadTsRef.current = Date.now();
     }
   };
+
+  // Carregar nome da mesa quando vir do URL
+  useEffect(() => {
+    if (mesaIdFromUrl) {
+      const loadMesaName = async () => {
+        try {
+          const mesas = await listMesas(userProfile?.codigo_empresa);
+          const mesa = (mesas || []).find(m => m.id === mesaIdFromUrl);
+          if (mesa) {
+            setMesaFilterLabel(`Mesa ${mesa.numero}`);
+          }
+        } catch {}
+      };
+      loadMesaName();
+    }
+  }, [mesaIdFromUrl, userProfile?.codigo_empresa]);
 
   // Hydrate from cache immediately on filters change to avoid empty UI
   useEffect(() => {
@@ -598,24 +620,41 @@ export default function HistoricoComandasPage() {
         // Carregar clientes vinculados para resolver nomes por id
         let clientesVinc = [];
         try { clientesVinc = await listarClientesDaComanda({ comandaId: id, codigoEmpresa: emp }); } catch {}
+        console.log('[openDetail] clientesVinc:', clientesVinc);
+        
         const nomeById = new Map((clientesVinc || []).map(r => {
           const cid = r?.cliente_id ?? r?.clientes?.id ?? null;
           const nome = r?.clientes?.nome ?? r?.nome ?? r?.nome_livre ?? '';
+          console.log(`[openDetail] Mapeando cliente: cid=${cid}, nome=${nome}`);
           return cid ? [String(cid), nome] : null;
         }).filter(Boolean));
+        console.log('[openDetail] nomeById map:', Array.from(nomeById.entries()));
         
         // Para pagamentos sem cliente_id (antigos), distribuir clientes vinculados
-        const clientesDisponiveis = Array.from(nomeById.values());
+        // Incluir também consumidores livres (sem cliente_id)
+        const clientesDisponiveis = [
+          ...Array.from(nomeById.values()),
+          ...(clientesVinc || [])
+            .filter(r => !r?.cliente_id && (r?.nome_livre || r?.nome))
+            .map(r => r?.nome_livre || r?.nome || 'Consumidor')
+        ];
+        console.log('[openDetail] clientesDisponiveis:', clientesDisponiveis);
         
+        console.log('[openDetail] pagamentos:', pagamentos);
         const pgEnriched = (pagamentos || []).map((p, idx) => {
           let clienteNome = '';
           if (p?.cliente_id) {
             // Tem cliente_id específico no pagamento (vendas novas)
             clienteNome = nomeById.get(String(p.cliente_id)) || '';
+            // Se não encontrou no mapa, usar consumidor disponível
+            if (!clienteNome && clientesDisponiveis.length > 0) {
+              clienteNome = clientesDisponiveis[idx % clientesDisponiveis.length];
+            }
           } else if (clientesDisponiveis.length > 0) {
             // Pagamento antigo sem cliente_id: distribuir clientes de forma round-robin
             clienteNome = clientesDisponiveis[idx % clientesDisponiveis.length];
           }
+          console.log(`[openDetail] Pagamento ${idx}: cliente_id=${p?.cliente_id}, clienteNome=${clienteNome}`);
           return {
             ...p,
             cliente_nome: clienteNome,
@@ -732,7 +771,7 @@ export default function HistoricoComandasPage() {
           if (v === 'balcao') navigate('/balcao');
           if (v === 'historico') navigate('/historico');
         }}>
-          <TabsList className="w-full grid grid-cols-3 sm:w-auto sm:inline-flex">
+          <TabsList className="grid w-full sm:w-auto grid-cols-3 sm:inline-flex">
             <TabsTrigger value="mesas">Mesas</TabsTrigger>
             <TabsTrigger value="balcao">Balcão</TabsTrigger>
             <TabsTrigger value="historico">Histórico</TabsTrigger>
@@ -883,10 +922,27 @@ export default function HistoricoComandasPage() {
             <DateInput value={to} onChange={setTo} />
           </div>
           <div className="md:col-span-2 hidden sm:block">
-            <Label className="mb-1 block">Busca</Label>
+            <Label className="mb-1 block">Busca {mesaFilterLabel && <span className="text-xs text-warning ml-1">({mesaFilterLabel})</span>}</Label>
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted" />
-              <Input placeholder="Mesa, status (fechada/aberta) ou cliente" className="pl-9" value={search} onChange={(e) => setSearch(e.target.value)} />
+              <Input 
+                placeholder="Mesa, status (fechada/aberta) ou cliente" 
+                className="pl-9 pr-12" 
+                value={search} 
+                onChange={(e) => setSearch(e.target.value)} 
+              />
+              {mesaIdFromUrl && (
+                <Button 
+                  size="sm" 
+                  variant="ghost" 
+                  className="absolute right-1 top-1/2 -translate-y-1/2 h-7 text-xs"
+                  onClick={() => {
+                    navigate('/historico');
+                  }}
+                >
+                  ✕ Limpar
+                </Button>
+              )}
             </div>
           </div>
           <div>
@@ -1310,29 +1366,33 @@ export default function HistoricoComandasPage() {
                   <div className="bg-surface-2 rounded-lg p-4 border border-border">
                     <h3 className="font-semibold mb-3">Resumo Financeiro</h3>
                     <div className="space-y-2 text-sm">
-                      <div className="flex justify-between">
-                        <span className="text-text-muted">Subtotal dos itens:</span>
-                        <span className="font-mono">R$ {subtotalItens.toFixed(2)}</span>
-                      </div>
-                      {totalDescontos > 0 && (
-                        <div className="flex justify-between text-warning">
-                          <span>Descontos:</span>
-                          <span className="font-mono">- R$ {totalDescontos.toFixed(2)}</span>
+                      <div className="flex items-center gap-4">
+                        <div className="flex items-center gap-2">
+                          <span className="text-text-muted">Subtotal</span>
+                          <span className="font-mono font-semibold">R$ {subtotalItens.toFixed(2)}</span>
                         </div>
-                      )}
+                        {totalDescontos > 0 && (
+                          <div className="flex items-center gap-2 text-warning">
+                            <span>Desconto</span>
+                            <span className="font-mono font-semibold">-R$ {totalDescontos.toFixed(2)}</span>
+                          </div>
+                        )}
+                      </div>
                       <div className="flex justify-between font-semibold pt-2 border-t border-border">
-                        <span>Total da comanda:</span>
+                        <span>Total:</span>
                         <span className="font-mono text-lg">R$ {totalItens.toFixed(2)}</span>
                       </div>
-                      <div className="flex justify-between text-success">
-                        <span>Total pago:</span>
-                        <span className="font-mono">R$ {totalPagamentos.toFixed(2)}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-text-secondary">Diferença</span>
-                        <span className={cn("font-semibold", Math.abs(diferenca) < 0.005 ? 'text-text-muted' : (diferenca > 0 ? 'text-emerald-500' : 'text-amber-500'))}>
-                          {Math.abs(diferenca) < 0.005 ? 'R$ 0,00' : `${diferenca > 0 ? '+' : '-'} R$ ${Math.abs(diferenca).toFixed(2)}`}
-                        </span>
+                      <div className="flex items-center gap-4 text-xs">
+                        <div className="flex items-center gap-2 text-success">
+                          <span>Pagamentos</span>
+                          <span className="font-mono">R$ {totalPagamentos.toFixed(2)}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-text-secondary">Diferença</span>
+                          <span className={cn("font-semibold", Math.abs(diferenca) < 0.005 ? 'text-text-muted' : (diferenca > 0 ? 'text-emerald-500' : 'text-amber-500'))}>
+                            {Math.abs(diferenca) < 0.005 ? 'R$ 0,00' : `${diferenca > 0 ? '+' : '-'} R$ ${Math.abs(diferenca).toFixed(2)}`}
+                          </span>
+                        </div>
                       </div>
                     </div>
                   </div>
