@@ -23,9 +23,11 @@ import EmpresasPage from '@/pages/EmpresasPage';
 import FinalizadorasPage from '@/pages/FinalizadorasPage';
 import TestPage from '@/pages/TestPage';
 import ResetPasswordPage from '@/pages/ResetPasswordPage';
+import IsisPremiumPage from '@/pages/IsisPremiumPage';
 import HistoricoComandasPage from '@/pages/HistoricoComandasPage';
 import PrintComandaPage from '@/pages/PrintComandaPage';
 import CreateCompanyPage from '@/pages/CreateCompanyPage';
+import IsisBookingPage from '@/pages/IsisBookingPage';
 import { Helmet } from 'react-helmet';
 
 function PrivateApp() {
@@ -83,7 +85,7 @@ function PrivateApp() {
               <title>F7 Arena</title>
               <meta name="description" content="Software para gestão de quadras esportivas." />
             </Helmet>
-        
+
             <Sidebar isVisible={sidebarVisible} setIsVisible={setSidebarVisible} sidebarPinned={sidebarPinned} />
 
             {/* Overlay mobile: fecha sidebar ao clicar fora (sidebar agora sobrepõe conteúdo) */}
@@ -99,30 +101,31 @@ function PrivateApp() {
             <div className="flex-1 flex flex-col overflow-hidden">
               <Header onToggleSidebar={handleSidebarButton} sidebarVisible={sidebarVisible} sidebarPinned={sidebarPinned} />
               <main className={cn("flex-1 overflow-x-hidden overflow-y-auto bg-background", isAgendaPage ? "p-0 md:p-8" : "p-8")}>
-              <Routes>
-                <Route path="/" element={<DashboardPage />} />
-                <Route path="/agenda" element={<AgendaPage />} />
-                <Route path="/vendas" element={<VendasPage />} />
-                <Route path="/balcao" element={<BalcaoPage />} />
-                <Route path="/produtos" element={<ProdutosPage />} />
-                <Route path="/compras" element={<ComprasPage />} />
-                <Route path="/clientes" element={<ClientesPage />} />
-                <Route path="/equipe" element={<EquipePage />} />
-                <Route path="/financeiro" element={<FinanceiroPage />} />
-                <Route path="/caixa" element={<Navigate to="/financeiro?tab=caixa" replace />} />
-                <Route path="/quadras" element={<QuadrasPage />} />
-                <Route path="/empresas" element={<EmpresasPage />} />
-                <Route path="/finalizadoras" element={<FinalizadorasPage />} />
-                <Route path="/test-page" element={<TestPage />} />
-                <Route path="/historico" element={<HistoricoComandasPage />} />
-                <Route path="/suporte" element={<SuportePage />} />
-              </Routes>
-            </main>
+                <Routes>
+                  <Route path="/" element={<DashboardPage />} />
+                  <Route path="/agenda" element={<AgendaPage sidebarVisible={sidebarVisible} />} />
+                  <Route path="/isis" element={<IsisPremiumPage />} />
+                  <Route path="/vendas" element={<VendasPage />} />
+                  <Route path="/balcao" element={<BalcaoPage />} />
+                  <Route path="/produtos" element={<ProdutosPage />} />
+                  <Route path="/compras" element={<ComprasPage />} />
+                  <Route path="/clientes" element={<ClientesPage />} />
+                  <Route path="/equipe" element={<EquipePage />} />
+                  <Route path="/financeiro" element={<FinanceiroPage />} />
+                  <Route path="/caixa" element={<Navigate to="/financeiro?tab=caixa" replace />} />
+                  <Route path="/quadras" element={<QuadrasPage />} />
+                  <Route path="/empresas" element={<EmpresasPage />} />
+                  <Route path="/finalizadoras" element={<FinalizadorasPage />} />
+                  <Route path="/test-page" element={<TestPage />} />
+                  <Route path="/historico" element={<HistoricoComandasPage />} />
+                  <Route path="/suporte" element={<SuportePage />} />
+                </Routes>
+              </main>
+            </div>
           </div>
-        </div>
-      </AgendaProvider>
-    </AlertsProvider>
-  </ModalsProvider>
+        </AgendaProvider>
+      </AlertsProvider>
+    </ModalsProvider>
   );
 }
 
@@ -132,6 +135,7 @@ function App() {
       {/* Rotas públicas */}
       <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="/40028922" element={<CreateCompanyPage />} />
+      <Route path="/agendar/:nomeFantasia" element={<IsisBookingPage />} />
       
       {/* Rota de impressão sem layout */}
       <Route path="/print-comanda" element={

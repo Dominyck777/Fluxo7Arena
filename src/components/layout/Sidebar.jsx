@@ -1,6 +1,7 @@
 import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Calendar, ShoppingCart, Users, UserCog, LifeBuoy, Settings, Trophy, Package, Wallet, ChevronDown, Layers, Building2, Banknote, Folder, CreditCard, ShoppingBag } from 'lucide-react';
+import { LayoutDashboard, Calendar, ShoppingCart, Users, UserCog, LifeBuoy, Settings, Trophy, Package, Wallet, ChevronDown, Layers, Building2, Banknote, Folder, CreditCard, ShoppingBag, Bot } from 'lucide-react';
+import { IsisAvatar } from '@/components/isis/IsisAvatar';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 
@@ -40,10 +41,25 @@ const NavItem = ({ to, icon: Icon, label, index, onNavigate }) => {
       <NavLink
         to={to}
         onClick={onNavigate}
-        className={({ isActive }) => (isActive ? activeLink : inactiveLink)}
+        className={({ isActive }) => {
+          if (to === '/isis' && isActive) {
+            return "flex items-center h-[52px] px-4 rounded-sm font-bold text-white shadow-lg shadow-emerald-500/10 border-l-4 border-transparent bg-gradient-to-r from-fuchsia-600 via-violet-600 to-emerald-600 ring-1 ring-white/10";
+          }
+          return isActive ? activeLink : inactiveLink;
+        }}
       >
-        <Icon className="h-5 w-5 mr-4 flex-shrink-0" />
-        <span className="text-base">{label}</span>
+        {to === '/isis' ? (
+          <span className="mr-4 flex-shrink-0 inline-flex items-center justify-center rounded-full p-[3px] bg-gradient-to-r from-fuchsia-500 via-violet-500 to-emerald-400 shadow-[0_0_12px_rgba(168,85,247,0.35)]">
+            <span className="rounded-full overflow-hidden bg-background">
+              <IsisAvatar size="sm" />
+            </span>
+          </span>
+        ) : (
+          <Icon className="h-5 w-5 mr-4 flex-shrink-0" />
+        )}
+        <span className="text-base flex items-center gap-2">
+          {label}
+        </span>
       </NavLink>
     </motion.li>
   );
@@ -252,6 +268,31 @@ function Sidebar({ onNavigate, isVisible, setIsVisible, sidebarPinned }) {
             >
               <LifeBuoy className="h-5 w-5 mr-4 flex-shrink-0" />
               <span className="text-base">Suporte</span>
+            </NavLink>
+          </motion.li>
+          <motion.li
+            custom={navItems.length + 2}
+            variants={navItemVariants}
+            initial="hidden"
+            animate="visible"
+          >
+            <NavLink
+              to="/isis"
+              onClick={handleNavClick}
+              className={({ isActive }) => (
+                isActive
+                  ? "flex items-center h-[56px] px-4 rounded-sm font-extrabold text-text-primary bg-surface-2/80 border border-white/20 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]"
+                  : "flex items-center h-[56px] px-4 rounded-sm text-text-secondary hover:bg-surface-2 hover:text-text-primary transition-all duration-200 border border-white/15"
+              )}
+            >
+              <span className="mr-4 flex-shrink-0 inline-flex items-center justify-center rounded-full p-[3px] bg-gradient-to-r from-fuchsia-500 via-violet-500 to-emerald-400 shadow-[0_0_12px_rgba(168,85,247,0.35)]">
+                <span className="rounded-full overflow-hidden bg-background">
+                  <IsisAvatar size="sm" />
+                </span>
+              </span>
+              <span className="text-lg font-extrabold bg-clip-text text-transparent bg-gradient-to-r from-fuchsia-400 via-violet-300 to-emerald-300">
+                Ísis
+              </span>
             </NavLink>
           </motion.li>
         </ul>

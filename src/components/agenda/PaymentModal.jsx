@@ -138,6 +138,16 @@ export default function PaymentModal({
   // Estado para indicador visual de auto-save
   const [isAutoSaving, setIsAutoSaving] = useState(false);
   
+  // Estado para modal de confirmação de status de pagamento
+  const [statusConfirmationModal, setStatusConfirmationModal] = useState({
+    isOpen: false,
+    participantIndex: null,
+    currentStatus: null
+  });
+  
+  // Ref para proteger o modal de confirmação de fechamento acidental
+  const statusConfirmationProtectedRef = useRef(false);
+  
   // Handler para atualizar nome do cliente consumidor
   const handleUpdateConsumidorName = useCallback((index, newName) => {
     setLocalParticipantsForm(prev => {
@@ -187,6 +197,75 @@ export default function PaymentModal({
       }, 0);
     }
   }, [setParticipantsForm]);
+  
+  // Handler para clicar no status de pagamento
+  const handleStatusClick = useCallback((index, currentStatus, valor) => {
+    // Se está "Pago", só permitir clicar se valor está zerado (para refazer)
+    if (currentStatus === 'Pago') {
+      const valorNumerico = parseBRL(valor);
+      if (Number.isFinite(valorNumerico) && valorNumerico > 0) {
+        // Valor preenchido, não permite clicar
+        return;
+      }
+      // Valor zerado, permite clicar para refazer
+    }
+    
+    // Proteger o modal de confirmação por 3 segundos
+    statusConfirmationProtectedRef.current = true;
+    console.log('🛡️ [StatusConfirmation] Modal protegido por 3 segundos');
+    setTimeout(() => {
+      statusConfirmationProtectedRef.current = false;
+      console.log('🛡️ [StatusConfirmation] Proteção removida');
+    }, 3000);
+    
+    // Abrir modal de confirmação
+    setStatusConfirmationModal({
+      isOpen: true,
+      participantIndex: index,
+      currentStatus: currentStatus
+    });
+  }, []);
+  
+  // Handler para confirmar mudança de status
+  const handleConfirmStatusChange = useCallback((newStatus) => {
+    const { participantIndex } = statusConfirmationModal;
+    
+    if (participantIndex !== null) {
+      setLocalParticipantsForm(prev => {
+        const list = [...prev];
+        if (participantIndex >= 0 && participantIndex < list.length) {
+          list[participantIndex] = {
+            ...list[participantIndex],
+            status_pagamento: newStatus
+          };
+        }
+        setParticipantsForm(list);
+        return list;
+      });
+      
+      // Marcar para auto-save imediato (será feito no useEffect)
+      autoSaveEnabledRef.current = true;
+      if (autoSaveTimeoutRef.current) clearTimeout(autoSaveTimeoutRef.current);
+      autoSaveTimeoutRef.current = setTimeout(() => {
+        console.log('💾 [StatusChange] Salvando mudança de status...');
+      }, 100);
+      
+      // Recarregar alertas imediatamente após mudança de status
+      setTimeout(() => {
+        console.log('🔄 [StatusChange] Recarregando alertas...');
+        loadAlerts().catch(err => {
+          console.error('❌ [StatusChange] Erro ao recarregar alertas:', err);
+        });
+      }, 500);
+    }
+    
+    // Fechar modal
+    setStatusConfirmationModal({
+      isOpen: false,
+      participantIndex: null,
+      currentStatus: null
+    });
+  }, [statusConfirmationModal, setParticipantsForm, loadAlerts]);
   
   // Helper para verificar se é cliente consumidor
   const isClienteConsumidor = useCallback((clienteId) => {
@@ -344,67 +423,55 @@ export default function PaymentModal({
     const perPerson = total / participantsCount;
     const masked = maskBRL(String(perPerson.toFixed(2)));
     
-    const hidden = paymentHiddenIndexes || [];
-    
     setLocalParticipantsForm(prev => {
       const newList = [...prev];
-      newList.forEach((p, idx) => {
-        if (!hidden.includes(idx)) {
-          newList[idx] = { 
-            ...newList[idx], 
-            valor_cota: masked, 
-            status_pagamento: 'Pago',
-            aplicar_taxa: false // Desmarca taxa ao dividir igualmente
-          };
-        }
+      newList.forEach((_, idx) => {
+        newList[idx] = { 
+          ...newList[idx], 
+          valor_cota: masked, 
+          status_pagamento: 'Pago',
+          aplicar_taxa: false // Desmarca taxa ao dividir igualmente
+        };
       });
       return newList;
     });
   };
   
   const zeroAllValues = () => {
-    const hidden = paymentHiddenIndexes || [];
-    
     setLocalParticipantsForm(prev => {
       const newList = [...prev];
-      newList.forEach((p, idx) => {
-        if (!hidden.includes(idx)) {
-          newList[idx] = { 
-            ...newList[idx], 
-            valor_cota: '', 
-            status_pagamento: 'Pendente',
-            aplicar_taxa: false  // Desmarcar checkbox ao zerar
-          };
-        }
+      newList.forEach((_, idx) => {
+        newList[idx] = { 
+          ...newList[idx], 
+          valor_cota: '', 
+          status_pagamento: 'Pendente',
+          aplicar_taxa: false  // Desmarcar checkbox ao zerar
+        };
       });
       return newList;
     });
   };
   
   const aplicarTaxaEmTodos = () => {
-    const hidden = paymentHiddenIndexes || [];
-    
     setLocalParticipantsForm(prev => {
       const newList = [...prev];
       newList.forEach((p, idx) => {
-        if (!hidden.includes(idx)) {
-          const valorAtual = parseBRL(p.valor_cota);
-          const temValor = valorAtual > 0;
+        const valorAtual = parseBRL(p.valor_cota);
+        const temValor = valorAtual > 0;
+        
+        // Só aplicar taxa se tiver valor e finalizadora com taxa
+        if (temValor) {
+          const finalizadora = payMethods.find(m => String(m.id) === String(p.finalizadora_id));
+          const taxa = Number(finalizadora?.taxa_percentual || 0);
           
-          // Só aplicar taxa se tiver valor e finalizadora com taxa
-          if (temValor) {
-            const finalizadora = payMethods.find(m => String(m.id) === String(p.finalizadora_id));
-            const taxa = Number(finalizadora?.taxa_percentual || 0);
-            
-            if (taxa > 0 && !p.aplicar_taxa) {
-              // Aplicar taxa: valor atual * (1 + taxa/100)
-              const novoValor = valorAtual * (1 + taxa / 100);
-              newList[idx] = { 
-                ...newList[idx], 
-                aplicar_taxa: true,
-                valor_cota: maskBRL(novoValor.toFixed(2))
-              };
-            }
+          if (taxa > 0 && !p.aplicar_taxa) {
+            // Aplicar taxa: valor atual * (1 + taxa/100)
+            const novoValor = valorAtual * (1 + taxa / 100);
+            newList[idx] = { 
+              ...newList[idx], 
+              aplicar_taxa: true,
+              valor_cota: maskBRL(novoValor.toFixed(2))
+            };
           }
         }
       });
@@ -451,12 +518,8 @@ export default function PaymentModal({
         return;
       }
       
-      // Usar localParticipantsForm como fonte da verdade (inclui substituições temporárias)
-      // Filtrar participantes que não foram removidos (por índice)
-      const hidden = paymentHiddenIndexes || [];
-      const effectiveParticipants = (localParticipantsForm || []).filter(
-        (p, idx) => !hidden.includes(idx)
-      );
+      // Usar TODOS participantes como fonte da verdade (ocultos no UI continuam sendo salvos)
+      const effectiveParticipants = (localParticipantsForm || []);
       
       // Calcular pendentes
       const pendingCount = effectiveParticipants.reduce((acc, p) => {
@@ -464,85 +527,75 @@ export default function PaymentModal({
         return acc + (st !== 'Pago' ? 1 : 0);
       }, 0);
       
-      // Deletar registros anteriores
+      // 🔧 SUBSTITUIÇÃO INTELIGENTE: Manter posição original, apenas trocar dados
       const saveTimestamp = new Date().toISOString();
       console.log(`\n\n========== SALVAMENTO INICIADO ${saveTimestamp} ==========`);
-      console.log('\ud83d\uddd1\ufe0f DELETANDO participantes antigos:', { agendamentoId, codigo });
-      const { error: delErr } = await supabase
+      console.log(`📝 effectiveParticipants: ${effectiveParticipants.length}`);
+      console.log(`📝 paymentHiddenIndexes: ${paymentHiddenIndexes}`);
+      
+      // Buscar participantes originais do banco para comparar
+      const { data: originalParticipants, error: fetchErr } = await supabase
         .from('agendamento_participantes')
-        .delete()
+        .select('*')
         .eq('codigo_empresa', codigo)
-        .eq('agendamento_id', agendamentoId);
+        .eq('agendamento_id', agendamentoId)
+        .order('ordem', { ascending: true })
+        .order('id', { ascending: true });
       
-      if (delErr) {
-        console.error('\u274c ERRO ao deletar:', delErr);
-      } else {
-        console.log('\u2705 Participantes antigos deletados');
-      }
-        
-      if (delErr) {
-        console.error('[PaymentModal] Delete error', delErr);
-        toast({ 
-          title: 'Erro ao salvar pagamentos', 
-          description: 'Falha ao limpar registros anteriores.', 
-          variant: 'destructive' 
-        });
-        throw delErr;
+      if (fetchErr) {
+        console.error('❌ Erro ao buscar participantes originais:', fetchErr);
+        throw fetchErr;
       }
       
-      // Preparar novos registros baseados em participantsForm (permite duplicados)
-      const rows = effectiveParticipants.map((p) => {
-        const valor = parseBRL(p.valor_cota);
-        const defaultMethod = getDefaultPayMethod();
-        const finId = p.finalizadora_id || (defaultMethod?.id ? String(defaultMethod.id) : null);
-        
-        const rowData = {
-          codigo_empresa: codigo,
-          agendamento_id: agendamentoId,
-          cliente_id: p.cliente_id,
-          nome: p.nome,
-          valor_cota: Number.isFinite(valor) ? valor : 0,
-          status_pagamento: p.status_pagamento || 'Pendente',
-          finalizadora_id: finId,
-          aplicar_taxa: p.aplicar_taxa || false,
-        };
-        
-        console.log(`\ud83d\udcbe SALVAR: ${p.nome} | Valor: ${p.valor_cota} \u2192 ${rowData.valor_cota} | Fin: ${finId?.slice(-4)} | Taxa: ${rowData.aplicar_taxa} | Status: ${rowData.status_pagamento}`);
-        
-        return rowData;
+      console.log(`📋 Participantes originais no banco: ${originalParticipants?.length || 0}`);
+      originalParticipants?.forEach((p, i) => {
+        console.log(`  #${i + 1}: ${p.nome} (ID: ${p.id})`);
       });
       
-      console.log(`\ud83d\udcbe TOTAL A SALVAR: ${rows.length} participantes`);
-      console.log('\ud83d\udcbe AGENDAMENTO ID:', agendamentoId);
-      console.log('\ud83d\udcbe EMPRESA:', codigo);
+      effectiveParticipants.forEach((p, i) => {
+        console.log(`  #${i + 1} (novo): ${p.nome}`);
+      });
       
-      // Inserir novos registros
-      if (rows.length > 0) {
-        console.log('\ud83d\udcbe INSERINDO no banco...');
-        const { data, error } = await supabase
-          .from('agendamento_participantes')
-          .insert(rows)
-          .select();
-          
-        if (error) {
-          console.error('\u274c ERRO ao inserir:', error);
-          toast({ 
-            title: 'Erro ao salvar pagamentos', 
-            description: 'Falha ao inserir pagamentos.', 
-            variant: 'destructive' 
-          });
-          throw error;
+      // 🎯 SEMPRE fazer UPDATE por posição (não deletar)
+      // Atualizar cada participante original com os dados do novo
+      console.log('✅ Fazendo substituição inteligente por posição');
+      
+      for (let i = 0; i < originalParticipants.length; i++) {
+        const original = originalParticipants[i];
+        const novo = effectiveParticipants[i];
+        
+        if (!novo) {
+          console.log(`⚠️ Posição #${i + 1}: Sem participante novo, pulando`);
+          continue;
         }
         
-        console.log('\u2705 INSERT bem-sucedido! Registros inseridos:', data?.length || 0);
-        console.log('========== SALVAMENTO CONCLU\u00cdDO ==========\n\n');
+        const valor = parseBRL(novo.valor_cota);
+        const defaultMethod = getDefaultPayMethod();
+        const finId = novo.finalizadora_id || (defaultMethod?.id ? String(defaultMethod.id) : null);
         
-        if (data && data.length > 0) {
-          data.forEach((row, idx) => {
-            console.log(`\u2705 SALVO #${idx + 1}: ${row.nome} | Valor: ${row.valor_cota} | Fin: ${row.finalizadora_id?.slice(-4)} | Taxa: ${row.aplicar_taxa} | Status: ${row.status_pagamento}`);
-          });
+        // Atualizar sempre (não verificar se mudou)
+        console.log(`🔄 Atualizando posição #${i + 1}: ${original.nome} → ${novo.nome}`);
+        
+        const { error: updateErr } = await supabase
+          .from('agendamento_participantes')
+          .update({
+            cliente_id: novo.cliente_id,
+            nome: novo.nome,
+            valor_cota: Number.isFinite(valor) ? valor : 0,
+            status_pagamento: novo.status_pagamento || 'Pendente',
+            finalizadora_id: finId,
+            aplicar_taxa: novo.aplicar_taxa || false,
+          })
+          .eq('id', original.id);
+        
+        if (updateErr) {
+          console.error(`❌ Erro ao atualizar posição #${i + 1}:`, updateErr);
+          throw updateErr;
         }
       }
+      
+      console.log('✅ Substituição inteligente concluída');
+      console.log('========== SALVAMENTO CONCLUÍDO ==========\n\n');
       
       // Atualizar form.selectedClients com base em participantsForm (inclui substituições)
       const newSelectedClients = effectiveParticipants.map(p => ({
@@ -1130,8 +1183,8 @@ export default function PaymentModal({
       const visibleParticipants = (localParticipantsForm || [])
         .filter((_, idx) => !(paymentHiddenIndexes || []).includes(idx));
 
-      // Dividir em grupos de 8
-      const PARTICIPANTS_PER_PAGE = 8;
+      // Dividir em grupos de 20 (tabela simplificada cabe mais pessoas por página)
+      const PARTICIPANTS_PER_PAGE = 20;
       const totalPages = Math.ceil(visibleParticipants.length / PARTICIPANTS_PER_PAGE);
       
       // Atualizar progresso inicial
@@ -1164,103 +1217,146 @@ export default function PaymentModal({
           throw new Error('Elemento do relatório não encontrado durante a geração');
         }
         
-        // Atualizar indicador de página
-        const pageIndicator = elemento.querySelector('#page-indicator');
-        if (pageIndicator) {
-          pageIndicator.textContent = `Página ${pageNum + 1} de ${totalPages}`;
-        }
-        
-        // Temporariamente esconder participantes que não são desta página
-        const allParticipantDivs = elemento.querySelectorAll('[data-participant-index]');
-        allParticipantDivs.forEach((div, idx) => {
-          div.style.display = (idx >= startIdx && idx < endIdx) ? 'block' : 'none';
-        });
-
         console.log(`📄 [PDF] Capturando página ${pageNum + 1}/${totalPages} (participantes ${startIdx + 1}-${endIdx})`);
         
-        // Criar container offscreen para renderização invisível
-        const container = document.createElement('div');
-        container.style.cssText = `
-          position: fixed;
-          left: 0;
-          top: 0;
-          width: 1px;
-          height: 1px;
-          overflow: hidden;
-          opacity: 0.01;
-          pointer-events: none;
-          z-index: -1;
-        `;
-        document.body.appendChild(container);
+        // Tornar elemento visível temporariamente para captura
+        const originalStyles = {
+          visibility: elemento.style.visibility,
+          opacity: elemento.style.opacity,
+        };
         
-        // Mover elemento para dentro do container offscreen
-        const originalParent = elemento.parentNode;
-        elemento.style.position = 'absolute';
-        elemento.style.left = '0';
-        elemento.style.top = '0';
-        elemento.style.transform = 'none';
+        // Tornar visível para captura
         elemento.style.visibility = 'visible';
         elemento.style.opacity = '1';
-        elemento.style.pointerEvents = 'none';
-        container.appendChild(elemento);
+        
+        console.log(`📋 [PDF] Elemento innerHTML length: ${elemento.innerHTML.length}`);
+        console.log(`📋 [PDF] Elemento scrollHeight: ${elemento.scrollHeight}`);
+        console.log(`📋 [PDF] Elemento scrollWidth: ${elemento.scrollWidth}`);
+        
+        // Ocultar cabeçalho e resumo nas páginas posteriores
+        const headerDiv = elemento.querySelector('div[style*="borderBottom"]');
+        const summaryDiv = elemento.querySelectorAll('div[style*="borderBottom"]')[1];
+        
+        if (pageNum > 0) {
+          // Ocultar cabeçalho e resumo
+          if (headerDiv) headerDiv.style.display = 'none';
+          if (summaryDiv) summaryDiv.style.display = 'none';
+        } else {
+          // Mostrar cabeçalho e resumo na primeira página
+          if (headerDiv) headerDiv.style.display = 'block';
+          if (summaryDiv) summaryDiv.style.display = 'flex';
+        }
+        
+        // Apenas esconder participantes que não são desta página
+        const allParticipantRows = elemento.querySelectorAll('tbody tr');
+        console.log(`📋 [PDF] Total de linhas na tabela: ${allParticipantRows.length}`);
+        
+        allParticipantRows.forEach((row, idx) => {
+          row.style.display = (idx >= startIdx && idx < endIdx) ? 'table-row' : 'none';
+        });
+        
+        // Atualizar indicador de página
+        const pageIndicatorElem = elemento.querySelector('#page-indicator');
+        if (pageIndicatorElem) {
+          pageIndicatorElem.textContent = `Página ${pageNum + 1} de ${totalPages}`;
+        }
+        
+        // Forçar reflow para garantir renderização
+        console.log(`🔄 [PDF] Forçando reflow...`);
+        elemento.offsetHeight;
+        elemento.getBoundingClientRect();
+        elemento.scrollHeight;
+        
+        // Forçar reflow novamente
+        void elemento.offsetWidth;
+        void elemento.clientHeight;
 
-        // Aguardar renderização completa
-        await new Promise(resolve => setTimeout(resolve, 600));
+        // Aguardar renderização completa com múltiplos frames
+        console.log(`⏳ [PDF] Aguardando renderização...`);
+        await new Promise(resolve => {
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              requestAnimationFrame(() => {
+                setTimeout(resolve, 2000);
+              });
+            });
+          });
+        });
+        
+        console.log(`✨ [PDF] Renderização completa, iniciando captura...`);
+        
+        // Verificar se os dados estão sendo renderizados
+        const tableRows = elemento.querySelectorAll('tbody tr');
+        console.log(`📊 [PDF] Linhas da tabela encontradas: ${tableRows.length}`);
+        
+        // Verificar conteúdo de cada linha
+        tableRows.forEach((row, idx) => {
+          const cells = row.querySelectorAll('td');
+          const cellTexts = Array.from(cells).map(c => c.textContent.trim()).join(' | ');
+          console.log(`📊 [PDF] Linha ${idx + 1}: ${cellTexts}`);
+        });
+        
+        if (tableRows.length === 0) {
+          console.warn('⚠️ [PDF] AVISO: Nenhuma linha de tabela encontrada! Verificando estrutura...');
+          const tbody = elemento.querySelector('tbody');
+          console.log('📋 [PDF] tbody existe:', !!tbody);
+          if (tbody) {
+            console.log('📋 [PDF] innerHTML do tbody:', tbody.innerHTML.substring(0, 500));
+          }
+        }
 
-        console.log(`📸 [PDF] Renderizado offscreen, iniciando captura...`);
-
-        // Capturar página com qualidade otimizada (mais leve)
+        // Capturar página com qualidade otimizada
         let canvas;
         try {
-          canvas = await toJpeg(elemento, {
-            quality: 0.85, // Reduzido para diminuir tamanho
-            pixelRatio: 1.5, // Reduzido de 3 para 1.5 (muito mais leve)
-            backgroundColor: '#1a1a1a',
+          // Usar apenas a altura do conteúdo real
+          const elementHeight = elemento.scrollHeight;
+          const elementWidth = elemento.scrollWidth;
+          console.log(`📐 [PDF] Dimensões reais: width=${elementWidth}px, height=${elementHeight}px`);
+          
+          // Usar toPng para melhor qualidade e compatibilidade
+          canvas = await toPng(elemento, {
+            pixelRatio: 2,
+            backgroundColor: '#ffffff',
             cacheBust: true,
             skipFonts: false,
-            width: 2400, // Reduzido de 2800
-            height: elemento.scrollHeight,
           });
           
           if (!canvas || canvas.length === 0) {
             throw new Error('Canvas vazio retornado pela captura');
           }
           
-          console.log(`✅ [PDF] Página ${pageNum + 1} capturada (${canvas.length} bytes, ${elemento.scrollHeight}px altura)`);
+          console.log(`✅ [PDF] Página ${pageNum + 1} capturada (${canvas.length} bytes, ${elementHeight}px altura, ${tableRows.length} linhas)`);
         } catch (captureError) {
           console.error(`❌ [PDF] Erro ao capturar página ${pageNum + 1}:`, captureError);
+          // Restaurar estilos originais mesmo em caso de erro
+          elemento.style.visibility = originalStyles.visibility;
+          elemento.style.opacity = originalStyles.opacity;
           throw new Error(`Falha ao capturar página ${pageNum + 1}: ${captureError.message}`);
         }
         
-        // Retornar elemento ao parent original
-        originalParent.appendChild(elemento);
-        document.body.removeChild(container);
-
-        // Retornar elemento para posição original (fora da tela)
-        elemento.style.position = 'fixed';
-        elemento.style.left = '-9999px';
-        elemento.style.top = '0';
-        elemento.style.transform = 'none';
-        elemento.style.visibility = 'hidden';
-        elemento.style.zIndex = '-1';
-        elemento.style.opacity = '1';
-        elemento.style.pointerEvents = 'none';
+        // Restaurar estilos originais após captura bem-sucedida
+        elemento.style.visibility = originalStyles.visibility;
+        elemento.style.opacity = originalStyles.opacity;
 
         // Adicionar ao PDF
         if (pageNum > 0) {
           pdf.addPage();
         }
 
-        // Adicionar imagem como JPEG (mais leve que PNG)
-        pdf.addImage(canvas, 'JPEG', 0, 0, pdfWidth, pdfHeight, '', 'MEDIUM');
-        console.log(`📑 [PDF] Página ${pageNum + 1} adicionada ao PDF`);
+        // Calcular altura proporcional no PDF baseado na largura
+        const imgWidth = pdfWidth;
+        const imgHeight = (elemento.scrollHeight / elemento.scrollWidth) * pdfWidth;
+        
+        // Adicionar imagem como PNG (melhor qualidade)
+        pdf.addImage(canvas, 'PNG', 0, 0, imgWidth, imgHeight, '', 'MEDIUM');
+        console.log(`📑 [PDF] Página ${pageNum + 1} adicionada ao PDF (${imgWidth}mm x ${imgHeight}mm)`);
       }
 
       // Restaurar visibilidade de todos os participantes e limpar indicador
       if (relatorioRef.current) {
-        const allParticipantDivs = relatorioRef.current.querySelectorAll('[data-participant-index]');
-        allParticipantDivs.forEach(div => {
-          div.style.display = 'block';
+        const allParticipantRows = relatorioRef.current.querySelectorAll('tbody tr');
+        allParticipantRows.forEach(row => {
+          row.style.display = 'table-row';
         });
         
         // Limpar indicador de página
@@ -1268,10 +1364,6 @@ export default function PaymentModal({
         if (pageIndicator) {
           pageIndicator.textContent = '';
         }
-        
-        // Garantir que elemento fique oculto
-        relatorioRef.current.style.visibility = 'hidden';
-        relatorioRef.current.style.zIndex = '-1';
       }
 
       // Progresso: Finalizando
@@ -1365,7 +1457,7 @@ export default function PaymentModal({
     >
       <DialogContent
         forceMount
-        className="w-[95vw] sm:max-w-[1100px] max-h-[90vh] overflow-y-scroll"
+        className="w-full max-w-[95vw] sm:max-w-[1100px] max-h-[90vh] overflow-y-auto overflow-x-hidden"
         onOpenAutoFocus={(e) => e.preventDefault()}
         onInteractOutside={async (e) => {
           const now = Date.now();
@@ -1379,9 +1471,17 @@ export default function PaymentModal({
             timeSinceVisibility: `${timeSinceVisibility}ms`,
             isAddParticipantOpen,
             isDownloadModalOpen,
+            statusConfirmationOpen: statusConfirmationModal.isOpen,
             isModalProtected: isModalProtected,
             timestamp: new Date().toISOString()
           });
+          
+          // 🛡️ PROTEÇÃO: Bloquear fechamento se modal de confirmação de status está aberto
+          if (statusConfirmationModal.isOpen) {
+            console.log('🛡️ [PaymentModal] Bloqueado: modal de confirmação de status está aberto');
+            e.preventDefault();
+            return;
+          }
           
           // 🛡️ PROTEÇÃO: Bloquear fechamento se modal de download estiver aberto
           if (isDownloadModalOpen) {
@@ -2183,15 +2283,29 @@ export default function PaymentModal({
                             
                             {/* Status */}
                             <div className="flex justify-end">
-                              <span
-                                className={`inline-flex items-center justify-center px-3 py-0.5 rounded text-xs font-medium border ${
-                                  pf.status_pagamento === 'Pago' ? 
-                                  'bg-emerald-600/20 text-emerald-400 border-emerald-700/40' : 
-                                  'bg-amber-600/20 text-amber-400 border-amber-700/40'
-                                }`}
-                              >
-                                {pf.status_pagamento === 'Pago' ? 'Pago' : 'Pendente'}
-                              </span>
+                              {(() => {
+                                const isPago = pf.status_pagamento === 'Pago';
+                                const temValor = Number.isFinite(parseBRL(pf.valor_cota)) && parseBRL(pf.valor_cota) > 0;
+                                const isDisabled = isPago && temValor;
+                                
+                                return (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleStatusClick(originalIdx, pf.status_pagamento, pf.valor_cota)}
+                                    disabled={isDisabled}
+                                    className={`inline-flex items-center justify-center px-3 py-0.5 rounded text-xs font-medium border transition-all ${
+                                      isPago && temValor
+                                        ? 'bg-emerald-600/20 text-emerald-400 border-emerald-700/40 cursor-not-allowed' 
+                                        : isPago
+                                        ? 'bg-emerald-600/20 text-emerald-400 border-emerald-700/40 hover:bg-emerald-600/30 hover:border-emerald-600/60 cursor-pointer'
+                                        : 'bg-amber-600/20 text-amber-400 border-amber-700/40 hover:bg-amber-600/30 hover:border-amber-600/60 cursor-pointer'
+                                    }`}
+                                    title={isDisabled ? 'Não é possível alterar (valor preenchido)' : 'Clique para alterar status'}
+                                  >
+                                    {isPago ? 'Pago' : 'Pendente'}
+                                  </button>
+                                );
+                              })()}
                             </div>
                           </div>
                           
@@ -2325,6 +2439,40 @@ export default function PaymentModal({
                               </div>
                             </div>
                             
+                            {/* Container isolado para Valor */}
+                            <div className="isolate">
+                              <Input
+                                ref={(el) => {
+                                  if (el) valorInputRefs.current[originalIdx] = el;
+                                }}
+                                type="text"
+                                inputMode="decimal"
+                                placeholder="R$ 0,00"
+                                value={maskBRL(pf.valor_cota)}
+                                onChange={(e) => {
+                                  const masked = maskBRL(e.target.value);
+                                  const amount = parseBRL(masked);
+                                  const autoStatus = (Number.isFinite(amount) && amount > 0) ? 'Pago' : 'Pendente';
+                                  
+                                  setLocalParticipantsForm(prev => {
+                                    const list = [...prev];
+                                    // Usar o índice original para atualizar
+                                    if (originalIdx >= 0 && originalIdx < list.length) {
+                                      list[originalIdx] = { 
+                                        ...list[originalIdx], 
+                                        valor_cota: masked, 
+                                        status_pagamento: autoStatus,
+                                        // Desmarcar taxa se valor for zerado
+                                        aplicar_taxa: (masked === '' || amount <= 0) ? false : list[originalIdx].aplicar_taxa
+                                      };
+                                    }
+                                    return list;
+                                  });
+                                }}
+                                className="w-28 text-text-primary placeholder:text-slate-400 bg-surface-2 border-border hover:border-border-hover focus:border-brand focus:ring-2 focus:ring-brand/20"
+                              />
+                            </div>
+                            
                             {/* Container isolado para Finalizadora + Checkbox */}
                             <div className="flex items-center gap-2 min-w-[240px] isolate">
                               <Select
@@ -2424,50 +2572,30 @@ export default function PaymentModal({
                               </div>
                             </div>
                             
-                            {/* Container isolado para Valor */}
-                            <div className="isolate">
-                              <Input
-                                ref={(el) => {
-                                  if (el) valorInputRefs.current[originalIdx] = el;
-                                }}
-                                type="text"
-                                inputMode="decimal"
-                                placeholder="R$ 0,00"
-                                value={maskBRL(pf.valor_cota)}
-                                onChange={(e) => {
-                                  const masked = maskBRL(e.target.value);
-                                  const amount = parseBRL(masked);
-                                  const autoStatus = (Number.isFinite(amount) && amount > 0) ? 'Pago' : 'Pendente';
-                                  
-                                  setLocalParticipantsForm(prev => {
-                                    const list = [...prev];
-                                    // Usar o índice original para atualizar
-                                    if (originalIdx >= 0 && originalIdx < list.length) {
-                                      list[originalIdx] = { 
-                                        ...list[originalIdx], 
-                                        valor_cota: masked, 
-                                        status_pagamento: autoStatus,
-                                        // Desmarcar taxa se valor for zerado
-                                        aplicar_taxa: (masked === '' || amount <= 0) ? false : list[originalIdx].aplicar_taxa
-                                      };
-                                    }
-                                    return list;
-                                  });
-                                }}
-                                className="w-28 text-text-primary placeholder:text-slate-400 bg-surface-2 border-border hover:border-border-hover focus:border-brand focus:ring-2 focus:ring-brand/20"
-                              />
-                            </div>
-                            
                             {/* Status */}
-                            <span
-                              className={`inline-flex items-center justify-center w-[90px] px-3 py-1 rounded text-sm font-medium border ${
-                                pf.status_pagamento === 'Pago' ? 
-                                'bg-emerald-600/20 text-emerald-400 border-emerald-700/40' : 
-                                'bg-amber-600/20 text-amber-400 border-amber-700/40'
-                              }`}
-                            >
-                              {pf.status_pagamento === 'Pago' ? 'Pago' : 'Pendente'}
-                            </span>
+                            {(() => {
+                              const isPago = pf.status_pagamento === 'Pago';
+                              const temValor = Number.isFinite(parseBRL(pf.valor_cota)) && parseBRL(pf.valor_cota) > 0;
+                              const isDisabled = isPago && temValor;
+                              
+                              return (
+                                <button
+                                  type="button"
+                                  onClick={() => handleStatusClick(originalIdx, pf.status_pagamento, pf.valor_cota)}
+                                  disabled={isDisabled}
+                                  className={`inline-flex items-center justify-center w-[90px] px-3 py-1 rounded text-sm font-medium border transition-all ${
+                                    isPago && temValor
+                                      ? 'bg-emerald-600/20 text-emerald-400 border-emerald-700/40 cursor-not-allowed' 
+                                      : isPago
+                                      ? 'bg-emerald-600/20 text-emerald-400 border-emerald-700/40 hover:bg-emerald-600/30 hover:border-emerald-600/60 cursor-pointer'
+                                      : 'bg-amber-600/20 text-amber-400 border-amber-700/40 hover:bg-amber-600/30 hover:border-amber-600/60 cursor-pointer'
+                                  }`}
+                                  title={isDisabled ? 'Não é possível alterar (valor preenchido)' : 'Clique para alterar status'}
+                                >
+                                  {isPago ? 'Pago' : 'Pendente'}
+                                </button>
+                              );
+                            })()}
                             
                             {/* Remover */}
                             <Button
@@ -2529,96 +2657,129 @@ export default function PaymentModal({
       ref={relatorioRef}
       style={{
         position: 'fixed',
-        left: '-9999px',
+        left: '0',
         top: '0',
-        width: '2400px',
+        width: '900px',
         minHeight: 'auto',
-        padding: '60px',
-        backgroundColor: '#ffffff',
-        color: '#000000',
+        padding: '30px',
+        backgroundColor: '#ffffff !important',
+        color: '#000000 !important',
         fontFamily: 'Arial, sans-serif',
+        opacity: '0',
         visibility: 'hidden',
-        zIndex: '-1',
+        zIndex: '-9999',
         pointerEvents: 'none',
+        overflow: 'hidden',
       }}
     >
-      <div style={{ marginBottom: '30px', textAlign: 'center', borderBottom: '3px solid #333', paddingBottom: '20px', backgroundColor: '#000' }}>
-        <h1 style={{ fontSize: '48px', fontWeight: 'bold', color: '#fff', margin: 0, padding: '15px 0' }}>
+      {/* Cabeçalho */}
+      <div style={{ marginBottom: '8px', paddingBottom: '6px', borderBottom: '2px solid #000', backgroundColor: '#fff', color: '#000' }}>
+        <h1 style={{ fontSize: '18px', fontWeight: 'bold', margin: '0 0 6px 0', color: '#000', letterSpacing: '0.5px', textAlign: 'center' }}>
           RELATÓRIO DE PAGAMENTOS
         </h1>
-      </div>
-
-      <div style={{ marginBottom: '30px', backgroundColor: '#f5f5f5', padding: '30px', border: '2px solid #ddd' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '25px', fontSize: '26px' }}>
-          <div>
-            <span style={{ color: '#666' }}>Data:</span>
-            <strong style={{ marginLeft: '10px', fontSize: '28px' }}>
-              {editingBooking?.start ? new Date(editingBooking.start).toLocaleDateString('pt-BR') : ''}
-            </strong>
-          </div>
-          <div>
-            <span style={{ color: '#666' }}>Horário:</span>
-            <strong style={{ marginLeft: '10px', fontSize: '28px' }}>
-              {editingBooking?.start && editingBooking?.end 
-                ? `${new Date(editingBooking.start).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} - ${new Date(editingBooking.end).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`
-                : ''}
-            </strong>
-          </div>
-          <div>
-            <span style={{ color: '#666' }}>Quadra:</span>
-            <strong style={{ marginLeft: '10px', fontSize: '28px' }}>{editingBooking?.court || ''}</strong>
-          </div>
-          <div>
-            <span style={{ color: '#666' }}>Modalidade:</span>
-            <strong style={{ marginLeft: '10px', fontSize: '28px' }}>{editingBooking?.modality || ''}</strong>
-          </div>
-          <div>
-            <span style={{ color: '#666' }}>Código:</span>
-            <strong style={{ marginLeft: '10px', fontSize: '28px' }}>#{editingBooking?.code || ''}</strong>
-          </div>
-          <div>
-            <span style={{ color: '#666' }}>Valor Total:</span>
-            <strong style={{ marginLeft: '10px', color: '#16a34a', fontSize: '30px' }}>R$ {maskBRL(paymentTotal || 0)}</strong>
-          </div>
-          <div>
-            <span style={{ color: '#666' }}>Diferença:</span>
-            <strong style={{ 
-              marginLeft: '10px', 
-              color: paymentSummary.diff < 0 ? '#dc2626' : '#16a34a', 
-              fontSize: '30px' 
-            }}>
-              {paymentSummary.diff < 0 ? '-' : ''}R$ {maskBRL(Math.abs(paymentSummary.diff).toFixed(2))}
-            </strong>
-          </div>
-        </div>
-      </div>
-
-      <div style={{ marginBottom: '25px' }}>
-        <h2 style={{ fontSize: '36px', fontWeight: 'bold', color: '#fff', marginBottom: '20px', textAlign: 'center', borderBottom: '2px solid #ddd', paddingBottom: '15px', backgroundColor: '#000', padding: '10px 0' }}>
-          PARTICIPANTES
-        </h2>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
-        {(localParticipantsForm || [])
-          .filter((_, idx) => !(paymentHiddenIndexes || []).includes(idx))
-          .map((p, index) => (
-            <div key={index} data-participant-index={index} style={{ backgroundColor: p.status_pagamento === 'Pago' ? '#f0fdf4' : '#fef9c3', padding: '30px', border: p.status_pagamento === 'Pago' ? '3px solid #16a34a' : '3px solid #ca8a04', borderRadius: '8px' }}>
-              <div style={{ fontSize: '36px', fontWeight: 'bold', marginBottom: '18px', color: p.status_pagamento === 'Pago' ? '#16a34a' : '#ca8a04' }}>
-                {index + 1}. {p.nome || 'Sem nome'} {p.status_pagamento === 'Pago' ? '✓' : '○'}
-              </div>
-              <div style={{ fontSize: '26px', color: '#333', lineHeight: '1.9' }}>
-                <div><span style={{ color: '#666' }}>Código:</span> <strong style={{ marginLeft: '10px', fontSize: '28px' }}>{p.codigo || 'N/A'}</strong></div>
-                <div><span style={{ color: '#666' }}>Valor:</span> <strong style={{ marginLeft: '10px', color: '#16a34a', fontSize: '30px' }}>R$ {maskBRL(p.valor_cota || 0)}</strong></div>
-                <div><span style={{ color: '#666' }}>Status:</span> <strong style={{ marginLeft: '10px', fontSize: '28px' }}>{p.status_pagamento || 'Pendente'}</strong></div>
-                <div><span style={{ color: '#666' }}>Forma:</span> <strong style={{ marginLeft: '10px', fontSize: '28px' }}>{payMethods.find(m => String(m.id) === String(p.finalizadora_id))?.nome || 'N/D'}</strong></div>
-              </div>
+        
+        {/* Informações do agendamento e resumo na mesma linha */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '10px', color: '#000', fontWeight: '600' }}>
+          {/* Informações do agendamento (esquerda) */}
+          <div style={{ display: 'flex', gap: '20px', flex: 1 }}>
+            <div>
+              <span style={{ fontWeight: '700' }}>Data:</span>
+              <span style={{ marginLeft: '4px' }}>{editingBooking?.start ? new Date(editingBooking.start).toLocaleDateString('pt-BR') : '-'}</span>
             </div>
-          ))}
+            <div>
+              <span style={{ fontWeight: '700' }}>Quadra:</span>
+              <span style={{ marginLeft: '4px' }}>{editingBooking?.court || '-'}</span>
+            </div>
+            <div>
+              <span style={{ fontWeight: '700' }}>Código:</span>
+              <span style={{ marginLeft: '4px' }}>{editingBooking?.code ? `#${editingBooking.code}` : '-'}</span>
+            </div>
+          </div>
+          
+          {/* Resumo (direita) */}
+          <div style={{ display: 'flex', gap: '30px', textAlign: 'right' }}>
+            <div>
+              <span style={{ fontWeight: '700' }}>Total:</span>
+              <strong style={{ marginLeft: '4px', color: '#000', fontSize: '11px', display: 'inline' }}>R$ {maskBRL(paymentTotal || 0)}</strong>
+            </div>
+            <div>
+              <span style={{ fontWeight: '700' }}>Diferença:</span>
+              <strong style={{ 
+                marginLeft: '4px', 
+                color: paymentSummary.diff < 0 ? '#dc2626' : '#16a34a',
+                fontSize: '11px',
+                display: 'inline'
+              }}>
+                {paymentSummary.diff < 0 ? '-' : ''}R$ {maskBRL(Math.abs(paymentSummary.diff).toFixed(2))}
+              </strong>
+            </div>
+          </div>
         </div>
       </div>
 
-      <div style={{ marginTop: '30px', textAlign: 'center', fontSize: '16px', color: '#666', borderTop: '2px solid #ddd', paddingTop: '15px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div>Gerado em: {new Date().toLocaleString('pt-BR')}</div>
-        <div id="page-indicator" style={{ fontSize: '18px', fontWeight: 'bold', color: '#000' }}>
+      {/* Tabela */}
+      <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '8px', fontSize: '10px', backgroundColor: '#fff', fontFamily: 'Arial, sans-serif', border: '1px solid #000', tableLayout: 'fixed' }}>
+        <thead>
+          <tr style={{ backgroundColor: '#cccccc', borderBottom: '1px solid #000' }}>
+            <th style={{ padding: '4px 2px', textAlign: 'center', fontWeight: '900', color: '#000', width: '5%', backgroundColor: '#cccccc', fontSize: '9px', border: '1px solid #000', wordWrap: 'break-word' }}>Nº</th>
+            <th style={{ padding: '4px 2px', textAlign: 'center', fontWeight: '900', color: '#000', width: '35%', backgroundColor: '#cccccc', fontSize: '9px', border: '1px solid #000', wordWrap: 'break-word' }}>Nome</th>
+            <th style={{ padding: '4px 2px', textAlign: 'center', fontWeight: '900', color: '#000', width: '10%', backgroundColor: '#cccccc', fontSize: '9px', border: '1px solid #000', wordWrap: 'break-word' }}>Código</th>
+            <th style={{ padding: '4px 2px', textAlign: 'center', fontWeight: '900', color: '#000', width: '15%', backgroundColor: '#cccccc', fontSize: '9px', border: '1px solid #000', wordWrap: 'break-word' }}>Valor</th>
+            <th style={{ padding: '4px 2px', textAlign: 'center', fontWeight: '900', color: '#000', width: '20%', backgroundColor: '#cccccc', fontSize: '9px', border: '1px solid #000', wordWrap: 'break-word' }}>Forma</th>
+            <th style={{ padding: '4px 2px', textAlign: 'center', fontWeight: '900', color: '#000', width: '15%', backgroundColor: '#cccccc', fontSize: '9px', border: '1px solid #000', wordWrap: 'break-word' }}>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {(() => {
+            const visibleParticipants = (localParticipantsForm || [])
+              .filter((_, idx) => !(paymentHiddenIndexes || []).includes(idx));
+            
+            return visibleParticipants.map((p, index) => {
+              const finalizadora = payMethods?.find(m => String(m.id) === String(p.finalizadora_id));
+              const statusPago = p.status_pagamento === 'Pago';
+              const cliente = localCustomers?.find(c => c.id === p.cliente_id);
+              const isConsumidor = cliente?.is_consumidor_final;
+              
+              // Limitar nome a primeiro e segundo nome
+              const nomeParts = (p.nome || 'Sem nome').trim().split(/\s+/);
+              const nomeAbreviado = nomeParts.slice(0, 2).join(' ');
+              
+              // Mostrar 0 para consumidores, código normal para outros
+              const codigoExibido = isConsumidor ? '0' : (p.codigo || 'N/A');
+              
+              return (
+                <tr key={`participant-${index}-${p.cliente_id}`} data-participant-index={index} style={{ backgroundColor: '#fff' }}>
+                  <td style={{ padding: '4px 2px', textAlign: 'center', color: '#000', backgroundColor: '#fff', fontSize: '10px', fontWeight: '600', border: '1px solid #000', wordWrap: 'break-word' }}>{index + 1}</td>
+                  <td style={{ padding: '4px 2px', textAlign: 'left', color: '#000', backgroundColor: '#fff', fontSize: '10px', fontWeight: '600', border: '1px solid #000', wordWrap: 'break-word', overflow: 'hidden' }}>{nomeAbreviado}</td>
+                  <td style={{ padding: '4px 2px', textAlign: 'center', color: '#000', fontSize: '10px', fontWeight: '600', backgroundColor: '#fff', border: '1px solid #000', wordWrap: 'break-word' }}>{codigoExibido}</td>
+                  <td style={{ padding: '4px 2px', textAlign: 'center', color: '#000', backgroundColor: '#fff', fontSize: '10px', fontWeight: '600', border: '1px solid #000', wordWrap: 'break-word' }}>R$ {maskBRL(p.valor_cota || 0)}</td>
+                  <td style={{ padding: '4px 2px', textAlign: 'center', color: '#000', fontSize: '10px', fontWeight: '600', backgroundColor: '#fff', border: '1px solid #000', wordWrap: 'break-word' }}>{finalizadora?.nome || 'N/D'}</td>
+                  <td style={{ 
+                    padding: '4px 2px', 
+                    textAlign: 'center', 
+                    fontWeight: '900',
+                    color: statusPago ? '#16a34a' : '#ca8a04',
+                    fontSize: '10px',
+                    backgroundColor: '#fff',
+                    border: '1px solid #000',
+                    wordWrap: 'break-word'
+                  }}>
+                    {statusPago ? '✓ Pago' : '○ Pendente'}
+                  </td>
+                </tr>
+              );
+            });
+          })()}
+        </tbody>
+      </table>
+
+      {/* Respiro/Padding ao final da primeira página */}
+      <div style={{ height: '2px', backgroundColor: '#fff' }}></div>
+
+      {/* Rodapé */}
+      <div style={{ marginTop: '2px', textAlign: 'center', fontSize: '10px', color: '#000', borderTop: '1px solid #000', paddingTop: '2px', display: 'flex', justifyContent: 'space-between', backgroundColor: '#fff' }}>
+        <div style={{ color: '#000', fontWeight: '500' }}>Gerado em: {new Date().toLocaleString('pt-BR')}</div>
+        <div id="page-indicator" style={{ fontSize: '10px', fontWeight: 'bold', color: '#000' }}>
           {/* Será preenchido dinamicamente */}
         </div>
       </div>
@@ -3119,6 +3280,91 @@ export default function PaymentModal({
             </Button>
           </div>
         )}
+      </DialogContent>
+    </Dialog>
+    
+    {/* Mini Modal de Confirmação de Status */}
+    <Dialog 
+      open={statusConfirmationModal.isOpen} 
+      onOpenChange={(open) => {
+        // Bloquear qualquer tentativa de fechar nos primeiros 3 segundos
+        if (!open && statusConfirmationProtectedRef.current) {
+          console.log('🛡️ [StatusConfirmation] Bloqueado onOpenChange (protegido)');
+          return;
+        }
+        if (!open) {
+          console.log('🛡️ [StatusConfirmation] Fechando modal via onOpenChange');
+          setStatusConfirmationModal({
+            isOpen: false,
+            participantIndex: null,
+            currentStatus: null
+          });
+        }
+      }}
+    >
+      <DialogContent 
+        className="w-[95vw] sm:max-w-[400px]"
+        onInteractOutside={(e) => {
+          // Bloquear clique fora nos primeiros 3 segundos
+          if (statusConfirmationProtectedRef.current) {
+            console.log('🛡️ [StatusConfirmation] Bloqueado clique fora');
+            e.preventDefault();
+          }
+        }}
+        onEscapeKeyDown={(e) => {
+          // Bloquear ESC nos primeiros 3 segundos
+          if (statusConfirmationProtectedRef.current) {
+            console.log('🛡️ [StatusConfirmation] Bloqueado ESC');
+            e.preventDefault();
+          }
+        }}
+      >
+        <DialogHeader>
+          <DialogTitle>Alterar Status de Pagamento</DialogTitle>
+          <DialogDescription>
+            {statusConfirmationModal.currentStatus === 'Pago' ? (
+              <>Tem certeza que deseja marcar este participante como <strong>Pendente</strong>?</>
+            ) : (
+              <>Tem certeza que deseja marcar este participante como <strong>Pago</strong> mesmo sem valor registrado?</>
+            )}
+          </DialogDescription>
+        </DialogHeader>
+        
+        <div className="space-y-4">
+          <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/30">
+            <p className="text-sm text-amber-400">
+              {statusConfirmationModal.currentStatus === 'Pago' ? (
+                <>⚠️ Esta ação marcará o participante como pendente novamente para refazer o pagamento.</>
+              ) : (
+                <>⚠️ Esta ação marcará o participante como pago sem um valor específico.</>
+              )}
+            </p>
+          </div>
+        </div>
+        
+        <DialogFooter className="gap-2">
+          <Button
+            type="button"
+            variant="ghost"
+            className="border border-white/10"
+            onClick={() => {
+              setStatusConfirmationModal({
+                isOpen: false,
+                participantIndex: null,
+                currentStatus: null
+              });
+            }}
+          >
+            Cancelar
+          </Button>
+          <Button
+            type="button"
+            className="bg-emerald-600 hover:bg-emerald-500 text-white"
+            onClick={() => handleConfirmStatusChange(statusConfirmationModal.currentStatus === 'Pago' ? 'Pendente' : 'Pago')}
+          >
+            Confirmar
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
     </>

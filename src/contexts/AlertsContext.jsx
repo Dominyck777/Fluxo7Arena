@@ -35,13 +35,11 @@ export const AlertsProvider = ({ children }) => {
       const alertasList = [];
       
       // 1. Produtos com estoque baixo
-      console.log('[Alertas] 1. Buscando produtos com estoque baixo...');
       const { data: produtosBaixoEstoque } = await supabase
         .from('produtos')
         .select('nome, estoque, estoque_minimo, status')
         .eq('codigo_empresa', codigo)
         .not('estoque_minimo', 'is', null);
-      console.log('[Alertas] ✅ Produtos:', produtosBaixoEstoque?.length || 0);
       
       const produtosCriticos = (produtosBaixoEstoque || []).filter(p => {
         const qtd = Number(p.estoque || 0);
@@ -60,17 +58,14 @@ export const AlertsProvider = ({ children }) => {
       }
       
       // 2. Pagamentos pendentes em agendamentos (incluindo passados)
-      console.log('[Alertas] 2. Buscando participantes pendentes...');
       // Buscar todos os participantes pendentes
       const { data: participantesPendentes } = await supabase
         .from('agendamento_participantes')
         .select('id, agendamento_id')
         .eq('codigo_empresa', codigo)
         .eq('status_pagamento', 'Pendente');
-      console.log('[Alertas] ✅ Participantes pendentes:', participantesPendentes?.length || 0);
       
       if (participantesPendentes && participantesPendentes.length > 0) {
-        console.log('[Alertas] 3. Buscando agendamentos com pendência...');
         // Buscar TODOS os agendamentos com pagamento pendente
         // Excluindo agendamentos cancelados ou ausentes
         const agendamentoIds = [...new Set(participantesPendentes.map(p => p.agendamento_id))];
@@ -80,7 +75,6 @@ export const AlertsProvider = ({ children }) => {
           .in('id', agendamentoIds)
           .not('status', 'in', '(canceled,absent)')
           .order('inicio', { ascending: true });
-        console.log('[Alertas] ✅ Agendamentos com pendência:', agendamentos?.length || 0);
         
         // Filtrar participantes apenas dos agendamentos válidos (não cancelados/ausentes)
         const agendamentosValidosIds = new Set((agendamentos || []).map(a => a.id));
@@ -107,7 +101,6 @@ export const AlertsProvider = ({ children }) => {
       }
       
       // 3. Comandas abertas há muito tempo (> 3 horas)
-      console.log('[Alertas] 4. Buscando comandas antigas...');
       const tres_horas_atras = new Date();
       tres_horas_atras.setHours(tres_horas_atras.getHours() - 3);
       const { data: comandasAntigas } = await supabase
@@ -117,7 +110,6 @@ export const AlertsProvider = ({ children }) => {
         .eq('status', 'open')
         .is('fechado_em', null)
         .lte('aberto_em', tres_horas_atras.toISOString());
-      console.log('[Alertas] ✅ Comandas antigas:', comandasAntigas?.length || 0);
       
       if (comandasAntigas && comandasAntigas.length > 0) {
         alertasList.push({
@@ -130,7 +122,6 @@ export const AlertsProvider = ({ children }) => {
       }
       
       // 4. Caixa aberto há muito tempo (> 12 horas)
-      console.log('[Alertas] 5. Buscando caixa aberto há muito tempo...');
       const doze_horas_atras = new Date();
       doze_horas_atras.setHours(doze_horas_atras.getHours() - 12);
       const { data: caixaAberto } = await supabase
@@ -140,7 +131,6 @@ export const AlertsProvider = ({ children }) => {
         .eq('status', 'open')
         .lte('aberto_em', doze_horas_atras.toISOString())
         .limit(1);
-      console.log('[Alertas] ✅ Caixa aberto:', caixaAberto?.length || 0);
       
       if (caixaAberto && caixaAberto.length > 0) {
         alertasList.push({

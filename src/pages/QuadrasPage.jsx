@@ -7,7 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { useToast } from '@/components/ui/use-toast';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
-import { Trophy, Users, TrendingUp, Eye, EyeOff } from 'lucide-react';
+import { Trophy, Users, TrendingUp, Eye, EyeOff, Calendar, Clock, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const pageVariants = {
@@ -76,13 +76,13 @@ export default function QuadrasPage() {
   const [submitting, setSubmitting] = useState(false);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
 
-  const [formQuadra, setFormQuadra] = useState({ nome: '', modalidades: [], tipo: 'Descoberta', status: 'Ativa', hora_inicio: '06:00', hora_fim: '23:59', valor_hora: '' });
+  const [formQuadra, setFormQuadra] = useState({ nome: '', descricao: '', modalidades: [], tipo: 'Descoberta', status: 'Ativa', hora_inicio: '06:00', hora_fim: '23:59', valor_hora: '' });
   const [newMod, setNewMod] = useState("");
 
   // Edit modal state
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
-  const [editForm, setEditForm] = useState({ nome: '', modalidades: [], tipo: 'Descoberta', status: 'Ativa', hora_inicio: '06:00', hora_fim: '23:59', valor_hora: '' });
+  const [editForm, setEditForm] = useState({ nome: '', descricao: '', modalidades: [], tipo: 'Descoberta', status: 'Ativa', hora_inicio: '06:00', hora_fim: '23:59', valor_hora: '' });
   const [newEditMod, setNewEditMod] = useState("");
   
   // Stats
@@ -93,21 +93,22 @@ export default function QuadrasPage() {
     totalBookings: '-',
   });
 
-  // Watchdog: se uma submissão ficar presa, logar após 15s
-  useEffect(() => {
-    if (!submitting) return;
-    const t = setTimeout(() => {
-      // eslint-disable-next-line no-console
-      console.error('[Quadras] add/update stuck >15s', {
-        route: '/quadras',
-        codigo_empresa: userProfile?.codigo_empresa,
-        editingId,
-        formQuadra,
-        editForm,
-      });
-    }, 15000);
-    return () => clearTimeout(t);
-  }, [submitting, userProfile?.codigo_empresa, editingId, formQuadra, editForm]);
+  // Dias de funcionamento
+  const [isDiasFuncionamentoOpen, setIsDiasFuncionamentoOpen] = useState(false);
+  const [quadraFuncionamento, setQuadraFuncionamento] = useState(null);
+  const [diasSemana, setDiasSemana] = useState({
+    0: true, // Domingo
+    1: true, // Segunda
+    2: true, // Terça
+    3: true, // Quarta
+    4: true, // Quinta
+    5: true, // Sexta
+    6: true  // Sábado
+  });
+  const [datasEspeciais, setDatasEspeciais] = useState([]);
+  const [novaDataFechamento, setNovaDataFechamento] = useState('');
+  const [observacaoFechamento, setObservacaoFechamento] = useState('');
+  const [loadingDiasFuncionamento, setLoadingDiasFuncionamento] = useState(false);
 
   // Helpers para converter entre input time (HH:mm) e banco (HH:mm:ss)
   const toDbTime = (hhmm) => {
@@ -184,6 +185,22 @@ export default function QuadrasPage() {
     return `${hh}:${mm}`;
   };
 
+  // Watchdog: se uma submissão ficar presa, logar após 15s
+  useEffect(() => {
+    if (!submitting) return;
+    const t = setTimeout(() => {
+      // eslint-disable-next-line no-console
+      console.error('[Quadras] add/update stuck >15s', {
+        route: '/quadras',
+        codigo_empresa: userProfile?.codigo_empresa,
+        editingId,
+        formQuadra,
+        editForm,
+      });
+    }, 15000);
+    return () => clearTimeout(t);
+  }, [submitting, userProfile?.codigo_empresa, editingId, formQuadra, editForm]);
+
   const loadQuadras = async () => {
     if (!userProfile?.codigo_empresa) return;
     const hasCache = quadras && quadras.length > 0;
@@ -224,6 +241,7 @@ export default function QuadrasPage() {
     setEditingId(q.id);
     setEditForm({
       nome: q.nome || '',
+      descricao: q.descricao || '',
       modalidades: Array.isArray(q.modalidades) ? q.modalidades : (q.modalidades ? [q.modalidades] : []),
       tipo: q.tipo || 'Descoberta',
       status: q.status || 'Ativa',
@@ -263,6 +281,7 @@ export default function QuadrasPage() {
     setSubmitting(true);
     const payload = {
       nome: editForm.nome.trim(),
+      descricao: editForm.descricao?.trim() || null,
       modalidades: editForm.modalidades,
       tipo: editForm.tipo,
       status: editForm.status,
@@ -294,7 +313,7 @@ export default function QuadrasPage() {
           .update(payload)
           .eq('codigo_empresa', userProfile.codigo_empresa)
           .eq('id', editingId)
-          .select('id,nome,modalidades,tipo,status,hora_inicio,hora_fim,valor')
+          .select('id,nome,descricao,modalidades,tipo,status,hora_inicio,hora_fim,valor')
           .single(),
         12000
       ));
@@ -441,6 +460,7 @@ export default function QuadrasPage() {
     const payload = {
       codigo_empresa: userProfile.codigo_empresa,
       nome: formQuadra.nome.trim(),
+      descricao: formQuadra.descricao?.trim() || null,
       modalidades: formQuadra.modalidades,
       tipo: formQuadra.tipo,
       status: formQuadra.status,
@@ -468,7 +488,7 @@ export default function QuadrasPage() {
         supabase
           .from('quadras')
           .insert(payload)
-          .select('id,nome,modalidades,tipo,status,hora_inicio,hora_fim,valor')
+          .select('id,nome,descricao,modalidades,tipo,status,hora_inicio,hora_fim,valor')
           .single(),
         12000
       ));
@@ -496,7 +516,7 @@ export default function QuadrasPage() {
       console.warn('insert success sem representação; recarregando lista');
       await loadQuadras();
       toast({ title: 'Quadra adicionada', description: `${payload.nome} foi cadastrada.` });
-      setFormQuadra({ nome: '', modalidades: [], tipo: 'Descoberta', status: 'Ativa', hora_inicio: '06:00', hora_fim: '23:59', valor_hora: '' });
+      setFormQuadra({ nome: '', descricao: '', modalidades: [], tipo: 'Descoberta', status: 'Ativa', hora_inicio: '06:00', hora_fim: '23:59', valor_hora: '' });
       setIsCreateOpen(false);
       setNewMod("");
       console.timeEnd('[Quadras] addQuadra duration');
@@ -506,7 +526,7 @@ export default function QuadrasPage() {
     // eslint-disable-next-line no-console
     console.log('insert success', { id: data?.id, nome: data?.nome });
     toast({ title: 'Quadra adicionada', description: `${data.nome} foi cadastrada.` });
-    setFormQuadra({ nome: '', modalidades: [], tipo: 'Descoberta', status: 'Ativa', hora_inicio: '06:00', hora_fim: '23:59', valor_hora: '' });
+    setFormQuadra({ nome: '', descricao: '', modalidades: [], tipo: 'Descoberta', status: 'Ativa', hora_inicio: '06:00', hora_fim: '23:59', valor_hora: '' });
     setIsCreateOpen(false);
     setNewMod("");
     // Atualiza lista
@@ -514,6 +534,145 @@ export default function QuadrasPage() {
     // eslint-disable-next-line no-console
     console.timeEnd('[Quadras] addQuadra duration');
     console.groupEnd();
+  };
+
+  // Funções para dias de funcionamento
+  const openDiasFuncionamento = async (quadra) => {
+    setQuadraFuncionamento(quadra);
+    setLoadingDiasFuncionamento(true);
+    
+    try {
+      // Carregar configurações existentes
+      const { data: configuracoes, error } = await supabase
+        .from('quadras_dias_funcionamento')
+        .select('*')
+        .eq('quadra_id', quadra.id)
+        .eq('codigo_empresa', userProfile.codigo_empresa);
+      
+      if (error) throw error;
+      
+      // Resetar estados
+      const novosDiasSemana = {
+        0: true, 1: true, 2: true, 3: true, 4: true, 5: true, 6: true
+      };
+      const novasDatasEspeciais = [];
+      
+      // Aplicar configurações existentes
+      configuracoes?.forEach(config => {
+        if (config.tipo === 'dia_semana') {
+          novosDiasSemana[config.dia_semana] = config.funciona;
+        } else if (config.tipo === 'data_fechamento') {
+          novasDatasEspeciais.push(config);
+        }
+      });
+      
+      setDiasSemana(novosDiasSemana);
+      setDatasEspeciais(novasDatasEspeciais);
+      setIsDiasFuncionamentoOpen(true);
+      
+    } catch (error) {
+      console.error('Erro ao carregar dias de funcionamento:', error);
+      toast({ title: 'Erro', description: 'Não foi possível carregar as configurações.' });
+    } finally {
+      setLoadingDiasFuncionamento(false);
+    }
+  };
+
+  const salvarDiasSemana = async () => {
+    if (!quadraFuncionamento) return;
+    
+    setLoadingDiasFuncionamento(true);
+    
+    try {
+      // Deletar configurações existentes de dias da semana
+      await supabase
+        .from('quadras_dias_funcionamento')
+        .delete()
+        .eq('quadra_id', quadraFuncionamento.id)
+        .eq('tipo', 'dia_semana');
+      
+      // Inserir novas configurações
+      const configuracoes = Object.entries(diasSemana).map(([dia, funciona]) => ({
+        quadra_id: quadraFuncionamento.id,
+        codigo_empresa: userProfile.codigo_empresa,
+        tipo: 'dia_semana',
+        dia_semana: parseInt(dia),
+        funciona: funciona,
+        observacao: 'Configuração de dias da semana'
+      }));
+      
+      const { error } = await supabase
+        .from('quadras_dias_funcionamento')
+        .insert(configuracoes);
+      
+      if (error) throw error;
+      
+      toast({ title: 'Sucesso', description: 'Dias da semana salvos com sucesso!' });
+      
+    } catch (error) {
+      console.error('Erro ao salvar dias da semana:', error);
+      toast({ title: 'Erro', description: 'Não foi possível salvar as configurações.' });
+    } finally {
+      setLoadingDiasFuncionamento(false);
+    }
+  };
+
+  const adicionarDataFechamento = async () => {
+    if (!quadraFuncionamento || !novaDataFechamento) return;
+    
+    setLoadingDiasFuncionamento(true);
+    
+    try {
+      const { data, error } = await supabase
+        .from('quadras_dias_funcionamento')
+        .insert({
+          quadra_id: quadraFuncionamento.id,
+          codigo_empresa: userProfile.codigo_empresa,
+          tipo: 'data_fechamento',
+          data_fechamento: novaDataFechamento,
+          funciona: false,
+          observacao: observacaoFechamento || 'Fechamento especial'
+        })
+        .select()
+        .single();
+      
+      if (error) throw error;
+      
+      setDatasEspeciais(prev => [...prev, data]);
+      setNovaDataFechamento('');
+      setObservacaoFechamento('');
+      
+      toast({ title: 'Sucesso', description: 'Data de fechamento adicionada!' });
+      
+    } catch (error) {
+      console.error('Erro ao adicionar data de fechamento:', error);
+      toast({ title: 'Erro', description: 'Não foi possível adicionar a data de fechamento.' });
+    } finally {
+      setLoadingDiasFuncionamento(false);
+    }
+  };
+
+  const removerDataFechamento = async (id) => {
+    setLoadingDiasFuncionamento(true);
+    
+    try {
+      const { error } = await supabase
+        .from('quadras_dias_funcionamento')
+        .delete()
+        .eq('id', id);
+      
+      if (error) throw error;
+      
+      setDatasEspeciais(prev => prev.filter(item => item.id !== id));
+      
+      toast({ title: 'Sucesso', description: 'Data de fechamento removida!' });
+      
+    } catch (error) {
+      console.error('Erro ao remover data de fechamento:', error);
+      toast({ title: 'Erro', description: 'Não foi possível remover a data de fechamento.' });
+    } finally {
+      setLoadingDiasFuncionamento(false);
+    }
   };
 
   return (
@@ -602,10 +761,16 @@ export default function QuadrasPage() {
                       </div>
                     </div>
 
-                    {/* Botão Editar */}
-                    <Button variant="outline" size="sm" onClick={() => openEdit(q)} className="w-full">
-                      Editar Quadra
-                    </Button>
+                    {/* Botões de Ação */}
+                    <div className="grid grid-cols-2 gap-2">
+                      <Button variant="outline" size="sm" onClick={() => openDiasFuncionamento(q)} className="flex items-center gap-1">
+                        <Calendar className="h-3 w-3" />
+                        Dias
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={() => openEdit(q)}>
+                        Editar
+                      </Button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -663,7 +828,13 @@ export default function QuadrasPage() {
                           </span>
                         </TableCell>
                         <TableCell className="text-right">
-                          <Button variant="outline" size="sm" onClick={() => openEdit(q)} className="text-sm">Editar</Button>
+                          <div className="flex items-center gap-2 justify-end">
+                            <Button variant="outline" size="sm" onClick={() => openDiasFuncionamento(q)} className="text-sm">
+                              <Calendar className="h-3 w-3 mr-1" />
+                              Dias
+                            </Button>
+                            <Button variant="outline" size="sm" onClick={() => openEdit(q)} className="text-sm">Editar</Button>
+                          </div>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -676,13 +847,23 @@ export default function QuadrasPage() {
 
         {/* Modal de criação */}
         <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
-          <DialogContent className="sm:max-w-[520px]">
+          <DialogContent className="sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Adicionar Quadra</DialogTitle>
               <DialogDescription>Cadastre uma nova quadra da sua empresa.</DialogDescription>
             </DialogHeader>
             <div className="grid gap-4 py-2">
               <Input label="Nome" value={formQuadra.nome} onChange={(e) => setFormQuadra({ ...formQuadra, nome: e.target.value })} placeholder="Ex.: Quadra Society 2" />
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="text-xs text-text-muted">Descrição (opcional)</span>
+                <textarea
+                  value={formQuadra.descricao}
+                  onChange={(e) => setFormQuadra({ ...formQuadra, descricao: e.target.value })}
+                  placeholder="Ex.: Quadra oficial com grama sintética, iluminação LED, vestiários completos"
+                  rows={3}
+                  className="bg-surface-2 border border-border rounded-md px-3 py-2 text-sm resize-none"
+                />
+              </label>
               <div className="flex flex-col gap-2 text-sm">
                 <span className="text-xs text-text-muted">Modalidades</span>
                 <div className="flex items-center gap-2">
@@ -808,13 +989,23 @@ export default function QuadrasPage() {
 
         {/* Modal de edição */}
         <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
-          <DialogContent className="sm:max-w-[520px]">
+          <DialogContent className="sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Editar Quadra</DialogTitle>
               <DialogDescription>Atualize os dados da quadra selecionada.</DialogDescription>
             </DialogHeader>
             <div className="grid gap-4 py-2">
               <Input label="Nome" value={editForm.nome} onChange={(e) => setEditForm({ ...editForm, nome: e.target.value })} placeholder="Ex.: Quadra Society 2" />
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="text-xs text-text-muted">Descrição (opcional)</span>
+                <textarea
+                  value={editForm.descricao}
+                  onChange={(e) => setEditForm({ ...editForm, descricao: e.target.value })}
+                  placeholder="Ex.: Quadra oficial com grama sintética, iluminação LED, vestiários completos"
+                  rows={3}
+                  className="bg-surface-2 border border-border rounded-md px-3 py-2 text-sm resize-none"
+                />
+              </label>
               <div className="flex flex-col gap-2 text-sm">
                 <span className="text-xs text-text-muted">Modalidades</span>
                 <div className="flex items-center gap-2">
@@ -929,6 +1120,167 @@ export default function QuadrasPage() {
             <DialogFooter>
               <Button onClick={updateQuadra} disabled={submitting || editForm.modalidades.length === 0}>
                 {submitting ? 'Salvando...' : 'Salvar alterações'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Modal de Dias de Funcionamento */}
+        <Dialog open={isDiasFuncionamentoOpen} onOpenChange={setIsDiasFuncionamentoOpen}>
+          <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-hidden pointer-events-none">
+            {/* Overlay de desenvolvimento encima do modal */}
+            <div className="fixed inset-0 z-50 backdrop-blur-lg bg-black/60 flex items-center justify-center pointer-events-auto">
+              <div className="rounded-2xl border border-white/30 bg-slate-900 shadow-2xl max-w-sm w-full text-center mx-4">
+                <div className="px-8 py-10">
+                  {/* Logo e nome Fluxo7Arena */}
+                  <div className="flex items-center justify-center gap-4 mb-8">
+                    <div className="w-14 h-14 bg-brand rounded-xl flex items-center justify-center flex-shrink-0">
+                      <Trophy className="w-8 h-8 text-primary-foreground" />
+                    </div>
+                    <div className="flex items-baseline select-none">
+                      <span className="font-extrabold text-3xl" style={{ color: '#FF6600' }}>Fluxo</span>
+                      <span className="font-extrabold text-3xl" style={{ color: '#FFAA33' }}>7</span>
+                      <span className="font-medium text-3xl" style={{ color: '#FFFFFF' }}> Arena</span>
+                    </div>
+                  </div>
+                  <div className="text-2xl font-bold text-white mb-3">Em Desenvolvimento</div>
+                  <p className="text-base text-gray-200">Esta funcionalidade está sendo desenvolvida e em breve estará disponível.</p>
+                  <div className="mt-8 flex items-center justify-center">
+                    <Button variant="outline" onClick={() => setIsDiasFuncionamentoOpen(false)}>Fechar</Button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Calendar className="h-5 w-5" />
+                Dias de Funcionamento - {quadraFuncionamento?.nome}
+              </DialogTitle>
+              <DialogDescription>
+                Configure os dias da semana que a quadra funciona e adicione datas específicas de fechamento.
+              </DialogDescription>
+            </DialogHeader>
+            
+            {loadingDiasFuncionamento ? (
+              <div className="flex items-center justify-center py-8">
+                <div className="text-sm text-text-muted">Carregando configurações...</div>
+              </div>
+            ) : (
+              <div className="space-y-6 py-4">
+                {/* Dias da Semana */}
+                <div>
+                  <h3 className="text-sm font-semibold text-text-primary mb-3">Dias da Semana</h3>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    {[
+                      { key: 0, label: 'Domingo', short: 'Dom' },
+                      { key: 1, label: 'Segunda', short: 'Seg' },
+                      { key: 2, label: 'Terça', short: 'Ter' },
+                      { key: 3, label: 'Quarta', short: 'Qua' },
+                      { key: 4, label: 'Quinta', short: 'Qui' },
+                      { key: 5, label: 'Sexta', short: 'Sex' },
+                      { key: 6, label: 'Sábado', short: 'Sáb' }
+                    ].map(dia => (
+                      <label key={dia.key} className="flex items-center gap-2 p-3 rounded-lg border border-border hover:bg-surface-2/50 cursor-pointer transition-colors">
+                        <input
+                          type="checkbox"
+                          checked={diasSemana[dia.key]}
+                          onChange={(e) => setDiasSemana(prev => ({ ...prev, [dia.key]: e.target.checked }))}
+                          className="w-4 h-4 text-primary bg-surface-2 border-border rounded focus:ring-primary focus:ring-2"
+                        />
+                        <div className="flex flex-col">
+                          <span className="text-sm font-medium text-text-primary">{dia.short}</span>
+                          <span className="text-xs text-text-muted hidden sm:block">{dia.label}</span>
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                  <div className="mt-4">
+                    <Button onClick={salvarDiasSemana} disabled={loadingDiasFuncionamento} size="sm">
+                      {loadingDiasFuncionamento ? 'Salvando...' : 'Salvar Dias da Semana'}
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Datas Específicas de Fechamento */}
+                <div>
+                  <h3 className="text-sm font-semibold text-text-primary mb-3">Datas de Fechamento</h3>
+                  
+                  {/* Adicionar Nova Data */}
+                  <div className="bg-surface-2/30 rounded-lg p-4 mb-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div>
+                        <label className="block text-xs text-text-muted mb-1">Data</label>
+                        <input
+                          type="date"
+                          value={novaDataFechamento}
+                          onChange={(e) => setNovaDataFechamento(e.target.value)}
+                          className="w-full bg-surface-2 border border-border rounded-md px-3 py-2 text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-text-muted mb-1">Observação</label>
+                        <input
+                          type="text"
+                          placeholder="Ex: Feriado, Manutenção"
+                          value={observacaoFechamento}
+                          onChange={(e) => setObservacaoFechamento(e.target.value)}
+                          className="w-full bg-surface-2 border border-border rounded-md px-3 py-2 text-sm"
+                        />
+                      </div>
+                      <div className="flex items-end">
+                        <Button
+                          onClick={adicionarDataFechamento}
+                          disabled={!novaDataFechamento || loadingDiasFuncionamento}
+                          size="sm"
+                          className="w-full sm:w-auto"
+                        >
+                          Adicionar
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Lista de Datas de Fechamento */}
+                  {datasEspeciais.length > 0 ? (
+                    <div className="space-y-2">
+                      {datasEspeciais.map((item) => (
+                        <div key={item.id} className="flex items-center justify-between p-3 bg-surface-2/50 rounded-lg border border-border">
+                          <div className="flex items-center gap-3">
+                            <Clock className="h-4 w-4 text-text-muted" />
+                            <div>
+                              <div className="text-sm font-medium text-text-primary">
+                                {new Date(item.data_fechamento + 'T00:00:00').toLocaleDateString('pt-BR')}
+                              </div>
+                              {item.observacao && (
+                                <div className="text-xs text-text-muted">{item.observacao}</div>
+                              )}
+                            </div>
+                          </div>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => removerDataFechamento(item.id)}
+                            disabled={loadingDiasFuncionamento}
+                            className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                          >
+                            <X className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-center py-6 text-sm text-text-muted">
+                      Nenhuma data de fechamento configurada
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+            
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setIsDiasFuncionamentoOpen(false)}>
+                Fechar
               </Button>
             </DialogFooter>
           </DialogContent>

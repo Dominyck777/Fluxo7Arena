@@ -1,0 +1,438 @@
+═══════════════════════════════════════════════════════════════════════════════
+                    DOCUMENTAÇÃO: SISTEMA DE CONFIRMAÇÃO VIA WHATSAPP
+                              Fluxo7 Arena - Ísis Cliente
+═══════════════════════════════════════════════════════════════════════════════
+
+*OBJETIVO GERAL*
+
+Implementar um sistema automático onde a Ísis envia mensagens via WhatsApp para 
+clientes confirmarem seus agendamentos 24 horas antes do evento. O cliente pode 
+responder "SIM" para confirmar ou "NÃO" para cancelar.
+
+*FLUXO ESPERADO*
+
+1️⃣ Cliente agenda pela Ísis (IsisBookingPage)
+2️⃣ Agendamento é criado no banco de dados
+3️⃣ Sistema agenda envio de confirmação para 24h antes
+4️⃣ Ísis envia mensagem WhatsApp: "Confirma seu agendamento?"
+5️⃣ Cliente responde SIM ou NÃO
+6️⃣ Sistema atualiza status do agendamento automaticamente
+7️⃣ Arena recebe notificação no dashboard
+
+═══════════════════════════════════════════════════════════════════════════════
+                              DECISÕES TOMADAS
+═══════════════════════════════════════════════════════════════════════════════
+
+*DECISÃO 1: USAR NÚMERO DA ARENA (NÃO NÚMERO PRÓPRIO DA ÍSIS)*
+
+✅ DECIDIMOS: Usar o número de telefone de cada arena para enviar mensagens
+
+*POR QUÊ?*
+• Mais confiança do cliente (reconhece o número da arena)
+• Rastreamento por arena (saber qual arena enviou)
+• Cada arena tem controle sobre suas mensagens
+• Menos risco de spam (número conhecido)
+• Mais pessoal e profissional
+
+*ALTERNATIVA REJEITADA: Número próprio da Ísis*
+• Cliente poderia confundir com bot/spam
+• Menos pessoal
+• Difícil rastrear qual arena enviou
+
+═══════════════════════════════════════════════════════════════════════════════
+
+*DECISÃO 2: USAR TWILIO COMO PROVIDER*
+
+✅ DECIDIMOS: Integrar com Twilio para enviar mensagens WhatsApp
+
+*POR QUÊ?*
+• Mais fácil de integrar (API simples)
+• Mais barato para começar ($0.0075 por mensagem)
+• Sem contrato mínimo
+• Setup rápido (30 minutos)
+• Documentação excelente
+• Webhooks nativos para receber respostas
+• Escalável (começa pequeno, cresce depois)
+• Suporte 24/7
+
+*COMPARAÇÃO COM ALTERNATIVAS*
+
+┌─────────────────┬──────────────┬─────────────────────┬──────────────┐
+│ Critério        │ Twilio       │ WhatsApp Business   │ Baileys      │
+├─────────────────┼──────────────┼─────────────────────┼──────────────┤
+│ Custo           │ $0.0075/msg  │ $30/mês mínimo      │ Grátis       │
+│ Setup           │ 30 minutos   │ 2-3 semanas         │ 1 hora       │
+│ Confiabilidade  │ 99.95%       │ 99.99%              │ 70%          │
+│ Documentação    │ ⭐⭐⭐⭐⭐    │ ⭐⭐⭐              │ ⭐⭐        │
+│ Escalabilidade  │ Até 100k/mês │ Ilimitado           │ Limitado     │
+│ Suporte         │ 24/7         │ 24/7                │ Comunidade   │
+│ Risco           │ Baixo        │ Nenhum              │ Alto         │
+│ Ideal para      │ MVP/Crescim. │ Escala grande       │ Hobby        │
+└─────────────────┴──────────────┴─────────────────────┴──────────────┘
+
+*ALTERNATIVA REJEITADA: WhatsApp Business API*
+• Mínimo mensal de $30 (não compensa para começar)
+• Setup leva 2-3 semanas (aprovação do Meta)
+• Mais complexo de integrar
+• Overkill para MVP
+
+*ALTERNATIVA REJEITADA: Baileys*
+• Risco de conta ser banida
+• Menos confiável (70% uptime)
+• Não recomendado para produção
+
+═══════════════════════════════════════════════════════════════════════════════
+
+*DECISÃO 3: MENSAGEM HÍBRIDA (ARENA + ÍSIS)*
+
+✅ DECIDIMOS: Mensagem menciona tanto a arena quanto a Ísis
+
+*EXEMPLO DE MENSAGEM*
+
+"Olá João! 👋
+
+Sou a Ísis da Arena X.
+
+Confirma seu agendamento?
+
+📍 Quadra 1
+📅 26 de novembro
+⏰ 19:00
+
+Responda:
+✅ SIM
+❌ NÃO"
+
+*POR QUÊ?*
+• Cliente reconhece a arena (confiança)
+• Cliente reconhece a Ísis (identidade)
+• Contexto claro (qual agendamento)
+• Simples e direto (fácil responder)
+
+═══════════════════════════════════════════════════════════════════════════════
+
+*DECISÃO 4: CONFIRMAÇÃO 24 HORAS ANTES*
+
+✅ DECIDIMOS: Enviar mensagem 24 horas antes do agendamento
+
+*POR QUÊ?*
+• Tempo suficiente para cliente responder
+• Não é muito cedo (cliente esquece)
+• Não é muito tarde (cliente já saiu)
+• Padrão de mercado
+
+*ALTERNATIVAS CONSIDERADAS*
+• 12 horas antes: Muito tarde, cliente pode já estar ocupado
+• 1 hora antes: Muito tarde, cliente não consegue cancelar
+• 48 horas antes: Muito cedo, cliente esquece
+
+═══════════════════════════════════════════════════════════════════════════════
+
+*DECISÃO 5: RESPOSTAS SIM/NÃO COM MOTIVO OPCIONAL*
+
+✅ DECIDIMOS: Cliente responde SIM ou NÃO, e se NÃO, pode informar motivo
+
+*FLUXO DE RESPOSTA*
+
+Cliente recebe: "Confirma seu agendamento?"
+├─ Responde "SIM" → Status = CONFIRMADO
+├─ Responde "NÃO" → Pede motivo → Status = CANCELADO
+└─ Não responde (24h) → Status = NÃO_RESPONDEU
+
+*POR QUÊ?*
+• Simples (cliente não precisa digitar muito)
+• Informativo (arena sabe por que cancelou)
+• Automático (sem intervenção manual)
+
+═══════════════════════════════════════════════════════════════════════════════
+                              CUSTOS ESTIMADOS
+═══════════════════════════════════════════════════════════════════════════════
+
+*CENÁRIO 1: Arena Pequena (100 agendamentos/mês)*
+
+100 confirmações × $0.0075 = *$0.75/mês* (≈ R$ 4)
+✅ MUITO BARATO - Praticamente grátis
+
+*CENÁRIO 2: Arena Média (1000 agendamentos/mês)*
+
+1000 confirmações × $0.0075 = *$7.50/mês* (≈ R$ 40)
+✅ BARATO - Menos que um café por dia
+
+*CENÁRIO 3: Múltiplas Arenas (10k agendamentos/mês)*
+
+10000 confirmações × $0.0075 = *$75/mês* (≈ R$ 400)
+✅ AINDA BARATO - Menos que um funcionário
+
+*CENÁRIO 4: Escala Grande (100k agendamentos/mês)*
+
+100000 confirmações × $0.0075 = *$750/mês* (≈ R$ 4.000)
+⚠️ CONSIDERAR MIGRAR PARA WHATSAPP BUSINESS ($30/mês mínimo)
+
+═══════════════════════════════════════════════════════════════════════════════
+                            ESTRUTURA DO BANCO
+═══════════════════════════════════════════════════════════════════════════════
+
+*TABELA: empresas (ADICIONAR CAMPOS)*
+
+ALTER TABLE empresas ADD COLUMN (
+  whatsapp_numero VARCHAR(20),           -- Número da arena (+55 11 98765-4321)
+  whatsapp_token VARCHAR(255),           -- Token de autenticação Twilio
+  whatsapp_habilitado BOOLEAN DEFAULT false  -- Ativar/desativar por arena
+);
+
+*TABELA: agendamento_confirmacoes (NOVA)*
+
+CREATE TABLE agendamento_confirmacoes (
+  id UUID PRIMARY KEY,
+  agendamento_id UUID REFERENCES agendamentos(id),
+  empresa_codigo VARCHAR(50),
+  cliente_telefone VARCHAR(20),
+  cliente_nome VARCHAR(255),
+  status VARCHAR(50),              -- pendente, confirmado, cancelado, nao_respondeu
+  motivo_cancelamento TEXT,
+  mensagem_enviada TEXT,
+  resposta_cliente TEXT,
+  enviado_em TIMESTAMP,
+  respondido_em TIMESTAMP,
+  criado_em TIMESTAMP,
+  atualizado_em TIMESTAMP
+);
+
+═══════════════════════════════════════════════════════════════════════════════
+                          COMPONENTES A IMPLEMENTAR
+═══════════════════════════════════════════════════════════════════════════════
+
+*1. EDGE FUNCTION: send-whatsapp-confirmation*
+
+Responsabilidade:
+• Receber agendamento_id e empresa_codigo
+• Buscar dados do agendamento
+• Buscar dados da empresa (número e token Twilio)
+• Buscar dados do cliente (telefone)
+• Formatar mensagem
+• Chamar API Twilio
+• Registrar no banco (agendamento_confirmacoes)
+
+Arquivo: supabase/functions/send-whatsapp-confirmation/index.ts
+
+*2. EDGE FUNCTION: receive-whatsapp-response*
+
+Responsabilidade:
+• Receber webhook do Twilio (cliente respondeu)
+• Extrair número do cliente e resposta
+• Buscar confirmação pendente
+• Processar resposta (SIM/NÃO)
+• Atualizar status no banco
+• Se cancelado, atualizar agendamento como canceled
+
+Arquivo: supabase/functions/receive-whatsapp-response/index.ts
+
+*3. TRIGGER NO ISISBOOKINGPAGE.JSX*
+
+Responsabilidade:
+• Após criar agendamento com sucesso
+• Calcular tempo de envio (24h antes)
+• Chamar Edge Function send-whatsapp-confirmation
+• Registrar log de agendamento
+
+Arquivo: src/pages/IsisBookingPage.jsx
+
+*4. DASHBOARD DE CONFIRMAÇÕES*
+
+Responsabilidade:
+• Listar confirmações pendentes
+• Mostrar status (confirmado, cancelado, não respondeu)
+• Permitir reenviar mensagem
+• Permitir cancelar manualmente
+• Analytics (taxa de confirmação)
+
+Arquivo: src/pages/AgendaPage.jsx (nova aba ou modal)
+
+═══════════════════════════════════════════════════════════════════════════════
+                            ROADMAP DE IMPLEMENTAÇÃO
+═══════════════════════════════════════════════════════════════════════════════
+
+*SEMANA 1: SETUP E BANCO*
+
+[ ] Criar conta Twilio (https://www.twilio.com)
+[ ] Configurar WhatsApp Sandbox
+[ ] Gerar credenciais (Account SID, Auth Token)
+[ ] Testar envio manual de mensagem
+[ ] Criar migrations SQL (tabelas)
+[ ] Adicionar campos na tabela empresas
+[ ] Criar tabela agendamento_confirmacoes
+
+*SEMANA 2: BACKEND (EDGE FUNCTIONS)*
+
+[ ] Implementar send-whatsapp-confirmation
+[ ] Testar envio com dados reais
+[ ] Implementar receive-whatsapp-response
+[ ] Testar recebimento de respostas
+[ ] Adicionar validação de webhook Twilio
+[ ] Adicionar retry automático
+[ ] Adicionar logging detalhado
+
+*SEMANA 3: FRONTEND E INTEGRAÇÃO*
+
+[ ] Integrar trigger no IsisBookingPage
+[ ] Testar fluxo completo (agendamento → confirmação)
+[ ] Criar dashboard de confirmações
+[ ] Testar respostas do cliente
+[ ] Adicionar notificações na arena
+[ ] Testar com múltiplas arenas
+
+*SEMANA 4: REFINAMENTO E PRODUÇÃO*
+
+[ ] Monitorar erros em produção
+[ ] Otimizar mensagens baseado em feedback
+[ ] Adicionar analytics
+[ ] Documentar para suporte
+[ ] Treinar equipe
+[ ] Deploy final
+
+═══════════════════════════════════════════════════════════════════════════════
+                            SEGURANÇA E BOAS PRÁTICAS
+═══════════════════════════════════════════════════════════════════════════════
+
+*ARMAZENAR CREDENCIAIS*
+
+❌ NUNCA no código:
+const token = "auth_token_aqui";
+
+✅ SEMPRE em variáveis de ambiente:
+// .env.local (desenvolvimento)
+TWILIO_ACCOUNT_SID=ACxxxxxxx
+TWILIO_AUTH_TOKEN=xxxxxxx
+
+// Supabase Secrets (produção)
+supabase secrets set TWILIO_ACCOUNT_SID "ACxxxxxxx"
+supabase secrets set TWILIO_AUTH_TOKEN "xxxxxxx"
+
+*VALIDAR WEBHOOKS*
+
+Twilio envia X-Twilio-Signature header
+Sempre validar para garantir que é realmente Twilio
+Usar biblioteca oficial: twilio.validateRequest()
+
+*RATE LIMITING*
+
+Implementar rate limit para evitar spam
+Máximo 5 mensagens por cliente por dia
+Máximo 1000 mensagens por minuto por arena
+
+*LOGS E MONITORAMENTO*
+
+Registrar todas as tentativas de envio
+Registrar todas as respostas recebidas
+Monitorar taxa de sucesso
+Alertar se taxa de erro > 5%
+
+═══════════════════════════════════════════════════════════════════════════════
+                          PRÓXIMOS PASSOS IMEDIATOS
+═══════════════════════════════════════════════════════════════════════════════
+
+*AÇÃO 1: CRIAR CONTA TWILIO*
+
+1. Acessar https://www.twilio.com
+2. Clicar em "Sign Up"
+3. Preencher dados básicos
+4. Verificar email
+5. Fazer login
+6. Receber $15 USD de trial
+
+*AÇÃO 2: CONFIGURAR WHATSAPP SANDBOX*
+
+1. No dashboard Twilio
+2. Ir em "Messaging" → "Try it out"
+3. Selecionar "WhatsApp"
+4. Conectar número (pode usar sandbox primeiro)
+5. Gerar credenciais
+
+*AÇÃO 3: TESTAR ENVIO MANUAL*
+
+1. Usar curl ou Postman
+2. Enviar mensagem de teste
+3. Verificar se chega no WhatsApp
+4. Responder e verificar webhook
+
+*AÇÃO 4: COMEÇAR IMPLEMENTAÇÃO*
+
+1. Criar migrations SQL
+2. Implementar Edge Functions
+3. Integrar no IsisBookingPage
+4. Testar com dados reais
+
+═══════════════════════════════════════════════════════════════════════════════
+                              PERGUNTAS FREQUENTES
+═══════════════════════════════════════════════════════════════════════════════
+
+*P: E se o cliente não responder?*
+R: Status fica "nao_respondeu" e você pode reenviar 1 hora antes do agendamento.
+
+*P: E se a mensagem não chegar?*
+R: Twilio tenta 3x automaticamente. Se falhar, você recebe notificação.
+
+*P: Posso usar número da arena?*
+R: Sim! Você configura o número da arena no Twilio e envia por ele.
+
+*P: Quanto custa para testar?*
+R: $15 USD de trial. Depois paga só o que usa ($0.0075 por mensagem).
+
+*P: Precisa de aprovação?*
+R: Não! Twilio é imediato. WhatsApp Business sim (2-3 semanas).
+
+*P: Posso migrar para WhatsApp Business depois?*
+R: Sim! Código é praticamente o mesmo, só muda a API.
+
+*P: Funciona com múltiplas arenas?*
+R: Sim! Cada arena tem seu próprio número e token.
+
+*P: Posso personalizar as mensagens?*
+R: Sim! Você controla 100% do texto da mensagem.
+
+*P: Funciona em horário comercial?*
+R: Sim! Twilio funciona 24/7, 365 dias por ano.
+
+═══════════════════════════════════════════════════════════════════════════════
+                              RESUMO EXECUTIVO
+═══════════════════════════════════════════════════════════════════════════════
+
+*O QUE VAMOS FAZER*
+
+Implementar sistema automático de confirmação de agendamentos via WhatsApp usando
+Twilio. Cliente recebe mensagem 24h antes, responde SIM ou NÃO, e sistema atualiza
+status automaticamente.
+
+*POR QUÊ TWILIO*
+
+• Mais fácil de integrar
+• Mais barato ($0.0075 por mensagem)
+• Sem contrato mínimo
+• Setup rápido (30 minutos)
+• Escalável
+
+*CUSTO ESTIMADO*
+
+• Arena pequena (100/mês): $0.75/mês
+• Arena média (1000/mês): $7.50/mês
+• Múltiplas arenas (10k/mês): $75/mês
+
+*TIMELINE*
+
+• Semana 1: Setup e banco
+• Semana 2: Backend (Edge Functions)
+• Semana 3: Frontend e integração
+• Semana 4: Refinamento e produção
+
+*PRÓXIMO PASSO*
+
+Criar conta Twilio e começar implementação na Semana 1.
+
+═══════════════════════════════════════════════════════════════════════════════
+
+Documento criado em: 26 de novembro de 2025
+Versão: 1.0
+Status: Pronto para implementação
+Responsável: Equipe Fluxo7
+
+═══════════════════════════════════════════════════════════════════════════════
