@@ -2553,18 +2553,43 @@ export default function BalcaoPage() {
                 if (ids.length === 0) { toast({ title: 'Selecione pelo menos um cliente', variant: 'warning' }); return; }
                 const codigoEmpresa = userProfile?.codigo_empresa;
                 if (!comandaId) {
-                  const nomesEscolhidos = (clients || [])
-                    .filter(x => ids.includes(x.id))
-                    .map(x => x?.nome)
-                    .filter(Boolean);
-                  const nomeFinal = nomesEscolhidos.length ? nomesEscolhidos.join(', ') : '';
-                  setCustomerName(nomeFinal);
-                  setClientChosen(true);
+                  // Não existe comanda ainda: criar/obter comanda de balcão e já vincular clientes
+                  if (!codigoEmpresa) {
+                    toast({ title: 'Empresa não definida', variant: 'destructive' });
+                    return;
+                  }
                   try {
-                    localStorage.setItem(LS_KEY.customerName, nomeFinal || '');
-                    localStorage.setItem(LS_KEY.clientChosen, 'true');
-                  } catch {}
-                  setIsClientWizardOpen(false);
+                    const c = await getOrCreateComandaBalcao({ codigoEmpresa });
+                    if (!c?.id) {
+                      toast({ title: 'Falha ao abrir venda', description: 'Não foi possível criar a comanda.', variant: 'destructive' });
+                      return;
+                    }
+                    const cid = c.id;
+                    await adicionarClientesAComanda({ comandaId: cid, clienteIds: ids, nomesLivres: [], codigoEmpresa });
+                    setComandaId(cid);
+                    // Nome do cliente na UI
+                    const nomesEscolhidos = (clients || [])
+                      .filter(x => ids.includes(x.id))
+                      .map(x => x?.nome)
+                      .filter(Boolean);
+                    const nomeFinal = nomesEscolhidos.length ? nomesEscolhidos.join(', ') : '';
+                    setCustomerName(nomeFinal);
+                    setClientChosen(true);
+                    // Atualizar cache principal da comanda
+                    try {
+                      localStorage.setItem(LS_KEY.comandaId, String(cid));
+                      localStorage.setItem(LS_KEY.customerName, nomeFinal || '');
+                      localStorage.setItem(LS_KEY.clientChosen, 'true');
+                      localStorage.removeItem(LS_KEY.pendingClientIds);
+                    } catch {}
+                    // Garantir itens sincronizados (caso já existam de uso anterior)
+                    try { await refetchItemsAndCustomer(cid, 2); } catch {}
+                    setIsClientWizardOpen(false);
+                  } catch (err) {
+                    console.error('[ClientWizard] Erro ao criar comanda de balcão:', err);
+                    toast({ title: 'Falha ao iniciar venda', description: err?.message || 'Tente novamente.', variant: 'destructive' });
+                    return;
+                  }
                 } else {
                   // Validar que a comanda existe antes de adicionar clientes
                   try {
