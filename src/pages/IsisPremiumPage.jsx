@@ -204,7 +204,7 @@ export default function IsisPremiumPage() {
 
       {/* Overlay Premium */}
       {showPremiumOverlay && (
-        <div className="absolute inset-0 z-50 backdrop-blur-lg bg-black/60 flex items-center justify-center pointer-events-auto rounded-lg overflow-hidden">
+        <div className="absolute inset-0 z-10 backdrop-blur-lg bg-black/60 flex items-center justify-center pointer-events-auto rounded-lg overflow-hidden">
           <motion.div 
             initial={{ opacity: 0, scale: 0.95, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
