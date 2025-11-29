@@ -2741,9 +2741,16 @@ function VendasPage() {
         <DialogContent 
           className="w-[95vw] sm:max-w-4xl max-h-[80vh] sm:max-h-[85vh] flex flex-col p-0 gap-0 focus:outline-none focus-visible:outline-none"
           onOpenAutoFocus={(e) => {
-            // Evitar que o foco vá para o botão de fechar do Dialog
-            e.preventDefault();
-            // NÃO focar automaticamente - deixar o usuário controlar
+            // Direcionar o foco inicial diretamente para o campo de busca do modal
+            try {
+              if (modalSearchRef.current) {
+                e.preventDefault();
+                modalSearchRef.current.focus();
+                setFocusContext('panel');
+                return;
+              }
+            } catch {}
+            // Se por algum motivo não houver ref, deixar o comportamento padrão
           }}
           onWheel={(e) => {
             // Durante rolagem, garantir que setas não virem scroll do body
@@ -2799,8 +2806,15 @@ function VendasPage() {
                   value={productSearch}
                   onChange={(e) => setProductSearch(e.target.value)}
                   onClick={(e) => {
-                    // Ao clicar no input, garantir que ele receba foco
+                    // Ao clicar no input, garantir que ele receba foco e que o contexto seja o painel
+                    e.stopPropagation();
                     e.currentTarget.focus();
+                    setFocusContext('panel');
+                  }}
+                  onFocus={(e) => {
+                    // Garantir que o foco neste input coloque o contexto em 'panel'
+                    e.stopPropagation();
+                    setFocusContext('panel');
                   }}
                   onKeyDown={(e) => {
                     e.stopPropagation();

@@ -143,7 +143,7 @@ export async function listPurchases(codigoEmpresa, filters = {}) {
 			.from('compras')
 			.select(`
 				*,
-				fornecedor:fornecedor_id(id, nome, cnpj)
+				fornecedor:clientes!compras_fornecedor_id_fkey(id, nome, cnpj)
 			`, { count: 'exact' })
 			.eq('codigo_empresa', codigoEmpresa);
 		
