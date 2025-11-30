@@ -1092,7 +1092,32 @@ export default function PaymentModal({
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isAddParticipantOpen, selectedParticipants, getDefaultPayMethod, setLocalParticipantsForm, toast, setAddParticipantSearch, setIsAddParticipantOpen, setSelectedParticipants]);
-  
+
+  // Coordenação externa: salvar e fechar sob demanda (usado pelo modal de agendamento)
+  useEffect(() => {
+    const handler = async () => {
+      try {
+        if (!isPaymentModalOpen) return;
+        // Cancelar debounce pendente
+        if (autoSaveTimeoutRef.current) {
+          clearTimeout(autoSaveTimeoutRef.current);
+          autoSaveTimeoutRef.current = null;
+        }
+        // Não duplicar salvamento
+        if (!isSavingPayments) {
+          await handleSavePayments({ autoSave: true });
+        }
+      } catch (err) {
+        console.error('[PaymentModal] save-and-close erro:', err);
+      } finally {
+        closePaymentModal();
+        try { window.dispatchEvent(new Event('paymentmodal:closed')); } catch {}
+      }
+    };
+    window.addEventListener('paymentmodal:save-and-close', handler);
+    return () => window.removeEventListener('paymentmodal:save-and-close', handler);
+  }, [isPaymentModalOpen, handleSavePayments, closePaymentModal]);
+
   // ✅ AUTO-SAVE: Salva automaticamente ao detectar mudanças
   useEffect(() => {
     if (!isPaymentModalOpen) {

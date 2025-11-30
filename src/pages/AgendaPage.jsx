@@ -4366,35 +4366,48 @@ function AgendaPage({ sidebarVisible = false }) {
               console.warn('[CustomerPicker][DIALOG:allow-close]', dump);
             } catch {}
             
-            // Não fechar o modal se o modal de pagamentos estiver aberto
+            // Se o modal de pagamentos estiver aberto, não bloquear aqui: coordenar abaixo
             if (isPaymentModalOpen) {
-              console.log('[Dialog] Tentativa de fechar modal principal bloqueada - modal de pagamentos está aberto');
-              return;
+              console.log('[Dialog] Fechamento solicitado com PaymentModal aberto - iniciando coordenação');
             }
             
-            console.log('🔍 [FLUXO CRÍTICO] Fechando modal de agendamento - ANTES de closePaymentModal()');
+            console.log('🔍 [FLUXO CRÍTICO] Solicitação de fechamento do modal de agendamento recebida');
             console.log('📊 Estado atual:', {
               isPaymentModalOpen,
               editingBooking: editingBooking?.id,
               timestamp: new Date().toISOString()
             });
-            
-            // 🔧 CORREÇÃO: Se modal de pagamentos está aberto, força salvamento antes de fechar
-            if (isPaymentModalOpen) {
-              console.log('🔍 [FLUXO CRÍTICO] Modal de pagamentos ainda aberto - forçando salvamento antes de fechar');
-              // Aguarda um pouco para garantir que auto-save pendente seja executado
-              await new Promise(resolve => setTimeout(resolve, 1600)); // 1.5s debounce + 100ms margem
-              console.log('🔍 [FLUXO CRÍTICO] Aguardou auto-save - prosseguindo com fechamento');
+
+            // 🔧 Coordenação com PaymentModal no wrapper (Vercel):
+            // Se o modal de pagamentos estiver aberto, solicitar "save-and-close" e aguardar confirmação
+            if (isPaymentModalOpen && typeof window !== 'undefined') {
+              console.log('🔍 [FLUXO CRÍTICO] PaymentModal aberto - solicitando save-and-close');
+              try {
+                await new Promise((resolve) => {
+                  const handler = () => {
+                    window.removeEventListener('paymentmodal:closed', handler);
+                    console.log('✅ [FLUXO CRÍTICO] PaymentModal confirmou fechamento');
+                    resolve();
+                  };
+                  // Fallback se o evento não vier (3s)
+                  const timeout = setTimeout(() => {
+                    window.removeEventListener('paymentmodal:closed', handler);
+                    console.warn('⏱️ [FLUXO CRÍTICO] Timeout aguardando PaymentModal fechar');
+                    resolve();
+                  }, 3000);
+                  const wrappedHandler = () => { clearTimeout(timeout); handler(); };
+                  window.addEventListener('paymentmodal:closed', wrappedHandler, { once: true });
+                  // Disparar solicitação
+                  window.dispatchEvent(new Event('paymentmodal:save-and-close'));
+                });
+              } catch {}
             }
-            
+
+            // Agora fechar o modal de agendamento
             setIsModalOpen(false);
             setEditingBooking(null);
             setPrefill(null);
-            
-            console.log('🔍 [FLUXO CRÍTICO] Chamando closePaymentModal()');
-            closePaymentModal();
             participantsPrefillOnceRef.current = false;
-            
             console.log('🔍 [FLUXO CRÍTICO] Modal de agendamento fechado');
             
             // Resetar estado de agendamento recorrente
