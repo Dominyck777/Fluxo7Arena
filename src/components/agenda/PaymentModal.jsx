@@ -844,7 +844,9 @@ export default function PaymentModal({
                 .from('agendamento_participantes')
                 .select('*')
                 .eq('agendamento_id', editingBooking.id)
-                .eq('codigo_empresa', userProfile?.codigo_empresa);
+                .eq('codigo_empresa', userProfile?.codigo_empresa)
+                .order('ordem', { ascending: true })
+                .order('id', { ascending: true });
               
               if (error) {
                 console.error('❌ Erro ao buscar participantes:', error);
@@ -1542,8 +1544,18 @@ export default function PaymentModal({
           try {
             // Cancela timeout pendente
             if (autoSaveTimeoutRef.current) {
+              console.log('🔍 [Auto-save Payments] Cancelando auto-save pendente antes de salvar ao clicar fora');
               clearTimeout(autoSaveTimeoutRef.current);
+              autoSaveTimeoutRef.current = null;
             }
+            
+            // 🛡️ PROTEÇÃO: Se já está salvando, não fazer novo salvamento
+            if (isSavingPayments) {
+              console.log('🛡️ [Auto-save Payments] Já está salvando - ignorando novo salvamento ao clicar fora');
+              closePaymentModal();
+              return;
+            }
+            
             await handleSavePayments({ autoSave: true });
             console.log('✅ [Auto-save Payments] Salvo ao clicar fora!');
           } catch (error) {
