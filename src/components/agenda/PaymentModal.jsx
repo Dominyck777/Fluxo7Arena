@@ -509,6 +509,12 @@ export default function PaymentModal({
       const agendamentoId = editingBooking?.id;
       const codigo = userProfile?.codigo_empresa;
       
+      console.log('🔍 [SAVE-PAYMENTS] Iniciando salvamento', {
+        autoSave,
+        agendamentoId,
+        timestamp: new Date().toISOString()
+      });
+      
       if (!agendamentoId || !codigo) {
         toast({ 
           title: 'Erro ao salvar pagamentos', 
@@ -526,6 +532,17 @@ export default function PaymentModal({
         const st = p.status_pagamento || 'Pendente';
         return acc + (st !== 'Pago' ? 1 : 0);
       }, 0);
+      
+      console.log('🔍 [SAVE-PAYMENTS] Dados a salvar:', {
+        totalParticipantes: effectiveParticipants.length,
+        pendentes: pendingCount,
+        participantes: effectiveParticipants.map((p, i) => ({
+          index: i,
+          nome: p.nome,
+          status: p.status_pagamento,
+          valor: p.valor_cota
+        }))
+      });
       
       // 🔧 SUBSTITUIÇÃO INTELIGENTE: Manter posição original, apenas trocar dados
       const saveTimestamp = new Date().toISOString();
@@ -652,13 +669,20 @@ export default function PaymentModal({
         console.error('[PaymentModal] Erro ao recarregar alertas:', err);
       });
       
+      console.log('✅ [SAVE-PAYMENTS] Salvamento concluído com sucesso');
+      console.log('📊 [SAVE-PAYMENTS] Contagem final de pendentes:', pendingCount);
+      
       // Só fecha o modal se NÃO for auto-save
       if (!autoSave) {
+        console.log('🔍 [SAVE-PAYMENTS] Fechando modal de pagamentos (não é auto-save)');
         closePaymentModal();
         setIsModalOpen(false);
+      } else {
+        console.log('🔍 [SAVE-PAYMENTS] Auto-save concluído - modal permanece aberto');
       }
       
     } catch (e) {
+      console.error('❌ [SAVE-PAYMENTS] Erro ao salvar:', e);
       toast({ 
         title: 'Erro ao salvar pagamentos', 
         description: 'Tente novamente.', 
@@ -815,13 +839,6 @@ export default function PaymentModal({
           // Sempre buscar do banco primeiro para garantir dados atualizados e completos
           if (editingBooking?.id) {
             // Buscar do banco para garantir dados corretos (especialmente duplicados)
-            const loadTimestamp = new Date().toISOString();
-            console.log(`\n\n========== CARREGAMENTO INICIADO ${loadTimestamp} ==========`);
-            console.log('🔍 BUSCANDO PARTICIPANTES DO BANCO...');
-            console.log('🔍 Query params:', {
-              agendamento_id: editingBooking.id,
-              codigo_empresa: userProfile?.codigo_empresa
-            });
             try {
               const { data: dbParticipants, error } = await supabase
                 .from('agendamento_participantes')
@@ -829,16 +846,9 @@ export default function PaymentModal({
                 .eq('agendamento_id', editingBooking.id)
                 .eq('codigo_empresa', userProfile?.codigo_empresa);
               
-              console.log('🔍 Resultado da query:', { 
-                encontrados: dbParticipants?.length || 0, 
-                erro: error,
-                dados: dbParticipants
-              });
-              
               if (error) {
                 console.error('❌ Erro ao buscar participantes:', error);
               } else if (dbParticipants && dbParticipants.length > 0) {
-                console.log(`✅ ${dbParticipants.length} participantes encontrados no banco`);
                 sourceData = dbParticipants.map(p => ({
                   cliente_id: p.cliente_id,
                   nome: p.nome,
@@ -850,7 +860,6 @@ export default function PaymentModal({
                 }));
                 dataSource = 'banco de dados';
               } else {
-                console.log('⚠️ Nenhum participante encontrado no banco!');
                 dataSource = 'banco vazio';
               }
             } catch (err) {
@@ -929,13 +938,6 @@ export default function PaymentModal({
               console.error('\ud83d\udea8 Erro na busca de debug:', err);
             }
           }
-          
-          console.log(`\ud83d\udcc2 CARREGANDO: ${withCodes.length} participantes de ${dataSource}`);
-          console.log('========== CARREGAMENTO CONCLU\u00cdDO ==========\n\n');
-          
-          withCodes.forEach((p, idx) => {
-            console.log(`\ud83d\udcc2 #${idx + 1}: ${p.nome} (cod:${p.codigo}) | Valor: ${p.valor_cota} | Fin: ${p.finalizadora_id?.slice(-4)} | Taxa: ${p.aplicar_taxa} | Status: ${p.status_pagamento}`);
-          });
           
           // Só atualizar se tiver dados OU se for novo agendamento
           if (withCodes.length > 0 || !editingBooking?.id) {
@@ -1092,6 +1094,15 @@ export default function PaymentModal({
   // ✅ AUTO-SAVE: Salva automaticamente ao detectar mudanças
   useEffect(() => {
     if (!isPaymentModalOpen) {
+      console.log('🔍 [AUTO-SAVE] Modal de pagamentos fechado - desabilitando auto-save');
+      console.log('📊 [AUTO-SAVE] Estado final ao fechar:', {
+        localParticipantsForm: localParticipantsForm.map(p => ({
+          nome: p.nome,
+          status: p.status_pagamento,
+          valor: p.valor_cota
+        })),
+        timestamp: new Date().toISOString()
+      });
       autoSaveEnabledRef.current = false;
       lastSavedFormRef.current = null;
       return;
@@ -1099,9 +1110,11 @@ export default function PaymentModal({
     
     // Aguarda inicialização completa (500ms após abrir)
     if (!autoSaveEnabledRef.current) {
+      console.log('🔍 [AUTO-SAVE] Inicializando auto-save (aguardando 500ms)');
       const timeout = setTimeout(() => {
         autoSaveEnabledRef.current = true;
         lastSavedFormRef.current = JSON.stringify(localParticipantsForm);
+        console.log('🔍 [AUTO-SAVE] Auto-save habilitado');
       }, 500);
       return () => clearTimeout(timeout);
     }
@@ -1114,22 +1127,26 @@ export default function PaymentModal({
       return;
     }
     
+    console.log('🔍 [AUTO-SAVE] Mudança detectada - agendando salvamento em 1.5s');
+    
     // Limpa timeout anterior
     if (autoSaveTimeoutRef.current) {
+      console.log('🔍 [AUTO-SAVE] Cancelando auto-save anterior');
       clearTimeout(autoSaveTimeoutRef.current);
     }
     
     // Debounce de 1.5 segundos
     autoSaveTimeoutRef.current = setTimeout(async () => {
-      console.log('🔄 [Auto-save Payments] Salvando alterações...');
+      console.log('🔍 [AUTO-SAVE] Iniciando auto-save AGORA');
+      console.log('📊 [AUTO-SAVE] Participantes a salvar:', localParticipantsForm.length);
       setIsAutoSaving(true);
       
       try {
         await handleSavePayments({ autoSave: true });
         lastSavedFormRef.current = currentForm;
-        console.log('✅ [Auto-save Payments] Salvo com sucesso!');
+        console.log('✅ [AUTO-SAVE] Salvo com sucesso!');
       } catch (error) {
-        console.error('❌ [Auto-save Payments] Erro ao salvar:', error);
+        console.error('❌ [AUTO-SAVE] Erro ao salvar:', error);
       } finally {
         setIsAutoSaving(false);
       }

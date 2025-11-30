@@ -334,7 +334,7 @@ function AgendaPage({ sidebarVisible = false }) {
       // Tentar forçar orientação landscape
       if (screen.orientation && screen.orientation.lock) {
         screen.orientation.lock('landscape').catch(() => {
-          // Fallback: atualizar meta tag
+          // Fallback: atualizar meta tag (silenciar erro de orientação não suportada)
           const metaTag = document.getElementById('screen-orientation-meta');
           if (metaTag) {
             metaTag.setAttribute('content', 'landscape');
@@ -478,12 +478,6 @@ function AgendaPage({ sidebarVisible = false }) {
   // Prefill ao clicar em um slot livre
   const [prefill, setPrefill] = useState(null);
   
-  // Debug prefill changes
-  useEffect(() => {
-    if (prefill) {
-      console.log('Prefill state changed:', prefill);
-    }
-  }, [prefill]);
   // Busca
   const [searchQuery, setSearchQuery] = useState("");
   // Janela de proteção extra para restaurar seleção se algum efeito concorrente limpar o array
@@ -1213,13 +1207,6 @@ function AgendaPage({ sidebarVisible = false }) {
         const participants = participantsByAgendamento[row.id];
         if (Array.isArray(participants) && participants.length > 0) {
           customerName = participants[0]?.nome || '';
-          
-          console.log('[DEBUG REPRESENTANTE] 🏷️ GRID (participantes):', {
-            id: row.id,
-            nomeExibido: customerName,
-            todosParticipantes: participants.map((p, i) => `${i+1}. ${p.nome}`),
-            primeiroParticipante: participants[0]?.nome
-          });
         }
       }
       
@@ -1229,11 +1216,6 @@ function AgendaPage({ sidebarVisible = false }) {
           const clientesArray = typeof row.clientes === 'string' ? JSON.parse(row.clientes) : row.clientes;
           if (Array.isArray(clientesArray) && clientesArray.length > 0) {
             customerName = clientesArray[0]?.nome || clientesArray[0] || '';
-            
-            console.log('[DEBUG REPRESENTANTE] 🏷️ GRID (clientes):', {
-              id: row.id,
-              nome: customerName
-            });
           }
         } catch {}
       }
@@ -1938,14 +1920,6 @@ function AgendaPage({ sidebarVisible = false }) {
         )}
         style={{ top: `${adjTop}px`, height: `${adjHeight}px` }}
         onClick={async () => {
-          console.log('[DEBUG REPRESENTANTE] 🎯 CLIQUE NO AGENDAMENTO:', {
-            id: booking.id,
-            customer: booking.customer,
-            clientes: booking.clientes,
-            todosParticipantes: participantsByAgendamento[booking.id]?.map((p, i) => `${i+1}. ${p.nome}`) || [],
-            primeiroParticipante: participantsByAgendamento[booking.id]?.[0]?.nome || 'N/A'
-          });
-          
           // Executa o vigia com pequena janela de até 600ms; não bloqueia por muito tempo a UX
           const guard = ensureFreshOnEdit(booking);
           const timeout = new Promise((resolve) => setTimeout(resolve, 600));
@@ -1953,13 +1927,6 @@ function AgendaPage({ sidebarVisible = false }) {
           try { result = await Promise.race([guard, timeout]); } catch {}
           // Prefira o booking atualizado retornado; senão busque do estado; fallback para o original
           const picked = (result && result.booking) || (bookings.find(b => b.id === booking.id) || booking);
-          
-          console.log('[DEBUG REPRESENTANTE] 📋 AGENDAMENTO SELECIONADO:', {
-            id: picked.id,
-            customer: picked.customer,
-            clientes: picked.clientes,
-            participantesDisponiveis: participantsByAgendamento[picked.id]?.map((p, i) => `${i+1}. ${p.nome}`) || []
-          });
           
           setEditingBooking(picked);
           openBookingModal();
@@ -3120,13 +3087,6 @@ function AgendaPage({ sidebarVisible = false }) {
           
           const houveMudancaDeParticipantes = nomesAtuais !== nomesOriginais;
           
-          console.log('[DEBUG REPRESENTANTE] 🔍 VERIFICAÇÃO DE MUDANÇA:', {
-            editingBookingId: editingBooking.id,
-            nomesAtuais: selNow.map(p => p.nome),
-            nomesOriginais: nomesOriginais ? nomesOriginais.split('|') : [],
-            houveMudanca: houveMudancaDeParticipantes
-          });
-          
           if (!houveMudancaDeParticipantes) {
             // Prioriza o campo 'clientes' do agendamento (salvo pela Isis) sobre os participantes carregados
             let ordemReferencia = [];
@@ -3149,13 +3109,6 @@ function AgendaPage({ sidebarVisible = false }) {
               ordemReferencia = loadedParts.map(p => p.nome);
             }
             
-            console.log('[DEBUG REPRESENTANTE] 🔄 REORDENAÇÃO NO SAVE:', {
-              editingBookingId: editingBooking.id,
-              selNowOriginal: selNow.map((p, i) => `${i+1}. ${p.nome}`),
-              ordemReferencia: ordemReferencia.map((nome, i) => `${i+1}. ${nome}`),
-              fonte: editingBooking.clientes ? 'campo_clientes' : 'participantes_carregados'
-            });
-            
             if (ordemReferencia.length > 0) {
               selNowFinal = [...selNow].sort((a, b) => {
                 const indexA = ordemReferencia.findIndex(nome => nome === a.nome);
@@ -3173,24 +3126,12 @@ function AgendaPage({ sidebarVisible = false }) {
                 return 0;
               });
               
-              console.log('[DEBUG REPRESENTANTE] ✅ RESULTADO DA REORDENAÇÃO:', {
-                selNowFinal: selNowFinal.map((p, i) => `${i+1}. ${p.nome}`),
-                primeiroParticipante: selNowFinal[0]?.nome
-              });
             }
-          } else {
-            console.log('[DEBUG REPRESENTANTE] ⏭️ PULANDO REORDENAÇÃO: Houve mudança de participantes (substituição)');
           }
         }
         
         const primaryClient = selNowFinal[0];
         const clientesArr = selNowFinal.map(getCustomerName).filter(Boolean);
-        
-        console.log('[DEBUG REPRESENTANTE] 📝 DADOS FINAIS PARA SALVAR:', {
-          primaryClient: { id: primaryClient?.id, nome: primaryClient?.nome },
-          clientesArr: clientesArr.map((nome, i) => `${i+1}. ${nome}`),
-          primeiroNomeArray: clientesArr[0]
-        });
 
         // Validação: para NOVO agendamento é obrigatório selecionar pelo menos 1 cliente
         if (!editingBooking?.id) {
@@ -3545,11 +3486,6 @@ function AgendaPage({ sidebarVisible = false }) {
               ordem: index + 1, // Campo ordem baseado na posição (1, 2, 3...)
             }));
             
-            console.log('[DEBUG REPRESENTANTE] 🆕 CRIANDO PARTICIPANTES:', {
-              agendamentoId: data.id,
-              ordemInsercao: rows.map((r, i) => ({ index: i, nome: r.nome })),
-              clientesArray: clientesArr
-            });
             if (rows.length > 0) {
               const { error: perr } = await supabase
                 .from('agendamento_participantes')
@@ -3799,14 +3735,6 @@ function AgendaPage({ sidebarVisible = false }) {
       if (initializedRef.current) return;
 
       if (editingBooking) {
-        console.log('[DEBUG REPRESENTANTE] 🔄 PREENCHENDO MODAL:', {
-          id: editingBooking.id,
-          customer: editingBooking.customer,
-          clientes: editingBooking.clientes,
-          participantesCarregados: participantsByAgendamento[editingBooking.id]?.map((p, i) => `${i+1}. ${p.nome}`) || [],
-          primeiroCarregado: participantsByAgendamento[editingBooking.id]?.[0]?.nome || 'N/A'
-        });
-        
         const startM = getHours(editingBooking.start) * 60 + getMinutes(editingBooking.start);
         const endM = getHours(editingBooking.end) * 60 + getMinutes(editingBooking.end);
         // Extrai participantes carregados para este agendamento
@@ -3905,7 +3833,6 @@ function AgendaPage({ sidebarVisible = false }) {
         const safeCourt = (availableCourts || []).includes(prefill.court)
           ? prefill.court
           : ((availableCourts || [])[0] || '');
-        console.log('Prefill received in modal', { prefill, safeCourt, availableCourts, 'prefill.court': prefill.court });
         const newForm = {
           selectedClients: userSelectedOnceRef.current ? (Array.isArray(form.selectedClients) ? form.selectedClients : []) : [],
           court: safeCourt,
@@ -3915,7 +3842,6 @@ function AgendaPage({ sidebarVisible = false }) {
           startMinutes: prefill.startMinutes ?? nearestSlot(),
           endMinutes: prefill.endMinutes ?? (nearestSlot() + 60),
         };
-        console.log('Form set with prefill', newForm);
         setForm(newForm);
         setParticipantsForm([]);
         suppressAutoAdjustRef.current = true;
@@ -4151,11 +4077,9 @@ function AgendaPage({ sidebarVisible = false }) {
       // [DEBUG-PaymentModal] silenciado
       if (suppressAutoAdjustRef.current) {
         // Não ajustar na primeira renderização após aplicar prefill manual
-        console.log('Auto-adjust suppressed, skipping');
         suppressAutoAdjustRef.current = false;
         return;
       }
-      console.log('Auto-adjust running', { startMinutes: form.startMinutes, court: form.court, date: form.date });
       const ensureValidStart = () => {
         if (isRangeFree(form.startMinutes, form.startMinutes + SLOT_MINUTES)) return form.startMinutes;
         for (let s = Math.max(courtBounds.start, form.startMinutes); s <= courtBounds.end - SLOT_MINUTES; s += SLOT_MINUTES) {
@@ -4197,17 +4121,14 @@ function AgendaPage({ sidebarVisible = false }) {
     useEffect(() => {
       // Não alterar quadra se acabamos de aplicar um prefill
       if (suppressAutoAdjustRef.current) {
-        console.log('Court closed check suppressed (prefill applied)');
         return;
       }
       
       // Só verificar fechamento se a data do formulário é hoje (currentDate)
       // Se for outro dia, o diasFuncionamento pode estar desatualizado
       const isFormDateToday = isSameDay(form.date, currentDate);
-      console.log('Checking if court is closed', { court: form.court, isFormDateToday, formDate: form.date, currentDate, diasFuncionamento });
       
       if (!isFormDateToday) {
-        console.log('Form date is not today, skipping court closed check');
         return;
       }
       
@@ -4218,8 +4139,6 @@ function AgendaPage({ sidebarVisible = false }) {
         const availableCourt = availableCourts.find(court => 
           !diasFuncionamento[court] || diasFuncionamento[court].funciona
         );
-        console.log('Court is closed, changing to', { availableCourt });
-        
         if (availableCourt) {
           setForm(f => ({ ...f, court: availableCourt }));
         }
@@ -4408,7 +4327,7 @@ function AgendaPage({ sidebarVisible = false }) {
       {isModalOpen && (
         <Dialog
           open={true}
-          onOpenChange={(open) => {
+          onOpenChange={async (open) => {
           // Apenas trata fechamento aqui; abertura é feita por openBookingModal()
           if (!open) {
             // Bloqueia fechamento quando o seletor de clientes estiver aberto
@@ -4453,11 +4372,30 @@ function AgendaPage({ sidebarVisible = false }) {
               return;
             }
             
+            console.log('🔍 [FLUXO CRÍTICO] Fechando modal de agendamento - ANTES de closePaymentModal()');
+            console.log('📊 Estado atual:', {
+              isPaymentModalOpen,
+              editingBooking: editingBooking?.id,
+              timestamp: new Date().toISOString()
+            });
+            
+            // 🔧 CORREÇÃO: Se modal de pagamentos está aberto, força salvamento antes de fechar
+            if (isPaymentModalOpen) {
+              console.log('🔍 [FLUXO CRÍTICO] Modal de pagamentos ainda aberto - forçando salvamento antes de fechar');
+              // Aguarda um pouco para garantir que auto-save pendente seja executado
+              await new Promise(resolve => setTimeout(resolve, 1600)); // 1.5s debounce + 100ms margem
+              console.log('🔍 [FLUXO CRÍTICO] Aguardou auto-save - prosseguindo com fechamento');
+            }
+            
             setIsModalOpen(false);
             setEditingBooking(null);
             setPrefill(null);
+            
+            console.log('🔍 [FLUXO CRÍTICO] Chamando closePaymentModal()');
             closePaymentModal();
             participantsPrefillOnceRef.current = false;
+            
+            console.log('🔍 [FLUXO CRÍTICO] Modal de agendamento fechado');
             
             // Resetar estado de agendamento recorrente
             setIsRecorrente(false);
