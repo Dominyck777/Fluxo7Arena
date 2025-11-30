@@ -3199,45 +3199,37 @@ function AgendaPage({ sidebarVisible = false }) {
           // Usar array indexado para preservar cada participante individualmente
           const currentArray = currentParticipants || [];
           
-          // Remove TODOS os participantes antigos
-          const { error: deleteError } = await supabase
-            .from('agendamento_participantes')
-            .delete()
-            .eq('codigo_empresa', userProfile.codigo_empresa)
-            .eq('agendamento_id', editingBooking.id);
-          
-          if (deleteError) console.error('Erro ao deletar participantes:', deleteError);
-          
-          // Insere novos participantes PRESERVANDO dados de pagamento quando já existiam
-          if (selNowFinal && selNowFinal.length > 0) {
-            const participantesRows = selNowFinal.map((c, index) => {
-              // Buscar participante correspondente pelo ÍNDICE, não por cliente_id
-              // Isso preserva duplicados corretamente
-              const existing = currentArray[index];
-              
-              // Só preservar dados se for o MESMO cliente no MESMO índice
-              const shouldPreserve = existing && existing.cliente_id === c.id;
-              
-              return {
-                codigo_empresa: userProfile.codigo_empresa,
-                agendamento_id: editingBooking.id,
-                cliente_id: c.id,
-                nome: c.nome,
-                ordem: index + 1, // Campo ordem baseado na posição (1, 2, 3...)
-                // Preserva dados de pagamento se já existir no mesmo índice
-                valor_cota: shouldPreserve ? (existing.valor_cota ?? 0) : 0,
-                status_pagamento: shouldPreserve ? (existing.status_pagamento ?? 'Pendente') : 'Pendente',
-                finalizadora_id: shouldPreserve ? (existing.finalizadora_id ?? null) : null,
-                aplicar_taxa: shouldPreserve ? (existing.aplicar_taxa ?? false) : false,
-                pago_em: shouldPreserve ? (existing.pago_em ?? null) : null,
-              };
-            });
-            
-            const { error: insertError } = await supabase
+          if (houveMudancaDeParticipantes) {
+            // Remove e recria participantes somente quando houve mudança (substituição)
+            const { error: deleteError } = await supabase
               .from('agendamento_participantes')
-              .insert(participantesRows);
-              
-            if (insertError) console.error('Erro ao inserir participantes:', insertError);
+              .delete()
+              .eq('codigo_empresa', userProfile.codigo_empresa)
+              .eq('agendamento_id', editingBooking.id);
+            if (deleteError) console.error('Erro ao deletar participantes:', deleteError);
+            
+            if (selNowFinal && selNowFinal.length > 0) {
+              const participantesRows = selNowFinal.map((c, index) => {
+                const existing = currentArray[index];
+                const shouldPreserve = existing && existing.cliente_id === c.id;
+                return {
+                  codigo_empresa: userProfile.codigo_empresa,
+                  agendamento_id: editingBooking.id,
+                  cliente_id: c.id,
+                  nome: c.nome,
+                  ordem: index + 1,
+                  valor_cota: shouldPreserve ? (existing.valor_cota ?? 0) : 0,
+                  status_pagamento: shouldPreserve ? (existing.status_pagamento ?? 'Pendente') : 'Pendente',
+                  finalizadora_id: shouldPreserve ? (existing.finalizadora_id ?? null) : null,
+                  aplicar_taxa: shouldPreserve ? (existing.aplicar_taxa ?? false) : false,
+                  pago_em: shouldPreserve ? (existing.pago_em ?? null) : null,
+                };
+              });
+              const { error: insertError } = await supabase
+                .from('agendamento_participantes')
+                .insert(participantesRows);
+              if (insertError) console.error('Erro ao inserir participantes:', insertError);
+            }
           }
           // Atualiza estado local (sem mexer em status quando ele mudou; será tratado abaixo)
           // Garante que pegamos o nome do cliente corretamente
