@@ -663,6 +663,17 @@ export default function PaymentModal({
       setPaymentWarning(null);
       // Atualizar contexto com os dados salvos
       setParticipantsForm(effectiveParticipants);
+      // Notificar Agenda para atualizar chips imediatamente
+      try {
+        window.dispatchEvent(
+          new CustomEvent('payments:saved', {
+            detail: {
+              agendamentoId,
+              participants: effectiveParticipants,
+            },
+          })
+        );
+      } catch {}
       
       // Recarregar alertas após salvar pagamentos (não bloqueia salvamento)
       loadAlerts().catch(err => {

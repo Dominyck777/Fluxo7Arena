@@ -393,6 +393,38 @@ function AgendaPage({ sidebarVisible = false }) {
   // Controle de concorrência e limpeza segura
   const participantsReqIdRef = useRef(0);
   const lastParticipantsDateKeyRef = useRef('');
+
+  // Atualizar chips imediatamente quando PaymentModal salva
+  useEffect(() => {
+    const onPaymentsSaved = (e) => {
+      try {
+        const detail = e?.detail || {};
+        const agendamentoId = detail.agendamentoId;
+        const participants = detail.participants;
+        if (!agendamentoId || !Array.isArray(participants)) return;
+        setParticipantsByAgendamento((prev) => {
+          const old = prev[agendamentoId] || [];
+          const next = participants.map((p, idx) => {
+            const prevP = old[idx] || {};
+            return {
+              ...prevP,
+              cliente_id: p.cliente_id,
+              nome: p.nome,
+              codigo: (prevP.codigo !== undefined ? prevP.codigo : (p.codigo ?? null)),
+              valor_cota: typeof p.valor_cota === 'string' ? p.valor_cota : (prevP.valor_cota ?? ''),
+              status_pagamento: p.status_pagamento || prevP.status_pagamento || 'Pendente',
+              finalizadora_id: p.finalizadora_id ?? prevP.finalizadora_id ?? null,
+              aplicar_taxa: p.aplicar_taxa ?? prevP.aplicar_taxa ?? false,
+              ordem: prevP.ordem ?? (idx + 1),
+            };
+          });
+          return { ...prev, [agendamentoId]: next };
+        });
+      } catch {}
+    };
+    window.addEventListener('payments:saved', onPaymentsSaved);
+    return () => window.removeEventListener('payments:saved', onPaymentsSaved);
+  }, []);
   // Evitar re-renders que fechem selects quando modal está aberto
   const modalOpenRef = useRef(false);
   useEffect(() => {
@@ -3199,7 +3231,18 @@ function AgendaPage({ sidebarVisible = false }) {
           // Usar array indexado para preservar cada participante individualmente
           const currentArray = currentParticipants || [];
           
-          if (houveMudancaDeParticipantes) {
+          const __mudancaDeParticipantes = (typeof houveMudancaDeParticipantes !== 'undefined') ? houveMudancaDeParticipantes : (() => {
+            try {
+              const nomesAtuais = (selNow || []).map(p => p.nome).sort().join('|');
+              let nomesOriginais = '';
+              if (editingBooking?.clientes) {
+                const clientes = Array.isArray(editingBooking.clientes) ? editingBooking.clientes : JSON.parse(editingBooking.clientes);
+                nomesOriginais = Array.isArray(clientes) ? clientes.sort().join('|') : '';
+              }
+              return nomesAtuais !== nomesOriginais;
+            } catch { return true; }
+          })();
+          if (__mudancaDeParticipantes) {
             // Remove e recria participantes somente quando houve mudança (substituição)
             const { error: deleteError } = await supabase
               .from('agendamento_participantes')
