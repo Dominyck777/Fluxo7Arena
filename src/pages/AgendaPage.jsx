@@ -3100,6 +3100,7 @@ function AgendaPage({ sidebarVisible = false }) {
         // Para agendamentos existentes, reordena participantes para manter ordem original (representante primeiro)
         // MAS: Não reordena se estamos vindo do modal de pagamentos (substituição de participantes)
         let selNowFinal = selNow;
+        let houveMudancaDeParticipantes = false; // ⚠️ FIX: Inicializar fora do if para evitar undefined
         if (editingBooking?.id) {
           // 🔧 NÃO reordenar se os nomes mudaram (indicativo de substituição no modal de pagamentos)
           // Comparar nomes atuais com o campo 'clientes' do agendamento
@@ -3117,7 +3118,7 @@ function AgendaPage({ sidebarVisible = false }) {
             }
           }
           
-          const houveMudancaDeParticipantes = nomesAtuais !== nomesOriginais;
+          houveMudancaDeParticipantes = nomesAtuais !== nomesOriginais;
           
           if (!houveMudancaDeParticipantes) {
             // Prioriza o campo 'clientes' do agendamento (salvo pela Isis) sobre os participantes carregados
@@ -3231,18 +3232,8 @@ function AgendaPage({ sidebarVisible = false }) {
           // Usar array indexado para preservar cada participante individualmente
           const currentArray = currentParticipants || [];
           
-          const __mudancaDeParticipantes = (typeof houveMudancaDeParticipantes !== 'undefined') ? houveMudancaDeParticipantes : (() => {
-            try {
-              const nomesAtuais = (selNow || []).map(p => p.nome).sort().join('|');
-              let nomesOriginais = '';
-              if (editingBooking?.clientes) {
-                const clientes = Array.isArray(editingBooking.clientes) ? editingBooking.clientes : JSON.parse(editingBooking.clientes);
-                nomesOriginais = Array.isArray(clientes) ? clientes.sort().join('|') : '';
-              }
-              return nomesAtuais !== nomesOriginais;
-            } catch { return true; }
-          })();
-          if (__mudancaDeParticipantes) {
+          // ⚠️ FIX: Usar a variável já calculada (não recalcular)
+          if (houveMudancaDeParticipantes) {
             // Remove e recria participantes somente quando houve mudança (substituição)
             const { error: deleteError } = await supabase
               .from('agendamento_participantes')
@@ -3329,7 +3320,8 @@ function AgendaPage({ sidebarVisible = false }) {
           
           // 🛡️ FIX: Não sobrescrever participantsForm se não houve mudança de participantes
           // Isso evita que dados de pagamento salvos pelo PaymentModal sejam perdidos
-          if (!__mudancaDeParticipantes) {
+          console.log('🛡️ [FIX] houveMudancaDeParticipantes =', houveMudancaDeParticipantes);
+          if (!houveMudancaDeParticipantes) {
             // Sem mudança de participantes: preservar dados atuais do contexto
             // Apenas atualizar se houver dados novos do banco
             console.log('🛡️ [FIX] Sem mudança de participantes - preservando dados de pagamento do contexto');
