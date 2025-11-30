@@ -3303,10 +3303,13 @@ function AgendaPage({ sidebarVisible = false }) {
           pendingSaveRef.current = false;
           
           // 🔄 Atualiza cache de participantes para refletir mudanças imediatamente
+          // ⚠️ FIX: Usar cliente_id como chave em vez de índice para preservar dados de pagamento
+          // Isso evita desalinhamento quando há reordenação de participantes
           const updatedParticipants = selNow.map((c, index) => {
-            // Buscar pelo índice para preservar duplicados
-            const existing = currentArray[index];
-            const shouldPreserve = existing && existing.cliente_id === c.id;
+            // 🔑 Buscar pelo cliente_id (chave) em vez de índice
+            // Isso preserva dados de pagamento mesmo se a ordem mudar
+            const existing = currentArray.find(p => p.cliente_id === c.id);
+            const shouldPreserve = !!existing;
             
             return {
               cliente_id: c.id,
@@ -3324,16 +3327,45 @@ function AgendaPage({ sidebarVisible = false }) {
             [editingBooking.id]: updatedParticipants
           }));
           
-          // Atualiza também o participantsForm (dados de pagamento) com valores preservados
-          setParticipantsForm(updatedParticipants.map(p => ({
-            cliente_id: p.cliente_id,
-            nome: p.nome,
-            codigo: p.codigo,
-            valor_cota: p.valor_cota ? maskBRL(String(Number(p.valor_cota).toFixed(2))) : '',
-            status_pagamento: p.status_pagamento,
-            finalizadora_id: p.finalizadora_id ? String(p.finalizadora_id) : (payMethods?.[0]?.id ? String(payMethods[0].id) : null),
-            aplicar_taxa: p.aplicar_taxa,
-          })));
+          // 🛡️ FIX: Não sobrescrever participantsForm se não houve mudança de participantes
+          // Isso evita que dados de pagamento salvos pelo PaymentModal sejam perdidos
+          if (!__mudancaDeParticipantes) {
+            // Sem mudança de participantes: preservar dados atuais do contexto
+            // Apenas atualizar se houver dados novos do banco
+            console.log('🛡️ [FIX] Sem mudança de participantes - preservando dados de pagamento do contexto');
+            setParticipantsForm(prev => {
+              // Mesclar dados atuais com dados do banco usando cliente_id como chave
+              const merged = (prev || []).map(p => {
+                const fromBank = updatedParticipants.find(up => up.cliente_id === p.cliente_id);
+                if (!fromBank) return p; // Manter dados atuais se não encontrar no banco
+                
+                // Mesclar: priorizar dados do contexto (PaymentModal) sobre dados do banco
+                return {
+                  cliente_id: p.cliente_id,
+                  nome: p.nome || fromBank.nome,
+                  codigo: p.codigo ?? fromBank.codigo,
+                  valor_cota: p.valor_cota || fromBank.valor_cota, // Manter valor do contexto
+                  status_pagamento: p.status_pagamento || fromBank.status_pagamento, // Manter status do contexto
+                  finalizadora_id: p.finalizadora_id ?? fromBank.finalizadora_id,
+                  aplicar_taxa: p.aplicar_taxa ?? fromBank.aplicar_taxa,
+                };
+              });
+              console.log('✅ [FIX] Dados de pagamento preservados:', merged);
+              return merged.length > 0 ? merged : updatedParticipants;
+            });
+          } else {
+            // Com mudança de participantes: reconstruir do zero
+            console.log('🔄 [FIX] Mudança de participantes detectada - reconstruindo participantsForm');
+            setParticipantsForm(updatedParticipants.map(p => ({
+              cliente_id: p.cliente_id,
+              nome: p.nome,
+              codigo: p.codigo,
+              valor_cota: p.valor_cota ? maskBRL(String(Number(p.valor_cota).toFixed(2))) : '',
+              status_pagamento: p.status_pagamento,
+              finalizadora_id: p.finalizadora_id ? String(p.finalizadora_id) : (payMethods?.[0]?.id ? String(payMethods[0].id) : null),
+              aplicar_taxa: p.aplicar_taxa,
+            })));
+          }
           
           // Recarregar alertas após salvar agendamento (não bloqueia auto-save)
           loadAlerts().catch(err => {
