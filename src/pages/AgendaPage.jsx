@@ -3097,14 +3097,21 @@ function AgendaPage({ sidebarVisible = false }) {
           } catch {}
         }
         
+        // ⚠️ FIX: Fazer cópia imutável de selNow para evitar mudanças posteriores
+        // PaymentModal pode modificar form.selectedClients, invalidando a comparação
+        const selNowSnapshot = [...selNow];
+        console.log('🔒 [FIX] selNowSnapshot criado:', selNowSnapshot.map(p => p.nome));
+        
         // Para agendamentos existentes, reordena participantes para manter ordem original (representante primeiro)
         // MAS: Não reordena se estamos vindo do modal de pagamentos (substituição de participantes)
-        let selNowFinal = selNow;
+        // ⚠️ FIX: Usar selNowSnapshot (cópia imutável) em vez de selNow
+        // selNow é referência a form.selectedClients que pode ser modificado pelo PaymentModal
+        let selNowFinal = selNowSnapshot;
         let houveMudancaDeParticipantes = false; // ⚠️ FIX: Inicializar fora do if para evitar undefined
         if (editingBooking?.id) {
           // 🔧 NÃO reordenar se os nomes mudaram (indicativo de substituição no modal de pagamentos)
           // Comparar nomes atuais com o campo 'clientes' do agendamento
-          const nomesAtuais = selNow.map(p => p.nome).sort().join('|');
+          const nomesAtuais = selNowSnapshot.map(p => p.nome).sort().join('|');
           let nomesOriginais = '';
           
           if (editingBooking.clientes) {
