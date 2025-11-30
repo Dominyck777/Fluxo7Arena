@@ -393,8 +393,6 @@ function AgendaPage({ sidebarVisible = false }) {
   // Controle de concorrência e limpeza segura
   const participantsReqIdRef = useRef(0);
   const lastParticipantsDateKeyRef = useRef('');
-  // Marca o último instante em que pagamentos deste agendamento foram salvos (para evitar refresh obsoleto)
-  const lastPaymentsSavedAtRef = useRef(new Map());
 
   // Atualizar chips imediatamente quando PaymentModal salva
   useEffect(() => {
@@ -404,14 +402,6 @@ function AgendaPage({ sidebarVisible = false }) {
         const agendamentoId = detail.agendamentoId;
         const participants = detail.participants;
         if (!agendamentoId || !Array.isArray(participants)) return;
-        try { lastPaymentsSavedAtRef.current.set(agendamentoId, Date.now()); } catch {}
-        const paidCount = participants.filter(p => String(p.status_pagamento || '').toLowerCase() === 'pago').length;
-        console.log('🧩 [payments:saved] recebido', {
-          agendamentoId,
-          total: participants.length,
-          pagos: paidCount,
-          preview: participants.map((p, i) => ({ i, nome: p.nome, status: p.status_pagamento }))
-        });
         setParticipantsByAgendamento((prev) => {
           const old = prev[agendamentoId] || [];
           const next = participants.map((p, idx) => {
@@ -428,46 +418,8 @@ function AgendaPage({ sidebarVisible = false }) {
               ordem: prevP.ordem ?? (idx + 1),
             };
           });
-          const afterPaid = next.filter(p => String(p.status_pagamento || '').toLowerCase() === 'pago').length;
-          console.log('🧩 [payments:saved] estado local atualizado', { agendamentoId, total: next.length, pagos: afterPaid });
           return { ...prev, [agendamentoId]: next };
         });
-        // Sincronizar com banco em background para garantir consistência no Vercel
-        (async () => {
-          try {
-            const startedAt = Date.now();
-            const { data } = await supabase
-              .from('agendamento_participantes')
-              .select('*')
-              .eq('codigo_empresa', userProfile?.codigo_empresa)
-              .eq('agendamento_id', agendamentoId)
-              .order('ordem', { ascending: true })
-              .order('id', { ascending: true });
-            if (Array.isArray(data)) {
-              // Se houve um novo payments:saved depois que iniciamos este refresh, abortar atualização
-              const lastSaved = lastPaymentsSavedAtRef.current.get(agendamentoId) || 0;
-              if (lastSaved && lastSaved > startedAt) {
-                console.log('🧩 [payments:saved] Ignorando DB refresh (mais recente já aplicado)', { agendamentoId });
-                return;
-              }
-              const mapped = data.map((p) => ({
-                cliente_id: p.cliente_id,
-                nome: p.nome,
-                codigo: p.codigo ?? null,
-                valor_cota: p.valor_cota,
-                status_pagamento: p.status_pagamento || 'Pendente',
-                finalizadora_id: p.finalizadora_id ?? null,
-                aplicar_taxa: p.aplicar_taxa ?? false,
-                ordem: p.ordem,
-              }));
-              const paidDb = mapped.filter(p => String(p.status_pagamento || '').toLowerCase() === 'pago').length;
-              console.log('🧩 [payments:saved] DB refresh concluído', { agendamentoId, total: mapped.length, pagos: paidDb });
-              setParticipantsByAgendamento(prev => ({ ...prev, [agendamentoId]: mapped }));
-            }
-          } catch (err) {
-            console.warn('[payments:saved] refresh erro', err);
-          }
-        })();
       } catch {}
     };
     window.addEventListener('payments:saved', onPaymentsSaved);
@@ -3350,39 +3302,38 @@ function AgendaPage({ sidebarVisible = false }) {
           completedSaveRef.current = true;
           pendingSaveRef.current = false;
           
-          // 🔄 Atualiza caches de participantes SOMENTE quando houve mudança de participantes
-          if (__mudancaDeParticipantes) {
-            const updatedParticipants = selNow.map((c, index) => {
-              const existing = currentArray[index];
-              const shouldPreserve = existing && existing.cliente_id === c.id;
-              return {
-                cliente_id: c.id,
-                nome: c.nome,
-                codigo: c.codigo || null,
-                valor_cota: shouldPreserve ? (existing.valor_cota ?? 0) : 0,
-                status_pagamento: shouldPreserve ? (existing.status_pagamento ?? 'Pendente') : 'Pendente',
-                finalizadora_id: shouldPreserve ? (existing.finalizadora_id ?? null) : null,
-                aplicar_taxa: shouldPreserve ? (existing.aplicar_taxa ?? false) : false,
-                ordem: index + 1,
-              };
-            });
-            setParticipantsByAgendamento(prev => ({
-              ...prev,
-              [editingBooking.id]: updatedParticipants
-            }));
-            // Atualiza também o participantsForm (dados de pagamento) quando houve substituição
-            setParticipantsForm(updatedParticipants.map(p => ({
-              cliente_id: p.cliente_id,
-              nome: p.nome,
-              codigo: p.codigo,
-              valor_cota: p.valor_cota ? maskBRL(String(Number(p.valor_cota).toFixed(2))) : '',
-              status_pagamento: p.status_pagamento,
-              finalizadora_id: p.finalizadora_id ? String(p.finalizadora_id) : (payMethods?.[0]?.id ? String(payMethods[0].id) : null),
-              aplicar_taxa: p.aplicar_taxa,
-            })));
-          } else {
-            // Não tocar nos caches de pagamento; PaymentModal é a fonte de verdade e já sincroniza via payments:saved
-          }
+          // 🔄 Atualiza cache de participantes para refletir mudanças imediatamente
+          const updatedParticipants = selNow.map((c, index) => {
+            // Buscar pelo índice para preservar duplicados
+            const existing = currentArray[index];
+            const shouldPreserve = existing && existing.cliente_id === c.id;
+            
+            return {
+              cliente_id: c.id,
+              nome: c.nome,
+              codigo: c.codigo || null,
+              valor_cota: shouldPreserve ? (existing.valor_cota ?? 0) : 0,
+              status_pagamento: shouldPreserve ? (existing.status_pagamento ?? 'Pendente') : 'Pendente',
+              finalizadora_id: shouldPreserve ? (existing.finalizadora_id ?? null) : null,
+              aplicar_taxa: shouldPreserve ? (existing.aplicar_taxa ?? false) : false,
+              ordem: index + 1, // Campo ordem baseado na posição (1, 2, 3...)
+            };
+          });
+          setParticipantsByAgendamento(prev => ({
+            ...prev,
+            [editingBooking.id]: updatedParticipants
+          }));
+          
+          // Atualiza também o participantsForm (dados de pagamento) com valores preservados
+          setParticipantsForm(updatedParticipants.map(p => ({
+            cliente_id: p.cliente_id,
+            nome: p.nome,
+            codigo: p.codigo,
+            valor_cota: p.valor_cota ? maskBRL(String(Number(p.valor_cota).toFixed(2))) : '',
+            status_pagamento: p.status_pagamento,
+            finalizadora_id: p.finalizadora_id ? String(p.finalizadora_id) : (payMethods?.[0]?.id ? String(payMethods[0].id) : null),
+            aplicar_taxa: p.aplicar_taxa,
+          })));
           
           // Recarregar alertas após salvar agendamento (não bloqueia auto-save)
           loadAlerts().catch(err => {
@@ -5606,87 +5557,21 @@ function AgendaPage({ sidebarVisible = false }) {
                   variant="ghost" 
                   className="border border-white/10 flex-1 sm:flex-none" 
                   onClick={async () => {
-                    const ts = new Date().toISOString();
-                    console.log('🧨 [CLOSE-BTN] Click no Fechar', {
-                      ts,
-                      isPaymentModalOpen,
-                      editingBookingId: editingBooking?.id || null,
-                      isSavingBooking,
-                      pendingSave: pendingSaveRef.current,
-                      completedSave: completedSaveRef.current,
-                    });
-
-                    // Se PaymentModal estiver aberto, coordenar salvamento e fechamento dele antes
-                    if (isPaymentModalOpen && typeof window !== 'undefined') {
-                      console.log('🔗 [CLOSE-BTN] PaymentModal aberto - solicitando save-and-close');
-                      try {
-                        await new Promise((resolve) => {
-                          const done = () => {
-                            console.log('✅ [CLOSE-BTN] PaymentModal fechou (via coordenação)');
-                            resolve();
-                          };
-                          const timeout = setTimeout(() => {
-                            console.warn('⏱️ [CLOSE-BTN] Timeout aguardando PaymentModal fechar');
-                            resolve();
-                          }, 3000);
-                          const handler = () => { clearTimeout(timeout); window.removeEventListener('paymentmodal:closed', handler); done(); };
-                          window.addEventListener('paymentmodal:closed', handler, { once: true });
-                          window.dispatchEvent(new Event('paymentmodal:save-and-close'));
-                        });
-                      } catch (err) {
-                        console.warn('⚠️ [CLOSE-BTN] Falha na coordenação com PaymentModal:', err);
-                      }
-                    }
-
                     // 🔄 Auto-save ao fechar: SEMPRE salva antes de fechar no modo de edição
                     if (editingBooking?.id) {
-                      console.log('💾 [CLOSE-BTN] Iniciando auto-save antes de fechar');
+                      console.log('💾 [Auto-save] Salvando ao fechar modal...');
                       try {
                         // Cancela timeout pendente
                         if (autoSaveTimeoutRef.current) {
-                          console.log('🔍 [CLOSE-BTN] Cancelando debounce pendente de saveBookingOnce');
                           clearTimeout(autoSaveTimeoutRef.current);
                         }
                         await saveBookingOnce({ autoSave: true });
-                        console.log('✅ [CLOSE-BTN] Auto-save concluído (antes de fechar)');
-
-                        // Garantir atualização do chip via refresh do DB (mesmo se PaymentModal abriu/fechou)
-                        try {
-                          console.log('🔄 [CLOSE-BTN] Refresh de participantes do DB para atualizar chip');
-                          const { data } = await supabase
-                            .from('agendamento_participantes')
-                            .select('*')
-                            .eq('codigo_empresa', userProfile?.codigo_empresa)
-                            .eq('agendamento_id', editingBooking.id)
-                            .order('ordem', { ascending: true })
-                            .order('id', { ascending: true });
-                          if (Array.isArray(data)) {
-                            const mapped = data.map((p) => ({
-                              cliente_id: p.cliente_id,
-                              nome: p.nome,
-                              codigo: p.codigo ?? null,
-                              valor_cota: p.valor_cota,
-                              status_pagamento: p.status_pagamento || 'Pendente',
-                              finalizadora_id: p.finalizadora_id ?? null,
-                              aplicar_taxa: p.aplicar_taxa ?? false,
-                              ordem: p.ordem,
-                            }));
-                            const paidDb = mapped.filter(p => String(p.status_pagamento || '').toLowerCase() === 'pago').length;
-                            console.log('🔄 [CLOSE-BTN] Refresh concluído', { total: mapped.length, pagos: paidDb });
-                            setParticipantsByAgendamento(prev => ({ ...prev, [editingBooking.id]: mapped }));
-                          }
-                        } catch (err) {
-                          console.warn('⚠️ [CLOSE-BTN] Erro no refresh de participantes pós-fechamento', err);
-                        }
+                        console.log('✅ [Auto-save] Salvo ao fechar!');
                       } catch (error) {
-                        console.error('❌ [CLOSE-BTN] Erro no auto-save antes de fechar:', error);
+                        console.error('❌ [Auto-save] Erro ao salvar ao fechar:', error);
                       }
-                    } else {
-                      console.log('ℹ️ [CLOSE-BTN] Modo criação - sem auto-save de edição');
                     }
-
-                    console.log('🚪 [CLOSE-BTN] Fechando modal de agendamento agora');
-                    try { if (typeof document !== 'undefined') document.activeElement?.blur?.(); } catch {}
+                    
                     setIsModalOpen(false);
                   }}
                 >
