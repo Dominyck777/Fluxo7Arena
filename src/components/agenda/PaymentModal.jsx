@@ -683,6 +683,14 @@ export default function PaymentModal({
       console.log('✅ [SAVE-PAYMENTS] Salvamento concluído com sucesso');
       console.log('📊 [SAVE-PAYMENTS] Contagem final de pendentes:', pendingCount);
       
+      // 📊 LOG 2: Ao fechar PaymentModal (após salvar)
+      console.log('📊 [LOG 2 - FECHAR PAYMENT MODAL] Dados salvos no banco:');
+      console.log('   Total:', effectiveParticipants.length);
+      console.log('   Pendentes:', pendingCount);
+      effectiveParticipants.forEach((p, idx) => {
+        console.log(`   #${idx + 1}: ${p.nome} | Status: ${p.status_pagamento} | Valor: ${p.valor_cota}`);
+      });
+      
       // Só fecha o modal se NÃO for auto-save
       if (!autoSave) {
         console.log('🔍 [SAVE-PAYMENTS] Fechando modal de pagamentos (não é auto-save)');
@@ -798,10 +806,14 @@ export default function PaymentModal({
   // Sincronizar estado local com contexto ao abrir modal
   useEffect(() => {
     if (isPaymentModalOpen) {
+      console.log('⏱️ [PaymentModal] Modal aberto - payMethods:', payMethods?.length || 0, 'initializedRef:', initializedRef.current);
+      
       // Timeout para detectar se finalizadoras não carregam (3 segundos)
       loadingTimeoutRef.current = setTimeout(() => {
+        console.log('⏱️ [PaymentModal] Timeout de 3s acionado - initializedRef:', initializedRef.current, 'payMethods:', payMethods?.length || 0);
         if (!initializedRef.current && (!payMethods || payMethods.length === 0)) {
           // Inicializar mesmo sem finalizadoras após timeout
+          console.log('⏱️ [PaymentModal] Inicializando com timeout (sem finalizadoras)');
           
           const sourceData = (form?.selectedClients || []).map(c => {
             let codigo = c.codigo;
@@ -956,6 +968,14 @@ export default function PaymentModal({
           if (withCodes.length > 0 || !editingBooking?.id) {
             setLocalParticipantsForm(withCodes);
             initializedRef.current = Date.now();
+            
+            // 📊 LOG 1: Ao abrir PaymentModal
+            console.log('📊 [LOG 1 - ABRIR PAYMENT MODAL] Participantes carregados:');
+            console.log('   Total:', withCodes.length);
+            console.log('   Fonte:', dataSource);
+            withCodes.forEach((p, idx) => {
+              console.log(`   #${idx + 1}: ${p.nome} | Status: ${p.status_pagamento} | Valor: ${p.valor_cota}`);
+            });
           } else {
             console.error('\ud83d\udea8 BLOQUEADO: Não vou sobrescrever com array vazio!');
             console.error('\ud83d\udea8 Mantendo dados anteriores para evitar perda.');

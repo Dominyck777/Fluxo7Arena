@@ -3100,7 +3100,20 @@ function AgendaPage({ sidebarVisible = false }) {
         // ⚠️ FIX: Fazer cópia imutável de selNow para evitar mudanças posteriores
         // PaymentModal pode modificar form.selectedClients, invalidando a comparação
         const selNowSnapshot = [...selNow];
-        console.log('🔒 [FIX] selNowSnapshot criado:', selNowSnapshot.map(p => p.nome));
+        console.log('🔒 [FIX] selNowSnapshot criado:', selNowSnapshot.length, 'participantes');
+        console.log('🔒 [FIX] form.selectedClients:', form.selectedClients?.length || 0);
+        console.log('🔒 [FIX] editingBooking.id:', editingBooking?.id);
+        
+        // 📊 LOG 3: Ao fechar modal de agendamento (saveBookingOnce)
+        console.log('📊 [LOG 3 - FECHAR MODAL AGENDAMENTO] Estado ao salvar:');
+        console.log('   Participantes selecionados:', selNowSnapshot.length);
+        selNowSnapshot.forEach((p, idx) => {
+          console.log(`   #${idx + 1}: ${p.nome}`);
+        });
+        console.log('   participantsForm (contexto):', (participantsForm || []).length);
+        (participantsForm || []).forEach((p, idx) => {
+          console.log(`   #${idx + 1}: ${p.nome} | Status: ${p.status_pagamento} | Valor: ${p.valor_cota}`);
+        });
         
         // Para agendamentos existentes, reordena participantes para manter ordem original (representante primeiro)
         // MAS: Não reordena se estamos vindo do modal de pagamentos (substituição de participantes)
@@ -3110,22 +3123,24 @@ function AgendaPage({ sidebarVisible = false }) {
         let houveMudancaDeParticipantes = false; // ⚠️ FIX: Inicializar fora do if para evitar undefined
         if (editingBooking?.id) {
           // 🔧 NÃO reordenar se os nomes mudaram (indicativo de substituição no modal de pagamentos)
-          // Comparar nomes atuais com o campo 'clientes' do agendamento
+          // Comparar nomes atuais com os participantes do banco
           const nomesAtuais = selNowSnapshot.map(p => p.nome).sort().join('|');
-          let nomesOriginais = '';
           
-          if (editingBooking.clientes) {
-            try {
-              const clientes = Array.isArray(editingBooking.clientes) 
-                ? editingBooking.clientes 
-                : JSON.parse(editingBooking.clientes);
-              nomesOriginais = Array.isArray(clientes) ? clientes.sort().join('|') : '';
-            } catch {
-              nomesOriginais = '';
-            }
+          // 🔑 FIX: Usar participantes do banco em vez de editingBooking.clientes (que pode estar undefined)
+          let nomesOriginais = '';
+          const participantesDoAgendamento = participantsByAgendamento[editingBooking.id] || [];
+          if (participantesDoAgendamento.length > 0) {
+            nomesOriginais = participantesDoAgendamento.map(p => p.nome).sort().join('|');
           }
           
           houveMudancaDeParticipantes = nomesAtuais !== nomesOriginais;
+          
+          // 🔍 DEBUG: Log para entender por que houveMudancaDeParticipantes é true
+          console.log('🔍 [DEBUG] Comparação de nomes:');
+          console.log('   nomesAtuais:', nomesAtuais);
+          console.log('   nomesOriginais:', nomesOriginais);
+          console.log('   editingBooking.clientes:', editingBooking.clientes);
+          console.log('   houveMudancaDeParticipantes:', houveMudancaDeParticipantes);
           
           if (!houveMudancaDeParticipantes) {
             // Prioriza o campo 'clientes' do agendamento (salvo pela Isis) sobre os participantes carregados
@@ -3240,14 +3255,25 @@ function AgendaPage({ sidebarVisible = false }) {
           const currentArray = currentParticipants || [];
           
           // ⚠️ FIX: Usar a variável já calculada (não recalcular)
+          console.log('🔍 [SAVE-BOOKING] houveMudancaDeParticipantes:', houveMudancaDeParticipantes);
+          console.log('🔍 [SAVE-BOOKING] currentArray.length:', currentArray.length);
+          console.log('🔍 [SAVE-BOOKING] selNowFinal.length:', selNowFinal.length);
+          
           if (houveMudancaDeParticipantes) {
             // Remove e recria participantes somente quando houve mudança (substituição)
-            const { error: deleteError } = await supabase
-              .from('agendamento_participantes')
-              .delete()
-              .eq('codigo_empresa', userProfile.codigo_empresa)
-              .eq('agendamento_id', editingBooking.id);
-            if (deleteError) console.error('Erro ao deletar participantes:', deleteError);
+            // ⚠️ PROTEÇÃO: Não deletar se selNowFinal está vazio (evita perda de dados)
+            if (!selNowFinal || selNowFinal.length === 0) {
+              console.error('🚨 [SAVE-BOOKING] PROTEÇÃO ACIONADA: Não vou deletar participantes com selNowFinal vazio!');
+              console.error('🚨 [SAVE-BOOKING] Isso evita perda de dados. Verifique por que selNowFinal está vazio.');
+            } else {
+              console.log('🔄 [SAVE-BOOKING] Deletando e recriando participantes...');
+              const { error: deleteError } = await supabase
+                .from('agendamento_participantes')
+                .delete()
+                .eq('codigo_empresa', userProfile.codigo_empresa)
+                .eq('agendamento_id', editingBooking.id);
+              if (deleteError) console.error('Erro ao deletar participantes:', deleteError);
+            }
             
             if (selNowFinal && selNowFinal.length > 0) {
               const participantesRows = selNowFinal.map((c, index) => {
@@ -3365,6 +3391,13 @@ function AgendaPage({ sidebarVisible = false }) {
               aplicar_taxa: p.aplicar_taxa,
             })));
           }
+          
+          // 📊 LOG 3 FINAL: Resultado após atualizar participantsForm
+          console.log('📊 [LOG 3 - RESULTADO FINAL] participantsForm após atualização:');
+          console.log('   Total:', updatedParticipants.length);
+          updatedParticipants.forEach((p, idx) => {
+            console.log(`   #${idx + 1}: ${p.nome} | Status: ${p.status_pagamento} | Valor: ${p.valor_cota}`);
+          });
           
           // Recarregar alertas após salvar agendamento (não bloqueia auto-save)
           loadAlerts().catch(err => {
