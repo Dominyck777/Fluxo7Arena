@@ -5557,21 +5557,35 @@ function AgendaPage({ sidebarVisible = false }) {
                   variant="ghost" 
                   className="border border-white/10 flex-1 sm:flex-none" 
                   onClick={async () => {
+                    const ts = new Date().toISOString();
+                    console.log('🧨 [CLOSE-BTN] Click no Fechar', {
+                      ts,
+                      isPaymentModalOpen,
+                      editingBookingId: editingBooking?.id || null,
+                      isSavingBooking,
+                      pendingSave: pendingSaveRef.current,
+                      completedSave: completedSaveRef.current,
+                    });
+
                     // 🔄 Auto-save ao fechar: SEMPRE salva antes de fechar no modo de edição
                     if (editingBooking?.id) {
-                      console.log('💾 [Auto-save] Salvando ao fechar modal...');
+                      console.log('💾 [CLOSE-BTN] Iniciando auto-save antes de fechar');
                       try {
                         // Cancela timeout pendente
                         if (autoSaveTimeoutRef.current) {
+                          console.log('🔍 [CLOSE-BTN] Cancelando debounce pendente de saveBookingOnce');
                           clearTimeout(autoSaveTimeoutRef.current);
                         }
                         await saveBookingOnce({ autoSave: true });
-                        console.log('✅ [Auto-save] Salvo ao fechar!');
+                        console.log('✅ [CLOSE-BTN] Auto-save concluído (antes de fechar)');
                       } catch (error) {
-                        console.error('❌ [Auto-save] Erro ao salvar ao fechar:', error);
+                        console.error('❌ [CLOSE-BTN] Erro no auto-save antes de fechar:', error);
                       }
+                    } else {
+                      console.log('ℹ️ [CLOSE-BTN] Modo criação - sem auto-save de edição');
                     }
-                    
+
+                    console.log('🚪 [CLOSE-BTN] Fechando modal de agendamento agora');
                     setIsModalOpen(false);
                   }}
                 >
