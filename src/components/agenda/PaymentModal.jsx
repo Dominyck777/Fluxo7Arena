@@ -602,6 +602,7 @@ export default function PaymentModal({
             status_pagamento: novo.status_pagamento || 'Pendente',
             finalizadora_id: finId,
             aplicar_taxa: novo.aplicar_taxa || false,
+            ordem: i + 1,
           })
           .eq('id', original.id);
         
@@ -940,12 +941,56 @@ export default function PaymentModal({
             };
           });
           
+          // Reordenar para seguir a ordem dos chips (com suporte a duplicados)
+          try {
+            const chips = (form?.selectedClients || []).slice();
+            if (chips.length > 0 && withCodes.length > 0) {
+              // Buckets por cliente_id preservando múltiplas ocorrências
+              const buckets = new Map();
+              withCodes.forEach((p) => {
+                const list = buckets.get(p.cliente_id) || [];
+                list.push(p);
+                buckets.set(p.cliente_id, list);
+              });
+              const occ = new Map();
+              const reordered = [];
+              for (const c of chips) {
+                const used = occ.get(c.id) || 0;
+                const list = buckets.get(c.id) || [];
+                const pick = list[used];
+                if (pick) {
+                  reordered.push(pick);
+                  occ.set(c.id, used + 1);
+                } else {
+                  // Se não existe no banco (ex.: recém adicionado), cria entrada padrão
+                  const defaultMethod = getDefaultPayMethod();
+                  const defaultFinalizadoraId = defaultMethod?.id ? String(defaultMethod.id) : null;
+                  reordered.push({
+                    cliente_id: c.id,
+                    nome: c.nome,
+                    codigo: c.codigo ?? null,
+                    valor_cota: '0,00',
+                    status_pagamento: 'Pendente',
+                    finalizadora_id: defaultFinalizadoraId,
+                    aplicar_taxa: Number(defaultMethod?.taxa_percentual || 0) > 0,
+                  });
+                }
+              }
+              if (reordered.length === chips.length) {
+                sourceData = reordered;
+                dataSource = dataSource + ' (reordenado pelos chips)';
+              }
+            }
+          } catch (e) {
+            console.error('[PaymentModal] Falha ao reordenar por chips:', e);
+          }
+
           // ALERTA CRÍTICO: Se não encontrou participantes em nenhuma fonte
           if (withCodes.length === 0 && editingBooking?.id) {
-            console.error('\ud83d\udea8 ALERTA CRÍTICO: Nenhum participante encontrado em NENHUMA fonte!');
-            console.error('\ud83d\udea8 Agendamento ID:', editingBooking.id);
-            console.error('\ud83d\udea8 Empresa:', userProfile?.codigo_empresa);
-            console.error('\ud83d\udea8 Isso pode indicar perda de dados!');
+            console.error('🚨 ALERTA CRÍTICO: Nenhum participante encontrado em NENHUMA fonte!');
+            console.error('🚨 Agendamento ID:', editingBooking.id);
+            console.error('🚨 Empresa:', userProfile?.codigo_empresa);
+            console.error('🚨 Isso pode indicar perda de dados!');
             
             // Tentar buscar novamente com mais detalhes
             try {

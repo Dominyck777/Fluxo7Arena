@@ -3248,7 +3248,8 @@ function AgendaPage({ sidebarVisible = false }) {
             .select('*')
             .eq('codigo_empresa', userProfile.codigo_empresa)
             .eq('agendamento_id', editingBooking.id)
-            .order('ordem', { ascending: true }); // Mantém ordem de inserção original
+            .order('ordem', { ascending: true })
+            .order('id', { ascending: true }); // Critério secundário estável
           
           // ⚠️ IMPORTANTE: Não usar Map por cliente_id pois sobrescreve duplicados!
           // Usar array indexado para preservar cada participante individualmente
@@ -3873,48 +3874,47 @@ function AgendaPage({ sidebarVisible = false }) {
         );
         // Seleciona primeiro participante por padrão
         setPaymentSelectedId(selectedFromParts[0]?.id || null);
-        // Fallback: se ainda não carregou participantes, buscar direto do banco
-        if (selectedFromParts.length === 0) {
-          (async () => {
-            try {
-              const { data, error } = await supabase
-                .from('agendamento_participantes')
-                .select(`cliente_id, nome, valor_cota, status_pagamento, finalizadora_id, aplicar_taxa, cliente:clientes!agendamento_participantes_cliente_id_fkey ( nome, codigo )`)
-                .eq('codigo_empresa', userProfile.codigo_empresa)
-                .eq('agendamento_id', editingBooking.id)
-                .order('ordem', { ascending: true }); // Ordena por campo ordem explícito
-              if (!error && Array.isArray(data)) {
-                const sel = data
-                  .filter(p => p && p.cliente_id)
-                  .map(p => ({ 
-                    id: p.cliente_id, 
-                    // Priorizar nome editado (agendamento_participantes.nome) sobre nome do cadastro
-                    nome: p.nome || p.cliente?.nome || '', 
-                    codigo: p.cliente?.codigo || null 
-                  }));
-                  // Removido filtro de deduplicação para permitir clientes duplicados
-                setForm(f => ({ ...f, selectedClients: sel }));
-                setParticipantsForm(data.map(p => ({
-                  cliente_id: p.cliente_id,
+        // Buscar do banco em background para garantir dados frescos mesmo se cache estiver vazio/desatualizado
+        (async () => {
+          try {
+            const { data, error } = await supabase
+              .from('agendamento_participantes')
+              .select(`cliente_id, nome, valor_cota, status_pagamento, finalizadora_id, aplicar_taxa, cliente:clientes!agendamento_participantes_cliente_id_fkey ( nome, codigo )`)
+              .eq('codigo_empresa', userProfile.codigo_empresa)
+              .eq('agendamento_id', editingBooking.id)
+              .order('ordem', { ascending: true })
+              .order('id', { ascending: true }); // Critério secundário estável
+            if (!error && Array.isArray(data)) {
+              const sel = data
+                .filter(p => p && p.cliente_id)
+                .map(p => ({ 
+                  id: p.cliente_id, 
                   // Priorizar nome editado (agendamento_participantes.nome) sobre nome do cadastro
-                  nome: p.nome || p.cliente?.nome || '',
-                  codigo: p.cliente?.codigo || null,
-                  valor_cota: (() => {
-                    const num = Number.isFinite(Number(p.valor_cota)) ? Number(p.valor_cota) : parseBRL(p.valor_cota);
-                    return maskBRL(String((Number.isFinite(num) ? num : 0).toFixed(2)));
-                  })(),
-                  status_pagamento: p.status_pagamento || 'Pendente',
-                  finalizadora_id: p.finalizadora_id ? String(p.finalizadora_id) : null,
-                  aplicar_taxa: p.aplicar_taxa || false,
-                })));
-                setPaymentSelectedId(sel[0]?.id || null);
-              }
-            } catch (e) {
-              // eslint-disable-next-line no-console
-              console.error('Falha ao carregar participantes (fallback)', e);
+                  nome: p.nome || p.cliente?.nome || '', 
+                  codigo: p.cliente?.codigo || null 
+                }));
+              // Removido filtro de deduplicação para permitir clientes duplicados
+              setForm(f => ({ ...f, selectedClients: sel }));
+              setParticipantsForm(data.map(p => ({
+                cliente_id: p.cliente_id,
+                // Priorizar nome editado (agendamento_participantes.nome) sobre nome do cadastro
+                nome: p.nome || p.cliente?.nome || '',
+                codigo: p.cliente?.codigo || null,
+                valor_cota: (() => {
+                  const num = Number.isFinite(Number(p.valor_cota)) ? Number(p.valor_cota) : parseBRL(p.valor_cota);
+                  return maskBRL(String((Number.isFinite(num) ? num : 0).toFixed(2)));
+                })(),
+                status_pagamento: p.status_pagamento || 'Pendente',
+                finalizadora_id: p.finalizadora_id ? String(p.finalizadora_id) : null,
+                aplicar_taxa: p.aplicar_taxa || false,
+              })));
+              setPaymentSelectedId(sel[0]?.id || null);
             }
-          })();
-        }
+          } catch (e) {
+            // eslint-disable-next-line no-console
+            console.error('Falha ao carregar participantes (refresh)', e);
+          }
+        })();
         // Marca como inicializado após preencher o formulário de edição
         initializedRef.current = true;
         
@@ -3989,6 +3989,13 @@ function AgendaPage({ sidebarVisible = false }) {
       // Permitir restauração normal no modo edição
       try { clearedByUserRef.current = false; } catch {}
     }, [editingBooking, isModalOpen]);
+
+    // Sempre resetar prefill guard ao abrir o modal (mesmo agendamento)
+    useEffect(() => {
+      if (isModalOpen) {
+        try { participantsPrefillOnceRef.current = false; } catch {}
+      }
+    }, [isModalOpen]);
 
     // Prefill tardio: quando os participantes chegam após abrir o modal
     useEffect(() => {
@@ -4331,21 +4338,39 @@ function AgendaPage({ sidebarVisible = false }) {
       const base = Math.floor(totalCents / count);
       let remainder = totalCents - base * count; // número de participantes que recebem +1 centavo
       setParticipantsForm(prev => {
-        // [DEBUG-PaymentModal] silenciado
-        const map = new Map(prev.map(p => [p.cliente_id, p]));
-        const ordered = (form.selectedClients || []).slice();
-        ordered.forEach((c, idx) => {
+        // Garantir a mesma ordem dos chips, suportando duplicados do mesmo cliente_id
+        const selected = (form.selectedClients || []).slice();
+        // Índices de ocorrência por cliente_id para lidar com duplicados
+        const occPrev = new Map();
+        const occSel = new Map();
+        // Agrupar prev por cliente_id preservando ordem de aparição
+        const buckets = new Map();
+        (prev || []).forEach((p) => {
+          const list = buckets.get(p.cliente_id) || [];
+          list.push(p);
+          buckets.set(p.cliente_id, list);
+        });
+        const result = selected.map((c) => {
+          const prevCount = (occPrev.get(c.id) || 0);
+          const list = buckets.get(c.id) || [];
+          const existing = list[prevCount];
+          occPrev.set(c.id, prevCount + 1);
           const cents = base + (remainder > 0 ? 1 : 0);
           if (remainder > 0) remainder--;
           const valueStr = (cents / 100).toFixed(2);
           const masked = maskBRL(String(valueStr));
           const amount = parseBRL(masked);
-          const row = map.get(c.id) || { cliente_id: c.id, nome: c.nome, status_pagamento: 'Pendente', valor_cota: '' };
-          row.valor_cota = masked;
-          row.status_pagamento = (Number.isFinite(amount) && amount > 0) ? 'Pago' : 'Pendente';
-          map.set(c.id, row);
+          return {
+            cliente_id: c.id,
+            nome: c.nome,
+            codigo: existing?.codigo ?? c.codigo ?? null,
+            valor_cota: masked,
+            status_pagamento: (Number.isFinite(amount) && amount > 0) ? 'Pago' : 'Pendente',
+            finalizadora_id: existing?.finalizadora_id ?? null,
+            aplicar_taxa: existing?.aplicar_taxa ?? false,
+          };
         });
-        return Array.from(map.values());
+        return result;
       });
     }, [form.selectedClients, paymentTotal, setParticipantsForm]);
 
