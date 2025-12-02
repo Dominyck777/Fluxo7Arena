@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -978,6 +978,15 @@ export default function PaymentModal({
                 for (let i = usedN; i < list.length; i++) leftovers.push(list[i]);
               });
               sourceData = reordered.concat(leftovers);
+              // Promover representante (primeiro não-consumidor) para posição 0
+              try {
+                const idxRep = sourceData.findIndex(p => String(p?.nome || '').toLowerCase() !== 'cliente consumidor');
+                if (idxRep > 0) {
+                  const rep = sourceData.splice(idxRep, 1)[0];
+                  sourceData.unshift(rep);
+                  if (localStorage.getItem('debug:agenda') === '1') console.log('[REP] Promovido a representante:', rep?.nome);
+                }
+              } catch {}
               dataSource = dataSource + ' (reordenado pelos chips)';
             }
           } catch (e) {
@@ -1101,7 +1110,8 @@ export default function PaymentModal({
   }, [isPaymentModalOpen, handleParticipantChange, localParticipantsForm]);
 
   // Reaplicar ordenação para seguir os chips se a ordem dos chips mudar durante o modal aberto
-  useEffect(() => {
+  // Use layout effect para evitar flicker/hidratação inconsistente em Vercel
+  useLayoutEffect(() => {
     if (!isPaymentModalOpen) return;
     const chips = (form?.selectedClients || []).slice();
     if (chips.length === 0) return;
@@ -1146,7 +1156,17 @@ export default function PaymentModal({
       const next = reordered.concat(leftovers);
       // Só aplicar se a ordem realmente mudou (shallow check por cliente_id sequência)
       const hasChange = next.length !== localParticipantsForm.length || next.some((p, i) => p.cliente_id !== localParticipantsForm[i]?.cliente_id || p.nome !== localParticipantsForm[i]?.nome);
-      if (hasChange) setLocalParticipantsForm(next);
+      if (hasChange) {
+        try {
+          if (localStorage.getItem('debug:agenda') === '1') {
+            const chipsNames = chips.map(c => c.nome);
+            const nextNames = next.map(p => p.nome);
+            console.log('[ORDER] chipsNames:', chipsNames);
+            console.log('[ORDER] finalNames (next):', nextNames);
+          }
+        } catch {}
+        setLocalParticipantsForm(next);
+      }
     } catch (e) {
       console.error('[PaymentModal] Falha ao reordenar após mudança de chips:', e);
     }

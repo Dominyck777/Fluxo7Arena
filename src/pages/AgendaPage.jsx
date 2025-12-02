@@ -4049,16 +4049,66 @@ function AgendaPage({ sidebarVisible = false }) {
       
       const loadedParts = participantsByAgendamento[editingBooking.id] || [];
       if (!loadedParts.length) return;
-      const selectedFromParts = loadedParts
+      // Reordenar loadedParts pela ordem conhecida: chips se existirem; senão pelo campo editingBooking.clientes
+      let orderedLoaded = loadedParts.slice();
+      const chipsNow = (form?.selectedClients || []).slice();
+      if (chipsNow.length > 0) {
+        const buckets = new Map();
+        loadedParts.forEach((p) => {
+          const list = buckets.get(p.cliente_id) || [];
+          list.push(p);
+          buckets.set(p.cliente_id, list);
+        });
+        const occ = new Map();
+        const reordered = [];
+        for (const c of chipsNow) {
+          const used = occ.get(c.id) || 0;
+          const list = buckets.get(c.id) || [];
+          const pick = list[used];
+          if (pick) {
+            reordered.push(pick);
+            occ.set(c.id, used + 1);
+          }
+        }
+        if (reordered.length === chipsNow.length) orderedLoaded = reordered;
+      } else if (Array.isArray(editingBooking?.clientes) && editingBooking.clientes.length > 0) {
+        const nameBuckets = new Map();
+        loadedParts.forEach((p) => {
+          const nm = p.nome || '';
+          const list = nameBuckets.get(nm) || [];
+          list.push(p);
+          nameBuckets.set(nm, list);
+        });
+        const occ = new Map();
+        const reordered = [];
+        for (const nm of editingBooking.clientes) {
+          const used = occ.get(nm) || 0;
+          const list = nameBuckets.get(nm) || [];
+          const pick = list[used];
+          if (pick) {
+            reordered.push(pick);
+            occ.set(nm, used + 1);
+          }
+        }
+        if (reordered.length === loadedParts.length) orderedLoaded = reordered;
+      }
+
+      const selectedFromParts = orderedLoaded
         .filter(p => p && p.cliente_id)
         .map(p => ({ id: p.cliente_id, nome: p.nome, codigo: p.codigo || null }));
-        // Removido filtro de deduplicação para permitir clientes duplicados
+      // Removido filtro de deduplicação para permitir clientes duplicados
       
       // ✅ CORREÇÃO: Sempre atualiza os participantes quando o modal abre, não apenas quando está vazio
       if (selectedFromParts.length > 0) {
+        try {
+          if (localStorage.getItem('debug:agenda') === '1') {
+            console.log('[ORDER-AGENDA] chipsIdsNow:', chipsNow.map(c => c.id));
+            console.log('[ORDER-AGENDA] selectedFromPartsIds:', selectedFromParts.map(s => s.id));
+          }
+        } catch {}
         setForm(f => ({ ...f, selectedClients: selectedFromParts }));
         setParticipantsForm(
-          loadedParts.map(p => ({
+          orderedLoaded.map(p => ({
             cliente_id: p.cliente_id,
             nome: p.nome,
             codigo: p.codigo || null,
