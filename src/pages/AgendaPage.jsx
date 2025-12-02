@@ -3885,19 +3885,60 @@ function AgendaPage({ sidebarVisible = false }) {
               .order('ordem', { ascending: true })
               .order('id', { ascending: true }); // Critério secundário estável
             if (!error && Array.isArray(data)) {
-              const sel = data
+              // Reordenar pelo order dos chips, se houver, senão por booking.clientes
+              const chips = (form?.selectedClients || []).slice();
+              let ordered = data.slice();
+              if (chips.length > 0) {
+                const buckets = new Map();
+                data.forEach((p) => {
+                  const list = buckets.get(p.cliente_id) || [];
+                  list.push(p);
+                  buckets.set(p.cliente_id, list);
+                });
+                const occ = new Map();
+                const reordered = [];
+                for (const c of chips) {
+                  const used = occ.get(c.id) || 0;
+                  const list = buckets.get(c.id) || [];
+                  const pick = list[used];
+                  if (pick) {
+                    reordered.push(pick);
+                    occ.set(c.id, used + 1);
+                  }
+                }
+                if (reordered.length === chips.length) ordered = reordered;
+              } else if (Array.isArray(editingBooking?.clientes) && editingBooking.clientes.length > 0) {
+                const nameBuckets = new Map();
+                data.forEach((p) => {
+                  const nm = p.nome || p.cliente?.nome || '';
+                  const list = nameBuckets.get(nm) || [];
+                  list.push(p);
+                  nameBuckets.set(nm, list);
+                });
+                const occ = new Map();
+                const reordered = [];
+                for (const nm of editingBooking.clientes) {
+                  const used = occ.get(nm) || 0;
+                  const list = nameBuckets.get(nm) || [];
+                  const pick = list[used];
+                  if (pick) {
+                    reordered.push(pick);
+                    occ.set(nm, used + 1);
+                  }
+                }
+                if (reordered.length === data.length) ordered = reordered;
+              }
+
+              const sel = ordered
                 .filter(p => p && p.cliente_id)
                 .map(p => ({ 
                   id: p.cliente_id, 
-                  // Priorizar nome editado (agendamento_participantes.nome) sobre nome do cadastro
                   nome: p.nome || p.cliente?.nome || '', 
                   codigo: p.cliente?.codigo || null 
                 }));
-              // Removido filtro de deduplicação para permitir clientes duplicados
               setForm(f => ({ ...f, selectedClients: sel }));
-              setParticipantsForm(data.map(p => ({
+              setParticipantsForm(ordered.map(p => ({
                 cliente_id: p.cliente_id,
-                // Priorizar nome editado (agendamento_participantes.nome) sobre nome do cadastro
                 nome: p.nome || p.cliente?.nome || '',
                 codigo: p.cliente?.codigo || null,
                 valor_cota: (() => {

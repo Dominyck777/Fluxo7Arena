@@ -941,7 +941,7 @@ export default function PaymentModal({
             };
           });
           
-          // Reordenar para seguir a ordem dos chips (com suporte a duplicados)
+          // Reordenar para seguir a ordem dos chips (com suporte a duplicados) e anexar sobras
           try {
             const chips = (form?.selectedClients || []).slice();
             if (chips.length > 0 && withCodes.length > 0) {
@@ -976,10 +976,15 @@ export default function PaymentModal({
                   });
                 }
               }
-              if (reordered.length === chips.length) {
-                sourceData = reordered;
-                dataSource = dataSource + ' (reordenado pelos chips)';
-              }
+              // Anexar quaisquer sobras do banco não consumidas (por segurança)
+              const usedCounts = new Map(occ);
+              const leftovers = [];
+              buckets.forEach((list, key) => {
+                const usedN = usedCounts.get(key) || 0;
+                for (let i = usedN; i < list.length; i++) leftovers.push(list[i]);
+              });
+              sourceData = reordered.concat(leftovers);
+              dataSource = dataSource + ' (reordenado pelos chips)';
             }
           } catch (e) {
             console.error('[PaymentModal] Falha ao reordenar por chips:', e);
@@ -1091,6 +1096,58 @@ export default function PaymentModal({
       }
     };
   }, [isPaymentModalOpen, handleParticipantChange, localParticipantsForm]);
+
+  // Reaplicar ordenação para seguir os chips se a ordem dos chips mudar durante o modal aberto
+  useEffect(() => {
+    if (!isPaymentModalOpen) return;
+    const chips = (form?.selectedClients || []).slice();
+    if (chips.length === 0) return;
+    if (!localParticipantsForm || localParticipantsForm.length === 0) return;
+    try {
+      // Buckets por cliente_id preservando múltiplas ocorrências
+      const buckets = new Map();
+      localParticipantsForm.forEach((p) => {
+        const list = buckets.get(p.cliente_id) || [];
+        list.push(p);
+        buckets.set(p.cliente_id, list);
+      });
+      const occ = new Map();
+      const reordered = [];
+      for (const c of chips) {
+        const used = occ.get(c.id) || 0;
+        const list = buckets.get(c.id) || [];
+        const pick = list[used];
+        if (pick) {
+          reordered.push(pick);
+          occ.set(c.id, used + 1);
+        } else {
+          // Se o chip não tem correspondente ainda, cria placeholder neutro
+          reordered.push({
+            cliente_id: c.id,
+            nome: c.nome,
+            codigo: c.codigo ?? null,
+            valor_cota: '0,00',
+            status_pagamento: 'Pendente',
+            finalizadora_id: getDefaultPayMethod()?.id ? String(getDefaultPayMethod().id) : null,
+            aplicar_taxa: Number(getDefaultPayMethod()?.taxa_percentual || 0) > 0,
+          });
+        }
+      }
+      // Anexar sobras não consumidas (por segurança)
+      const usedCounts = new Map(occ);
+      const leftovers = [];
+      buckets.forEach((list, key) => {
+        const usedN = usedCounts.get(key) || 0;
+        for (let i = usedN; i < list.length; i++) leftovers.push(list[i]);
+      });
+      const next = reordered.concat(leftovers);
+      // Só aplicar se a ordem realmente mudou (shallow check por cliente_id sequência)
+      const hasChange = next.length !== localParticipantsForm.length || next.some((p, i) => p.cliente_id !== localParticipantsForm[i]?.cliente_id || p.nome !== localParticipantsForm[i]?.nome);
+      if (hasChange) setLocalParticipantsForm(next);
+    } catch (e) {
+      console.error('[PaymentModal] Falha ao reordenar após mudança de chips:', e);
+    }
+  }, [isPaymentModalOpen, form?.selectedClients]);
   
   // Limpar seleções quando o modal de adicionar participante fecha
   useEffect(() => {
