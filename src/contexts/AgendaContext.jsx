@@ -83,18 +83,18 @@ export const AgendaProvider = ({ children }) => {
     
     if (modalProtectionRef.current.isProtected && now < modalProtectionRef.current.protectedUntil) {
       const remainingMs = modalProtectionRef.current.protectedUntil - now;
-      console.log(`🛡️ [PaymentModal] Fechamento bloqueado por proteção (${remainingMs}ms restantes)`);
+      try { if (localStorage.getItem('debug:agenda') === '1') console.log(`🛡️ [PaymentModal] Fechamento bloqueado por proteção (${remainingMs}ms restantes)`); } catch {}
       return false;
     }
     
     // Bloquear fechamento se aconteceu logo após mudança de visibilidade (500ms)
     const timeSinceVisibilityChange = Date.now() - lastVisibilityChangeRef.current;
     if (timeSinceVisibilityChange < 500) {
-      console.log('🛡️ [PaymentModal] Fechamento bloqueado por mudança de visibilidade recente');
+      try { if (localStorage.getItem('debug:agenda') === '1') console.log('🛡️ [PaymentModal] Fechamento bloqueado por mudança de visibilidade recente'); } catch {}
       return false;
     }
     
-    console.log('✅ [PaymentModal] Fechando modal (não protegido)');
+    try { if (localStorage.getItem('debug:agenda') === '1') console.log('✅ [PaymentModal] Fechando modal (não protegido)'); } catch {}
     setIsPaymentModalOpen(false);
     return true;
   }, []);
@@ -125,16 +125,20 @@ export const AgendaProvider = ({ children }) => {
     const handleVisibilityChange = () => {
       const newTime = Date.now();
       const wasHidden = document.hidden;
-      console.log('👁️ [AgendaContext] visibilitychange:', {
-        hidden: wasHidden,
-        timestamp: new Date().toISOString(),
-        isPaymentModalOpen: isPaymentModalOpen
-      });
+      try {
+        if (localStorage.getItem('debug:agenda') === '1') {
+          console.log('👁️ [AgendaContext] visibilitychange:', {
+            hidden: wasHidden,
+            timestamp: new Date().toISOString(),
+            isPaymentModalOpen: isPaymentModalOpen
+          });
+        }
+      } catch {}
       lastVisibilityChangeRef.current = newTime;
       
       // 🛡️ Se a aba voltou a ficar visível E o modal de pagamentos está aberto, proteger por 3s
       if (!wasHidden && isPaymentModalOpen) {
-        console.log('🛡️ [AgendaContext] Aba restaurada com modal aberto - protegendo por 3s');
+        try { if (localStorage.getItem('debug:agenda') === '1') console.log('🛡️ [AgendaContext] Aba restaurada com modal aberto - protegendo por 3s'); } catch {}
         const newProtectionUntil = Date.now() + 3000;
         modalProtectionRef.current.isProtected = true;
         modalProtectionRef.current.protectedUntil = newProtectionUntil;
@@ -143,15 +147,19 @@ export const AgendaProvider = ({ children }) => {
     
     const handleFocus = () => {
       const newTime = Date.now();
-      console.log('🎯 [AgendaContext] window focus:', {
-        timestamp: new Date().toISOString(),
-        isPaymentModalOpen: isPaymentModalOpen
-      });
+      try {
+        if (localStorage.getItem('debug:agenda') === '1') {
+          console.log('🎯 [AgendaContext] window focus:', {
+            timestamp: new Date().toISOString(),
+            isPaymentModalOpen: isPaymentModalOpen
+          });
+        }
+      } catch {}
       lastVisibilityChangeRef.current = newTime;
       
       // 🛡️ Se a janela ganhou foco E o modal de pagamentos está aberto, proteger por 3s
       if (isPaymentModalOpen) {
-        console.log('🛡️ [AgendaContext] Janela ganhou foco com modal aberto - protegendo por 3s');
+        try { if (localStorage.getItem('debug:agenda') === '1') console.log('🛡️ [AgendaContext] Janela ganhou foco com modal aberto - protegendo por 3s'); } catch {}
         const newProtectionUntil = Date.now() + 3000;
         modalProtectionRef.current.isProtected = true;
         modalProtectionRef.current.protectedUntil = newProtectionUntil;

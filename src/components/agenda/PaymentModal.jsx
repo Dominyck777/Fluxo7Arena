@@ -509,11 +509,7 @@ export default function PaymentModal({
       const agendamentoId = editingBooking?.id;
       const codigo = userProfile?.codigo_empresa;
       
-      console.log('🔍 [SAVE-PAYMENTS] Iniciando salvamento', {
-        autoSave,
-        agendamentoId,
-        timestamp: new Date().toISOString()
-      });
+      try { if (localStorage.getItem('debug:agenda') === '1') console.log('🔍 [SAVE-PAYMENTS] Iniciando salvamento', { autoSave, agendamentoId, timestamp: new Date().toISOString() }); } catch {}
       
       if (!agendamentoId || !codigo) {
         toast({ 
@@ -533,22 +529,19 @@ export default function PaymentModal({
         return acc + (st !== 'Pago' ? 1 : 0);
       }, 0);
       
-      console.log('🔍 [SAVE-PAYMENTS] Dados a salvar:', {
-        totalParticipantes: effectiveParticipants.length,
-        pendentes: pendingCount,
-        participantes: effectiveParticipants.map((p, i) => ({
-          index: i,
-          nome: p.nome,
-          status: p.status_pagamento,
-          valor: p.valor_cota
-        }))
-      });
+      try {
+        if (localStorage.getItem('debug:agenda') === '1') {
+          console.log('🔍 [SAVE-PAYMENTS] Dados a salvar:', {
+            totalParticipantes: effectiveParticipants.length,
+            pendentes: pendingCount,
+          });
+          console.log('[ORDER-SAVE] savingIds:', effectiveParticipants.map(p => p.cliente_id));
+        }
+      } catch {}
       
       // 🔧 SUBSTITUIÇÃO INTELIGENTE: Manter posição original, apenas trocar dados
       const saveTimestamp = new Date().toISOString();
-      console.log(`\n\n========== SALVAMENTO INICIADO ${saveTimestamp} ==========`);
-      console.log(`📝 effectiveParticipants: ${effectiveParticipants.length}`);
-      console.log(`📝 paymentHiddenIndexes: ${paymentHiddenIndexes}`);
+      try { if (localStorage.getItem('debug:agenda') === '1') console.log(`\n\n========== SALVAMENTO INICIADO ${saveTimestamp} ==========`); } catch {}
       
       // Buscar participantes originais do banco para comparar
       const { data: originalParticipants, error: fetchErr } = await supabase
@@ -564,10 +557,12 @@ export default function PaymentModal({
         throw fetchErr;
       }
       
-      console.log(`📋 Participantes originais no banco: ${originalParticipants?.length || 0}`);
-      originalParticipants?.forEach((p, i) => {
-        console.log(`  #${i + 1}: ${p.nome} (ID: ${p.id})`);
-      });
+      try {
+        if (localStorage.getItem('debug:agenda') === '1') {
+          console.log(`📋 Participantes originais no banco: ${originalParticipants?.length || 0}`);
+          console.log('[ORDER-SAVE] originalIds:', (originalParticipants || []).map(p => p.cliente_id));
+        }
+      } catch {}
       
       effectiveParticipants.forEach((p, i) => {
         console.log(`  #${i + 1} (novo): ${p.nome}`);
@@ -681,8 +676,7 @@ export default function PaymentModal({
         console.error('[PaymentModal] Erro ao recarregar alertas:', err);
       });
       
-      console.log('✅ [SAVE-PAYMENTS] Salvamento concluído com sucesso');
-      console.log('📊 [SAVE-PAYMENTS] Contagem final de pendentes:', pendingCount);
+      try { if (localStorage.getItem('debug:agenda') === '1') { console.log('✅ [SAVE-PAYMENTS] Salvamento concluído com sucesso'); console.log('📊 [SAVE-PAYMENTS] Contagem final de pendentes:', pendingCount); } } catch {}
       
       // 📊 LOG 2: Ao fechar PaymentModal (após salvar)
       console.log('📊 [LOG 2 - FECHAR PAYMENT MODAL] Dados salvos no banco:');
@@ -807,14 +801,14 @@ export default function PaymentModal({
   // Sincronizar estado local com contexto ao abrir modal
   useEffect(() => {
     if (isPaymentModalOpen) {
-      console.log('⏱️ [PaymentModal] Modal aberto - payMethods:', payMethods?.length || 0, 'initializedRef:', initializedRef.current);
+      try { if (localStorage.getItem('debug:agenda') === '1') console.log('⏱️ [PaymentModal] Modal aberto - payMethods:', payMethods?.length || 0, 'initializedRef:', initializedRef.current); } catch {}
       
       // Timeout para detectar se finalizadoras não carregam (3 segundos)
       loadingTimeoutRef.current = setTimeout(() => {
-        console.log('⏱️ [PaymentModal] Timeout de 3s acionado - initializedRef:', initializedRef.current, 'payMethods:', payMethods?.length || 0);
+        try { if (localStorage.getItem('debug:agenda') === '1') console.log('⏱️ [PaymentModal] Timeout de 3s acionado - initializedRef:', initializedRef.current, 'payMethods:', payMethods?.length || 0); } catch {}
         if (!initializedRef.current && (!payMethods || payMethods.length === 0)) {
           // Inicializar mesmo sem finalizadoras após timeout
-          console.log('⏱️ [PaymentModal] Inicializando com timeout (sem finalizadoras)');
+          try { if (localStorage.getItem('debug:agenda') === '1') console.log('⏱️ [PaymentModal] Inicializando com timeout (sem finalizadoras)'); } catch {}
           
           const sourceData = (form?.selectedClients || []).map(c => {
             let codigo = c.codigo;
@@ -1020,12 +1014,21 @@ export default function PaymentModal({
             initializedRef.current = Date.now();
             
             // 📊 LOG 1: Ao abrir PaymentModal
-            console.log('📊 [LOG 1 - ABRIR PAYMENT MODAL] Participantes carregados:');
-            console.log('   Total:', withCodes.length);
-            console.log('   Fonte:', dataSource);
-            withCodes.forEach((p, idx) => {
-              console.log(`   #${idx + 1}: ${p.nome} | Status: ${p.status_pagamento} | Valor: ${p.valor_cota}`);
-            });
+            try {
+              if (localStorage.getItem('debug:agenda') === '1') {
+                console.log('📊 [LOG 1 - ABRIR PAYMENT MODAL] Participantes carregados:');
+                console.log('   Total:', withCodes.length);
+                console.log('   Fonte:', dataSource);
+                withCodes.forEach((p, idx) => {
+                  console.log(`   #${idx + 1}: ${p.nome} | Status: ${p.status_pagamento} | Valor: ${p.valor_cota}`);
+                });
+                // 👇 Diagnóstico de ordem
+                const chips = (form?.selectedClients || []).map(c => c.id);
+                const finalIds = withCodes.map(p => p.cliente_id);
+                console.log('[ORDER] chipsIds:', chips);
+                console.log('[ORDER] finalIds:', finalIds);
+              }
+            } catch {}
           } else {
             console.error('\ud83d\udea8 BLOQUEADO: Não vou sobrescrever com array vazio!');
             console.error('\ud83d\udea8 Mantendo dados anteriores para evitar perda.');
