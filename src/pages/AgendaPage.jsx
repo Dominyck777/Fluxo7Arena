@@ -3929,6 +3929,15 @@ function AgendaPage({ sidebarVisible = false }) {
                 if (reordered.length === data.length) ordered = reordered;
               }
 
+              // Promover representante (primeiro não-consumidor) para posição 0
+              try {
+                const idxRep = ordered.findIndex(p => String(p?.nome || '').toLowerCase() !== 'cliente consumidor');
+                if (idxRep > 0) {
+                  const rep = ordered.splice(idxRep, 1)[0];
+                  ordered.unshift(rep);
+                }
+              } catch {}
+
               const sel = ordered
                 .filter(p => p && p.cliente_id)
                 .map(p => ({ 
@@ -4092,6 +4101,15 @@ function AgendaPage({ sidebarVisible = false }) {
         }
         if (reordered.length === loadedParts.length) orderedLoaded = reordered;
       }
+
+      // Promover representante (primeiro não-consumidor) para posição 0
+      try {
+        const idxRep = orderedLoaded.findIndex(p => String(p?.nome || '').toLowerCase() !== 'cliente consumidor');
+        if (idxRep > 0) {
+          const rep = orderedLoaded.splice(idxRep, 1)[0];
+          orderedLoaded.unshift(rep);
+        }
+      } catch {}
 
       const selectedFromParts = orderedLoaded
         .filter(p => p && p.cliente_id)

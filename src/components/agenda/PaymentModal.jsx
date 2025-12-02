@@ -914,7 +914,7 @@ export default function PaymentModal({
           }
           
           // Atualizar códigos faltantes e garantir finalizadora padrão
-          const withCodes = sourceData.map(p => {
+          let withCodes = sourceData.map(p => {
             let codigo = p.codigo;
             if ((codigo === null || codigo === undefined) && localCustomers && Array.isArray(localCustomers)) {
               const clienteCompleto = localCustomers.find(lc => lc.id === p.cliente_id);
@@ -992,6 +992,20 @@ export default function PaymentModal({
           } catch (e) {
             console.error('[PaymentModal] Falha ao reordenar por chips:', e);
           }
+
+          // Após reordenar/promover, recalcular withCodes para refletir a nova ordem
+          withCodes = sourceData.map(p => {
+            let codigo = p.codigo;
+            if ((codigo === null || codigo === undefined) && localCustomers && Array.isArray(localCustomers)) {
+              const clienteCompleto = localCustomers.find(lc => lc.id === p.cliente_id);
+              codigo = clienteCompleto?.codigo !== null && clienteCompleto?.codigo !== undefined ? clienteCompleto.codigo : null;
+            }
+            return { 
+              ...p, 
+              codigo: (codigo !== null && codigo !== undefined) ? codigo : p.codigo,
+              finalizadora_id: p.finalizadora_id || (() => { const dm = getDefaultPayMethod(); return dm?.id ? String(dm.id) : null; })()
+            };
+          });
 
           // ALERTA CRÍTICO: Se não encontrou participantes em nenhuma fonte
           if (withCodes.length === 0 && editingBooking?.id) {
