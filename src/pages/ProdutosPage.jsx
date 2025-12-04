@@ -15,7 +15,7 @@ import { Calendar } from "@/components/ui/calendar";
 import { format, parseISO } from "date-fns";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Checkbox } from '@/components/ui/checkbox';
-import { listProductsPaged, listProducts, createProduct, updateProduct, deleteProduct, listCategories, createCategory, removeCategory, getMostSoldProductsToday, getSoldProductsByPeriod, adjustProductStock, bulkUpdateProductStatus, bulkClearNewFlag } from '@/lib/products';
+import { listProductsPaged, listProducts, createProduct, updateProduct, deleteProduct, listCategories, createCategory, removeCategory, getMostSoldProductsToday, getSoldProductsByPeriod, adjustProductStock, bulkUpdateProductStatus, bulkClearNewFlag, getNextProductCode } from '@/lib/products';
 import { getUserUISettings, saveUserUISettings } from '@/lib/userSettings';
 import { useAuth } from '@/contexts/AuthContext';
 import XMLImportModal from '@/components/XMLImportModal';
@@ -1415,6 +1415,7 @@ function ProdutosPage() {
     const [products, setProducts] = useState(initialProducts);
     const [categories, setCategories] = useState(initialCategories);
     const [selectedProductIds, setSelectedProductIds] = useState([]);
+    const [suggestedCode, setSuggestedCode] = useState('');
 
     const [viewMode, setViewMode] = useState('list');
     const [showStats, setShowStats] = useState(true);
@@ -1807,8 +1808,21 @@ function ProdutosPage() {
 
     // Import removido nesta versão
 
-    const handleAddNew = () => {
+    const handleAddNew = async () => {
       setSelectedProduct(null);
+      // Buscar código sugerido no backend (menor código livre), mas não bloquear abertura se falhar
+      const codigoEmpresa = userProfile?.codigo_empresa || null;
+      let initialCode = '';
+      if (codigoEmpresa) {
+        try {
+          initialCode = await getNextProductCode({ codigoEmpresa });
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.error('[Produtos] handleAddNew: falha ao obter próximo código', err);
+        }
+      }
+      // Abre o formulário; ProductFormModal vai usar suggestedCode como placeholder/valor inicial
+      setSuggestedCode(initialCode || '');
       setIsFormOpen(true);
     };
 
@@ -1968,16 +1982,17 @@ function ProdutosPage() {
           console.warn('[Produtos] handleSaveProduct chamado sem payload válido. Ignorando.');
           return;
         }
-        // Geração automática de código se vazio: próximo sequencial de 4 dígitos
-        if (!payload.code) {
-          const numericCodes = products
-            .map(p => (p.code || '').trim())
-            .filter(c => /^\d+$/.test(c))
-            .map(c => parseInt(c, 10));
-          const next = (numericCodes.length ? Math.max(...numericCodes) + 1 : 1);
-          payload.code = String(next).padStart(4, '0');
-        }
         const codigoEmpresa = userProfile?.codigo_empresa || null;
+        // Geração automática de código se vazio: usa backend para encontrar o menor código livre
+        if (!payload.code && codigoEmpresa) {
+          try {
+            const nextCode = await getNextProductCode({ codigoEmpresa });
+            payload.code = nextCode;
+          } catch (err) {
+            // eslint-disable-next-line no-console
+            console.error('[Produtos] Falha ao obter próximo código automático', err);
+          }
+        }
         // Aplica um timeout curto só na gravação; refetch roda em background
         const withLocalTimeout = async (p) => {
           const timeoutMs = 12000;
@@ -1994,6 +2009,10 @@ function ProdutosPage() {
           await refetchProducts();
           console.log('[Produtos] Refetch concluído após update');
         } else {
+          // Produto criado manualmente: marcar como "novo" usando dataImportacao
+          if (!payload.dataImportacao) {
+            payload.dataImportacao = new Date();
+          }
           const created = await withLocalTimeout(createProduct(payload, { codigoEmpresa }));
           // eslint-disable-next-line no-console
           console.log('[Produtos] Produto criado', created);
@@ -2039,15 +2058,7 @@ function ProdutosPage() {
       }
     };
 
-    // Código sugerido automático para novo produto (4 dígitos)
-    const suggestedCode = useMemo(() => {
-      const numericCodes = products
-        .map(p => (p.code || '').trim())
-        .filter(c => /^\d+$/.test(c))
-        .map(c => parseInt(c, 10));
-      const next = (numericCodes.length ? Math.max(...numericCodes) + 1 : 1);
-      return String(next).padStart(4, '0');
-    }, [products]);
+    // Código sugerido para novo produto vem do backend (getNextProductCode), armazenado em estado local
 
     return (
       <>
