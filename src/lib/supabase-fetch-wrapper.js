@@ -5,13 +5,23 @@
  * para contornar bugs de minificação no Netlify/Vercel
  */
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
-const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY
+const SUPABASE_URL_ENV = import.meta.env.VITE_SUPABASE_URL
+const SUPABASE_ANON_KEY_ENV = import.meta.env.VITE_SUPABASE_ANON_KEY
+
+function getActiveSupabaseUrl() {
+  try { if (typeof window !== 'undefined' && window.__SUPABASE_URL) return window.__SUPABASE_URL } catch {}
+  return SUPABASE_URL_ENV
+}
+
+function getActiveAnonKey() {
+  try { if (typeof window !== 'undefined' && window.__SUPABASE_KEY) return window.__SUPABASE_KEY } catch {}
+  return SUPABASE_ANON_KEY_ENV
+}
 
 // Descobre o ref do projeto a partir do SUPABASE_URL (ex: https://<ref>.supabase.co)
 function getProjectRef() {
   try {
-    const u = new URL(SUPABASE_URL)
+    const u = new URL(getActiveSupabaseUrl())
     const host = u.host || ''
     const parts = host.split('.')
     // Geralmente o primeiro subdomínio é o ref do projeto
@@ -29,6 +39,13 @@ function getAuthStorageKey() {
 
 // Obtém o access_token do usuário autenticado com timeout
 async function getAccessToken() {
+  // 0) Custom JWT from localStorage (DEV custom auth)
+  try {
+    const custom = localStorage.getItem('custom-auth-token')
+    if (custom && custom.trim()) {
+      return custom.trim()
+    }
+  } catch {}
   // 1) Tenta via auth.getSession() com timeout de 1s
   try {
     // eslint-disable-next-line no-undef
@@ -91,11 +108,13 @@ const supabaseFetch = async (endpoint, options = {}) => {
   const { method = 'GET', body, headers: customHeaders = {}, params = {}, signal, timeoutMs = 20000 } = options
   
   const queryString = buildQueryString(params)
-  const url = `${SUPABASE_URL}/rest/v1/${endpoint}${queryString ? `?${queryString}` : ''}`
+  const base = getActiveSupabaseUrl()
+  const url = `${base}/rest/v1/${endpoint}${queryString ? `?${queryString}` : ''}`
+  const anonKey = getActiveAnonKey()
   
   const headers = {
-    'apikey': SUPABASE_ANON_KEY,
-    'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+    'apikey': anonKey,
+    'Authorization': `Bearer ${anonKey}`,
     'Content-Type': 'application/json',
     'Prefer': 'return=representation',
     ...customHeaders,
@@ -427,8 +446,8 @@ export const supabaseWrapper = {
   auth: null, // Será preenchido pelo client original
   
   // Para compatibilidade
-  supabaseUrl: SUPABASE_URL,
-  supabaseKey: SUPABASE_ANON_KEY,
+  supabaseUrl: getActiveSupabaseUrl(),
+  supabaseKey: getActiveAnonKey(),
 }
 
 // Teste automático (silenciado)

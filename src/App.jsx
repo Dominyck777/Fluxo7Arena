@@ -28,6 +28,7 @@ import HistoricoComandasPage from '@/pages/HistoricoComandasPage';
 import PrintComandaPage from '@/pages/PrintComandaPage';
 import CreateCompanyPage from '@/pages/CreateCompanyPage';
 import IsisBookingPage from '@/pages/IsisBookingPage';
+import MaintenancePage from '@/pages/MaintenancePage';
 import { Helmet } from 'react-helmet';
 
 function PrivateApp() {
@@ -130,12 +131,31 @@ function PrivateApp() {
 }
 
 function App() {
+  const maintenanceActive = String(import.meta.env.VITE_MAINTENANCE_MODE || '').toLowerCase() === 'true';
+  const [bypassed, setBypassed] = useState(false);
+
+  useEffect(() => {
+    try { setBypassed(localStorage.getItem('maintenance:bypass') === '1'); } catch {}
+  }, []);
+
+  if (maintenanceActive && !bypassed) {
+    return (
+      <Routes>
+        <Route path="/maintenance" element={<MaintenancePage />} />
+        <Route path="*" element={<Navigate to="/maintenance" replace />} />
+      </Routes>
+    );
+  }
+
   return (
     <Routes>
       {/* Rotas públicas */}
       <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="/40028922" element={<CreateCompanyPage />} />
       <Route path="/agendar/:nomeFantasia" element={<IsisBookingPage />} />
+      
+      {/* Opcional: manter rota de manutenção acessível mesmo quando inativo */}
+      <Route path="/maintenance" element={<MaintenancePage />} />
       
       {/* Rota de impressão sem layout */}
       <Route path="/print-comanda" element={

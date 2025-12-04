@@ -45,6 +45,10 @@ function Header({ onToggleSidebar, sidebarVisible, sidebarPinned }) {
 
   // Balão de alertas removido - funcionalidade desabilitada
 
+  const isDevTarget = React.useMemo(() => {
+    try { return typeof window !== 'undefined' && String(window.__ACTIVE_TARGET || '').toLowerCase() === 'dev'; } catch { return false; }
+  }, []);
+
   const getIcon = (iconName) => {
     const icons = {
       Package, DollarSign, CalendarCheck, Clock, ShoppingCart, Store, Users, CalendarPlus, AlertTriangle, Info
@@ -175,6 +179,11 @@ function Header({ onToggleSidebar, sidebarVisible, sidebarPinned }) {
           <span className="tracking-tight max-w-[240px] md:max-w-[320px] truncate leading-[44px] text-base text-text-primary font-semibold">
             {companyName}
           </span>
+          {isDevTarget && (
+            <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider bg-red-600 text-white shadow animate-pulse">
+              Dev
+            </span>
+          )}
         </div>
         {/* Data removida conforme solicitado */}
       </div>

@@ -121,9 +121,20 @@ const LoginPage = () => {
     }
   };
 
+  const isDevTarget = (() => {
+    try { return typeof window !== 'undefined' && String(window.__ACTIVE_TARGET || '').toLowerCase() === 'dev'; } catch { return false; }
+  })();
+
   return (
     <>
-      <div className="min-h-screen bg-background flex items-center justify-center p-4 sm:p-6">
+      <div className="min-h-screen bg-background flex items-center justify-center p-4 sm:p-6 relative">
+        {isDevTarget && (
+          <div className="pointer-events-none select-none absolute top-4 right-4 z-20">
+            <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-extrabold uppercase tracking-wider bg-red-600 text-white shadow animate-pulse">
+              Dev
+            </span>
+          </div>
+        )}
         <div className="absolute inset-0 bg-court-pattern opacity-[0.02] mix-blend-overlay"></div>
         
         <motion.div

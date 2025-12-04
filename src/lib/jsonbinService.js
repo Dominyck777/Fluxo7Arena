@@ -8,12 +8,6 @@ const JSONBIN_BIN_ID = '690605e5ae596e708f3c7bc5';
 const JSONBIN_API_KEY = '$2a$10$/XmOGvx8./SZzV3qMzQ5i.6FjBjS4toNbeaEFzX2D8QPUddyM6VR2';
 const JSONBIN_BASE_URL = 'https://api.jsonbin.io/v3';
 
-// Debug das variáveis de ambiente (apenas em desenvolvimento)
-if (import.meta.env.DEV) {
-  console.log('[JSONBin] BIN_ID:', JSONBIN_BIN_ID);
-  console.log('[JSONBin] API_KEY presente:', !!JSONBIN_API_KEY);
-  console.log('[JSONBin] API_KEY length:', JSONBIN_API_KEY?.length);
-}
 
 /**
  * Busca dados do bin

@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
-import { supabase } from '@/lib/supabase';
+import { supabase, SUPABASE_URL_CURRENT, SUPABASE_ANON_KEY_CURRENT } from '@/lib/supabase';
 
 const AuthContext = createContext({});
 
@@ -19,6 +19,9 @@ export const AuthProvider = ({ children }) => {
   const [authReady, setAuthReady] = useState(false);
   const lastLoadedUserIdRef = useRef(null);
   const loadingProfileRef = useRef(false);
+  const isDevTarget = (() => {
+    try { return typeof window !== 'undefined' && String(window.__ACTIVE_TARGET || '').toLowerCase() === 'dev'; } catch { return false; }
+  })();
 
   useEffect(() => {
     // 0) Checagem de logout forçado para evitar re-login imediato pós redirect
@@ -55,22 +58,38 @@ export const AuthProvider = ({ children }) => {
       console.warn('AuthContext: falha ao hidratar cache local:', e);
     }
 
-    // 2) Verificar sessão atual
+    // 2) Verificar sessão atual (custom DEV auth ou Supabase Auth)
     const getSession = async () => {
       try {
-        const { data: { session }, error } = await supabase.auth.getSession();
-        if (error) {
-          console.error('supabase.auth.getSession error:', error);
+        // 2.1) Custom token (DEV): se existir, prioriza
+        if (isDevTarget) {
+          try {
+            const raw = localStorage.getItem('custom-auth-token');
+            if (raw && raw.trim()) {
+              // Decodificar payload (JWT base64url)
+              const payload = JSON.parse(atob(raw.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+              const uid = payload?.sub || null;
+              if (uid) {
+                setUser({ id: uid });
+                setAuthReady(true);
+                await loadUserProfile(uid);
+                lastLoadedUserIdRef.current = uid;
+                setLoading(false);
+                return;
+              }
+            }
+          } catch {}
         }
+
+        // 2.2) Fluxo padrão Supabase Auth
+        const { data: { session }, error } = await supabase.auth.getSession();
+        if (error) { console.error('supabase.auth.getSession error:', error); }
         if (session?.user) {
           setUser(session.user);
-          // Libera authReady imediatamente para evitar travar a UI no reload;
-          // o carregamento de perfil/empresa acontece em background.
           setAuthReady(true);
           await loadUserProfile(session.user.id);
           lastLoadedUserIdRef.current = session.user.id;
         } else {
-          // Sem sessão: liberar imediatamente a UI pública
           setAuthReady(true);
         }
       } catch (e) {
@@ -102,12 +121,16 @@ export const AuthProvider = ({ children }) => {
           return;
         }
 
+        // Em DEV com custom auth, o onAuthStateChange pode ser irrelevante.
+        if (isDevTarget) {
+          setAuthReady(true);
+          setLoading(false);
+          return;
+        }
         const nextUser = session?.user || null;
         setUser(nextUser);
         setAuthReady(true);
-
         if (nextUser?.id) {
-          // Evita múltiplas cargas concorrentes; o próprio loadUserProfile tem single-flight
           await loadUserProfile(nextUser.id);
           lastLoadedUserIdRef.current = nextUser.id;
           setLoading(false);
@@ -481,12 +504,42 @@ export const AuthProvider = ({ children }) => {
 
   const signIn = async (email, password) => {
     try {
-      // Fazer login
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
+      if (isDevTarget) {
+        // Custom DEV auth via PostgREST RPC (auth_login_dev) usando fetch direto com apikey/Authorization
+        const baseUrl = SUPABASE_URL_CURRENT
+        const anonKey = SUPABASE_ANON_KEY_CURRENT
 
+        const resp = await fetch(`${baseUrl}/rest/v1/rpc/auth_login_dev`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'apikey': anonKey,
+            'Authorization': `Bearer ${anonKey}`,
+          },
+          body: JSON.stringify({ p_email: email, p_password: password })
+        })
+        if (!resp.ok) {
+          const txt = await resp.text().catch(() => '')
+          let message = 'Não foi possível entrar. Tente novamente.'
+          if (resp.status === 401) message = 'Email ou senha inválidos.'
+          if (resp.status === 423) message = 'Usuário bloqueado temporariamente.'
+          return { data: null, error: new Error(message + (txt ? ` (${txt})` : '')) }
+        }
+        const rpcData = await resp.json()
+        const access = rpcData?.access_token || ''
+        const uid = (() => { try { return JSON.parse(atob(access.split('.')[1].replace(/-/g,'+').replace(/_/g,'/'))).sub } catch { return null } })();
+        try { localStorage.setItem('custom-auth-token', access) } catch {}
+        if (uid) {
+          setUser({ id: uid });
+          setAuthReady(true);
+          await loadUserProfile(uid);
+          lastLoadedUserIdRef.current = uid;
+        }
+        return { data: { user: uid ? { id: uid } : null }, error: null };
+      }
+
+      // Fluxo padrão (MAIN)
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) {
         let message = 'Não foi possível entrar. Tente novamente.';
         const raw = (error.message || '').toLowerCase();
@@ -502,16 +555,9 @@ export const AuthProvider = ({ children }) => {
         }
         return { data: null, error: new Error(message) };
       }
-
-      // Verificar se usuário tem cadastro em 'colaboradores'. Se não tiver, apenas segue; criação agora ocorre via fluxo de cadastro de funcionário.
       if (data.user) {
-        await supabase
-          .from('colaboradores')
-          .select('id')
-          .eq('id', data.user.id)
-          .single();
+        await supabase.from('colaboradores').select('id').eq('id', data.user.id).single();
       }
-
       return { data, error: null };
     } catch (error) {
       return { data: null, error };
@@ -519,7 +565,9 @@ export const AuthProvider = ({ children }) => {
   }
 
   const signOut = async () => {
-    // Solicitar signOut global e aguardar brevemente para propagar aos outros contextos/abas
+    // DEV custom auth: limpar token custom
+    try { localStorage.removeItem('custom-auth-token'); } catch {}
+    // Solicitar signOut global (Main) e aguardar brevemente
     try {
       const signOutPromise = supabase.auth.signOut({ scope: 'global' });
       const shortTimeout = new Promise((resolve) => setTimeout(resolve, 700));
@@ -527,6 +575,7 @@ export const AuthProvider = ({ children }) => {
     } catch (e) {
       console.warn('[AuthContext] signOut(): error during signOut', e?.message || e);
     }
+
     // Limpar estado em memória imediatamente
     lastLoadedUserIdRef.current = null;
     setUser(null);
