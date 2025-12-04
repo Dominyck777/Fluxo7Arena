@@ -2,9 +2,9 @@ import React, { useMemo, useState } from 'react';
 import { Ban, Clock, Calendar, ShieldAlert, Sparkles } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import IsisAvatar from '@/components/isis/IsisAvatar';
+import { IsisAvatar } from '@/components/isis/IsisAvatar';
 
-const PASSWORD = '40028922';
+const PASSWORD = 'f740028922';
 
 function fmt(dt) {
   try {
@@ -72,7 +72,7 @@ export default function MaintenancePage() {
               <div className="relative">
                 <div className="absolute -inset-4 bg-brand/20 blur-2xl rounded-full" />
                 <div className="relative rounded-2xl p-1 bg-gradient-to-b from-brand/40 to-transparent">
-                  <IsisAvatar size={112} />
+                  <IsisAvatar size="xl" variant="header" />
                 </div>
               </div>
             </div>
