@@ -226,6 +226,48 @@ export async function getMostSoldProductsToday({ limit = 5, codigoEmpresa } = {}
   return sorted.map(([id, total]) => ({ id, name: nameById.get(id) || String(id), total }))
 }
 
+// Retorna o menor código numérico livre (4 dígitos) para produtos de uma empresa
+export async function getNextProductCode({ codigoEmpresa } = {}) {
+  if (!codigoEmpresa) throw new Error('codigoEmpresa é obrigatório')
+
+  // Busca todos os códigos numéricos da empresa
+  const { data, error } = await withTimeout((signal) => {
+    let q = supabase
+      .from('produtos')
+      .select('codigo_produto')
+      .eq('codigo_empresa', codigoEmpresa)
+      .order('codigo_produto', { ascending: true })
+      .abortSignal(signal)
+    return q
+  }, 15000, 'Timeout getNextProductCode (15s)')
+
+  if (error) throw error
+
+  const numericSet = new Set()
+  for (const row of data || []) {
+    const raw = (row.codigo_produto || '').trim()
+    if (/^\d+$/.test(raw)) {
+      const n = parseInt(raw, 10)
+      if (Number.isFinite(n) && n > 0) numericSet.add(n)
+    }
+  }
+
+  // Encontra o menor inteiro positivo que ainda não existe
+  let candidate = 1
+  const maxLoops = (numericSet.size || 0) + 1000
+  let loops = 0
+  while (numericSet.has(candidate) && loops < maxLoops) {
+    candidate += 1
+    loops += 1
+  }
+
+  if (!Number.isFinite(candidate) || candidate <= 0) {
+    candidate = 1
+  }
+
+  return String(candidate).padStart(4, '0')
+}
+
 // Helper to map UI -> DB
 function mapUiToDb(data) {
   return {
