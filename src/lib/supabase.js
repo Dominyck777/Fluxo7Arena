@@ -2,18 +2,16 @@ import { createClient } from '@supabase/supabase-js'
 import { supabaseWrapper } from './supabase-fetch-wrapper'
 import { ACTIVE_TARGET as MANUAL_TARGET } from './deployTarget'
 
-// Load targets dynamically so backendTargets.js can be gitignored
+// Load targets dynamically using Vite glob so optional files don't break build
 let ACTIVE_TARGET = undefined
 let TARGETS = undefined
 try {
-  const def = await import('./backendTargets.js')
+  const mods = import.meta.glob('./backendTargets*.js', { eager: true })
+  const def = mods['./backendTargets.js'] || null
+  const local = mods['./backendTargets.local.js'] || null
   if (def?.TARGETS) TARGETS = def.TARGETS
   if (def?.ACTIVE_TARGET) ACTIVE_TARGET = def.ACTIVE_TARGET
-} catch {}
-
-// Try to load local (gitignored) overrides (takes precedence)
-try {
-  const local = await import('./backendTargets.local.js')
+  // Local overrides take precedence
   if (local?.TARGETS) TARGETS = local.TARGETS
   if (local?.ACTIVE_TARGET) ACTIVE_TARGET = local.ACTIVE_TARGET
 } catch {}
