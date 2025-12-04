@@ -175,24 +175,6 @@ export async function listPurchases(codigoEmpresa, filters = {}) {
 		
 		const { data, error, count } = await query;
 		
-		// Logs de diagnóstico para produção (ComprasPage)
-		try {
-			console.log('[Purchases:list] filtros =', {
-				codigoEmpresa,
-				filters,
-				page,
-				pageSize,
-				from,
-				to,
-			});
-			console.log('[Purchases:list] resultado bruto =', {
-				count,
-				primeiroId: data?.[0]?.id,
-				primeiroFornecedorId: data?.[0]?.fornecedor_id,
-				primeiroFornecedorObj: data?.[0]?.fornecedor,
-			});
-		} catch {}
-		
 		if (error) throw error;
 		return { data: data || [], count: count ?? 0 };
 	} catch (error) {

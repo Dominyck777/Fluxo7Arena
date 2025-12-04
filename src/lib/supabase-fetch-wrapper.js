@@ -93,17 +93,6 @@ const supabaseFetch = async (endpoint, options = {}) => {
   const queryString = buildQueryString(params)
   const url = `${SUPABASE_URL}/rest/v1/${endpoint}${queryString ? `?${queryString}` : ''}`
   
-  // Log leve apenas para a tabela de compras, para diagnosticar o select
-  try {
-    if (endpoint === 'compras') {
-      console.log('[SupabaseWrapper] REQUEST compras', {
-        url,
-        params,
-        select: params?.select,
-      });
-    }
-  } catch {}
-  
   const headers = {
     'apikey': SUPABASE_ANON_KEY,
     'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
@@ -177,20 +166,6 @@ const supabaseFetch = async (endpoint, options = {}) => {
     console.error(`[Supabase Wrapper] Erro ao parsear JSON de ${endpoint}:`, e)
     throw new Error(`[Supabase Wrapper] JSON parse error: ${e.message}`)
   }
-  
-  // Log leve de resposta apenas para compras, para ver fornecedor_id/fornecedor
-  try {
-    if (endpoint === 'compras') {
-      const first = Array.isArray(data) ? data[0] : null
-      console.log('[SupabaseWrapper] RESPONSE compras', {
-        elapsed,
-        rows: Array.isArray(data) ? data.length : null,
-        primeiroId: first?.id,
-        primeiroFornecedorId: first?.fornecedor_id,
-        primeiroFornecedorObj: first?.fornecedor,
-      })
-    }
-  } catch {}
   
   if (elapsed > 3000) {
     console.warn(`[Supabase Wrapper] ⚠️ fetch ${endpoint} LENTO (${elapsed}ms)`)
