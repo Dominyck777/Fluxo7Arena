@@ -141,10 +141,7 @@ export async function listPurchases(codigoEmpresa, filters = {}) {
 
 		let query = supabase
 			.from('compras')
-			.select(`
-				*,
-				fornecedor:clientes!compras_fornecedor_id_fkey(id, nome, cnpj)
-			`, { count: 'exact' })
+			.select('*,fornecedor:clientes!compras_fornecedor_id_fkey(id,nome,cnpj)', { count: 'exact' })
 			.eq('codigo_empresa', codigoEmpresa);
 		
 		// Filtro de ativo/inativo
