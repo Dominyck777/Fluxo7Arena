@@ -1,4 +1,4 @@
---
+﻿--
 -- PostgreSQL database dump
 --
 
@@ -18,166 +18,6 @@ SET check_function_bodies = false;
 SET xmloption = content;
 SET client_min_messages = warning;
 SET row_security = off;
-
-DROP POLICY IF EXISTS vendas_update_empresa ON public.vendas;
-DROP POLICY IF EXISTS vendas_select_empresa ON public.vendas;
-DROP POLICY IF EXISTS vendas_insert_empresa ON public.vendas;
-DROP POLICY IF EXISTS vendas_delete_empresa ON public.vendas;
-DROP POLICY IF EXISTS usuarios_select_self ON public.usuarios;
-DROP POLICY IF EXISTS quadras_update_policy ON public.quadras;
-DROP POLICY IF EXISTS quadras_update_company ON public.quadras;
-DROP POLICY IF EXISTS quadras_select_policy ON public.quadras;
-DROP POLICY IF EXISTS quadras_select_company ON public.quadras;
-DROP POLICY IF EXISTS quadras_insert_policy ON public.quadras;
-DROP POLICY IF EXISTS quadras_insert_company ON public.quadras;
-DROP POLICY IF EXISTS quadras_delete_policy ON public.quadras;
-DROP POLICY IF EXISTS quadras_delete_company ON public.quadras;
-DROP POLICY IF EXISTS produtos_update_company ON public.produtos;
-DROP POLICY IF EXISTS produtos_select_company ON public.produtos;
-DROP POLICY IF EXISTS produtos_insert_company ON public.produtos;
-DROP POLICY IF EXISTS produtos_delete_company ON public.produtos;
-DROP POLICY IF EXISTS produto_categorias_update ON public.produto_categorias;
-DROP POLICY IF EXISTS produto_categorias_select ON public.produto_categorias;
-DROP POLICY IF EXISTS produto_categorias_insert ON public.produto_categorias;
-DROP POLICY IF EXISTS produto_categorias_delete ON public.produto_categorias;
-DROP POLICY IF EXISTS pagamentos_update_by_company ON public.pagamentos;
-DROP POLICY IF EXISTS pagamentos_select_by_company ON public.pagamentos;
-DROP POLICY IF EXISTS pagamentos_insert_by_company ON public.pagamentos;
-DROP POLICY IF EXISTS pagamentos_delete_by_company ON public.pagamentos;
-DROP POLICY IF EXISTS mesas_update_by_company ON public.mesas;
-DROP POLICY IF EXISTS mesas_select_by_company ON public.mesas;
-DROP POLICY IF EXISTS mesas_insert_by_company ON public.mesas;
-DROP POLICY IF EXISTS mesas_delete_by_company ON public.mesas;
-DROP POLICY IF EXISTS itens_venda_update_empresa ON public.itens_venda;
-DROP POLICY IF EXISTS itens_venda_select_empresa ON public.itens_venda;
-DROP POLICY IF EXISTS itens_venda_insert_empresa ON public.itens_venda;
-DROP POLICY IF EXISTS itens_venda_delete_empresa ON public.itens_venda;
-DROP POLICY IF EXISTS finalizadoras_update_by_company ON public.finalizadoras;
-DROP POLICY IF EXISTS finalizadoras_select_by_company ON public.finalizadoras;
-DROP POLICY IF EXISTS finalizadoras_insert_by_company ON public.finalizadoras;
-DROP POLICY IF EXISTS finalizadoras_delete_by_company ON public.finalizadoras;
-DROP POLICY IF EXISTS empresas_update_user_company ON public.empresas;
-DROP POLICY IF EXISTS empresas_select_user_company ON public.empresas;
-DROP POLICY IF EXISTS empresas_by_company ON public.empresas;
-DROP POLICY IF EXISTS contas_receber_update ON public.contas_receber;
-DROP POLICY IF EXISTS contas_receber_select ON public.contas_receber;
-DROP POLICY IF EXISTS contas_receber_insert ON public.contas_receber;
-DROP POLICY IF EXISTS contas_receber_delete ON public.contas_receber;
-DROP POLICY IF EXISTS contas_receber_baixas_update ON public.contas_receber_baixas;
-DROP POLICY IF EXISTS contas_receber_baixas_select ON public.contas_receber_baixas;
-DROP POLICY IF EXISTS contas_receber_baixas_insert ON public.contas_receber_baixas;
-DROP POLICY IF EXISTS contas_receber_baixas_delete ON public.contas_receber_baixas;
-DROP POLICY IF EXISTS contas_pagar_update ON public.contas_pagar;
-DROP POLICY IF EXISTS contas_pagar_select ON public.contas_pagar;
-DROP POLICY IF EXISTS contas_pagar_insert ON public.contas_pagar;
-DROP POLICY IF EXISTS contas_pagar_delete ON public.contas_pagar;
-DROP POLICY IF EXISTS contas_pagar_baixas_update ON public.contas_pagar_baixas;
-DROP POLICY IF EXISTS contas_pagar_baixas_select ON public.contas_pagar_baixas;
-DROP POLICY IF EXISTS contas_pagar_baixas_insert ON public.contas_pagar_baixas;
-DROP POLICY IF EXISTS contas_pagar_baixas_delete ON public.contas_pagar_baixas;
-DROP POLICY IF EXISTS comandas_update_by_company ON public.comandas;
-DROP POLICY IF EXISTS comandas_select_by_company ON public.comandas;
-DROP POLICY IF EXISTS comandas_insert_by_company ON public.comandas;
-DROP POLICY IF EXISTS comandas_delete_by_company ON public.comandas;
-DROP POLICY IF EXISTS comanda_itens_update_by_company ON public.comanda_itens;
-DROP POLICY IF EXISTS comanda_itens_select_by_company ON public.comanda_itens;
-DROP POLICY IF EXISTS comanda_itens_insert_by_company ON public.comanda_itens;
-DROP POLICY IF EXISTS comanda_itens_delete_by_company ON public.comanda_itens;
-DROP POLICY IF EXISTS comanda_clientes_update_by_company ON public.comanda_clientes;
-DROP POLICY IF EXISTS comanda_clientes_select_by_company ON public.comanda_clientes;
-DROP POLICY IF EXISTS comanda_clientes_insert_by_company ON public.comanda_clientes;
-DROP POLICY IF EXISTS comanda_clientes_delete_by_company ON public.comanda_clientes;
-DROP POLICY IF EXISTS colaboradores_update_company ON public.colaboradores;
-DROP POLICY IF EXISTS colaboradores_select_company ON public.colaboradores;
-DROP POLICY IF EXISTS colaboradores_insert_company ON public.colaboradores;
-DROP POLICY IF EXISTS colaboradores_delete_company ON public.colaboradores;
-DROP POLICY IF EXISTS clientes_update_policy ON public.clientes;
-DROP POLICY IF EXISTS clientes_update_company ON public.clientes;
-DROP POLICY IF EXISTS clientes_select_policy ON public.clientes;
-DROP POLICY IF EXISTS clientes_select_company ON public.clientes;
-DROP POLICY IF EXISTS clientes_insert_policy ON public.clientes;
-DROP POLICY IF EXISTS clientes_insert_company ON public.clientes;
-DROP POLICY IF EXISTS clientes_delete_policy ON public.clientes;
-DROP POLICY IF EXISTS clientes_delete_company ON public.clientes;
-DROP POLICY IF EXISTS caixa_sessoes_update_by_company ON public.caixa_sessoes;
-DROP POLICY IF EXISTS caixa_sessoes_select_by_company ON public.caixa_sessoes;
-DROP POLICY IF EXISTS caixa_sessoes_insert_by_company ON public.caixa_sessoes;
-DROP POLICY IF EXISTS caixa_sessoes_delete_by_company ON public.caixa_sessoes;
-DROP POLICY IF EXISTS caixa_resumos_update ON public.caixa_resumos;
-DROP POLICY IF EXISTS caixa_resumos_select ON public.caixa_resumos;
-DROP POLICY IF EXISTS caixa_resumos_insert ON public.caixa_resumos;
-DROP POLICY IF EXISTS caixa_resumos_delete ON public.caixa_resumos;
-DROP POLICY IF EXISTS caixa_movimentos_rls_all ON public.caixa_movimentos;
-DROP POLICY IF EXISTS caixa_movimentacoes_update_by_company ON public.caixa_movimentacoes;
-DROP POLICY IF EXISTS caixa_movimentacoes_select_by_company ON public.caixa_movimentacoes;
-DROP POLICY IF EXISTS caixa_movimentacoes_insert_by_company ON public.caixa_movimentacoes;
-DROP POLICY IF EXISTS caixa_movimentacoes_delete_by_company ON public.caixa_movimentacoes;
-DROP POLICY IF EXISTS caixa_mov_update ON public.caixa_movimentacoes;
-DROP POLICY IF EXISTS caixa_mov_select ON public.caixa_movimentacoes;
-DROP POLICY IF EXISTS caixa_mov_insert ON public.caixa_movimentacoes;
-DROP POLICY IF EXISTS caixa_mov_delete ON public.caixa_movimentacoes;
-DROP POLICY IF EXISTS agendamentos_update_policy ON public.agendamentos;
-DROP POLICY IF EXISTS agendamentos_select_policy ON public.agendamentos;
-DROP POLICY IF EXISTS agendamentos_insert_policy ON public.agendamentos;
-DROP POLICY IF EXISTS agendamentos_delete_policy ON public.agendamentos;
-DROP POLICY IF EXISTS agendamento_participantes_update_policy ON public.agendamento_participantes;
-DROP POLICY IF EXISTS agendamento_participantes_select_policy ON public.agendamento_participantes;
-DROP POLICY IF EXISTS agendamento_participantes_insert_policy ON public.agendamento_participantes;
-DROP POLICY IF EXISTS agendamento_participantes_delete_policy ON public.agendamento_participantes;
-DROP POLICY IF EXISTS agenda_settings_update_company ON public.agenda_settings;
-DROP POLICY IF EXISTS agenda_settings_select_company ON public.agenda_settings;
-DROP POLICY IF EXISTS agenda_settings_insert_company ON public.agenda_settings;
-DROP POLICY IF EXISTS agenda_settings_delete_company ON public.agenda_settings;
-DROP POLICY IF EXISTS ag_update_by_company ON public.agendamentos;
-DROP POLICY IF EXISTS ag_select_by_company ON public.agendamentos;
-DROP POLICY IF EXISTS ag_participantes_update_company ON public.agendamento_participantes;
-DROP POLICY IF EXISTS ag_participantes_select_company ON public.agendamento_participantes;
-DROP POLICY IF EXISTS ag_participantes_insert_company ON public.agendamento_participantes;
-DROP POLICY IF EXISTS ag_participantes_delete_company ON public.agendamento_participantes;
-DROP POLICY IF EXISTS ag_insert_by_company ON public.agendamentos;
-DROP POLICY IF EXISTS ag_delete_by_company ON public.agendamentos;
-DROP POLICY IF EXISTS "Usuários podem ver resumos de caixa da sua empresa" ON public.caixa_resumos;
-DROP POLICY IF EXISTS "Usuários podem ver movimentações de caixa da sua empresa" ON public.caixa_movimentacoes;
-DROP POLICY IF EXISTS "Usuários podem ver itens de compras da própria empresa" ON public.compras_itens;
-DROP POLICY IF EXISTS "Usuários podem ver compras da própria empresa" ON public.compras;
-DROP POLICY IF EXISTS "Usuários podem inserir itens de compras da própria empresa" ON public.compras_itens;
-DROP POLICY IF EXISTS "Usuários podem inserir compras na própria empresa" ON public.compras;
-DROP POLICY IF EXISTS "Usuários podem deletar resumos de caixa da sua empresa" ON public.caixa_resumos;
-DROP POLICY IF EXISTS "Usuários podem deletar movimentações de caixa da sua empresa" ON public.caixa_movimentacoes;
-DROP POLICY IF EXISTS "Usuários podem deletar itens de compras da própria empresa" ON public.compras_itens;
-DROP POLICY IF EXISTS "Usuários podem deletar compras da própria empresa" ON public.compras;
-DROP POLICY IF EXISTS "Usuários podem criar resumos de caixa na sua empresa" ON public.caixa_resumos;
-DROP POLICY IF EXISTS "Usuários podem criar movimentações de caixa na sua empresa" ON public.caixa_movimentacoes;
-DROP POLICY IF EXISTS "Usuários podem atualizar resumos de caixa da sua empresa" ON public.caixa_resumos;
-DROP POLICY IF EXISTS "Usuários podem atualizar movimentações de caixa da sua empre" ON public.caixa_movimentacoes;
-DROP POLICY IF EXISTS "Usuários podem atualizar itens de compras da própria empresa" ON public.compras_itens;
-DROP POLICY IF EXISTS "Usuários podem atualizar compras da própria empresa" ON public.compras;
-DROP POLICY IF EXISTS "Usuarios podem ler counters da propria empresa" ON public.empresa_counters;
-DROP POLICY IF EXISTS "Usuarios podem gerenciar dias de funcionamento da propria empre" ON public.quadras_dias_funcionamento;
-DROP POLICY IF EXISTS "Usuarios podem criar counters da propria empresa" ON public.empresa_counters;
-DROP POLICY IF EXISTS "Usuarios podem atualizar counters da propria empresa" ON public.empresa_counters;
-DROP POLICY IF EXISTS "Users can view their company agenda settings" ON public.agenda_settings;
-DROP POLICY IF EXISTS "Users can update their company agenda settings" ON public.agenda_settings;
-DROP POLICY IF EXISTS "Users can manage own ui settings" ON public.user_ui_settings;
-DROP POLICY IF EXISTS "Users can delete their company agenda settings" ON public.agenda_settings;
-DROP POLICY IF EXISTS "Users can create their company agenda settings" ON public.agenda_settings;
-DROP POLICY IF EXISTS "Isis pode ler quadras" ON public.quadras;
-DROP POLICY IF EXISTS "Isis pode ler dias funcionamento" ON public.quadras_dias_funcionamento;
-DROP POLICY IF EXISTS "Isis pode criar clientes" ON public.clientes;
-DROP POLICY IF EXISTS "Isis pode buscar clientes" ON public.clientes;
-DROP POLICY IF EXISTS "Anyone can read companies" ON public.empresas;
-DROP POLICY IF EXISTS "Allow public read by codigo_empresa" ON public.clientes;
-DROP POLICY IF EXISTS "Allow public read agendamentos by codigo_empresa" ON public.agendamentos;
-DROP POLICY IF EXISTS "Allow public insert usuarios" ON public.usuarios;
-DROP POLICY IF EXISTS "Allow public insert quadras" ON public.quadras;
-DROP POLICY IF EXISTS "Allow public insert produto_categorias" ON public.produto_categorias;
-DROP POLICY IF EXISTS "Allow public insert colaboradores" ON public.colaboradores;
-DROP POLICY IF EXISTS "Allow public insert agendamentos by codigo_empresa" ON public.agendamentos;
-DROP POLICY IF EXISTS "Allow public insert agendamento_participantes by codigo_empresa" ON public.agendamento_participantes;
-DROP POLICY IF EXISTS "Allow public insert agenda_settings" ON public.agenda_settings;
-DROP POLICY IF EXISTS "Allow insert new companies" ON public.empresas;
-DROP POLICY IF EXISTS "Allow anonymous read access to quadras" ON public.quadras;
-DROP POLICY IF EXISTS "Acesso publico empresa_counters" ON public.empresa_counters;
 ALTER TABLE IF EXISTS ONLY public.vendas DROP CONSTRAINT IF EXISTS vendas_company_code_fkey;
 ALTER TABLE IF EXISTS ONLY public.usuarios DROP CONSTRAINT IF EXISTS usuarios_codigo_empresa_fkey;
 ALTER TABLE IF EXISTS ONLY public.usuarios DROP CONSTRAINT IF EXISTS users_id_fkey;
@@ -234,176 +74,6 @@ ALTER TABLE IF EXISTS ONLY public.agendamentos DROP CONSTRAINT IF EXISTS agendam
 ALTER TABLE IF EXISTS ONLY public.agendamento_participantes DROP CONSTRAINT IF EXISTS agendamento_participantes_cliente_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.agendamento_participantes DROP CONSTRAINT IF EXISTS agendamento_participantes_agendamento_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.agenda_settings DROP CONSTRAINT IF EXISTS agenda_settings_empresa_id_fkey;
-DROP TRIGGER IF EXISTS zz_clientes_set_codigo ON public.clientes;
-DROP TRIGGER IF EXISTS zz_agendamentos_set_codigo ON public.agendamentos;
-DROP TRIGGER IF EXISTS trigger_update_compras_timestamp ON public.compras;
-DROP TRIGGER IF EXISTS trigger_registrar_historico_comanda ON public.comandas;
-DROP TRIGGER IF EXISTS trigger_atualizar_ultima_atualizacao_item ON public.comanda_itens;
-DROP TRIGGER IF EXISTS trigger_atualizar_ultima_atualizacao_comanda ON public.comandas;
-DROP TRIGGER IF EXISTS trg_set_company_code_pagamentos ON public.pagamentos;
-DROP TRIGGER IF EXISTS trg_set_company_code_mesas ON public.mesas;
-DROP TRIGGER IF EXISTS trg_set_company_code_finalizadoras ON public.finalizadoras;
-DROP TRIGGER IF EXISTS trg_set_company_code_comandas ON public.comandas;
-DROP TRIGGER IF EXISTS trg_set_company_code_comanda_itens ON public.comanda_itens;
-DROP TRIGGER IF EXISTS trg_set_company_code_comanda_clientes ON public.comanda_clientes;
-DROP TRIGGER IF EXISTS trg_set_company_code_caixa ON public.caixa_sessoes;
-DROP TRIGGER IF EXISTS trg_quadras_dias_funcionamento_updated_at ON public.quadras_dias_funcionamento;
-DROP TRIGGER IF EXISTS trg_protect_consumidor_final ON public.clientes;
-DROP TRIGGER IF EXISTS trg_produtos_set_company_code ON public.produtos;
-DROP TRIGGER IF EXISTS trg_produtos_normalize ON public.produtos;
-DROP TRIGGER IF EXISTS trg_produtos_autocode ON public.produtos;
-DROP TRIGGER IF EXISTS trg_produto_categorias_touch ON public.produto_categorias;
-DROP TRIGGER IF EXISTS trg_produto_categorias_set_empresa ON public.produto_categorias;
-DROP TRIGGER IF EXISTS trg_pagamentos_updated_at ON public.pagamentos;
-DROP TRIGGER IF EXISTS trg_mov_saldo_apply ON public.movimentos_saldo;
-DROP TRIGGER IF EXISTS trg_mesas_updated_at ON public.mesas;
-DROP TRIGGER IF EXISTS trg_finalizadoras_updated_at ON public.finalizadoras;
-DROP TRIGGER IF EXISTS trg_contas_receber_set_updated_at ON public.contas_receber;
-DROP TRIGGER IF EXISTS trg_contas_pagar_set_updated_at ON public.contas_pagar;
-DROP TRIGGER IF EXISTS trg_comandas_updated_at ON public.comandas;
-DROP TRIGGER IF EXISTS trg_comanda_itens_updated_at ON public.comanda_itens;
-DROP TRIGGER IF EXISTS trg_colaboradores_updated_at ON public.colaboradores;
-DROP TRIGGER IF EXISTS trg_clientes_set_timestamp ON public.clientes;
-DROP TRIGGER IF EXISTS trg_caixa_sessoes_updated_at ON public.caixa_sessoes;
-DROP TRIGGER IF EXISTS trg_caixa_movimentos_updated_at ON public.caixa_movimentos;
-DROP TRIGGER IF EXISTS trg_baixa_estoque_on_close ON public.comandas;
-DROP TRIGGER IF EXISTS trg_agenda_settings_set_updated_at ON public.agenda_settings;
-DROP TRIGGER IF EXISTS trg_ag_participantes_set_empresa ON public.agendamento_participantes;
-DROP TRIGGER IF EXISTS set_updated_at_agp ON public.agendamento_participantes;
-DROP TRIGGER IF EXISTS clientes_set_timestamp ON public.clientes;
-DROP TRIGGER IF EXISTS clientes_set_empresa_from_user ON public.clientes;
-DROP TRIGGER IF EXISTS agendamentos_set_empresa_from_user ON public.agendamentos;
-DROP INDEX IF EXISTS public.ux_produtos_empresa_codigo_produto;
-DROP INDEX IF EXISTS public.ux_produto_categorias_empresa_nome;
-DROP INDEX IF EXISTS public.ux_agendamentos_empresa_codigo;
-DROP INDEX IF EXISTS public.usuarios_codigo_empresa_idx;
-DROP INDEX IF EXISTS public.uq_mesas_empresa_numero;
-DROP INDEX IF EXISTS public.uq_finalizadoras_empresa_nome;
-DROP INDEX IF EXISTS public.uq_clientes_empresa_email_lower;
-DROP INDEX IF EXISTS public.uq_clientes_empresa_cpf;
-DROP INDEX IF EXISTS public.uq_clientes_empresa_codigo;
-DROP INDEX IF EXISTS public.uq_caixa_aberto_por_empresa;
-DROP INDEX IF EXISTS public.quadras_codigo_empresa_idx;
-DROP INDEX IF EXISTS public.produtos_codigo_empresa_nome_unidade_unique;
-DROP INDEX IF EXISTS public.idx_vendas_empresa_status;
-DROP INDEX IF EXISTS public.idx_vendas_criado_em;
-DROP INDEX IF EXISTS public.idx_quadras_dias_funcionamento_quadra_dia_semana;
-DROP INDEX IF EXISTS public.idx_quadras_dias_funcionamento_quadra_data_fechamento;
-DROP INDEX IF EXISTS public.idx_quadras_dias_funcionamento_quadra;
-DROP INDEX IF EXISTS public.idx_quadras_dias_funcionamento_empresa;
-DROP INDEX IF EXISTS public.idx_quadras_dias_funcionamento_data;
-DROP INDEX IF EXISTS public.idx_produtos_xml_chave;
-DROP INDEX IF EXISTS public.idx_produtos_ncm;
-DROP INDEX IF EXISTS public.idx_produtos_marca;
-DROP INDEX IF EXISTS public.idx_produtos_importados;
-DROP INDEX IF EXISTS public.idx_produtos_importado_via_xml;
-DROP INDEX IF EXISTS public.idx_produtos_grupo;
-DROP INDEX IF EXISTS public.idx_produtos_fornecedor;
-DROP INDEX IF EXISTS public.idx_produtos_codigo_empresa;
-DROP INDEX IF EXISTS public.idx_produtos_codigo_barras;
-DROP INDEX IF EXISTS public.idx_produtos_categoria;
-DROP INDEX IF EXISTS public.idx_pagamentos_xml_chave;
-DROP INDEX IF EXISTS public.idx_pagamentos_recebido_em;
-DROP INDEX IF EXISTS public.idx_pagamentos_origem;
-DROP INDEX IF EXISTS public.idx_pagamentos_finalizadora;
-DROP INDEX IF EXISTS public.idx_pagamentos_empresa;
-DROP INDEX IF EXISTS public.idx_pagamentos_comanda_id;
-DROP INDEX IF EXISTS public.idx_pagamentos_comanda;
-DROP INDEX IF EXISTS public.idx_pagamentos_codigo_empresa;
-DROP INDEX IF EXISTS public.idx_pagamentos_caixa;
-DROP INDEX IF EXISTS public.idx_mov_saldo_empresa;
-DROP INDEX IF EXISTS public.idx_mov_saldo_cliente;
-DROP INDEX IF EXISTS public.idx_mov_saldo_agendamento;
-DROP INDEX IF EXISTS public.idx_mesas_nome;
-DROP INDEX IF EXISTS public.idx_mesas_empresa;
-DROP INDEX IF EXISTS public.idx_mesas_codigo_empresa;
-DROP INDEX IF EXISTS public.idx_itens_venda_empresa;
-DROP INDEX IF EXISTS public.idx_finalizadoras_ordem;
-DROP INDEX IF EXISTS public.idx_finalizadoras_empresa;
-DROP INDEX IF EXISTS public.idx_finalizadoras_codigo_sefaz;
-DROP INDEX IF EXISTS public.idx_finalizadoras_codigo;
-DROP INDEX IF EXISTS public.idx_finalizadoras_ativo;
-DROP INDEX IF EXISTS public.idx_estoque_reservado_produto_id;
-DROP INDEX IF EXISTS public.idx_estoque_reservado_comanda_id;
-DROP INDEX IF EXISTS public.idx_estoque_reservado_ativo;
-DROP INDEX IF EXISTS public.idx_cr_baixas_empresa_data;
-DROP INDEX IF EXISTS public.idx_cr_baixas_empresa_conta;
-DROP INDEX IF EXISTS public.idx_cp_baixas_empresa_data;
-DROP INDEX IF EXISTS public.idx_cp_baixas_empresa_conta;
-DROP INDEX IF EXISTS public.idx_contas_receber_empresa_vencimento;
-DROP INDEX IF EXISTS public.idx_contas_receber_empresa_status;
-DROP INDEX IF EXISTS public.idx_contas_receber_empresa_cliente;
-DROP INDEX IF EXISTS public.idx_contas_pagar_empresa_vencimento;
-DROP INDEX IF EXISTS public.idx_contas_pagar_empresa_status;
-DROP INDEX IF EXISTS public.idx_contas_pagar_empresa_fornecedor;
-DROP INDEX IF EXISTS public.idx_compras_status;
-DROP INDEX IF EXISTS public.idx_compras_itens_selecionado;
-DROP INDEX IF EXISTS public.idx_compras_itens_produto;
-DROP INDEX IF EXISTS public.idx_compras_itens_compra;
-DROP INDEX IF EXISTS public.idx_compras_fornecedor;
-DROP INDEX IF EXISTS public.idx_compras_empresa_modelo_nfe;
-DROP INDEX IF EXISTS public.idx_compras_empresa_ativo;
-DROP INDEX IF EXISTS public.idx_compras_empresa;
-DROP INDEX IF EXISTS public.idx_compras_data_emissao;
-DROP INDEX IF EXISTS public.idx_compras_chave_nfe;
-DROP INDEX IF EXISTS public.idx_compras_ativo;
-DROP INDEX IF EXISTS public.idx_comandas_xml_chave;
-DROP INDEX IF EXISTS public.idx_comandas_vendedor_id;
-DROP INDEX IF EXISTS public.idx_comandas_ultima_atualizacao;
-DROP INDEX IF EXISTS public.idx_comandas_origem;
-DROP INDEX IF EXISTS public.idx_comandas_mesa_status;
-DROP INDEX IF EXISTS public.idx_comandas_mesa;
-DROP INDEX IF EXISTS public.idx_comandas_fechado_em;
-DROP INDEX IF EXISTS public.idx_comandas_empresa_status;
-DROP INDEX IF EXISTS public.idx_comandas_empresa_fechado;
-DROP INDEX IF EXISTS public.idx_comandas_desconto_tipo;
-DROP INDEX IF EXISTS public.idx_comandas_codigo_empresa;
-DROP INDEX IF EXISTS public.idx_comandas_agendamento_id;
-DROP INDEX IF EXISTS public.idx_comandas_aberto_em;
-DROP INDEX IF EXISTS public.idx_comanda_itens_produto;
-DROP INDEX IF EXISTS public.idx_comanda_itens_empresa;
-DROP INDEX IF EXISTS public.idx_comanda_itens_desconto_tipo;
-DROP INDEX IF EXISTS public.idx_comanda_itens_comanda_id;
-DROP INDEX IF EXISTS public.idx_comanda_itens_comanda;
-DROP INDEX IF EXISTS public.idx_comanda_itens_codigo_empresa;
-DROP INDEX IF EXISTS public.idx_comanda_historico_tipo;
-DROP INDEX IF EXISTS public.idx_comanda_historico_comanda_id;
-DROP INDEX IF EXISTS public.idx_comanda_historico_codigo_empresa;
-DROP INDEX IF EXISTS public.idx_comanda_clientes_empresa;
-DROP INDEX IF EXISTS public.idx_comanda_clientes_comanda;
-DROP INDEX IF EXISTS public.idx_comanda_clientes_cliente;
-DROP INDEX IF EXISTS public.idx_colaboradores_codigo_empresa;
-DROP INDEX IF EXISTS public.idx_colaboradores_ativo;
-DROP INDEX IF EXISTS public.idx_clientes_empresa_telefone;
-DROP INDEX IF EXISTS public.idx_clientes_empresa_nome;
-DROP INDEX IF EXISTS public.idx_clientes_empresa_aniversario;
-DROP INDEX IF EXISTS public.idx_clientes_consumidor_final;
-DROP INDEX IF EXISTS public.idx_caixa_sessoes_empresa_status;
-DROP INDEX IF EXISTS public.idx_caixa_sessoes_empresa;
-DROP INDEX IF EXISTS public.idx_caixa_resumos_sessao_criado_em;
-DROP INDEX IF EXISTS public.idx_caixa_resumos_periodo;
-DROP INDEX IF EXISTS public.idx_caixa_resumos_empresa_sessao;
-DROP INDEX IF EXISTS public.idx_caixa_movimentos_empresa;
-DROP INDEX IF EXISTS public.idx_caixa_movimentos_caixa;
-DROP INDEX IF EXISTS public.idx_caixa_mov_tipo;
-DROP INDEX IF EXISTS public.idx_caixa_mov_empresa_sessao;
-DROP INDEX IF EXISTS public.idx_caixa_empresa;
-DROP INDEX IF EXISTS public.idx_agp_finalizadora;
-DROP INDEX IF EXISTS public.idx_agp_codigo_empresa;
-DROP INDEX IF EXISTS public.idx_agp_agendamento;
-DROP INDEX IF EXISTS public.idx_agendamento_participantes_ordem;
-DROP INDEX IF EXISTS public.gin_trgm_clientes_telefone;
-DROP INDEX IF EXISTS public.gin_trgm_clientes_nome;
-DROP INDEX IF EXISTS public.gin_trgm_clientes_email;
-DROP INDEX IF EXISTS public.compras_chave_nfe_ativa_unique;
-DROP INDEX IF EXISTS public.companies_code_idx;
-DROP INDEX IF EXISTS public.comanda_clientes_empresa_idx;
-DROP INDEX IF EXISTS public.comanda_clientes_comanda_idx;
-DROP INDEX IF EXISTS public.comanda_clientes_cliente_idx;
-DROP INDEX IF EXISTS public.colaboradores_codigo_empresa_idx;
-DROP INDEX IF EXISTS public.clientes_codigo_empresa_idx;
-DROP INDEX IF EXISTS public.agendamentos_codigo_empresa_idx;
-DROP INDEX IF EXISTS public.agendamento_participantes_agendamento_id_idx;
 ALTER TABLE IF EXISTS ONLY public.usuarios DROP CONSTRAINT IF EXISTS users_pkey;
 ALTER TABLE IF EXISTS ONLY public.user_ui_settings DROP CONSTRAINT IF EXISTS user_ui_settings_pkey;
 ALTER TABLE IF EXISTS ONLY public.colaboradores DROP CONSTRAINT IF EXISTS user_profiles_pkey;
@@ -445,99 +115,11 @@ ALTER TABLE IF EXISTS ONLY public.agendamento_participantes DROP CONSTRAINT IF E
 ALTER TABLE IF EXISTS ONLY public.agenda_settings DROP CONSTRAINT IF EXISTS agenda_settings_pkey;
 ALTER TABLE IF EXISTS public.caixa_resumos ALTER COLUMN id DROP DEFAULT;
 ALTER TABLE IF EXISTS public.caixa_movimentacoes ALTER COLUMN id DROP DEFAULT;
-DROP TABLE IF EXISTS public.vendas;
-DROP VIEW IF EXISTS public.v_agendamentos_isis;
-DROP VIEW IF EXISTS public.v_agendamentos_detalhado;
-DROP VIEW IF EXISTS public.v_agendamento_participantes;
-DROP TABLE IF EXISTS public.usuarios;
-DROP TABLE IF EXISTS public.user_ui_settings;
-DROP TABLE IF EXISTS public.quadras_dias_funcionamento;
-DROP TABLE IF EXISTS public.quadras;
-DROP TABLE IF EXISTS public.produtos;
-DROP TABLE IF EXISTS public.produto_categorias;
-DROP TABLE IF EXISTS public.pagamentos;
-DROP TABLE IF EXISTS public.movimentos_saldo;
-DROP TABLE IF EXISTS public.mesas;
-DROP TABLE IF EXISTS public.itens_venda;
-DROP TABLE IF EXISTS public.finalizadoras;
-DROP TABLE IF EXISTS public.estoque_reservado;
-DROP TABLE IF EXISTS public.estoque_baixa_log;
-DROP TABLE IF EXISTS public.empresas;
-DROP TABLE IF EXISTS public.empresa_counters;
-DROP TABLE IF EXISTS public.contas_receber_baixas;
-DROP TABLE IF EXISTS public.contas_receber;
-DROP TABLE IF EXISTS public.contas_pagar_baixas;
-DROP TABLE IF EXISTS public.contas_pagar;
-DROP TABLE IF EXISTS public.compras_itens;
-DROP TABLE IF EXISTS public.compras;
-DROP TABLE IF EXISTS public.comandas;
-DROP TABLE IF EXISTS public.comanda_itens;
-DROP TABLE IF EXISTS public.comanda_historico;
-DROP TABLE IF EXISTS public.comanda_clientes;
-DROP TABLE IF EXISTS public.colaboradores;
-DROP TABLE IF EXISTS public.clientes;
-DROP TABLE IF EXISTS public.caixa_sessoes;
-DROP SEQUENCE IF EXISTS public.caixa_resumos_id_seq;
-DROP TABLE IF EXISTS public.caixa_resumos;
-DROP TABLE IF EXISTS public.caixa_movimentos;
-DROP SEQUENCE IF EXISTS public.caixa_movimentacoes_id_seq;
-DROP TABLE IF EXISTS public.caixa_movimentacoes;
-DROP TABLE IF EXISTS public.agendamentos;
-DROP TABLE IF EXISTS public.agendamento_participantes;
-DROP TABLE IF EXISTS public.agenda_settings;
-DROP OPERATOR IF EXISTS public.= (public.payment_status, text);
-DROP OPERATOR IF EXISTS public.= (text, public.payment_status);
-DROP FUNCTION IF EXISTS public.update_compras_timestamp();
-DROP FUNCTION IF EXISTS public.trg_contas_receber_set_updated_at();
-DROP FUNCTION IF EXISTS public.trg_contas_pagar_set_updated_at();
-DROP FUNCTION IF EXISTS public.trg_comandas_baixar_estoque();
-DROP FUNCTION IF EXISTS public.touch_updated_at();
-DROP FUNCTION IF EXISTS public.tg_set_timestamp();
-DROP FUNCTION IF EXISTS public.text_eq_payment_status(a text, b public.payment_status);
-DROP FUNCTION IF EXISTS public.set_updated_at();
-DROP FUNCTION IF EXISTS public.set_timestamp_updated_at();
-DROP FUNCTION IF EXISTS public.set_timestamp();
-DROP FUNCTION IF EXISTS public.set_empresa_produto_categorias();
-DROP FUNCTION IF EXISTS public.set_empresa_from_user();
-DROP FUNCTION IF EXISTS public.set_current_empresa(empresa_codigo text);
-DROP FUNCTION IF EXISTS public.set_company_code_default();
-DROP FUNCTION IF EXISTS public.set_agendamento_empresa_from_user();
-DROP FUNCTION IF EXISTS public.set_ag_participantes_codigo_empresa();
-DROP FUNCTION IF EXISTS public.registrar_historico_comanda();
-DROP FUNCTION IF EXISTS public.quadra_funciona_na_data(p_quadra_id uuid, p_data date);
-DROP FUNCTION IF EXISTS public.protect_consumidor_final();
-DROP FUNCTION IF EXISTS public.produtos_set_company_code();
-DROP FUNCTION IF EXISTS public.payment_status_eq_text(a public.payment_status, b text);
-DROP FUNCTION IF EXISTS public.normalize_codigo_produto();
-DROP FUNCTION IF EXISTS public.get_my_company_id();
-DROP FUNCTION IF EXISTS public.get_my_company_code();
-DROP FUNCTION IF EXISTS public.gen_codigo_produto();
-DROP FUNCTION IF EXISTS public.fn_mov_saldo_apply();
-DROP FUNCTION IF EXISTS public.fix_invalid_comanda_status(target_comanda_id uuid);
-DROP FUNCTION IF EXISTS public.current_empresa_id();
-DROP FUNCTION IF EXISTS public.current_codigo_empresa();
-DROP FUNCTION IF EXISTS public.create_company_full(payload jsonb);
-DROP FUNCTION IF EXISTS public.colaboradores_enforce_codigo_empresa();
-DROP FUNCTION IF EXISTS public.clientes_set_codigo_fn();
-DROP FUNCTION IF EXISTS public.clientes_next_codigo();
-DROP FUNCTION IF EXISTS public.calcular_total_comanda_com_desconto(p_comanda_id uuid);
-DROP FUNCTION IF EXISTS public.baixar_estoque_por_comanda(p_comanda_id uuid);
-DROP FUNCTION IF EXISTS public.atualizar_ultima_atualizacao_item();
-DROP FUNCTION IF EXISTS public.atualizar_ultima_atualizacao_comanda();
-DROP FUNCTION IF EXISTS public.atualizar_observacoes_comanda(p_comanda_id uuid, p_observacoes text);
-DROP FUNCTION IF EXISTS public.agendamentos_set_codigo_fn();
-DROP FUNCTION IF EXISTS public._ensure_policy(tbl regclass, pol_name text, cmd text);
-DROP TYPE IF EXISTS public.payment_status;
-DROP TYPE IF EXISTS public.payment_method;
-DROP TYPE IF EXISTS public.mesa_status;
-DROP TYPE IF EXISTS public.comanda_status;
-DROP TYPE IF EXISTS public.caixa_mov_tipo;
-DROP SCHEMA IF EXISTS public;
 --
 -- Name: public; Type: SCHEMA; Schema: -; Owner: -
 --
 
-CREATE SCHEMA public;
+CREATE SCHEMA IF NOT EXISTS public;
 
 
 --
@@ -635,7 +217,7 @@ begin
       );
     exception
       when duplicate_object then
-        -- Política já existe: ignora
+        -- PolÃ­tica jÃ¡ existe: ignora
         null;
     end;
   end if;
@@ -654,14 +236,14 @@ declare
   v_empresa_id uuid;
   v_next bigint;
 begin
-  -- Se já vier com codigo, não altera
+  -- Se jÃ¡ vier com codigo, nÃ£o altera
   if new.codigo is not null then
     return new;
   end if;
 
   -- Resolve empresa_id via codigo_empresa
   if new.codigo_empresa is null then
-    raise exception 'agendamentos_set_codigo_fn: NEW.codigo_empresa não pode ser nulo';
+    raise exception 'agendamentos_set_codigo_fn: NEW.codigo_empresa nÃ£o pode ser nulo';
   end if;
 
   select e.id into v_empresa_id
@@ -670,15 +252,15 @@ begin
   limit 1;
 
   if v_empresa_id is null then
-    raise exception 'agendamentos_set_codigo_fn: empresa não encontrada para codigo_empresa=%', new.codigo_empresa;
+    raise exception 'agendamentos_set_codigo_fn: empresa nÃ£o encontrada para codigo_empresa=%', new.codigo_empresa;
   end if;
 
-  -- Garante existência da linha em empresa_counters
+  -- Garante existÃªncia da linha em empresa_counters
   insert into public.empresa_counters (empresa_id)
   values (v_empresa_id)
   on conflict (empresa_id) do nothing;
 
-  -- Lê o próximo código atual e incrementa (lock com for update implícito via update)
+  -- LÃª o prÃ³ximo cÃ³digo atual e incrementa (lock com for update implÃ­cito via update)
   select next_agendamento_codigo
     into v_next
   from public.empresa_counters
@@ -763,7 +345,7 @@ begin
     raise exception 'comanda_id ausente';
   end if;
 
-  -- já baixou?
+  -- jÃ¡ baixou?
   select exists(select 1 from public.estoque_baixa_log where comanda_id = p_comanda_id) into v_exists;
   if v_exists then
     return;
@@ -884,30 +466,30 @@ CREATE FUNCTION public.clientes_set_codigo_fn() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
 BEGIN
-    -- ✅ PRIORIDADE 1: SE É CONSUMIDOR FINAL, SEMPRE USA CÓDIGO 0
+    -- âœ… PRIORIDADE 1: SE Ã‰ CONSUMIDOR FINAL, SEMPRE USA CÃ“DIGO 0
     IF NEW.is_consumidor_final = true THEN
         NEW.codigo := 0;
         RETURN NEW;
     END IF;
 
-    -- ✅ PRIORIDADE 2: SE JÁ TEM CÓDIGO DEFINIDO MANUALMENTE, MANTÉM
+    -- âœ… PRIORIDADE 2: SE JÃ TEM CÃ“DIGO DEFINIDO MANUALMENTE, MANTÃ‰M
     IF NEW.codigo IS NOT NULL THEN
         RETURN NEW;
     END IF;
 
-    -- ✅ PRIORIDADE 3: GERA PRÓXIMO CÓDIGO SEQUENCIAL
+    -- âœ… PRIORIDADE 3: GERA PRÃ“XIMO CÃ“DIGO SEQUENCIAL
     SELECT next_cliente_codigo
     INTO NEW.codigo
     FROM public.empresa_counters ec
     JOIN public.empresas e ON e.id = ec.empresa_id
     WHERE e.codigo_empresa = NEW.codigo_empresa;
 
-    -- Fallback: se não encontrou contador (empresa nova), começa em 1
+    -- Fallback: se nÃ£o encontrou contador (empresa nova), comeÃ§a em 1
     IF NEW.codigo IS NULL THEN
         NEW.codigo := 1;
     END IF;
 
-    -- Incrementa contador para próximo cliente
+    -- Incrementa contador para prÃ³ximo cliente
     UPDATE public.empresa_counters
     SET next_cliente_codigo = next_cliente_codigo + 1
     WHERE empresa_id = (
@@ -937,13 +519,13 @@ begin
     where e.id = NEW.empresa_id;
 
     if v_codigo is null then
-      raise foreign_key_violation using message = 'empresa_id inválido (empresa sem codigo)';
+      raise foreign_key_violation using message = 'empresa_id invÃ¡lido (empresa sem codigo)';
     end if;
 
     if NEW.codigo_empresa is null then
       NEW.codigo_empresa := v_codigo;
     elsif NEW.codigo_empresa <> v_codigo then
-      raise insufficient_privilege using message = 'codigo_empresa não corresponde ao codigo da empresa_id';
+      raise insufficient_privilege using message = 'codigo_empresa nÃ£o corresponde ao codigo da empresa_id';
     end if;
   end if;
 
@@ -988,7 +570,7 @@ begin
   v_emp_tel := nullif(trim((payload->'empresa'->>'telefone')), '');
   v_emp_endereco := nullif(trim((payload->'empresa'->>'endereco')), '');
 
-  -- Próximo codigo_empresa sequencial numérico (em texto)
+  -- PrÃ³ximo codigo_empresa sequencial numÃ©rico (em texto)
   select coalesce(max((codigo_empresa)::int), 0) + 1
     into strict v_codigo_empresa
   from public.empresas
@@ -1053,7 +635,7 @@ CREATE FUNCTION public.current_codigo_empresa() RETURNS text
     LANGUAGE sql SECURITY DEFINER
     SET search_path TO 'public'
     AS $$
-  -- usa codigo_empresa direto se já tiver na linha do usuário; senão, resolve via empresas
+  -- usa codigo_empresa direto se jÃ¡ tiver na linha do usuÃ¡rio; senÃ£o, resolve via empresas
   select coalesce(c.codigo_empresa, e.codigo) as codigo
   from public.colaboradores c
   left join public.empresas e on e.id = c.empresa_id
@@ -1141,7 +723,7 @@ declare
   v_empresa text;
   v_next int;
 begin
-  -- definir empresa do registro (assumindo trigger/valor já define codigo_empresa)
+  -- definir empresa do registro (assumindo trigger/valor jÃ¡ define codigo_empresa)
   if new.codigo_empresa is null then
     -- tenta obter do contexto
     v_empresa := public.get_my_company_code();
@@ -1150,7 +732,7 @@ begin
     v_empresa := new.codigo_empresa;
   end if;
 
-  -- Se não vier código, gerar a partir do maior existente
+  -- Se nÃ£o vier cÃ³digo, gerar a partir do maior existente
   if new.codigo_produto is null or btrim(new.codigo_produto) = '' then
     select coalesce(max((regexp_replace(codigo_produto, '\\D', '', 'g'))::int), 0) + 1
       into v_next
@@ -1270,43 +852,43 @@ CREATE FUNCTION public.protect_consumidor_final() RETURNS trigger
     AS $$
 BEGIN
     -- ========================================
-    -- PROTEÇÃO CONTRA DELETE
+    -- PROTEÃ‡ÃƒO CONTRA DELETE
     -- ========================================
     IF TG_OP = 'DELETE' THEN
         IF OLD.is_consumidor_final = true THEN
-            RAISE EXCEPTION 'Não é permitido excluir o cliente "Cliente Consumidor" (código 0). Este é um cliente especial do sistema.';
+            RAISE EXCEPTION 'NÃ£o Ã© permitido excluir o cliente "Cliente Consumidor" (cÃ³digo 0). Este Ã© um cliente especial do sistema.';
         END IF;
         RETURN OLD;
     END IF;
 
     -- ========================================
-    -- PROTEÇÃO CONTRA UPDATE DE CAMPOS CRÍTICOS
+    -- PROTEÃ‡ÃƒO CONTRA UPDATE DE CAMPOS CRÃTICOS
     -- ========================================
     IF TG_OP = 'UPDATE' THEN
         IF OLD.is_consumidor_final = true THEN
-            -- Impede alterar campos críticos
+            -- Impede alterar campos crÃ­ticos
             IF NEW.nome != OLD.nome THEN
-                RAISE EXCEPTION 'Não é permitido alterar o nome do cliente "Cliente Consumidor"';
+                RAISE EXCEPTION 'NÃ£o Ã© permitido alterar o nome do cliente "Cliente Consumidor"';
             END IF;
             
             IF NEW.cpf IS DISTINCT FROM OLD.cpf THEN
-                RAISE EXCEPTION 'Não é permitido alterar o CPF do cliente "Cliente Consumidor"';
+                RAISE EXCEPTION 'NÃ£o Ã© permitido alterar o CPF do cliente "Cliente Consumidor"';
             END IF;
             
             IF NEW.email IS DISTINCT FROM OLD.email THEN
-                RAISE EXCEPTION 'Não é permitido alterar o email do cliente "Cliente Consumidor"';
+                RAISE EXCEPTION 'NÃ£o Ã© permitido alterar o email do cliente "Cliente Consumidor"';
             END IF;
             
             IF NEW.is_consumidor_final != OLD.is_consumidor_final THEN
-                RAISE EXCEPTION 'Não é permitido remover a flag is_consumidor_final';
+                RAISE EXCEPTION 'NÃ£o Ã© permitido remover a flag is_consumidor_final';
             END IF;
             
             IF NEW.codigo != OLD.codigo THEN
-                RAISE EXCEPTION 'Não é permitido alterar o código do cliente "Cliente Consumidor"';
+                RAISE EXCEPTION 'NÃ£o Ã© permitido alterar o cÃ³digo do cliente "Cliente Consumidor"';
             END IF;
             
-            -- Permite atualizar: saldo, telefone, observações, timestamps
-            -- Esses campos são permitidos para facilitar operações do sistema
+            -- Permite atualizar: saldo, telefone, observaÃ§Ãµes, timestamps
+            -- Esses campos sÃ£o permitidos para facilitar operaÃ§Ãµes do sistema
         END IF;
         RETURN NEW;
     END IF;
@@ -1330,7 +912,7 @@ DECLARE
 BEGIN
     dia_semana_num := EXTRACT(DOW FROM p_data);
     
-    -- 1. Verificar se há fechamento específico para esta data
+    -- 1. Verificar se hÃ¡ fechamento especÃ­fico para esta data
     SELECT NOT funciona INTO fechamento_especifico
     FROM public.quadras_dias_funcionamento 
     WHERE quadra_id = p_quadra_id 
@@ -1338,7 +920,7 @@ BEGIN
       AND data_fechamento = p_data
       AND funciona = false;
     
-    -- Se encontrou fechamento específico, quadra está fechada
+    -- Se encontrou fechamento especÃ­fico, quadra estÃ¡ fechada
     IF fechamento_especifico IS NOT NULL AND fechamento_especifico = true THEN
         RETURN false;
     END IF;
@@ -1350,12 +932,12 @@ BEGIN
       AND tipo = 'dia_semana'
       AND dia_semana = dia_semana_num;
     
-    -- Se tem configuração para o dia da semana, usar ela
+    -- Se tem configuraÃ§Ã£o para o dia da semana, usar ela
     IF funcionamento_semanal IS NOT NULL THEN
         RETURN funcionamento_semanal;
     END IF;
     
-    -- 3. Fallback: se não tem configuração, assume que funciona (comportamento atual)
+    -- 3. Fallback: se nÃ£o tem configuraÃ§Ã£o, assume que funciona (comportamento atual)
     RETURN true;
 END;
 $$;
@@ -1378,7 +960,7 @@ begin
     NEW.codigo_empresa::integer, -- CAST AQUI
     NEW.id,
     'observacao_adicionada',
-    'Observação: ' || coalesce(NEW.observacoes, '')
+    'ObservaÃ§Ã£o: ' || coalesce(NEW.observacoes, '')
   );
 
   return NEW;
@@ -1447,7 +1029,7 @@ CREATE FUNCTION public.set_current_empresa(empresa_codigo text) RETURNS void
     LANGUAGE plpgsql SECURITY DEFINER
     AS $$
 BEGIN
-    -- Define a empresa atual na sessão
+    -- Define a empresa atual na sessÃ£o
     PERFORM set_config('app.current_empresa', empresa_codigo, false);
 END;
 $$;
@@ -1462,7 +1044,7 @@ CREATE FUNCTION public.set_empresa_from_user() RETURNS trigger
     SET search_path TO 'public'
     AS $$
 begin
-  -- Se o front não enviar, preencher pelo contexto do usuário
+  -- Se o front nÃ£o enviar, preencher pelo contexto do usuÃ¡rio
   if NEW.codigo_empresa is null then
     NEW.codigo_empresa := public.get_my_company_code();
   end if;
@@ -1685,7 +1267,7 @@ CREATE TABLE public.agenda_settings (
 -- Name: TABLE agenda_settings; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON TABLE public.agenda_settings IS 'Configurações de automação da agenda por empresa (1:1 com empresas).';
+COMMENT ON TABLE public.agenda_settings IS 'ConfiguraÃ§Ãµes de automaÃ§Ã£o da agenda por empresa (1:1 com empresas).';
 
 
 --
@@ -1722,7 +1304,7 @@ COMMENT ON TABLE public.agendamento_participantes IS 'Cotas de valor por partici
 -- Name: COLUMN agendamento_participantes.valor_cota; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.agendamento_participantes.valor_cota IS 'Valor atribuído ao participante';
+COMMENT ON COLUMN public.agendamento_participantes.valor_cota IS 'Valor atribuÃ­do ao participante';
 
 
 --
@@ -1765,14 +1347,14 @@ COMMENT ON COLUMN public.agendamentos.clientes IS 'Participantes do agendamento 
 -- Name: COLUMN agendamentos.valor_total; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.agendamentos.valor_total IS 'Preço total do agendamento para meia hora (R$)';
+COMMENT ON COLUMN public.agendamentos.valor_total IS 'PreÃ§o total do agendamento para meia hora (R$)';
 
 
 --
 -- Name: COLUMN agendamentos.auto_disabled; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.agendamentos.auto_disabled IS 'Quando true, desativa QUALQUER automação (auto-confirmar, auto-iniciar, auto-finalizar) para este agendamento.';
+COMMENT ON COLUMN public.agendamentos.auto_disabled IS 'Quando true, desativa QUALQUER automaÃ§Ã£o (auto-confirmar, auto-iniciar, auto-finalizar) para este agendamento.';
 
 
 --
@@ -1862,7 +1444,7 @@ COMMENT ON COLUMN public.caixa_resumos.valor_final_dinheiro IS 'Valor contado in
 -- Name: COLUMN caixa_resumos.diferenca_dinheiro; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.caixa_resumos.diferenca_dinheiro IS 'Diferença entre o valor contado e o saldo final calculado (contado - saldo_final_calculado).';
+COMMENT ON COLUMN public.caixa_resumos.diferenca_dinheiro IS 'DiferenÃ§a entre o valor contado e o saldo final calculado (contado - saldo_final_calculado).';
 
 
 --
@@ -1961,7 +1543,7 @@ CREATE TABLE public.clientes (
 -- Name: COLUMN clientes.is_consumidor_final; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.clientes.is_consumidor_final IS 'Identifica cliente padrão "Consumidor Final" que não pode ser editado/excluído. Sempre recebe código 0.';
+COMMENT ON COLUMN public.clientes.is_consumidor_final IS 'Identifica cliente padrÃ£o "Consumidor Final" que nÃ£o pode ser editado/excluÃ­do. Sempre recebe cÃ³digo 0.';
 
 
 --
@@ -2014,7 +1596,7 @@ CREATE TABLE public.comanda_historico (
 -- Name: TABLE comanda_historico; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON TABLE public.comanda_historico IS 'Auditoria de alterações em comandas para rastreabilidade';
+COMMENT ON TABLE public.comanda_historico IS 'Auditoria de alteraÃ§Ãµes em comandas para rastreabilidade';
 
 
 --
@@ -2088,7 +1670,7 @@ END) STORED,
 -- Name: COLUMN comandas.is_balcao; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.comandas.is_balcao IS 'True quando a comanda não possui mesa (Balcão).';
+COMMENT ON COLUMN public.comandas.is_balcao IS 'True quando a comanda nÃ£o possui mesa (BalcÃ£o).';
 
 
 --
@@ -2116,14 +1698,14 @@ COMMENT ON COLUMN public.comandas.desconto_valor IS 'Valor do desconto (% ou R$)
 -- Name: COLUMN comandas.observacoes; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.comandas.observacoes IS 'Notas/observações da comanda (ex: sem cebola, urgente)';
+COMMENT ON COLUMN public.comandas.observacoes IS 'Notas/observaÃ§Ãµes da comanda (ex: sem cebola, urgente)';
 
 
 --
 -- Name: COLUMN comandas.vendedor_id; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.comandas.vendedor_id IS 'Usuário que realizou a venda (para comissão)';
+COMMENT ON COLUMN public.comandas.vendedor_id IS 'UsuÃ¡rio que realizou a venda (para comissÃ£o)';
 
 
 --
@@ -2137,7 +1719,7 @@ COMMENT ON COLUMN public.comandas.agendamento_id IS 'Agendamento vinculado (se v
 -- Name: COLUMN comandas.versao_sincronizacao; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.comandas.versao_sincronizacao IS 'Versão para sincronização realtime';
+COMMENT ON COLUMN public.comandas.versao_sincronizacao IS 'VersÃ£o para sincronizaÃ§Ã£o realtime';
 
 
 --
@@ -2193,7 +1775,7 @@ COMMENT ON TABLE public.compras IS 'Registro de compras (NF-es de entrada) impor
 -- Name: COLUMN compras.chave_nfe; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.compras.chave_nfe IS 'Chave de acesso única da NF-e (44 dígitos)';
+COMMENT ON COLUMN public.compras.chave_nfe IS 'Chave de acesso Ãºnica da NF-e (44 dÃ­gitos)';
 
 
 --
@@ -2207,7 +1789,7 @@ COMMENT ON COLUMN public.compras.xml_completo IS 'XML completo da NF-e para audi
 -- Name: COLUMN compras.forma_pagamento; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.compras.forma_pagamento IS 'Forma de pagamento da NF-e (Dinheiro, PIX, Cartão, etc)';
+COMMENT ON COLUMN public.compras.forma_pagamento IS 'Forma de pagamento da NF-e (Dinheiro, PIX, CartÃ£o, etc)';
 
 
 --
@@ -2294,21 +1876,21 @@ COMMENT ON TABLE public.compras_itens IS 'Itens individuais de cada compra (NF-e
 -- Name: COLUMN compras_itens.codigo_produto_xml; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.compras_itens.codigo_produto_xml IS 'Código do produto conforme consta no XML';
+COMMENT ON COLUMN public.compras_itens.codigo_produto_xml IS 'CÃ³digo do produto conforme consta no XML';
 
 
 --
 -- Name: COLUMN compras_itens.vinculado_manualmente; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.compras_itens.vinculado_manualmente IS 'Indica se o produto foi vinculado manualmente pelo usuário';
+COMMENT ON COLUMN public.compras_itens.vinculado_manualmente IS 'Indica se o produto foi vinculado manualmente pelo usuÃ¡rio';
 
 
 --
 -- Name: COLUMN compras_itens.selecionado_na_importacao; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.compras_itens.selecionado_na_importacao IS 'Indica se este produto foi selecionado pelo usuário durante a importação original do XML. Usado para manter consistência no reprocessamento.';
+COMMENT ON COLUMN public.compras_itens.selecionado_na_importacao IS 'Indica se este produto foi selecionado pelo usuÃ¡rio durante a importaÃ§Ã£o original do XML. Usado para manter consistÃªncia no reprocessamento.';
 
 
 --
@@ -2478,14 +2060,14 @@ CREATE TABLE public.finalizadoras (
 -- Name: COLUMN finalizadoras.codigo_interno; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.finalizadoras.codigo_interno IS 'Código interno sequencial (01, 02, 03...)';
+COMMENT ON COLUMN public.finalizadoras.codigo_interno IS 'CÃ³digo interno sequencial (01, 02, 03...)';
 
 
 --
 -- Name: COLUMN finalizadoras.codigo_sefaz; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.finalizadoras.codigo_sefaz IS 'Código oficial SEFAZ para XML NF-e/NFC-e';
+COMMENT ON COLUMN public.finalizadoras.codigo_sefaz IS 'CÃ³digo oficial SEFAZ para XML NF-e/NFC-e';
 
 
 --
@@ -2522,7 +2104,7 @@ CREATE TABLE public.mesas (
 -- Name: COLUMN mesas.nome; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.mesas.nome IS 'Nome amigável da mesa (ex.: Pátio 1)';
+COMMENT ON COLUMN public.mesas.nome IS 'Nome amigÃ¡vel da mesa (ex.: PÃ¡tio 1)';
 
 
 --
@@ -2684,21 +2266,21 @@ COMMENT ON COLUMN public.produtos.fornecedor_id IS 'ID do fornecedor (cliente co
 -- Name: COLUMN produtos.data_importacao; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.produtos.data_importacao IS 'Data/hora da última importação via XML';
+COMMENT ON COLUMN public.produtos.data_importacao IS 'Data/hora da Ãºltima importaÃ§Ã£o via XML';
 
 
 --
 -- Name: COLUMN produtos.xml_chave_nfe; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.produtos.xml_chave_nfe IS 'Chave de acesso da NF-e de origem (44 dígitos)';
+COMMENT ON COLUMN public.produtos.xml_chave_nfe IS 'Chave de acesso da NF-e de origem (44 dÃ­gitos)';
 
 
 --
 -- Name: COLUMN produtos.xml_numero_nfe; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.produtos.xml_numero_nfe IS 'Número da NF-e de origem';
+COMMENT ON COLUMN public.produtos.xml_numero_nfe IS 'NÃºmero da NF-e de origem';
 
 
 --
@@ -2726,28 +2308,28 @@ CREATE TABLE public.quadras (
 -- Name: COLUMN quadras.valor; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.quadras.valor IS 'Preço por meia hora (R$) para locação da quadra';
+COMMENT ON COLUMN public.quadras.valor IS 'PreÃ§o por meia hora (R$) para locaÃ§Ã£o da quadra';
 
 
 --
 -- Name: COLUMN quadras.hora_inicio; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.quadras.hora_inicio IS 'Horário padrão de abertura da quadra';
+COMMENT ON COLUMN public.quadras.hora_inicio IS 'HorÃ¡rio padrÃ£o de abertura da quadra';
 
 
 --
 -- Name: COLUMN quadras.hora_fim; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.quadras.hora_fim IS 'Horário padrão de fechamento da quadra';
+COMMENT ON COLUMN public.quadras.hora_fim IS 'HorÃ¡rio padrÃ£o de fechamento da quadra';
 
 
 --
 -- Name: COLUMN quadras.descricao; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.quadras.descricao IS 'Descrição detalhada da quadra (dimensões, características, comodidades)';
+COMMENT ON COLUMN public.quadras.descricao IS 'DescriÃ§Ã£o detalhada da quadra (dimensÃµes, caracterÃ­sticas, comodidades)';
 
 
 --
@@ -2776,28 +2358,28 @@ CREATE TABLE public.quadras_dias_funcionamento (
 -- Name: TABLE quadras_dias_funcionamento; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON TABLE public.quadras_dias_funcionamento IS 'Configuração de dias de funcionamento das quadras por dia da semana e fechamentos específicos';
+COMMENT ON TABLE public.quadras_dias_funcionamento IS 'ConfiguraÃ§Ã£o de dias de funcionamento das quadras por dia da semana e fechamentos especÃ­ficos';
 
 
 --
 -- Name: COLUMN quadras_dias_funcionamento.tipo; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.quadras_dias_funcionamento.tipo IS 'Tipo de configuração: dia_semana ou data_fechamento';
+COMMENT ON COLUMN public.quadras_dias_funcionamento.tipo IS 'Tipo de configuraÃ§Ã£o: dia_semana ou data_fechamento';
 
 
 --
 -- Name: COLUMN quadras_dias_funcionamento.dia_semana; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.quadras_dias_funcionamento.dia_semana IS 'Dia da semana (0=domingo, 1=segunda, ..., 6=sábado)';
+COMMENT ON COLUMN public.quadras_dias_funcionamento.dia_semana IS 'Dia da semana (0=domingo, 1=segunda, ..., 6=sÃ¡bado)';
 
 
 --
 -- Name: COLUMN quadras_dias_funcionamento.data_fechamento; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.quadras_dias_funcionamento.data_fechamento IS 'Data específica de fechamento';
+COMMENT ON COLUMN public.quadras_dias_funcionamento.data_fechamento IS 'Data especÃ­fica de fechamento';
 
 
 --
@@ -2838,117 +2420,15 @@ CREATE TABLE public.usuarios (
 --
 -- Name: v_agendamento_participantes; Type: VIEW; Schema: public; Owner: -
 --
-
-CREATE VIEW public.v_agendamento_participantes AS
- SELECT ap.id,
-    ap.agendamento_id,
-    ap.codigo_empresa,
-    ap.cliente_id,
-    c.nome,
-    ap.valor_cota,
-    (ap.status_pagamento)::text AS status_pagamento_text,
-    ap.status_pagamento
-   FROM (public.agendamento_participantes ap
-     JOIN public.clientes c ON ((c.id = ap.cliente_id)));
-
-
 --
 -- Name: v_agendamentos_detalhado; Type: VIEW; Schema: public; Owner: -
 --
-
-CREATE VIEW public.v_agendamentos_detalhado AS
- SELECT a.id AS agendamento_id,
-    a.codigo AS agendamento_codigo,
-    a.codigo_empresa,
-    a.inicio,
-    a.fim,
-    a.modalidade,
-    a.status AS agendamento_status,
-    a.valor_total AS valor_total_agendamento,
-    a.criado_em AS agendamento_criado_em,
-    q.id AS quadra_id,
-    q.nome AS quadra_nome,
-    ap.id AS participante_id,
-    ap.cliente_id,
-    ap.nome AS participante_nome,
-    ap.valor_cota,
-    ap.status_pagamento,
-    ap.pago_em,
-    ap.metodo_pagamento,
-    ap.created_at AS participante_criado_em,
-    ap.updated_at AS participante_atualizado_em,
-    c.nome AS cliente_nome_completo,
-    c.cpf AS cliente_cpf,
-    c.telefone AS cliente_telefone,
-    c.email AS cliente_email,
-    f.id AS finalizadora_id,
-    f.nome AS finalizadora_nome,
-    f.tipo AS finalizadora_tipo,
-    f.taxa_percentual AS finalizadora_taxa,
-        CASE
-            WHEN (ap.status_pagamento OPERATOR(public.=) 'Pago'::text) THEN ap.valor_cota
-            ELSE (0)::numeric
-        END AS valor_pago,
-        CASE
-            WHEN (ap.status_pagamento OPERATOR(public.=) 'Pendente'::text) THEN ap.valor_cota
-            ELSE (0)::numeric
-        END AS valor_pendente,
-    (EXTRACT(epoch FROM (a.fim - a.inicio)) / (60)::numeric) AS duracao_minutos,
-        CASE ap.status_pagamento
-            WHEN 'Pago'::text THEN '✅ Pago'::text
-            WHEN 'Pendente'::text THEN '⏳ Pendente'::text
-            WHEN 'Cancelado'::text THEN '❌ Cancelado'::text
-            ELSE (ap.status_pagamento)::text
-        END AS status_pagamento_legivel
-   FROM ((((public.agendamentos a
-     LEFT JOIN public.quadras q ON ((a.quadra_id = q.id)))
-     LEFT JOIN public.agendamento_participantes ap ON ((a.id = ap.agendamento_id)))
-     LEFT JOIN public.clientes c ON ((ap.cliente_id = c.id)))
-     LEFT JOIN public.finalizadoras f ON ((ap.finalizadora_id = f.id)))
-  ORDER BY a.inicio DESC, a.codigo DESC, ap.nome;
-
-
 --
 -- Name: VIEW v_agendamentos_detalhado; Type: COMMENT; Schema: public; Owner: -
 --
-
-COMMENT ON VIEW public.v_agendamentos_detalhado IS 'View detalhada dos agendamentos com participantes e finalizadoras. 
-Cada linha representa um participante do agendamento. 
-Agendamentos sem participantes também aparecem (com dados de participante NULL).';
-
-
 --
 -- Name: v_agendamentos_isis; Type: VIEW; Schema: public; Owner: -
 --
-
-CREATE VIEW public.v_agendamentos_isis AS
- SELECT a.id AS agendamento_id,
-    a.codigo AS agendamento_codigo,
-    a.codigo_empresa,
-    a.inicio,
-    a.fim,
-    a.modalidade,
-    a.status AS agendamento_status,
-    q.id AS quadra_id,
-    q.nome AS quadra_nome,
-    ( SELECT p.nome
-           FROM public.agendamento_participantes p
-          WHERE ((p.agendamento_id = a.id) AND ((p.codigo_empresa)::text = a.codigo_empresa))
-          ORDER BY (p.nome ~~* 'cliente consumidor%'::text), p.created_at
-         LIMIT 1) AS representante_nome,
-    ( SELECT count(*) AS count
-           FROM public.agendamento_participantes p
-          WHERE ((p.agendamento_id = a.id) AND ((p.codigo_empresa)::text = a.codigo_empresa))) AS participantes_total,
-    ( SELECT count(*) AS count
-           FROM public.agendamento_participantes p
-          WHERE ((p.agendamento_id = a.id) AND ((p.codigo_empresa)::text = a.codigo_empresa) AND (p.status_pagamento OPERATOR(public.=) 'Pago'::text))) AS participantes_pagos,
-    ( SELECT count(*) AS count
-           FROM public.agendamento_participantes p
-          WHERE ((p.agendamento_id = a.id) AND ((p.codigo_empresa)::text = a.codigo_empresa) AND (p.status_pagamento OPERATOR(public.=) 'Pendente'::text))) AS participantes_pendentes
-   FROM (public.agendamentos a
-     JOIN public.quadras q ON (((q.id = a.quadra_id) AND (q.codigo_empresa = a.codigo_empresa))));
-
-
 --
 -- Name: vendas; Type: TABLE; Schema: public; Owner: -
 --
@@ -3364,21 +2844,21 @@ COMMENT ON INDEX public.compras_chave_nfe_ativa_unique IS 'Ensures only one acti
 -- Name: gin_trgm_clientes_email; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX gin_trgm_clientes_email ON public.clientes USING gin (email public.gin_trgm_ops);
+CREATE INDEX gin_trgm_clientes_email ON public.clientes USING gin (email extensions.gin_trgm_ops);
 
 
 --
 -- Name: gin_trgm_clientes_nome; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX gin_trgm_clientes_nome ON public.clientes USING gin (nome public.gin_trgm_ops);
+CREATE INDEX gin_trgm_clientes_nome ON public.clientes USING gin (nome extensions.gin_trgm_ops);
 
 
 --
 -- Name: gin_trgm_clientes_telefone; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX gin_trgm_clientes_telefone ON public.clientes USING gin (telefone public.gin_trgm_ops);
+CREATE INDEX gin_trgm_clientes_telefone ON public.clientes USING gin (telefone extensions.gin_trgm_ops);
 
 
 --
@@ -5154,123 +4634,123 @@ CREATE POLICY "Usuarios podem ler counters da propria empresa" ON public.empresa
 
 
 --
--- Name: compras Usuários podem atualizar compras da própria empresa; Type: POLICY; Schema: public; Owner: -
+-- Name: compras UsuÃ¡rios podem atualizar compras da prÃ³pria empresa; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY "Usuários podem atualizar compras da própria empresa" ON public.compras FOR UPDATE USING ((codigo_empresa = (( SELECT public.get_my_company_code() AS get_my_company_code))::integer));
+CREATE POLICY "UsuÃ¡rios podem atualizar compras da prÃ³pria empresa" ON public.compras FOR UPDATE USING ((codigo_empresa = (( SELECT public.get_my_company_code() AS get_my_company_code))::integer));
 
 
 --
--- Name: compras_itens Usuários podem atualizar itens de compras da própria empresa; Type: POLICY; Schema: public; Owner: -
+-- Name: compras_itens UsuÃ¡rios podem atualizar itens de compras da prÃ³pria empresa; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY "Usuários podem atualizar itens de compras da própria empresa" ON public.compras_itens FOR UPDATE USING ((EXISTS ( SELECT 1
+CREATE POLICY "UsuÃ¡rios podem atualizar itens de compras da prÃ³pria empresa" ON public.compras_itens FOR UPDATE USING ((EXISTS ( SELECT 1
    FROM public.compras
   WHERE ((compras.id = compras_itens.compra_id) AND (compras.codigo_empresa = (( SELECT public.get_my_company_code() AS get_my_company_code))::integer)))));
 
 
 --
--- Name: caixa_movimentacoes Usuários podem atualizar movimentações de caixa da sua empre; Type: POLICY; Schema: public; Owner: -
+-- Name: caixa_movimentacoes UsuÃ¡rios podem atualizar movimentaÃ§Ãµes de caixa da sua empre; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY "Usuários podem atualizar movimentações de caixa da sua empre" ON public.caixa_movimentacoes FOR UPDATE USING ((codigo_empresa = public.get_my_company_code())) WITH CHECK ((codigo_empresa = public.get_my_company_code()));
-
-
---
--- Name: caixa_resumos Usuários podem atualizar resumos de caixa da sua empresa; Type: POLICY; Schema: public; Owner: -
---
-
-CREATE POLICY "Usuários podem atualizar resumos de caixa da sua empresa" ON public.caixa_resumos FOR UPDATE USING ((codigo_empresa = public.get_my_company_code())) WITH CHECK ((codigo_empresa = public.get_my_company_code()));
+CREATE POLICY "UsuÃ¡rios podem atualizar movimentaÃ§Ãµes de caixa da sua empre" ON public.caixa_movimentacoes FOR UPDATE USING ((codigo_empresa = public.get_my_company_code())) WITH CHECK ((codigo_empresa = public.get_my_company_code()));
 
 
 --
--- Name: caixa_movimentacoes Usuários podem criar movimentações de caixa na sua empresa; Type: POLICY; Schema: public; Owner: -
+-- Name: caixa_resumos UsuÃ¡rios podem atualizar resumos de caixa da sua empresa; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY "Usuários podem criar movimentações de caixa na sua empresa" ON public.caixa_movimentacoes FOR INSERT WITH CHECK ((codigo_empresa = public.get_my_company_code()));
-
-
---
--- Name: caixa_resumos Usuários podem criar resumos de caixa na sua empresa; Type: POLICY; Schema: public; Owner: -
---
-
-CREATE POLICY "Usuários podem criar resumos de caixa na sua empresa" ON public.caixa_resumos FOR INSERT WITH CHECK ((codigo_empresa = public.get_my_company_code()));
+CREATE POLICY "UsuÃ¡rios podem atualizar resumos de caixa da sua empresa" ON public.caixa_resumos FOR UPDATE USING ((codigo_empresa = public.get_my_company_code())) WITH CHECK ((codigo_empresa = public.get_my_company_code()));
 
 
 --
--- Name: compras Usuários podem deletar compras da própria empresa; Type: POLICY; Schema: public; Owner: -
+-- Name: caixa_movimentacoes UsuÃ¡rios podem criar movimentaÃ§Ãµes de caixa na sua empresa; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY "Usuários podem deletar compras da própria empresa" ON public.compras FOR DELETE USING ((codigo_empresa = (( SELECT public.get_my_company_code() AS get_my_company_code))::integer));
+CREATE POLICY "UsuÃ¡rios podem criar movimentaÃ§Ãµes de caixa na sua empresa" ON public.caixa_movimentacoes FOR INSERT WITH CHECK ((codigo_empresa = public.get_my_company_code()));
 
 
 --
--- Name: compras_itens Usuários podem deletar itens de compras da própria empresa; Type: POLICY; Schema: public; Owner: -
+-- Name: caixa_resumos UsuÃ¡rios podem criar resumos de caixa na sua empresa; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY "Usuários podem deletar itens de compras da própria empresa" ON public.compras_itens FOR DELETE USING ((EXISTS ( SELECT 1
+CREATE POLICY "UsuÃ¡rios podem criar resumos de caixa na sua empresa" ON public.caixa_resumos FOR INSERT WITH CHECK ((codigo_empresa = public.get_my_company_code()));
+
+
+--
+-- Name: compras UsuÃ¡rios podem deletar compras da prÃ³pria empresa; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY "UsuÃ¡rios podem deletar compras da prÃ³pria empresa" ON public.compras FOR DELETE USING ((codigo_empresa = (( SELECT public.get_my_company_code() AS get_my_company_code))::integer));
+
+
+--
+-- Name: compras_itens UsuÃ¡rios podem deletar itens de compras da prÃ³pria empresa; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY "UsuÃ¡rios podem deletar itens de compras da prÃ³pria empresa" ON public.compras_itens FOR DELETE USING ((EXISTS ( SELECT 1
    FROM public.compras
   WHERE ((compras.id = compras_itens.compra_id) AND (compras.codigo_empresa = (( SELECT public.get_my_company_code() AS get_my_company_code))::integer)))));
 
 
 --
--- Name: caixa_movimentacoes Usuários podem deletar movimentações de caixa da sua empresa; Type: POLICY; Schema: public; Owner: -
+-- Name: caixa_movimentacoes UsuÃ¡rios podem deletar movimentaÃ§Ãµes de caixa da sua empresa; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY "Usuários podem deletar movimentações de caixa da sua empresa" ON public.caixa_movimentacoes FOR DELETE USING ((codigo_empresa = public.get_my_company_code()));
-
-
---
--- Name: caixa_resumos Usuários podem deletar resumos de caixa da sua empresa; Type: POLICY; Schema: public; Owner: -
---
-
-CREATE POLICY "Usuários podem deletar resumos de caixa da sua empresa" ON public.caixa_resumos FOR DELETE USING ((codigo_empresa = public.get_my_company_code()));
+CREATE POLICY "UsuÃ¡rios podem deletar movimentaÃ§Ãµes de caixa da sua empresa" ON public.caixa_movimentacoes FOR DELETE USING ((codigo_empresa = public.get_my_company_code()));
 
 
 --
--- Name: compras Usuários podem inserir compras na própria empresa; Type: POLICY; Schema: public; Owner: -
+-- Name: caixa_resumos UsuÃ¡rios podem deletar resumos de caixa da sua empresa; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY "Usuários podem inserir compras na própria empresa" ON public.compras FOR INSERT WITH CHECK ((codigo_empresa = (( SELECT public.get_my_company_code() AS get_my_company_code))::integer));
+CREATE POLICY "UsuÃ¡rios podem deletar resumos de caixa da sua empresa" ON public.caixa_resumos FOR DELETE USING ((codigo_empresa = public.get_my_company_code()));
 
 
 --
--- Name: compras_itens Usuários podem inserir itens de compras da própria empresa; Type: POLICY; Schema: public; Owner: -
+-- Name: compras UsuÃ¡rios podem inserir compras na prÃ³pria empresa; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY "Usuários podem inserir itens de compras da própria empresa" ON public.compras_itens FOR INSERT WITH CHECK ((EXISTS ( SELECT 1
+CREATE POLICY "UsuÃ¡rios podem inserir compras na prÃ³pria empresa" ON public.compras FOR INSERT WITH CHECK ((codigo_empresa = (( SELECT public.get_my_company_code() AS get_my_company_code))::integer));
+
+
+--
+-- Name: compras_itens UsuÃ¡rios podem inserir itens de compras da prÃ³pria empresa; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY "UsuÃ¡rios podem inserir itens de compras da prÃ³pria empresa" ON public.compras_itens FOR INSERT WITH CHECK ((EXISTS ( SELECT 1
    FROM public.compras
   WHERE ((compras.id = compras_itens.compra_id) AND (compras.codigo_empresa = (( SELECT public.get_my_company_code() AS get_my_company_code))::integer)))));
 
 
 --
--- Name: compras Usuários podem ver compras da própria empresa; Type: POLICY; Schema: public; Owner: -
+-- Name: compras UsuÃ¡rios podem ver compras da prÃ³pria empresa; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY "Usuários podem ver compras da própria empresa" ON public.compras FOR SELECT USING ((codigo_empresa = (( SELECT public.get_my_company_code() AS get_my_company_code))::integer));
+CREATE POLICY "UsuÃ¡rios podem ver compras da prÃ³pria empresa" ON public.compras FOR SELECT USING ((codigo_empresa = (( SELECT public.get_my_company_code() AS get_my_company_code))::integer));
 
 
 --
--- Name: compras_itens Usuários podem ver itens de compras da própria empresa; Type: POLICY; Schema: public; Owner: -
+-- Name: compras_itens UsuÃ¡rios podem ver itens de compras da prÃ³pria empresa; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY "Usuários podem ver itens de compras da própria empresa" ON public.compras_itens FOR SELECT USING ((EXISTS ( SELECT 1
+CREATE POLICY "UsuÃ¡rios podem ver itens de compras da prÃ³pria empresa" ON public.compras_itens FOR SELECT USING ((EXISTS ( SELECT 1
    FROM public.compras
   WHERE ((compras.id = compras_itens.compra_id) AND (compras.codigo_empresa = (( SELECT public.get_my_company_code() AS get_my_company_code))::integer)))));
 
 
 --
--- Name: caixa_movimentacoes Usuários podem ver movimentações de caixa da sua empresa; Type: POLICY; Schema: public; Owner: -
+-- Name: caixa_movimentacoes UsuÃ¡rios podem ver movimentaÃ§Ãµes de caixa da sua empresa; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY "Usuários podem ver movimentações de caixa da sua empresa" ON public.caixa_movimentacoes FOR SELECT USING ((codigo_empresa = public.get_my_company_code()));
+CREATE POLICY "UsuÃ¡rios podem ver movimentaÃ§Ãµes de caixa da sua empresa" ON public.caixa_movimentacoes FOR SELECT USING ((codigo_empresa = public.get_my_company_code()));
 
 
 --
--- Name: caixa_resumos Usuários podem ver resumos de caixa da sua empresa; Type: POLICY; Schema: public; Owner: -
+-- Name: caixa_resumos UsuÃ¡rios podem ver resumos de caixa da sua empresa; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY "Usuários podem ver resumos de caixa da sua empresa" ON public.caixa_resumos FOR SELECT USING ((codigo_empresa = public.get_my_company_code()));
+CREATE POLICY "UsuÃ¡rios podem ver resumos de caixa da sua empresa" ON public.caixa_resumos FOR SELECT USING ((codigo_empresa = public.get_my_company_code()));
 
 
 --
