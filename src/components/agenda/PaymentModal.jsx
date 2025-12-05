@@ -607,6 +607,35 @@ export default function PaymentModal({
         }
       }
       
+      // Inserir novos participantes que foram adicionados no PaymentModal
+      const originalLen = originalParticipants.length;
+      if (effectiveParticipants.length > originalLen) {
+        console.log('➕ Inserindo participantes adicionais:', effectiveParticipants.length - originalLen);
+        const rowsToInsert = effectiveParticipants.slice(originalLen).map((novo, idx) => {
+          const valor = parseBRL(novo.valor_cota);
+          const defaultMethod = getDefaultPayMethod();
+          const finId = novo.finalizadora_id || (defaultMethod?.id ? String(defaultMethod.id) : null);
+          return {
+            codigo_empresa: codigo,
+            agendamento_id: agendamentoId,
+            cliente_id: novo.cliente_id,
+            nome: novo.nome,
+            valor_cota: Number.isFinite(valor) ? valor : 0,
+            status_pagamento: novo.status_pagamento || 'Pendente',
+            finalizadora_id: finId,
+            aplicar_taxa: novo.aplicar_taxa || false,
+            ordem: originalLen + idx + 1,
+          };
+        });
+        const { error: insertErr } = await supabase
+          .from('agendamento_participantes')
+          .insert(rowsToInsert);
+        if (insertErr) {
+          console.error('❌ Erro ao inserir novos participantes:', insertErr);
+          throw insertErr;
+        }
+      }
+      
       console.log('✅ Substituição inteligente concluída');
       console.log('========== SALVAMENTO CONCLUÍDO ==========\n\n');
       
