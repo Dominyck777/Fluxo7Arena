@@ -133,6 +133,7 @@ function PrivateApp() {
 }
 
 function App() {
+  const location = useLocation();
   const [bypassed, setBypassed] = useState(false);
   const [active, setActive] = useState(false);
   const envMaintenance = String(import.meta.env.VITE_MAINTENANCE_MODE || '').toLowerCase() === 'true';
@@ -171,8 +172,18 @@ function App() {
   }, []);
 
   const maintenanceActive = Boolean(FORCE_MAINTENANCE) || envMaintenance || active;
+  const isBypassed = (() => {
+    try {
+      const ls = localStorage.getItem('maintenance:bypass') === '1';
+      const ss = (() => { try { return sessionStorage.getItem('maintenance:bypass') === '1'; } catch { return false; } })();
+      const ck = (() => {
+        try { return document.cookie.split(';').some(c => c.trim() === 'fx_maint_bypass=1'); } catch { return false; }
+      })();
+      return ls || ss || ck;
+    } catch { return false; }
+  })();
 
-  if (maintenanceActive && !bypassed) {
+  if (maintenanceActive && !isBypassed) {
     return (
       <Routes>
         <Route path="/maintenance" element={<MaintenancePage />} />

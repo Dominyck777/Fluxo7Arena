@@ -63,6 +63,9 @@ export default function MaintenancePage() {
         const ok = String(code || '') === PASSWORD;
         if (ok) {
           try { localStorage.setItem('maintenance:bypass', '1'); } catch {}
+          try { sessionStorage.setItem('maintenance:bypass', '1'); } catch {}
+          try { document.cookie = 'fx_maint_bypass=1; path=/; max-age=2592000'; } catch {}
+          try { sessionStorage.removeItem('auth:returnUrl'); } catch {}
           navigate('/login', { replace: true });
         } else {
           console.warn('[Maintenance] Senha inválida.');
@@ -85,6 +88,9 @@ export default function MaintenancePage() {
     const candidate = code || last;
     if (candidate && candidate === PASSWORD) {
       try { localStorage.setItem('maintenance:bypass', '1'); } catch {}
+      try { sessionStorage.setItem('maintenance:bypass', '1'); } catch {}
+      try { document.cookie = 'fx_maint_bypass=1; path=/; max-age=2592000'; } catch {}
+      try { sessionStorage.removeItem('auth:returnUrl'); } catch {}
       navigate('/login', { replace: true });
     }
   }, [location, navigate]);
