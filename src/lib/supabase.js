@@ -111,6 +111,9 @@ export const supabase = {
   // Functions usando client original (Edge Functions)
   functions: originalClient.functions,
 
+  // RPC (PostgREST) usando client original
+  rpc: (...args) => originalClient.rpc(...args),
+
   // Realtime usando client original (precisa de todas as funcionalidades)
   realtime: originalClient.realtime,
   channel: (...args) => originalClient.channel(...args),

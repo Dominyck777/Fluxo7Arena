@@ -1,6 +1,7 @@
+import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { format } from 'date-fns';
-import { Bot, User } from 'lucide-react';
+import { Bot, User, Copy as CopyIcon, Check as CheckIcon } from 'lucide-react';
 import { IsisAvatar } from './IsisAvatar';
 
 /**
@@ -36,6 +37,29 @@ const processMarkdown = (text, isIsis, isSuccess) => {
 export const IsisMessage = ({ message }) => {
   const isIsis = message.from === 'isis';
   const isSuccess = isIsis && message?.color === 'green';
+  const [copied, setCopied] = useState(false);
+
+  const copyToClipboard = async (text) => {
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.top = '0';
+        ta.style.left = '0';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    } catch {}
+  };
   
   return (
     <motion.div
@@ -57,7 +81,7 @@ export const IsisMessage = ({ message }) => {
         {/* Mensagem */}
         <div className="flex flex-col gap-1">
           <div
-            className={`px-3 py-2.5 md:px-5 md:py-3.5 backdrop-blur-sm transition-all duration-300 ${
+            className={`relative px-3 py-2.5 md:px-5 md:py-3.5 backdrop-blur-sm transition-all duration-300 ${
               isIsis
                 ? (isSuccess
                     ? 'bg-emerald-600/90 border border-emerald-400 text-white rounded-2xl rounded-bl-sm shadow-lg shadow-emerald-600/30'
@@ -65,9 +89,23 @@ export const IsisMessage = ({ message }) => {
                 : 'bg-surface/70 border border-white/10 text-text-primary rounded-2xl rounded-br-sm'
             }`}
           >
-            <p className="text-[15px] md:text-[15px] font-bold leading-relaxed whitespace-pre-wrap tracking-wide">
+            <p className="text-[15px] md:text-[15px] font-bold leading-relaxed whitespace-pre-wrap tracking-wide relative">
               {processMarkdown(message.text, isIsis, isSuccess)}
             </p>
+            {message.copyable && (
+              <button
+                type="button"
+                onClick={() => copyToClipboard(message.copyText || (typeof message.text === 'string' ? message.text : ''))}
+                className={`absolute right-2 bottom-2 p-1.5 md:p-2 rounded-full border shadow-sm transition ${
+                  isIsis
+                    ? 'bg-white/80 border-white/40 text-[#0A0A0A] hover:bg-white'
+                    : 'bg-white/10 border-white/10 text-text-primary hover:bg-white/20'
+                }`}
+                aria-label="Copiar texto"
+              >
+                {copied ? <CheckIcon className="w-4 h-4" /> : <CopyIcon className="w-4 h-4" />}
+              </button>
+            )}
           </div>
           
           {/* Timestamp */}

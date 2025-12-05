@@ -12,42 +12,47 @@ export const IsisHorarioInput = ({ onSubmit, onMudarData, disabled = false, hora
   const [fim, setFim] = useState('');
   const [esporte, setEsporte] = useState('');
 
-  // Gera opções de horário de início (todos os slots disponíveis)
-  const opcoesInicio = horariosDisponiveis.map(slot => ({
-    value: slot.inicio,
-    label: slot.inicio,
-    available: true
-  }));
+  // Gera opções de horário de início, desabilitando inícios que não alcancem 60min contínuos
+  const opcoesInicio = horariosDisponiveis.map((slot, idx) => {
+    let expected = horariosDisponiveis[idx].fim;
+    let steps = 0;
+    let i = idx + 1;
+    while (i < horariosDisponiveis.length && horariosDisponiveis[i].inicio === expected) {
+      steps++;
+      expected = horariosDisponiveis[i].fim;
+      i++;
+    }
+    // steps conta blocos de 30min consecutivos após o início
+    // mínimo de 2 blocos (>= 60min)
+    const available = steps >= 2;
+    return {
+      value: slot.inicio,
+      label: slot.inicio,
+      available,
+    };
+  });
 
   // Gera opções de horário de fim (baseado no horário de início selecionado)
   const opcoesFim = (() => {
     if (!inicio) return [];
-    
     const inicioIdx = horariosDisponiveis.findIndex(slot => slot.inicio === inicio);
     if (inicioIdx === -1) return [];
     
-    // Cria opções de fim - percorre slots disponíveis a partir do início selecionado
-    // IMPORTANTE: Tempo mínimo de 1 hora (2 slots de 30min), então começa do índice + 1
-    const opcoes = [];
-    
+    const options = [];
+    let expected = horariosDisponiveis[inicioIdx].fim;
+    let steps = 0; // cada step = 30min adicionais
     for (let i = inicioIdx + 1; i < horariosDisponiveis.length; i++) {
-      const currentSlot = horariosDisponiveis[i];
-      const nextSlot = horariosDisponiveis[i + 1];
-      
-      // Sempre adiciona o fim do slot atual como opção
-      opcoes.push({
-        value: currentSlot.fim,
-        label: currentSlot.fim,
-        available: true
-      });
-      
-      // Se não há próximo slot OU há quebra na sequência, para aqui
-      if (!nextSlot || currentSlot.fim !== nextSlot.inicio) {
-        break;
+      const current = horariosDisponiveis[i];
+      // exige cadeia contínua a partir do início selecionado
+      if (current.inicio !== expected) break;
+      steps++;
+      // só libera opções de fim quando atingirmos >= 60min (2 steps)
+      if (steps >= 2) {
+        options.push({ value: current.fim, label: current.fim, available: true });
       }
+      expected = current.fim;
     }
-    
-    return opcoes;
+    return options;
   })();
 
   // Auto-submete quando todos estão selecionados

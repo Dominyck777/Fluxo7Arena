@@ -54,16 +54,21 @@ export const IsisProvider = ({ children }) => {
   }, []);
   
   // Simula digitação da Isis
-  const addIsisMessage = useCallback((text, delay = 2000, color = null) => {
+  const addIsisMessage = useCallback((textOrMessage, delay = 2000, color = null) => {
     setIsTyping(true);
     
     setTimeout(() => {
       setIsTyping(false);
+      const payload = (textOrMessage && typeof textOrMessage === 'object' && textOrMessage.text)
+        ? textOrMessage
+        : { text: textOrMessage };
       addMessage({
         from: 'isis',
-        text,
+        text: payload.text,
         type: 'text',
-        color
+        color: payload.color ?? color,
+        copyable: !!payload.copyable,
+        copyText: payload.copyText
       });
     }, delay);
   }, [addMessage]);

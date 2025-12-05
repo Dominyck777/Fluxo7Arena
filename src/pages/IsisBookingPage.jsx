@@ -1466,7 +1466,7 @@ const IsisBookingPageContent = () => {
     }
   };
   
-  // Agrupa slots consecutivos em intervalos
+  // Agrupa slots consecutivos em intervalos e filtra intervalos < 60min
   const agruparSlotsEmIntervalos = (slots) => {
     if (slots.length === 0) return [];
     
@@ -1493,7 +1493,18 @@ const IsisBookingPageContent = () => {
     // Adiciona o último intervalo
     intervalos.push(intervaloAtual);
     
-    return intervalos;
+    // Converte HH:mm em minutos, tratando 00:00 como 24:00 (fim do dia)
+    const toMinutes = (hhmm) => {
+      const [h, m] = hhmm.split(':').map(Number);
+      if (h === 0 && m === 0) return 24 * 60;
+      return h * 60 + m;
+    };
+    
+    // Filtra para manter apenas intervalos com duração mínima de 60 minutos
+    return intervalos.filter((int) => {
+      const dur = toMinutes(int.fim) - toMinutes(int.inicio);
+      return dur >= 60;
+    });
   };
   
   // Handler para input de horário (início, fim e esporte juntos)
@@ -1779,13 +1790,13 @@ const IsisBookingPageContent = () => {
     
     // Delay menor se for modo edição inicial
     const delay = modoEdicaoInicial ? 200 : 1000;
-    addIsisMessage(resumo, delay);
+    addIsisMessage({ text: resumo, copyable: true, copyText: resumo }, delay);
     
     // Botões de confirmação e edição
     const confirmButtons = [
       { 
         label: agendamentoFinal ? 'Salvar Alterações' : 'Confirmar Agendamento', 
-        value: 'confirm', 
+        value: agendamentoFinal ? 'confirm' : 'criar agendamento', 
         icon: '✅'
       }
     ];
@@ -1898,7 +1909,7 @@ ${listaNomes}
 
 👤 **Responsável:** ${selections.cliente.nome}`;
     
-    addIsisMessage(resumoFinal, 1200);
+    addIsisMessage({ text: resumoFinal, copyable: true, copyText: resumoFinal }, 1200);
     
     // Botões finais
     const finalButtons = [
@@ -2351,7 +2362,20 @@ ${listaNomes}
       const horaInicio = format(dataAgendamento, 'HH:mm');
       const horaFim = format(new Date(agendamentoCompleto.fim), 'HH:mm');
       
-      updateSelection('quadra', agendamentoCompleto.quadras);
+      // Garantir quadra mesmo se o join vier nulo por RLS
+      let quadraFromJoin = agendamentoCompleto.quadras || null;
+      if (!quadraFromJoin) {
+        try {
+          const { data: quadraFetched } = await supabase
+            .from('quadras')
+            .select('id, nome, descricao, modalidades, valor')
+            .eq('id', agendamentoCompleto.quadra_id)
+            .single();
+          quadraFromJoin = quadraFetched || null;
+        } catch {}
+      }
+
+      updateSelection('quadra', quadraFromJoin);
       updateSelection('data', dataAgendamento);
       updateSelection('horario', {
         inicio: horaInicio,
@@ -2410,16 +2434,32 @@ ${listaNomes}
           fimDate: new Date(agendamentoCompleto.fim)
         };
         
-        mostrarResumo(
-          horarioData,                           // horário
-          agendamentoCompleto.modalidade,        // esporte
-          true,                                  // modo edição inicial
-          agendamentoCompleto.quadras,           // quadra
-          dataAgendamento,                       // data
-          participantes,                         // participantes
-          agendamentoCompleto                    // agendamento para edição
-        );
-        nextStep('review');
+        if (quadraFromJoin) {
+          mostrarResumo(
+            horarioData,                           // horário
+            agendamentoCompleto.modalidade,        // esporte
+            true,                                  // modo edição inicial
+            quadraFromJoin,                        // quadra garantida
+            dataAgendamento,                       // data
+            participantes,                         // participantes
+            agendamentoCompleto                    // agendamento para edição
+          );
+          nextStep('review');
+        } else {
+          // Se ainda não temos quadra, orientar usuário a selecionar novamente
+          addIsisMessage('Não consegui carregar os dados da quadra deste agendamento. Vamos escolher a quadra novamente?', 800);
+          setTimeout(() => {
+            // Reaproveita fluxo de seleção de quadra inicial
+            const quadraButtons = quadras.map(q => ({
+              label: q.nome,
+              value: q.id,
+              icon: '🏟️',
+              subtitle: q.descricao || q.tipo || null,
+              quadra: q
+            }));
+            addIsisMessageWithButtons('Qual quadra você quer?', quadraButtons, 600);
+          }, 1200);
+        }
       }, 1400); // Delay único maior para aguardar atualização do contexto
       
     } catch (error) {

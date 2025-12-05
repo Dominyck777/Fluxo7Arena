@@ -54,6 +54,17 @@ export const IsisParticipantesInput = ({
     }
   }, [showImport]);
 
+  useEffect(() => {
+    if (showImport && selfName && (!suggested || suggested.length === 0)) {
+      const key = canonicalKey(selfName);
+      setSuggested([selfName]);
+      setSelectedMap({ [key]: true });
+      setSelfMatchedKey(key);
+      setSelfDetected(true);
+      setHasProcessed(true);
+    }
+  }, [showImport]);
+
   const removeDiacritics = (str) => str.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
   const canonicalKey = (str) => removeDiacritics(String(str || '').trim().toLowerCase()).replace(/\s+/g, ' ');
   const presentKeys = new Set((participantesAtuais || []).map(p => canonicalKey(p.nome)));
@@ -80,6 +91,37 @@ export const IsisParticipantesInput = ({
     const candTokens = tokenize(cand);
     if (selfTokens.length === 0 || candTokens.length === 0) return false;
     return candTokens.some(t => selfTokens.includes(t));
+  };
+
+  // Extrai chaves canônicas dos nomes que estão sob o cabeçalho "Lista de espera", "Lista de reserva" ou "Convidados"
+  const extractWaitlistKeys = (text) => {
+    const keys = new Set();
+    if (!text) return keys;
+    const lines = String(text).split(/\r?\n/);
+    let inWaitlist = false;
+    for (let raw of lines) {
+      const normalized = removeDiacritics(String(raw || '')).toLowerCase().trim();
+      if (!inWaitlist) {
+        if (/^\s*[*\-•°]?\s*(lista\s+de\s+(espera|reserva)|convidad\w*)\b[\s:]*$/i.test(normalized)) {
+          inWaitlist = true;
+        }
+        continue;
+      }
+      // Encerrar seção ao encontrar um novo cabeçalho comum (exceto 'convidados', que também é seção excluída)
+      if (/^\s*\*\s*\w+|^\s*(convocad|jogad|levanta|goleir)\w*/i.test(removeDiacritics(raw))) {
+        inWaitlist = false;
+        continue;
+      }
+      const candidate = String(raw)
+        .replace(/^\s*[°•*\-]+\s*/g, '')
+        .replace(/^\s*\d+\)?\s*/g, '')
+        .replace(/^[\W_]+/, '')
+        .trim();
+      const hasLetters = /[A-Za-zÀ-ÖØ-öø-ÿ]/.test(candidate);
+      const ok = candidate && hasLetters && !/[0-9@]/.test(candidate) && candidate.length >= 2 && candidate.length <= 60;
+      if (ok) keys.add(canonicalKey(candidate));
+    }
+    return keys;
   };
 
   const handleSubmit = (e) => {
@@ -124,7 +166,9 @@ export const IsisParticipantesInput = ({
       if (data && typeof data.source === 'string') {
         console.log('[Isis Import] source=', data.source);
       }
-      const extracted = Array.isArray(data?.extracted) ? data.extracted : [];
+      const waitlistKeys = extractWaitlistKeys(importText);
+      const extractedRaw = Array.isArray(data?.extracted) ? data.extracted : [];
+      const extracted = extractedRaw.filter(n => !waitlistKeys.has(canonicalKey(n)));
       // detecta se o próprio usuário apareceu no texto processado (antes dos filtros)
       const detectedSelf = extracted.some(n => isSelfMatch(n));
       const invalidItems = Array.isArray(data?.invalid) ? data.invalid : [];
@@ -138,22 +182,29 @@ export const IsisParticipantesInput = ({
       }
       // move o próprio usuário (se detectado) para o topo
       let ordered = uniques.slice(0, 50);
-      const matchIdx = ordered.findIndex(n => isSelfMatch(n));
+      let matchIdx = ordered.findIndex(n => isSelfMatch(n));
       if (matchIdx >= 0) {
         const matched = ordered[matchIdx];
         setSelfMatchedKey(canonicalKey(matched));
         ordered = [matched, ...ordered.filter((_, i) => i !== matchIdx)];
+      } else if (selfName) {
+        const key = canonicalKey(selfName);
+        setSelfMatchedKey(key);
+        setSelfDetected(true);
+        ordered = [selfName, ...ordered];
       } else {
         setSelfMatchedKey(null);
       }
       setSuggested(ordered);
       setInvalid(invalidItems);
       const initialSel = {};
+      if (selfName) initialSel[canonicalKey(selfName)] = true;
       uniques.slice(0, 50).forEach(n => { initialSel[canonicalKey(n)] = true; });
       setSelectedMap(initialSel);
       setHasProcessed(true);
-      setSelfDetected(detectedSelf);
+      setSelfDetected(detectedSelf || !!selfName);
     } catch (err) {
+      const waitlistKeys = extractWaitlistKeys(importText);
       const local = importText.split(/[\n,;]+/).map(s => s.trim()).filter(Boolean);
       const detectedSelf = local.some(item => {
         const cleaned = item.replace(/^[\W_]+|[\W_]+$/g, '');
@@ -167,17 +218,26 @@ export const IsisParticipantesInput = ({
         const hasLetters = /[A-Za-zÀ-ÖØ-öø-ÿ]/.test(cleaned);
         const ok = cleaned.length >= 2 && cleaned.length <= 60 && hasLetters && !/[0-9@]/.test(cleaned);
         if (!ok || !key) continue;
+        if (waitlistKeys.has(key)) continue;
         if (seen.has(key)) continue;
         seen.add(key);
         const title = cleaned.toLowerCase().split(/\s+/).map(w => w ? w[0].toUpperCase() + w.slice(1) : w).join(' ');
         uniques.push(title);
       }
-      setSuggested(uniques.slice(0, 50));
+      let ordered = uniques.slice(0, 50);
+      if (selfName) {
+        const key = canonicalKey(selfName);
+        setSelfMatchedKey(key);
+        setSelfDetected(true);
+        ordered = [selfName, ...ordered];
+      }
+      setSuggested(ordered);
       const initialSel = {};
+      if (selfName) initialSel[canonicalKey(selfName)] = true;
       uniques.slice(0, 50).forEach(n => { initialSel[canonicalKey(n)] = true; });
       setSelectedMap(initialSel);
       setHasProcessed(true);
-      setSelfDetected(detectedSelf);
+      setSelfDetected(detectedSelf || !!selfName);
     } finally {
       setIsProcessing(false);
     }
@@ -394,7 +454,7 @@ export const IsisParticipantesInput = ({
                       value={importText}
                       onChange={(e) => setImportText(e.target.value)}
                       disabled={isProcessing}
-                      placeholder={"Exemplo:\n1) João Silva\n2) Maria Clara\n3) Pedro Henrique\n\nCole sua lista (um por linha ou separados por vírgula) e clique em “Processar com Ísis”"}
+                      placeholder={"Exemplo:\n1) João Silva\n2) Maria Clara\n3) Pedro Henrique\n\nDica: nomes sob os cabeçalhos 'Lista de espera', 'Lista de reserva' ou 'Convidados' serão ignorados.\n\nCole sua lista (um por linha ou separados por vírgula) e clique em “Processar com Ísis”"}
                       className="w-full min-h-[320px] max-h-[320px] resize-none overflow-y-auto bg-surface border border-white/10 rounded-xl p-3 outline-none text-sm focus:ring-2 focus:ring-brand/40"
                     />
                     <div className="mt-3 flex flex-wrap items-center gap-2">
