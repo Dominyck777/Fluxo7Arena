@@ -108,7 +108,7 @@ as $$
 declare
   v_user record;
   v_now timestamptz := now();
-  v_exp_seconds integer := 60*60*24*7; -- 7 dias
+  v_exp_seconds integer := 60*60*24*45; -- 45 dias
   v_secret text;
   v_token text;
 begin
@@ -153,7 +153,7 @@ begin
      where id = v_user.id;
 
     return jsonb_build_object(
-      'token', v_token,
+      'access_token', v_token,
       'user', jsonb_build_object(
         'id', v_user.id,
         'nome', v_user.nome,
@@ -384,13 +384,7 @@ create policy quad_select_company
 on public.quadras
 for select to authenticated
 using (
-  -- se coluna existir e estiver preenchida
-  coalesce(codigo_empresa, public.fx_claim_text('codigo_empresa')) = public.fx_claim_text('codigo_empresa')
-  or exists (
-    select 1 from public.empresas e
-     where e.id = quadras.empresa_id
-       and e.codigo_empresa = public.fx_claim_text('codigo_empresa')
-  )
+  codigo_empresa = public.fx_claim_text('codigo_empresa')
 );
 
 -- quadras_dias_funcionamento (relacionar em quadras)
@@ -404,14 +398,7 @@ using (
   exists (
     select 1 from public.quadras q
     where q.id = quadras_dias_funcionamento.quadra_id
-      and (
-        coalesce(q.codigo_empresa, public.fx_claim_text('codigo_empresa')) = public.fx_claim_text('codigo_empresa')
-        or exists (
-          select 1 from public.empresas e
-           where e.id = q.empresa_id
-             and e.codigo_empresa = public.fx_claim_text('codigo_empresa')
-        )
-      )
+      and q.codigo_empresa = public.fx_claim_text('codigo_empresa')
   )
 );
 

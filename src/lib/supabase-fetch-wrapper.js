@@ -174,6 +174,21 @@ const supabaseFetch = async (endpoint, options = {}) => {
     let errorText = ''
     try { errorText = await response.text() } catch {}
     const elapsed = Date.now() - startedAt
+    let isJwtExpired = false
+    try {
+      const j = JSON.parse(errorText)
+      isJwtExpired = (response.status === 401) && (j?.code === 'PGRST303' || /jwt expired/i.test(j?.message || ''))
+    } catch {}
+    if (isJwtExpired) {
+      try { window.dispatchEvent(new CustomEvent('auth:jwt-expired')) } catch {}
+      try {
+        localStorage.removeItem('custom-auth-token')
+        Object.keys(localStorage).filter(k => k.startsWith('sb-')).forEach(k => localStorage.removeItem(k))
+        Object.keys(sessionStorage).filter(k => k.startsWith('sb-')).forEach(k => sessionStorage.removeItem(k))
+        sessionStorage.setItem('auth:forceLogout', '1')
+        window.location.replace('/')
+      } catch {}
+    }
     throw new Error(`[Supabase Wrapper] HTTP ${response.status} (${elapsed}ms) - ${errorText || 'unknown error'}`)
   }
   

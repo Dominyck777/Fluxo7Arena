@@ -134,6 +134,7 @@ function PrivateApp() {
 function App() {
   const [bypassed, setBypassed] = useState(false);
   const [active, setActive] = useState(false);
+  const envMaintenance = String(import.meta.env.VITE_MAINTENANCE_MODE || '').toLowerCase() === 'true';
 
   useEffect(() => {
     try {
@@ -168,7 +169,7 @@ function App() {
     } catch {}
   }, []);
 
-  const maintenanceActive = active;
+  const maintenanceActive = envMaintenance || active;
 
   if (maintenanceActive && !bypassed) {
     return (
