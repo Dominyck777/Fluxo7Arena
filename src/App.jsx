@@ -31,6 +31,7 @@ import CreateCompanyPage from '@/pages/CreateCompanyPage';
 import IsisBookingPage from '@/pages/IsisBookingPage';
 import MaintenancePage from '@/pages/MaintenancePage';
 import { Helmet } from 'react-helmet';
+import { FORCE_MAINTENANCE } from '@/lib/maintenanceConfig';
 
 function PrivateApp() {
   const [sidebarVisible, setSidebarVisible] = useState(true);
@@ -169,7 +170,7 @@ function App() {
     } catch {}
   }, []);
 
-  const maintenanceActive = envMaintenance || active;
+  const maintenanceActive = Boolean(FORCE_MAINTENANCE) || envMaintenance || active;
 
   if (maintenanceActive && !bypassed) {
     return (

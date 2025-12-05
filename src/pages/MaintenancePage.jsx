@@ -1,9 +1,11 @@
+// Bypass de manutenção: parâmetro de URL -> ?senha=f740028922
 import React, { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Ban, Clock, Calendar, ShieldAlert, Sparkles } from 'lucide-react';
+import { Ban, Clock, Calendar, Trophy } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { IsisAvatar } from '@/components/isis/IsisAvatar';
+import { DEFAULT_MAINTENANCE_END, DEFAULT_MAINTENANCE_TEXT, FORCE_MAINTENANCE } from '@/lib/maintenanceConfig';
 
 const PASSWORD = 'f740028922';
 
@@ -16,12 +18,10 @@ function fmt(dt) {
 }
 
 export default function MaintenancePage() {
-  const [pwd, setPwd] = useState('');
-  const [error, setError] = useState('');
   const location = useLocation();
   const navigate = useNavigate();
 
-  const active = String(import.meta.env.VITE_MAINTENANCE_MODE || '').toLowerCase() === 'true';
+  const active = Boolean(FORCE_MAINTENANCE) || (typeof window !== 'undefined' && (localStorage.getItem('maintenance:active') === 'true'));
   const [endLocal, setEndLocal] = useState('');
   const [textLocal, setTextLocal] = useState('');
 
@@ -38,8 +38,8 @@ export default function MaintenancePage() {
     } catch {}
   }, []);
 
-  const endRaw = endLocal || (import.meta.env.VITE_MAINTENANCE_END || '');
-  const customText = (textLocal && textLocal.trim()) ? textLocal : (import.meta.env.VITE_MAINTENANCE_TEXT || '');
+  const endRaw = endLocal || DEFAULT_MAINTENANCE_END || (import.meta.env.VITE_MAINTENANCE_END || '');
+  const customText = (textLocal && textLocal.trim()) ? textLocal : (DEFAULT_MAINTENANCE_TEXT || (import.meta.env.VITE_MAINTENANCE_TEXT || ''));
 
   const endDate = useMemo(() => {
     if (!endRaw) return null;
@@ -56,23 +56,32 @@ export default function MaintenancePage() {
     return base;
   }, [customText, endDate]);
 
-  const handleBypass = (e) => {
-    e.preventDefault();
-    setError('');
-    if ((pwd || '').trim() === PASSWORD) {
-      try { localStorage.setItem('maintenance:bypass', '1'); } catch {}
-      navigate('/login', { replace: true });
-      return;
-    }
-    setError('Senha incorreta.');
-  };
+  // Expor uma API simples via console: window.f7MaintenanceBypass('senha')
+  useEffect(() => {
+    try {
+      window.f7MaintenanceBypass = (code) => {
+        const ok = String(code || '') === PASSWORD;
+        if (ok) {
+          try { localStorage.setItem('maintenance:bypass', '1'); } catch {}
+          navigate('/login', { replace: true });
+        } else {
+          console.warn('[Maintenance] Senha inválida.');
+        }
+        return ok;
+      };
+      window.f7MaintenanceReset = () => {
+        try { localStorage.removeItem('maintenance:bypass'); } catch {}
+        console.info('[Maintenance] Bypass removido.');
+      };
+    } catch {}
+  }, [navigate]);
 
   useEffect(() => {
     const path = String(location.pathname || '');
     const parts = path.split('/').filter(Boolean);
     const last = parts[parts.length - 1] || '';
     const search = new URLSearchParams(location.search || '');
-    const code = search.get('code') || search.get('pwd') || '';
+    const code = search.get('senha') || search.get('pwd') || search.get('code') || '';
     const candidate = code || last;
     if (candidate && candidate === PASSWORD) {
       try { localStorage.setItem('maintenance:bypass', '1'); } catch {}
@@ -87,12 +96,23 @@ export default function MaintenancePage() {
            style={{ background: 'radial-gradient(50% 50% at 50% 50%, rgba(76,110,245,0.45) 0%, rgba(76,110,245,0.18) 40%, rgba(0,0,0,0) 70%)' }} />
 
       <div className="relative z-10 mx-auto max-w-4xl px-6 py-16 md:py-24">
-        <div className="flex items-center justify-center gap-3 mb-6 text-brand">
-          <Sparkles className="w-5 h-5 text-brand" />
-          <span className="uppercase tracking-[0.2em] text-xs text-brand/80">F7 Arena</span>
-        </div>
-
         <div className="mx-auto max-w-3xl rounded-3xl border border-white/10 bg-white/[0.02] backdrop-blur-xl shadow-[0_0_60px_-10px_rgba(76,110,245,0.5)] p-6 md:p-10">
+          {/* Logo estilo da tela de login */}
+          <div className="text-center mb-8">
+            <div className="flex items-center justify-center">
+              <div className="w-16 h-16 bg-brand rounded-xl flex items-center justify-center mr-4">
+                <Trophy className="w-8 h-8 text-primary-foreground" />
+              </div>
+              <div>
+                <h1 className="text-5xl font-extrabold">
+                  <span style={{ color: '#FF6600' }}>Fluxo</span>
+                  <span style={{ color: '#FFAA33' }}>7</span>
+                </h1>
+                <p className="text-2xl font-semibold" style={{ color: '#B0B0B0' }}>Arena</p>
+              </div>
+            </div>
+          </div>
+
           <div className="flex items-center justify-center gap-3 text-red-400 mb-4">
             <Ban className="w-6 h-6" />
             <span className="font-semibold tracking-wide">Modo de Manutenção</span>
@@ -127,32 +147,8 @@ export default function MaintenancePage() {
                 </div>
               </div>
 
-              <form onSubmit={handleBypass} className="mt-8">
-                <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-                  <div className="flex items-center gap-2 text-white/80 mb-3">
-                    <ShieldAlert className="w-5 h-5 text-brand" />
-                    <span className="font-medium">Acesso de manutenção</span>
-                  </div>
-                  <div className="flex flex-col md:flex-row gap-3">
-                    <input
-                      type="password"
-                      inputMode="numeric"
-                      placeholder="Senha de acesso"
-                      value={pwd}
-                      onChange={(e) => setPwd(e.target.value)}
-                      className="flex-1 rounded-xl bg-black/40 border border-white/10 px-4 py-3 outline-none focus:border-brand/60 placeholder-white/40"
-                    />
-                    <button
-                      type="submit"
-                      className="rounded-xl px-5 py-3 bg-brand hover:bg-brand/90 transition text-white font-medium shadow-lg shadow-brand/20"
-                    >
-                      Liberar Login
-                    </button>
-                  </div>
-                  {error && <p className="mt-2 text-sm text-red-400">{error}</p>}
-                  <p className="mt-2 text-xs text-white/50">Dica: use a senha fornecida pela equipe para acessar a tela de login.</p>
-                </div>
-              </form>
+              {/* Removido input de senha. Para liberar via console:
+                  window.f7MaintenanceBypass('f740028922') */}
             </div>
           </div>
         </div>
