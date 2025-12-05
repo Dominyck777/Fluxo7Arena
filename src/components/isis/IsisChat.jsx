@@ -1,4 +1,5 @@
 import { useIsis } from '@/contexts/IsisContext';
+import { motion } from 'framer-motion';
 import { IsisMessage } from './IsisMessage';
 import { IsisTypingIndicator } from './IsisTypingIndicator';
 import { IsisResponseButtons } from './IsisResponseButtons';
@@ -14,9 +15,13 @@ export const IsisChat = ({ children, onButtonClick, hideButtonTexts = false }) =
       {/* Mensagens */}
       <div className="flex-1 px-3 md:px-6 py-4 md:py-8">
         {messages.map((message) => (
-          <div key={message.id}>
+          <motion.div
+            key={message.id}
+            layout="position"
+            transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+          >
             <IsisMessage message={message} />
-            
+
             {/* Se mensagem tem botões, renderiza */}
             {message.type === 'buttons' && message.buttons && (
               <IsisResponseButtons
@@ -27,7 +32,7 @@ export const IsisChat = ({ children, onButtonClick, hideButtonTexts = false }) =
                 hidden={!!message.buttonsHidden}
               />
             )}
-          </div>
+          </motion.div>
         ))}
         
         {/* Typing indicator */}
