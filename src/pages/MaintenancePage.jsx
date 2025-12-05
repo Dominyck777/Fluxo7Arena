@@ -1,4 +1,5 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { Ban, Clock, Calendar, ShieldAlert, Sparkles } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -17,11 +18,28 @@ function fmt(dt) {
 export default function MaintenancePage() {
   const [pwd, setPwd] = useState('');
   const [error, setError] = useState('');
+  const location = useLocation();
+  const navigate = useNavigate();
 
-  // Env config
   const active = String(import.meta.env.VITE_MAINTENANCE_MODE || '').toLowerCase() === 'true';
-  const endRaw = import.meta.env.VITE_MAINTENANCE_END || '';
-  const customText = import.meta.env.VITE_MAINTENANCE_TEXT || '';
+  const [endLocal, setEndLocal] = useState('');
+  const [textLocal, setTextLocal] = useState('');
+
+  useEffect(() => {
+    try {
+      setEndLocal(localStorage.getItem('maintenance:end') || '');
+      setTextLocal(localStorage.getItem('maintenance:message') || '');
+      const onStorage = (e) => {
+        if (e.key === 'maintenance:end') setEndLocal(e.newValue || '');
+        if (e.key === 'maintenance:message') setTextLocal(e.newValue || '');
+      };
+      window.addEventListener('storage', onStorage);
+      return () => window.removeEventListener('storage', onStorage);
+    } catch {}
+  }, []);
+
+  const endRaw = endLocal || (import.meta.env.VITE_MAINTENANCE_END || '');
+  const customText = (textLocal && textLocal.trim()) ? textLocal : (import.meta.env.VITE_MAINTENANCE_TEXT || '');
 
   const endDate = useMemo(() => {
     if (!endRaw) return null;
@@ -43,11 +61,24 @@ export default function MaintenancePage() {
     setError('');
     if ((pwd || '').trim() === PASSWORD) {
       try { localStorage.setItem('maintenance:bypass', '1'); } catch {}
-      window.location.assign('/login');
+      navigate('/login', { replace: true });
       return;
     }
     setError('Senha incorreta.');
   };
+
+  useEffect(() => {
+    const path = String(location.pathname || '');
+    const parts = path.split('/').filter(Boolean);
+    const last = parts[parts.length - 1] || '';
+    const search = new URLSearchParams(location.search || '');
+    const code = search.get('code') || search.get('pwd') || '';
+    const candidate = code || last;
+    if (candidate && candidate === PASSWORD) {
+      try { localStorage.setItem('maintenance:bypass', '1'); } catch {}
+      navigate('/login', { replace: true });
+    }
+  }, [location, navigate]);
 
   return (
     <div className="min-h-screen relative overflow-hidden bg-gradient-to-b from-[#0f1324] via-[#0b0f1c] to-[#070a14] text-white">

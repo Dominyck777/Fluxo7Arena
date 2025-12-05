@@ -22,6 +22,7 @@ import QuadrasPage from '@/pages/QuadrasPage';
 import EmpresasPage from '@/pages/EmpresasPage';
 import FinalizadorasPage from '@/pages/FinalizadorasPage';
 import TestPage from '@/pages/TestPage';
+import BackendDeployPage from '@/pages/BackendDeployPage';
 import ResetPasswordPage from '@/pages/ResetPasswordPage';
 import IsisPremiumPage from '@/pages/IsisPremiumPage';
 import HistoricoComandasPage from '@/pages/HistoricoComandasPage';
@@ -131,12 +132,43 @@ function PrivateApp() {
 }
 
 function App() {
-  const maintenanceActive = String(import.meta.env.VITE_MAINTENANCE_MODE || '').toLowerCase() === 'true';
   const [bypassed, setBypassed] = useState(false);
+  const [active, setActive] = useState(false);
 
   useEffect(() => {
-    try { setBypassed(localStorage.getItem('maintenance:bypass') === '1'); } catch {}
+    try {
+      const computeActive = () => {
+        const isActive = localStorage.getItem('maintenance:active') === 'true';
+        const end = localStorage.getItem('maintenance:end');
+        if (isActive && end) {
+          const now = new Date();
+          if (now > new Date(end)) {
+            localStorage.removeItem('maintenance:active');
+            return false;
+          }
+        }
+        return isActive;
+      };
+
+      setBypassed(localStorage.getItem('maintenance:bypass') === '1');
+      setActive(computeActive());
+
+      // Escutar mudanças de storage (multi-aba)
+      const onStorage = (e) => {
+        if (!e || !e.key) {
+          setActive(computeActive());
+          setBypassed(localStorage.getItem('maintenance:bypass') === '1');
+          return;
+        }
+        if (e.key === 'maintenance:bypass') setBypassed(e.newValue === '1');
+        if (e.key === 'maintenance:active' || e.key === 'maintenance:end') setActive(computeActive());
+      };
+      window.addEventListener('storage', onStorage);
+      return () => window.removeEventListener('storage', onStorage);
+    } catch {}
   }, []);
+
+  const maintenanceActive = active;
 
   if (maintenanceActive && !bypassed) {
     return (
@@ -156,6 +188,8 @@ function App() {
       
       {/* Opcional: manter rota de manutenção acessível mesmo quando inativo */}
       <Route path="/maintenance" element={<MaintenancePage />} />
+      {/* Painel interno para alternar branch/maintenance (local override) */}
+      <Route path="/backenddeploy" element={<BackendDeployPage />} />
       
       {/* Rota de impressão sem layout */}
       <Route path="/print-comanda" element={
