@@ -21,9 +21,10 @@ export const IsisChat = ({ children, onButtonClick, hideButtonTexts = false }) =
             {message.type === 'buttons' && message.buttons && (
               <IsisResponseButtons
                 buttons={message.buttons}
-                onSelect={onButtonClick || message.onButtonClick}
+                onSelect={(button) => (onButtonClick || message.onButtonClick)?.(button, message.id)}
                 disabled={message.disabled}
                 hideText={hideButtonTexts}
+                hidden={!!message.buttonsHidden}
               />
             )}
           </div>

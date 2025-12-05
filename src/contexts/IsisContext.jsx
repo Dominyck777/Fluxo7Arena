@@ -114,6 +114,21 @@ export const IsisProvider = ({ children }) => {
       return msg;
     }));
   }, []);
+
+  // Remove uma mensagem específica (ex.: esconder botões após clique)
+  const removeMessageById = useCallback((messageId) => {
+    setMessages(prev => prev.filter(m => m.id !== messageId));
+  }, []);
+
+  // Oculta os botões de uma mensagem (mantendo o balão de texto)
+  const hideButtonsInMessage = useCallback((messageId) => {
+    setMessages(prev => prev.map(m => {
+      if (m.id === messageId && m.type === 'buttons') {
+        return { ...m, buttonsHidden: true, disabled: true };
+      }
+      return m;
+    }));
+  }, []);
   
   // Adiciona mensagem do usuário
   const addUserMessage = useCallback((text) => {
@@ -203,6 +218,8 @@ export const IsisProvider = ({ children }) => {
     addIsisMessageWithButtons,
     addUserMessage,
     disableAllButtons,
+    removeMessageById,
+    hideButtonsInMessage,
     updateSelection,
     updateContact,
     nextStep,

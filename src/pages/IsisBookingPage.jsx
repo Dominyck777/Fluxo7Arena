@@ -35,6 +35,8 @@ const IsisBookingPageContent = () => {
     addIsisMessageWithButtons,
     addUserMessage,
     disableAllButtons,
+    removeMessageById,
+    hideButtonsInMessage,
     updateSelection,
     updateContact,
     nextStep,
@@ -1971,6 +1973,11 @@ ${listaNomes}
           await criarAgendamento();
         }
         break;
+      case 'criar agendamento':
+        // Fluxo explícito para novo agendamento
+        addUserMessage('✅ Confirmar Agendamento');
+        await criarAgendamento();
+        break;
         
       case 'edit_quadra':
         addUserMessage('✏️ Editar Quadra');
@@ -3033,9 +3040,13 @@ ${listaNomes}
   };
   
   // Handler centralizado para cliques em botões
-  const handleButtonClick = (button) => {
+  const handleButtonClick = (button, sourceMessageId) => {
     // Desabilita todos os botões imediatamente para evitar cliques duplos
     disableAllButtons();
+    // Oculta SOMENTE os botões do balão de pergunta (mantendo o texto)
+    if (sourceMessageId) {
+      try { hideButtonsInMessage(sourceMessageId); } catch {}
+    }
     
     switch (currentStep) {
       case 'quadra':
