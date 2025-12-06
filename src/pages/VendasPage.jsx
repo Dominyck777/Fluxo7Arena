@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from 'react';
 
 // framer-motion removido para evitar piscadas e erros de runtime
 import { DragDropContext, Droppable, Draggable } from 'react-beautiful-dnd';
@@ -127,6 +127,8 @@ function VendasPage() {
   const [isMobileView, setIsMobileView] = useState(() => {
     try { return typeof window !== 'undefined' && window.innerWidth <= 640; } catch { return false; }
   });
+  // Feedback visual: último produto adicionado no modal
+  const [lastAddedProductId, setLastAddedProductId] = useState(null);
   
   // Estados para Desconto
   const [selectedItemForDesconto, setSelectedItemForDesconto] = useState(null);
@@ -192,6 +194,7 @@ function VendasPage() {
         console.error('[decProduct] Erro ao atualizar estoque reservado:', err);
       }
     } catch (e) {
+      console.error('[decProduct] Erro:', e);
       toast({ title: 'Falha ao alterar quantidade', description: e?.message || 'Tente novamente', variant: 'destructive' });
     }
   };
@@ -2035,7 +2038,6 @@ function VendasPage() {
     const tbl = selectedTable;
     const items = tbl?.order || [];
     const total = tbl ? calculateTotal(items) : 0;
-    console.log('[OrderDetailsDialog] tbl:', tbl, 'comandaId:', tbl?.comandaId);
     return (
       <Dialog open={isOrderDetailsOpen} onOpenChange={setIsOrderDetailsOpen}>
         <DialogContent
@@ -2085,6 +2087,9 @@ function VendasPage() {
       </Dialog>
     );
   };
+
+  // Memoizar OrderDetailsDialog para evitar re-renders ao adicionar produtos
+  const MemoizedOrderDetailsDialog = useMemo(() => OrderDetailsDialog, [selectedTable?.id, isOrderDetailsOpen]);
 
   const OrderDetailsPanel = ({ table }) => {
     const [localObservacoes, setLocalObservacoes] = useState('');
@@ -2656,6 +2661,11 @@ function VendasPage() {
         console.error('[addProductToComanda] Erro ao atualizar estoque reservado:', err);
       }
       
+      // Flash visual na linha do produto (sem mexer em foco/scroll)
+      setLastAddedProductId(prod.id);
+      setTimeout(() => {
+        setLastAddedProductId((current) => (current === prod.id ? null : current));
+      }, 500);
       toast({ title: 'Produto adicionado', variant: 'success' });
     } catch (e) {
       console.error('[addProductToComanda] EXCEPTION:', e);
@@ -2697,17 +2707,6 @@ function VendasPage() {
       
       return matchesSearch;
     });
-    
-    // Garantir que item focado fique visível ao navegar por setas E manter foco real no DOM
-    useEffect(() => {
-      try {
-        const idx = productFocusIndex !== null && productFocusIndex !== undefined ? productFocusIndex : 0;
-        const el = productItemRefs.current?.[idx];
-        if (el && typeof el.scrollIntoView === 'function') {
-          el.scrollIntoView({ block: 'nearest' });
-        }
-      } catch {}
-    }, [productFocusIndex]);
 
     // NÃO usar useEffect para restaurar foco - focar diretamente após ação
 
@@ -2739,28 +2738,16 @@ function VendasPage() {
         setFocusContext(open ? 'panel' : 'tables');
       }}>
         <DialogContent 
-          className="w-[95vw] sm:max-w-4xl max-h-[80vh] sm:max-h-[85vh] flex flex-col p-0 gap-0 focus:outline-none focus-visible:outline-none"
+          className="w-[95vw] sm:max-w-4xl max-h-[80vh] sm:max-h-[85vh] flex flex-col p-0 gap-0 focus:outline-none focus-visible:outline-none !overflow-visible"
+          style={{ scrollBehavior: 'auto' }}
           onOpenAutoFocus={(e) => {
-            // Direcionar o foco inicial diretamente para o campo de busca do modal
-            try {
-              if (modalSearchRef.current) {
-                e.preventDefault();
-                modalSearchRef.current.focus();
-                setFocusContext('panel');
-                return;
-              }
-            } catch {}
-            // Se por algum motivo não houver ref, deixar o comportamento padrão
+            // Prevenir foco automático que causa scroll subir
+            e.preventDefault();
+            setFocusContext('panel');
           }}
           onWheel={(e) => {
             // Durante rolagem, garantir que setas não virem scroll do body
             e.stopPropagation();
-          }}
-          onKeyDownCapture={(e) => {
-            // BLOQUEAR APENAS O SCROLL - não bloquear a lógica de navegação
-            if (['ArrowDown','ArrowUp','Home','End','PageDown','PageUp','Space'].includes(e.key)) {
-              e.preventDefault();
-            }
           }}
           onKeyDown={(e) => {
             // Processar navegação normalmente
@@ -2806,7 +2793,7 @@ function VendasPage() {
                   value={productSearch}
                   onChange={(e) => setProductSearch(e.target.value)}
                   onClick={(e) => {
-                    // Ao clicar no input, garantir que ele receba foco e que o contexto seja o painel
+                    // Ao clicar no input, garantir que o contexto seja o painel
                     e.stopPropagation();
                     e.currentTarget.focus();
                     setFocusContext('panel');
@@ -2963,6 +2950,7 @@ function VendasPage() {
                     const reserved = reservedStock.get(prod.id) || 0;
                     const remaining = Math.max(0, stock - reserved);
                     const isFocused = idx === productFocusIndex;
+                    const isJustAdded = prod.id === lastAddedProductId;
                     
                     return (
                       <div
@@ -2974,7 +2962,7 @@ function VendasPage() {
                         }}
                         data-product-card
                         className={cn(
-                          "flex items-center gap-2 sm:gap-4 p-2.5 sm:p-3 rounded-lg border-2 transition-all outline-none focus:outline-none focus-visible:outline-none",
+                          "flex items-center gap-2 sm:gap-4 p-2.5 sm:p-3 rounded-lg border-2 transition-colors duration-500 outline-none focus:outline-none focus-visible:outline-none",
                           remaining === 0 && q === 0
                             ? "opacity-50 cursor-not-allowed bg-surface-2 border-border" 
                             : "cursor-pointer",
@@ -2984,7 +2972,8 @@ function VendasPage() {
                             ? "border-border bg-surface hover:border-brand/50 hover:bg-surface-2"
                             : q > 0
                             ? "border-border bg-surface"
-                            : "border-border"
+                            : "border-border",
+                          isJustAdded && "bg-brand/8"
                         )}
                         tabIndex={remaining > 0 || q > 0 ? 0 : -1}
                         onKeyDown={(e) => {
@@ -3291,7 +3280,6 @@ function VendasPage() {
            const prod = filtered[idx];
            if (prod) {
              addProductToComanda(prod);
-             setTimeout(() => productsSearchRef.current?.focus(), 100);
            }
            return;
          }
@@ -3299,7 +3287,6 @@ function VendasPage() {
            const prod = filtered[idx];
            if (prod) {
              decProduct(prod);
-             setTimeout(() => productsSearchRef.current?.focus(), 100);
            }
            return;
          }
@@ -5683,7 +5670,7 @@ function VendasPage() {
       <MobileTableModal />
       <CounterModeModal />
       <CashierDetailsDialog open={isCashierDetailsOpen} onOpenChange={setIsCashierDetailsOpen} cashSummary={cashSummary} />
-      <OrderDetailsDialog />
+      <MemoizedOrderDetailsDialog />
       <RemoveItemConfirmDialog />
       <ManageClientsDialog />
       <OpenTableDialog />
@@ -5731,7 +5718,7 @@ function VendasPage() {
         />
       )}
       
-      <ProductsModal />
+      {useMemo(() => <ProductsModal />, [isProductsModalOpen, selectedTable?.id])}
     </>
   );
 }
