@@ -1,0 +1,1624 @@
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { motion } from 'framer-motion';
+import { Input } from '@/components/ui/input';
+import { Calendar } from '@/components/ui/calendar';
+import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { useToast } from '@/components/ui/use-toast';
+import { CalendarDays, FileText, Search, Loader2, Copy, Download } from 'lucide-react';
+import { listarComandas, listarItensDaComanda, listarTotaisPorComanda, listarPagamentos, listMesas, listarClientesDaComanda, listarFechamentosCaixa, listarResumoPeriodo, getCaixaResumo, listarMovimentacoesCaixa, listarClientesPorComandas, listarFinalizadorasPorComandas } from '@/lib/store';
+import { gerarXMLNFe, downloadXML } from '@/lib/nfe';
+import { cn } from '@/lib/utils';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useAuth } from '@/contexts/AuthContext';
+import XMLSalesImportModal from '@/components/XMLSalesImportModal';
+
+const pageVariants = { hidden: { opacity: 0 }, visible: { opacity: 1, transition: { staggerChildren: 0.1 } } };
+const itemVariants = { hidden: { opacity: 0, y: 20 }, visible: { opacity: 1, y: 0, transition: { duration: 0.5 } } };
+
+function useDebounced(value, delay = 300) {
+  const [v, setV] = useState(value);
+  useEffect(() => { const t = setTimeout(() => setV(value), delay); return () => clearTimeout(t); }, [value, delay]);
+  return v;
+}
+
+// Componente local para campo de data com ícone clicável que abre o datepicker nativo
+function DateInput({ value, onChange }) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef(null);
+  const inputRef = useRef(null);
+  const popRef = useRef(null);
+  const [popPos, setPopPos] = useState({ top: 0, left: 0, width: 0, center: false, mode: 'fixed' });
+
+  // Fechar ao clicar fora (considerando popover fixo)
+  useEffect(() => {
+    function onDocClick(e) {
+      const target = e.target;
+      const inWrap = wrapRef.current && wrapRef.current.contains(target);
+      const inPop = popRef.current && popRef.current.contains(target);
+      if (!inWrap && !inPop) setOpen(false);
+    }
+    function onEsc(e) { if (e.key === 'Escape') setOpen(false); }
+    function onScroll() { if (open) positionPopover(); }
+    window.addEventListener('mousedown', onDocClick);
+    window.addEventListener('keydown', onEsc);
+    window.addEventListener('scroll', onScroll, true);
+    window.addEventListener('resize', onScroll);
+    return () => {
+      window.removeEventListener('mousedown', onDocClick);
+      window.removeEventListener('keydown', onEsc);
+      window.removeEventListener('scroll', onScroll, true);
+      window.removeEventListener('resize', onScroll);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  // Reposiciona ao abrir (após render) com requestAnimationFrame para evitar medições precoces
+  useEffect(() => {
+    if (open) {
+      const raf1 = requestAnimationFrame(() => {
+        positionPopover();
+        const raf2 = requestAnimationFrame(() => positionPopover());
+        return () => cancelAnimationFrame(raf2);
+      });
+      return () => cancelAnimationFrame(raf1);
+    }
+  }, [open]);
+
+  // Body scroll lock for overlay mode (mobile)
+  useEffect(() => {
+    if (open && popPos.mode === 'overlay') {
+      const prev = document.body.style.overflow;
+      document.body.style.overflow = 'hidden';
+      return () => { document.body.style.overflow = prev; };
+    }
+  }, [open, popPos.mode]);
+
+  const positionPopover = () => {
+    try {
+      const el = inputRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      const pad = 8;
+      const desiredWidth = Math.max(rect.width, 280);
+      const maxWidth = Math.min(vw - pad * 2, 360);
+      const width = Math.min(desiredWidth, maxWidth);
+
+      // Medir altura do calendário se já existe, senão heurística
+      let calH = 320;
+      if (popRef.current) {
+        try { calH = popRef.current.getBoundingClientRect().height || calH; } catch {}
+      }
+
+      // Mobile: usar OVERLAY centralizado para evitar teclado/scroll bagunçar posição
+      if (vw <= 640) {
+        setPopPos({ top: 0, left: 0, width: Math.min(vw - pad * 2, 360), center: true, mode: 'overlay' });
+        return;
+      }
+
+      // Desktop/tablet: usar ANCORADO ao wrapper (absolute) para alinhar perfeitamente
+      // Usaremos top relativo ao wrapper e largura mínima igual ao input
+      const wrap = wrapRef.current;
+      const wrapRect = wrap ? wrap.getBoundingClientRect() : rect;
+      const relTop = (rect.bottom - wrapRect.top) + 6; // abaixo do input, relativo ao wrapper
+      const minW = Math.max(rect.width, 280);
+      setPopPos({ top: relTop, left: 0, width: minW, center: false, mode: 'anchor' });
+    } catch {}
+  };
+
+  // Util: parse/format
+  const parseISODate = (s) => {
+    try {
+      const [y,m,d] = String(s || '').split('-').map(Number);
+      if (!y || !m || !d) return null;
+      return new Date(y, m - 1, d);
+    } catch { return null; }
+  };
+
+  const statusCaixaPt = (s) => {
+    const v = String(s || '').toLowerCase();
+    if (v === 'open') return 'Aberto';
+    if (v === 'closed') return 'Fechado';
+    return '—';
+  };
+  const formatYMD = (d) => {
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+  };
+  const formatBR = (d) => {
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${pad(d.getDate())}/${pad(d.getMonth()+1)}/${d.getFullYear()}`;
+  };
+
+  const selected = parseISODate(value);
+  const display = selected ? formatBR(selected) : '';
+
+  return (
+    <div className="relative" ref={wrapRef}>
+      <button
+        type="button"
+        className="absolute left-2 top-1/2 -translate-y-1/2 p-1 rounded hover:bg-warning/10 focus:outline-none"
+        onMouseDown={(e) => { e.preventDefault(); }}
+        onClick={() => { setOpen((v) => !v); setTimeout(positionPopover, 0); }}
+        aria-label="Abrir calendário"
+      >
+        <CalendarDays className="h-4 w-4 text-warning" />
+      </button>
+      {typeof window !== 'undefined' && window.innerWidth <= 640 ? (
+        <button
+          type="button"
+          ref={inputRef}
+          onMouseDown={(e) => { e.preventDefault(); }}
+          onClick={() => { setOpen(true); setTimeout(positionPopover, 0); }}
+          className="pl-9 pr-3 h-10 w-full text-left bg-surface text-text-primary border border-warning/40 rounded-md"
+        >
+          {display || 'Selecionar data'}
+        </button>
+      ) : (
+        <Input
+          type="text"
+          readOnly
+          ref={inputRef}
+          inputMode="none"
+          onMouseDown={(e) => { e.preventDefault(); }}
+          onClick={() => { setOpen((v) => !v); setTimeout(positionPopover, 0); }}
+          className="pl-9 pr-3 w-full bg-surface text-text-primary border border-warning/40 focus-visible:ring-warning focus-visible:border-warning"
+          value={display}
+        />
+      )}
+      {open && (
+        popPos.mode === 'overlay' ? (
+          <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/50" onClick={(e) => { if (e.target === e.currentTarget) setOpen(false); }}>
+            <div ref={popRef} className="bg-black text-white border border-warning/40 rounded-md shadow-xl p-2 w-[92vw] max-w-[360px]">
+              <Calendar
+                mode="single"
+                selected={selected || undefined}
+                onSelect={(d) => { if (d) { onChange(formatYMD(d)); setOpen(false); } }}
+                showOutsideDays
+                className=""
+                classNames={{
+                  caption_label: 'text-sm font-medium text-white',
+                  head_cell: 'text-xs text-warning/80 w-9',
+                  day: 'h-9 w-9 p-0 font-normal text-white hover:bg-warning/10 rounded-md',
+                  day_selected: 'bg-warning text-black hover:bg-warning focus:bg-warning',
+                  day_today: 'border border-warning text-white',
+                  day_outside: 'text-white/30',
+                  nav_button: 'h-7 w-7 p-0 text-white hover:bg-warning/10 rounded-md',
+                  table: 'w-full',
+                }}
+              />
+            </div>
+          </div>
+        ) : popPos.mode === 'anchor' ? (
+          <div
+            ref={popRef}
+            className="absolute z-[999] bg-black text-white border border-warning/40 rounded-md shadow-xl p-2 left-0"
+            style={{ top: `${popPos.top}px`, minWidth: `${popPos.width}px`, maxWidth: '92vw' }}
+          >
+          <Calendar
+            mode="single"
+            selected={selected || undefined}
+            onSelect={(d) => { if (d) { onChange(formatYMD(d)); setOpen(false); } }}
+            showOutsideDays
+            className=""
+            classNames={{
+              caption_label: 'text-sm font-medium text-white',
+              head_cell: 'text-xs text-warning/80 w-9',
+              day: 'h-9 w-9 p-0 font-normal text-white hover:bg-warning/10 rounded-md',
+              day_selected: 'bg-warning text-black hover:bg-warning focus:bg-warning',
+              day_today: 'border border-warning text-white',
+              day_outside: 'text-white/30',
+              nav_button: 'h-7 w-7 p-0 text-white hover:bg-warning/10 rounded-md',
+              table: 'w-full',
+            }}
+          />
+        </div>
+        ) : (
+          <div
+            ref={popRef}
+            className="fixed z-[999] bg-black text-white border border-warning/40 rounded-md shadow-xl p-2"
+            style={{ top: `${popPos.top}px`, left: `${popPos.left}px`, width: `${popPos.width}px`, maxWidth: '92vw' }}
+          >
+          <Calendar
+            mode="single"
+            selected={selected || undefined}
+            onSelect={(d) => { if (d) { onChange(formatYMD(d)); setOpen(false); } }}
+            showOutsideDays
+            className=""
+            classNames={{
+              caption_label: 'text-sm font-medium text-white',
+              head_cell: 'text-xs text-warning/80 w-9',
+              day: 'h-9 w-9 p-0 font-normal text-white hover:bg-warning/10 rounded-md',
+              day_selected: 'bg-warning text-black hover:bg-warning focus:bg-warning',
+              day_today: 'border border-warning text-white',
+              day_outside: 'text-white/30',
+              nav_button: 'h-7 w-7 p-0 text-white hover:bg-warning/10 rounded-md',
+              table: 'w-full',
+            }}
+          />
+        </div>
+        )
+      )}
+    </div>
+  );
+}
+
+export default function HistoricoComandasPage() {
+  const { toast } = useToast();
+  const navigate = useNavigate();
+  const { userProfile } = useAuth();
+  const [searchParams] = useSearchParams();
+  const mesaIdFromUrl = searchParams.get('mesa');
+  
+  const [loading, setLoading] = useState(false);
+  const [rows, setRows] = useState([]);
+  const [from, setFrom] = useState(() => mesaIdFromUrl ? '' : new Date().toISOString().slice(0,10));
+  const [to, setTo] = useState(() => mesaIdFromUrl ? '' : new Date().toISOString().slice(0,10));
+  const [status, setStatus] = useState(() => mesaIdFromUrl ? 'all' : 'closed');
+  const [search, setSearch] = useState('');
+  const debouncedSearch = useDebounced(search, 350);
+  const [tipo, setTipo] = useState('all'); // all | comanda | balcao
+  const [tab, setTab] = useState('comandas'); // comandas | fechamentos
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
+  const [mesaFilterLabel, setMesaFilterLabel] = useState('');
+
+  const [detailId, setDetailId] = useState(null);
+  const [detail, setDetail] = useState({ loading: false, itens: [], pagamentos: [] });
+  const [detailMeta, setDetailMeta] = useState(null); // { mesaLabel, clientesStr, aberto_em, fechado_em, tipo }
+  const [cashDetail, setCashDetail] = useState({ open: false, loading: false, resumo: null, periodo: { from: null, to: null }, movs: [] });
+  
+  // XML Import
+  const [isXmlImportOpen, setIsXmlImportOpen] = useState(false);
+  const [mobileActionsOpen, setMobileActionsOpen] = useState(false);
+  
+  // Mostrar todas (sem filtro de data)
+  const [showAll, setShowAll] = useState(false);
+  
+  // Exportar CSV - Comandas
+  const exportarCSV = async () => {
+    try {
+      toast({ title: 'Gerando CSV...', description: 'Aguarde enquanto preparamos o arquivo', variant: 'default' });
+      
+      // Buscar todas as comandas do período
+      const todasComandas = await listarComandas({ 
+        status, 
+        from: from || undefined, 
+        to: to || undefined, 
+        search: debouncedSearch || '', 
+        limit: 10000, 
+        offset: 0 
+      });
+      
+      if (!todasComandas || todasComandas.length === 0) {
+        toast({ title: 'Nenhum dado para exportar', variant: 'warning' });
+        return;
+      }
+      
+      // Buscar totais
+      const ids = todasComandas.map(r => r.id);
+      const totals = await listarTotaisPorComanda(ids, userProfile?.codigo_empresa);
+      const mesas = await listMesas(userProfile?.codigo_empresa);
+      const mapMesaNumero = new Map(mesas.map(m => [m.id, m.numero]));
+      const namesByComanda = await listarClientesPorComandas(ids);
+      const finsByComanda = await listarFinalizadorasPorComandas(ids);
+      
+      // Montar dados para CSV
+      const csvData = todasComandas.map(cmd => {
+        const mesaLabel = cmd.mesa_id ? `Mesa ${mapMesaNumero.get(cmd.mesa_id) || '?'}` : 'Balcão';
+        const clientes = namesByComanda[cmd.id] || 'Sem cliente';
+        const fins = finsByComanda[cmd.id];
+        const finalizadoras = Array.isArray(fins) ? fins.join(', ') : (fins || 'Não informado');
+        const statusLabel = cmd.fechado_em ? 'Fechada' : 'Aberta';
+        
+        return {
+          'Tipo': cmd.tipo === 'balcao' ? 'Balcão' : 'Mesa',
+          'Mesa/Local': mesaLabel,
+          'Cliente(s)': clientes,
+          'Status': statusLabel,
+          'Abertura': new Date(cmd.aberto_em).toLocaleString('pt-BR'),
+          'Fechamento': cmd.fechado_em ? new Date(cmd.fechado_em).toLocaleString('pt-BR') : '-',
+          'Total (R$)': Number(totals[cmd.id] || 0).toFixed(2),
+          'Forma(s) Pagamento': finalizadoras,
+          'Observações': cmd.observacao || '-'
+        };
+      });
+      
+      // Converter para CSV
+      const headers = Object.keys(csvData[0]);
+      const csvContent = [
+        headers.join(';'),
+        ...csvData.map(row => headers.map(h => {
+          const value = row[h] || '';
+          // Escapar aspas e adicionar aspas se contém vírgula ou ponto-e-vírgula
+          return `"${String(value).replace(/"/g, '""')}"`;
+        }).join(';'))
+      ].join('\n');
+      
+      // Download
+      const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      const url = URL.createObjectURL(blob);
+      link.setAttribute('href', url);
+      link.setAttribute('download', `historico_comandas_${new Date().toISOString().slice(0,10)}.csv`);
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      toast({ title: 'CSV exportado!', description: `${csvData.length} comandas exportadas`, variant: 'success' });
+    } catch (error) {
+      console.error('Erro ao exportar CSV:', error);
+      toast({ title: 'Erro ao exportar', description: error.message, variant: 'destructive' });
+    }
+  };
+
+  // Exportar CSV - Fechamentos de Caixa
+  const exportarFechamentosCSV = async () => {
+    try {
+      toast({ title: 'Gerando CSV...', description: 'Aguarde enquanto preparamos o arquivo', variant: 'default' });
+      
+      if (!rows || rows.length === 0) {
+        toast({ title: 'Nenhum dado para exportar', variant: 'warning' });
+        return;
+      }
+      
+      // Montar dados para CSV
+      const csvData = rows.map(sess => {
+        const statusLabel = sess.status === 'open' ? 'Aberto' : sess.status === 'closed' ? 'Fechado' : sess.status;
+        
+        return {
+          'Data Abertura': sess.aberto_em ? new Date(sess.aberto_em).toLocaleString('pt-BR') : '-',
+          'Data Fechamento': sess.fechado_em ? new Date(sess.fechado_em).toLocaleString('pt-BR') : '-',
+          'Status': statusLabel,
+          'Saldo Inicial (R$)': Number(sess.saldo_inicial || 0).toFixed(2),
+          'Saldo Final (R$)': Number(sess.saldo_final || 0).toFixed(2),
+          'Valor Contado (R$)': sess.valor_final_dinheiro ? Number(sess.valor_final_dinheiro).toFixed(2) : '-',
+          'Diferença (R$)': sess.diferenca_dinheiro ? Number(sess.diferenca_dinheiro).toFixed(2) : '-'
+        };
+      });
+      
+      // Converter para CSV
+      const headers = Object.keys(csvData[0]);
+      const csvContent = [
+        headers.join(';'),
+        ...csvData.map(row => headers.map(h => {
+          const value = row[h] || '';
+          return `"${String(value).replace(/"/g, '""')}"`;
+        }).join(';'))
+      ].join('\n');
+      
+      // Download
+      const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      const url = URL.createObjectURL(blob);
+      link.setAttribute('href', url);
+      link.setAttribute('download', `fechamentos_caixa_${new Date().toISOString().slice(0,10)}.csv`);
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      toast({ title: 'CSV exportado!', description: `${csvData.length} fechamentos exportados`, variant: 'success' });
+    } catch (error) {
+      console.error('Erro ao exportar CSV:', error);
+      toast({ title: 'Erro ao exportar', description: error.message, variant: 'destructive' });
+    }
+  };
+
+  // Paginação de comandas
+  const PAGE_LIMIT = 100;
+  const [offset, setOffset] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+
+  // Resilient loading helpers
+  const mountedRef = useRef(false);
+  const lastLoadTsRef = useRef(0);
+  const detailReqIdRef = useRef(0);
+  const detailOpenRef = useRef(false);
+  const getEmpresaCodigoFromCache = () => {
+    try {
+      const raw = localStorage.getItem('auth:userProfile');
+      return raw ? (JSON.parse(raw)?.codigo_empresa || null) : null;
+    } catch { return null; }
+  };
+  const cacheKey = useMemo(() => {
+    const emp = getEmpresaCodigoFromCache() || 'na';
+    const k = `hist:comandas:${emp}:${from}:${to}:${status}:${tipo}:${(debouncedSearch||'').trim()}`;
+    return k;
+  }, [from, to, status, tipo, debouncedSearch]);
+
+  const load = async ({ append = false, skipCacheWrite = false } = {}) => {
+    try {
+      setLoading(true);
+      // Short-circuit de pré-requisito: precisa de codigoEmpresa
+      const emp = getEmpresaCodigoFromCache();
+      if (!emp) {
+        setLoading(false);
+        return;
+      }
+      // Timeout de segurança
+      const safetyTimer = setTimeout(() => setLoading(false), 10000);
+      if (tab === 'comandas') {
+        // Busca base de comandas (sem depender do id no filtro de busca)
+        // Não enviar 'search' ao backend; buscamos tudo do período e filtramos no client
+        // Quando há termo de busca, ampliamos o limite e ignoramos paginação para melhor cobertura
+        const searching = !!(debouncedSearch && debouncedSearch.trim());
+        const effLimit = searching ? 1000 : PAGE_LIMIT;
+        const effOffset = searching ? 0 : offset;
+        console.log('[HistoricoComandasPage] Carregando com:', { status, from, to, search: debouncedSearch, mesaId: mesaIdFromUrl, searching, effLimit });
+        const list = await listarComandas({ status, from, to, search: mesaIdFromUrl || debouncedSearch, limit: effLimit, offset: effOffset });
+        console.log('[HistoricoComandasPage] Resultado:', list?.length || 0, 'comandas');
+        // Carrega totais em lote
+        const ids = (list || []).map(r => r.id);
+        let totals = {};
+        if (ids.length > 0) {
+          try { totals = await listarTotaisPorComanda(ids, emp); } catch { totals = {}; }
+        }
+        // Mapa de mesas { id: numero }
+        let mesas = [];
+        try { mesas = await listMesas(emp); } catch { mesas = []; }
+        const mapMesaNumero = new Map((mesas || []).map(m => [m.id, m.numero]));
+        // Nomes de clientes e finalizadoras em lote (evita N+1)
+        let namesByComanda = {};
+        let finsByComanda = {};
+        try { namesByComanda = await listarClientesPorComandas(ids); } catch { namesByComanda = {}; }
+        try { finsByComanda = await listarFinalizadorasPorComandas(ids); } catch { finsByComanda = {}; }
+        const withTotals = (list || []).map(r => {
+          const names = namesByComanda[r.id];
+          const fins = finsByComanda[r.id];
+          return {
+            ...r,
+            // status derivado: respeita 'cancelled'; senão, se tem fechado_em => 'closed', senão status real
+            statusDerived: (r.status === 'cancelled') ? 'cancelled' : (r.fechado_em ? 'closed' : (r.status || 'open')),
+            total: Number(totals[r.id] || 0),
+            mesaNumero: mapMesaNumero.get(r.mesa_id),
+            clientesStr: Array.isArray(names) ? names.join(', ') : (names || ''),
+            finalizadorasStr: Array.isArray(fins) ? fins.join(', ') : (fins || '')
+          };
+        });
+        setHasMore(searching ? false : ((list || []).length === PAGE_LIMIT));
+        if (append) {
+          setRows(prev => [...prev, ...withTotals]);
+        } else {
+          setRows(withTotals);
+        }
+        // Cache persist
+        if (!skipCacheWrite) {
+          try { localStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), rows: withTotals })); } catch {}
+        }
+      } else {
+        // Fechamentos de caixa
+        const sess = await listarFechamentosCaixa({ from, to, limit: 100, offset: 0, codigoEmpresa: emp });
+        setRows(sess || []);
+      }
+      clearTimeout(safetyTimer);
+    } catch (e) {
+      toast({ title: 'Falha ao carregar histórico', description: e?.message || 'Tente novamente', variant: 'destructive' });
+    } finally {
+      setLoading(false);
+      lastLoadTsRef.current = Date.now();
+    }
+  };
+
+  // Carregar nome da mesa quando vir do URL
+  useEffect(() => {
+    if (mesaIdFromUrl) {
+      const loadMesaName = async () => {
+        try {
+          const mesas = await listMesas(userProfile?.codigo_empresa);
+          const mesa = (mesas || []).find(m => m.id === mesaIdFromUrl);
+          if (mesa) {
+            setMesaFilterLabel(`Mesa ${mesa.numero}`);
+          }
+        } catch {}
+      };
+      loadMesaName();
+    }
+  }, [mesaIdFromUrl, userProfile?.codigo_empresa]);
+
+  // Hydrate from cache immediately on filters change to avoid empty UI
+  useEffect(() => {
+    mountedRef.current = true;
+    if (tab === 'comandas') {
+      try {
+        const raw = localStorage.getItem(cacheKey);
+        if (raw) {
+          const obj = JSON.parse(raw);
+          // Usa cache apenas se for recente (até 2 minutos)
+          if (obj && Array.isArray(obj.rows) && (Date.now() - Number(obj.ts || 0) < 120000)) {
+            setRows(obj.rows);
+          }
+        }
+      } catch {}
+    }
+    return () => { mountedRef.current = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cacheKey, tab]);
+
+  // Recarrega lista ao trocar filtros/abas, resetando paginação
+  useEffect(() => {
+    if (tab === 'comandas') { setOffset(0); setHasMore(false); }
+    load({ append: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status, debouncedSearch, from, to, tab]);
+
+  // Retry backoff se vier vazio (corridas de auth/latência)
+  useEffect(() => {
+    if (!loading && tab === 'comandas' && rows.length === 0) {
+      const t = setTimeout(() => { if (mountedRef.current) load({ append: false, skipCacheWrite: false }); }, 1500);
+      return () => clearTimeout(t);
+    }
+  }, [rows.length, loading, tab]);
+
+  // Reload ao voltar foco/visível se passou muito tempo (30s)
+  useEffect(() => {
+    const onVis = () => {
+      if (document.visibilityState === 'visible') {
+        if (Date.now() - (lastLoadTsRef.current || 0) > 30000) load({ append: false });
+      }
+    };
+    const onFocus = () => {
+      if (Date.now() - (lastLoadTsRef.current || 0) > 30000) load({ append: false });
+    };
+    window.addEventListener('visibilitychange', onVis);
+    window.addEventListener('focus', onFocus);
+    return () => {
+      window.removeEventListener('visibilitychange', onVis);
+      window.removeEventListener('focus', onFocus);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cacheKey, tab]);
+
+  const openDetail = async (id) => {
+    setDetailId(id);
+    setDetail({ loading: true, itens: [], pagamentos: [] });
+    const emp = getEmpresaCodigoFromCache();
+    detailOpenRef.current = true;
+    // token/reqId para evitar sobrescrita por respostas antigas
+    const myReq = ++detailReqIdRef.current;
+    // Timeout de segurança para nunca travar em loading
+    const safetyTimer = setTimeout(() => {
+      if (detailReqIdRef.current === myReq && detailOpenRef.current) setDetail((prev) => ({ ...prev, loading: false }));
+    }, 10000);
+    // Pré-requisito faltando: encerra loading e informa
+    if (!emp) {
+      clearTimeout(safetyTimer);
+      if (detailReqIdRef.current === myReq && detailOpenRef.current) {
+        setDetail({ loading: false, itens: [], pagamentos: [] });
+      }
+      return;
+    }
+    // Monta metadados a partir da linha da lista (mesa, clientes, horários)
+    try {
+      const row = (rows || []).find(r => r.id === id) || null;
+      if (row) {
+        const mesaLabel = (row.mesa_id == null) ? 'Balcão' : (row.mesaNumero != null ? `Mesa ${row.mesaNumero}` : 'Comanda');
+        setDetailMeta({
+          mesaLabel,
+          clientesStr: row.clientesStr || '',
+          aberto_em: row.aberto_em || null,
+          fechado_em: row.fechado_em || null,
+          tipo: (row.mesa_id == null) ? 'balcao' : 'comanda',
+          status: row.statusDerived || row.status || 'open',
+          diferenca_pagamento: typeof row.diferenca_pagamento === 'number' ? row.diferenca_pagamento : 0,
+        });
+      } else {
+        setDetailMeta(null);
+      }
+    } catch { setDetailMeta(null); }
+    try {
+      const fetchOnce = async () => {
+        const [itens, pagamentos] = await Promise.all([
+          listarItensDaComanda({ comandaId: id, codigoEmpresa: emp }),
+          listarPagamentos({ comandaId: id, codigoEmpresa: emp })
+        ]);
+        // Carregar clientes vinculados para resolver nomes por id
+        let clientesVinc = [];
+        try { clientesVinc = await listarClientesDaComanda({ comandaId: id, codigoEmpresa: emp }); } catch {}
+        console.log('[openDetail] clientesVinc:', clientesVinc);
+        
+        const nomeById = new Map((clientesVinc || []).map(r => {
+          const cid = r?.cliente_id ?? r?.clientes?.id ?? null;
+          const nome = r?.clientes?.nome ?? r?.nome ?? r?.nome_livre ?? '';
+          console.log(`[openDetail] Mapeando cliente: cid=${cid}, nome=${nome}`);
+          return cid ? [String(cid), nome] : null;
+        }).filter(Boolean));
+        console.log('[openDetail] nomeById map:', Array.from(nomeById.entries()));
+        
+        // Para pagamentos sem cliente_id (antigos), distribuir clientes vinculados
+        // Incluir também consumidores livres (sem cliente_id)
+        const clientesDisponiveis = [
+          ...Array.from(nomeById.values()),
+          ...(clientesVinc || [])
+            .filter(r => !r?.cliente_id && (r?.nome_livre || r?.nome))
+            .map(r => r?.nome_livre || r?.nome || 'Consumidor')
+        ];
+        console.log('[openDetail] clientesDisponiveis:', clientesDisponiveis);
+        
+        console.log('[openDetail] pagamentos:', pagamentos);
+        const pgEnriched = (pagamentos || []).map((p, idx) => {
+          let clienteNome = '';
+          if (p?.cliente_id) {
+            // Tem cliente_id específico no pagamento (vendas novas)
+            clienteNome = nomeById.get(String(p.cliente_id)) || '';
+            // Se não encontrou no mapa, usar consumidor disponível
+            if (!clienteNome && clientesDisponiveis.length > 0) {
+              clienteNome = clientesDisponiveis[idx % clientesDisponiveis.length];
+            }
+          } else if (clientesDisponiveis.length > 0) {
+            // Pagamento antigo sem cliente_id: distribuir clientes de forma round-robin
+            clienteNome = clientesDisponiveis[idx % clientesDisponiveis.length];
+          }
+          console.log(`[openDetail] Pagamento ${idx}: cliente_id=${p?.cliente_id}, clienteNome=${clienteNome}`);
+          return {
+            ...p,
+            cliente_nome: clienteNome,
+            finalizadora_nome: p?.finalizadoras?.nome || p?.metodo || '—'
+          };
+        });
+        return { itens: itens || [], pagamentos: pgEnriched };
+      };
+      let result = await fetchOnce();
+      // Retry único se vier tudo vazio (ex.: latência/consistência eventual)
+      if ((result.itens.length === 0) && (result.pagamentos.length === 0)) {
+        await new Promise(r => setTimeout(r, 700));
+        result = await fetchOnce();
+      }
+      // Aplicar apenas se ainda for a mesma requisição e id
+      if (detailReqIdRef.current === myReq && detailOpenRef.current) {
+        setDetail({ loading: false, itens: result.itens, pagamentos: result.pagamentos });
+      }
+    } catch (e) {
+      if (detailReqIdRef.current === myReq && detailOpenRef.current) {
+        setDetail({ loading: false, itens: [], pagamentos: [] });
+      }
+      toast({ title: 'Falha ao carregar detalhes', description: e?.message || 'Tente novamente', variant: 'destructive' });
+    } finally {
+      clearTimeout(safetyTimer);
+      if (detailReqIdRef.current === myReq && detailOpenRef.current) {
+        setDetail((prev) => ({ ...prev, loading: false }));
+      }
+    }
+  };
+
+  const totals = useMemo(() => {
+    const sum = rows.reduce((acc, r) => acc + Number(r.total || 0), 0);
+    return { sum };
+  }, [rows]);
+
+  const normalize = (s) => (s || '').toString().toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu, '');
+  const filtered = useMemo(() => {
+    const raw = (debouncedSearch || '').trim();
+    const term = normalize(raw);
+    // 1) Sempre aplica filtro por Tipo
+    const byTipo = rows.filter(r => {
+      const isBalcao = (r.mesa_id == null);
+      if (tipo === 'balcao' && !isBalcao) return false;
+      if (tipo === 'comanda' && isBalcao) return false;
+      return true;
+    });
+    // 1.5) Aplica filtro por Status no client-side também (além do backend)
+    const byStatus = byTipo.filter(r => {
+      const s = (r.statusDerived || (r.status === 'cancelled' ? 'cancelled' : (r.fechado_em ? 'closed' : (r.status || 'open'))));
+      if (status === 'closed') return s === 'closed';
+      if (status === 'open') return s === 'open';
+      if (status === 'awaiting-payment') return s === 'awaiting-payment';
+      if (status === 'cancelled') return s === 'cancelled';
+      return true;
+    });
+    // 2) Se não houver termo, retorna somente por Tipo
+    if (!term) return byStatus;
+    // 3) Aplica busca textual adicional
+    return byStatus.filter(r => {
+      const mesaNumero = r.mesaNumero != null ? String(r.mesaNumero) : '';
+      const mesaLabel = r.mesa_id == null ? 'balcao' : `mesa ${mesaNumero}`;
+      const texto = [
+        mesaNumero,
+        mesaLabel,
+        r.clientesStr || '',
+        r.finalizadorasStr || '',
+        (r.mesa_id == null ? 'balcao' : 'comanda'),
+        (r.statusDerived || r.status || '')
+      ].map(normalize).join(' | ');
+      return texto.includes(term);
+    });
+  }, [rows, debouncedSearch, tipo, status]);
+
+  const statusPt = (s) => {
+    if (s === 'open') return 'Aberta';
+    if (s === 'awaiting-payment') return 'Pagamento';
+    if (s === 'closed') return 'Fechada';
+    if (s === 'cancelled') return 'Cancelada';
+    return s || '—';
+  };
+
+  const fmtDate = (iso) => {
+    if (!iso) return '—';
+    try {
+      const d = new Date(iso);
+      return d.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    } catch { return '—'; }
+  };
+
+  // Status de sessão de caixa em português (usado na aba Fechamentos)
+  const statusCaixaPt = (s) => {
+    const v = String(s || '').toLowerCase();
+    if (v === 'open') return 'Aberto';
+    if (v === 'closed') return 'Fechado';
+    return '—';
+  };
+
+  const fmtMoney = (v) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(v||0));
+
+  const statusBadgeClass = (s) => {
+    if (s === 'open') return 'text-info bg-info/10 border-info/30';
+    if (s === 'awaiting-payment') return 'text-warning bg-warning/10 border-warning/30';
+    if (s === 'closed') return 'text-success bg-success/10 border-success/30';
+    if (s === 'cancelled') return 'text-red-400 bg-red-500/10 border-red-500/30';
+    return 'text-text-secondary bg-transparent border-border/50';
+  };
+
+  return (
+    <motion.div variants={pageVariants} initial="hidden" animate="visible" className="min-h-screen flex flex-col">
+      <motion.div variants={itemVariants} className="mb-6 gap-3 flex flex-col sm:flex-row sm:items-center sm:justify-between">
+        <Tabs value="historico" onValueChange={(v) => {
+          if (v === 'mesas') navigate('/vendas');
+          if (v === 'balcao') navigate('/balcao');
+          if (v === 'historico') navigate('/historico');
+        }}>
+          <TabsList className="grid w-full sm:w-auto grid-cols-3 sm:inline-flex">
+            <TabsTrigger value="mesas">Mesas</TabsTrigger>
+            <TabsTrigger value="balcao">Balcão</TabsTrigger>
+            <TabsTrigger value="historico">Histórico</TabsTrigger>
+          </TabsList>
+        </Tabs>
+        {/* Abas internas do Histórico: Select no mobile, Tabs no desktop */}
+        <div className="w-full flex items-center gap-2 sm:gap-3">
+          {/* Mobile control */}
+          <div className="flex sm:hidden items-center gap-2 w-full">
+            <Select value={tab} onValueChange={setTab}>
+              <SelectTrigger className="w-[160px] text-sm">
+                <SelectValue placeholder="Selecionar" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="comandas">Comandas</SelectItem>
+                <SelectItem value="fechamentos">Fechamentos</SelectItem>
+              </SelectContent>
+            </Select>
+            <div className="ml-auto text-xs text-text-secondary whitespace-nowrap">
+              Total: <span className="font-semibold text-text-primary">R$ {totals.sum.toFixed(2)}</span>
+            </div>
+            {/* Mobile actions icon */}
+            {tab === 'comandas' && (
+              <Button type="button" size="icon" variant="outline" className="h-9 w-9 sm:hidden" onClick={() => setMobileActionsOpen(true)} title="Ações">
+                <Download className="h-4 w-4" />
+              </Button>
+            )}
+            {tab === 'fechamentos' && (
+              <Button type="button" size="icon" variant="outline" className="h-9 w-9 sm:hidden" onClick={exportarFechamentosCSV} title="Exportar">
+                <Download className="h-4 w-4" />
+              </Button>
+            )}
+          </div>
+          {/* Desktop tabs */}
+          <div className="hidden sm:flex items-center gap-2 sm:gap-3 ml-auto">
+            <Tabs value={tab} onValueChange={setTab} className="w-full sm:w-auto">
+              <TabsList className="w-full grid grid-cols-2 sm:w-auto sm:inline-flex text-sm">
+                <TabsTrigger value="comandas" className="text-sm">Comandas</TabsTrigger>
+                <TabsTrigger value="fechamentos" className="text-sm">Fechamentos</TabsTrigger>
+              </TabsList>
+            </Tabs>
+          </div>
+        </div>
+        {/* Ações (desktop somente) + Total já mostrado no mobile acima */}
+        <div className="hidden sm:flex w-full sm:w-auto items-center gap-2 sm:gap-3">
+          {tab === 'comandas' && (
+            <>
+              <Button variant="secondary" size="sm" className="hidden sm:inline-flex" onClick={() => setIsXmlImportOpen(true)}>
+                <FileText className="mr-2 h-4 w-4" />
+                Importar XML
+              </Button>
+              <Button variant="outline" size="sm" className="hidden sm:inline-flex" onClick={exportarCSV}>
+                <Download className="mr-1 h-3 w-3" />
+                Exportar
+              </Button>
+              <button
+                className="hidden sm:inline-block text-xs text-text-muted hover:text-text-primary transition-colors"
+                onClick={() => {
+                  if (showAll) {
+                    const hoje = new Date().toISOString().slice(0, 10);
+                    setFrom(hoje);
+                    setTo(hoje);
+                    setShowAll(false);
+                  } else {
+                    setFrom('');
+                    setTo('');
+                    setShowAll(true);
+                  }
+                  setOffset(0);
+                }}
+                title={showAll ? 'Voltar ao filtro de hoje' : 'Mostrar todas as comandas'}
+              >
+                {showAll ? '◀' : '●'}
+              </button>
+              <div className="text-sm text-text-secondary whitespace-nowrap ml-auto">Total: <span className="font-semibold text-text-primary">R$ {totals.sum.toFixed(2)}</span></div>
+            </>
+          )}
+          {tab === 'fechamentos' && (
+            <Button variant="outline" size="sm" className="hidden sm:inline-flex" onClick={exportarFechamentosCSV}>
+              <Download className="mr-1 h-3 w-3" />
+              Exportar
+            </Button>
+          )}
+        </div>
+      </motion.div>
+
+      {/* Mobile actions (Importar/Exportar) */}
+      <Dialog open={mobileActionsOpen} onOpenChange={setMobileActionsOpen}>
+        <DialogContent className="sm:hidden w-[92vw] max-w-[360px] p-2" onOpenAutoFocus={(e) => e.preventDefault()} onKeyDown={(e) => e.stopPropagation()}>
+          <DialogHeader>
+            <DialogTitle className="text-base">Ações</DialogTitle>
+            <DialogDescription>Escolha uma ação para Comandas</DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col gap-2">
+            <Button variant="secondary" onClick={() => { setMobileActionsOpen(false); setIsXmlImportOpen(true); }}>
+              <FileText className="mr-2 h-4 w-4" /> Importar XML
+            </Button>
+            <Button variant="outline" onClick={() => { setMobileActionsOpen(false); exportarCSV(); }}>
+              <Download className="mr-2 h-4 w-4" /> Exportar CSV
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Paginação - Comandas */}
+      {tab === 'comandas' && (
+        <div className="flex items-center justify-between mt-2">
+          <div className="text-xs text-text-secondary">Carregadas {rows.length} {rows.length === 1 ? 'comanda' : 'comandas'}</div>
+          {hasMore && (
+            <Button size="sm" variant="outline" disabled={loading} onClick={async () => {
+              const next = offset + PAGE_LIMIT;
+              setOffset(next);
+              await load({ append: true });
+            }}>Carregar mais</Button>
+          )}
+        </div>
+      )}
+
+      {/* Barra compacta de busca + toggle filtros (mobile) */}
+      {tab === 'comandas' && (
+        <div className="sm:hidden bg-surface rounded-lg border border-border p-3 mb-3">
+          <div className="flex items-center gap-2">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted" />
+              <Input placeholder="Buscar..." className="pl-9 h-9 text-sm" value={search} onChange={(e) => setSearch(e.target.value)} />
+            </div>
+            <Button size="sm" variant="outline" className="h-9" onClick={() => setMobileFiltersOpen(v => !v)}>
+              {mobileFiltersOpen ? 'Ocultar' : 'Filtros'}
+            </Button>
+          </div>
+          <div className="mt-1 text-[11px] text-text-secondary truncate">
+            {from || '—'} • {to || '—'}
+          </div>
+        </div>
+      )}
+
+      {/* Abas internas foram movidas para o topo; aqui removidas para ganhar espaço */}
+      
+      {tab === 'comandas' && (
+      <motion.div variants={itemVariants} className={`bg-surface rounded-lg border border-border p-4 mb-4 ${mobileFiltersOpen ? '' : 'hidden'} sm:block`}>
+        <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
+          <div>
+            <Label className="mb-1 block">Período Inicial</Label>
+            <DateInput value={from} onChange={setFrom} />
+          </div>
+          <div>
+            <Label className="mb-1 block">Período Final</Label>
+            <DateInput value={to} onChange={setTo} />
+          </div>
+          <div className="md:col-span-2 hidden sm:block">
+            <Label className="mb-1 block">Busca {mesaFilterLabel && <span className="text-xs text-warning ml-1">({mesaFilterLabel})</span>}</Label>
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted" />
+              <Input 
+                placeholder="Mesa, status (fechada/aberta) ou cliente" 
+                className="pl-9 pr-12" 
+                value={search} 
+                onChange={(e) => setSearch(e.target.value)} 
+              />
+              {mesaIdFromUrl && (
+                <Button 
+                  size="sm" 
+                  variant="ghost" 
+                  className="absolute right-1 top-1/2 -translate-y-1/2 h-7 text-xs"
+                  onClick={() => {
+                    navigate('/historico');
+                  }}
+                >
+                  ✕ Limpar
+                </Button>
+              )}
+            </div>
+          </div>
+          <div>
+            <Label className="mb-1 block">Status</Label>
+            <Select value={status} onValueChange={setStatus}>
+              <SelectTrigger className="w-full text-xs">
+                <SelectValue placeholder="Selecionar status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="closed">Fechadas</SelectItem>
+                <SelectItem value="open">Abertas</SelectItem>
+                <SelectItem value="awaiting-payment">Pagamento</SelectItem>
+                <SelectItem value="cancelled">Canceladas</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label className="mb-1 block">Tipo</Label>
+            <Select value={tipo} onValueChange={setTipo}>
+              <SelectTrigger className="w-full text-xs">
+                <SelectValue placeholder="Selecionar tipo" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos</SelectItem>
+                <SelectItem value="comanda">Comandas</SelectItem>
+                <SelectItem value="balcao">Balcão</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+      </motion.div>
+      )}
+
+      {tab === 'comandas' && (
+      <motion.div variants={itemVariants} className="bg-surface rounded-lg border border-border p-0 overflow-hidden">
+        {/* Desktop table (>= sm) */}
+        <div className="hidden sm:block overflow-x-auto pr-2 sm:pr-3">
+          <table className="min-w-full text-sm">
+            <thead className="bg-surface-2 text-text-secondary">
+              <tr>
+                <th className="text-left px-4 py-3 whitespace-nowrap">Mesa</th>
+                <th className="text-left px-4 py-3 whitespace-nowrap">Tipo</th>
+                <th className="text-left px-4 py-3">Clientes</th>
+                <th className="text-left px-4 py-3">Status</th>
+                <th className="text-left px-4 py-3">Finalizadora</th>
+                <th className="text-left px-4 py-3 whitespace-nowrap">Abertura</th>
+                <th className="text-left px-4 py-3 whitespace-nowrap">Fechamento</th>
+                <th className="text-right px-4 py-3 whitespace-nowrap">Diferença</th>
+                <th className="text-right px-4 py-3">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.length === 0 && (
+                <tr><td colSpan={8} className="px-4 py-6 text-center text-text-muted">Nenhuma comanda encontrada no período.</td></tr>
+              )}
+              {filtered.map(r => (
+                <tr
+                  key={r.id}
+                  className="border-t border-border/70 hover:bg-warning/10 cursor-pointer transition-all duration-150 hover:translate-x-[1px]"
+                  onClick={() => openDetail(r.id)}
+                >
+                  <td className="px-4 py-2 whitespace-nowrap">{r.mesa_id == null ? 'Balcão' : (r.mesaNumero != null ? `Mesa ${r.mesaNumero}` : '—')}</td>
+                  <td className="px-4 py-2 whitespace-nowrap">{r.mesa_id == null ? 'Balcão' : 'Comanda'}</td>
+                  <td className="px-4 py-2 break-words" title={r.clientesStr || ''}>{r.clientesStr || '—'}</td>
+                  <td className="px-4 py-2">
+                    <span className={cn("inline-flex items-center text-[11px] font-medium px-2 py-0.5 rounded-full border", statusBadgeClass(r.statusDerived || r.status))}>
+                      {statusPt(r.statusDerived || r.status)}
+                    </span>
+                  </td>
+                  <td className="px-4 py-2 break-words" title={r.finalizadorasStr || ''}>{r.finalizadorasStr || '—'}</td>
+                  <td className="px-4 py-2 whitespace-nowrap">{fmtDate(r.aberto_em)}</td>
+                  <td className="px-4 py-2 whitespace-nowrap">{fmtDate(r.fechado_em)}</td>
+                  <td className="px-4 py-2 text-right whitespace-nowrap">
+                    {(() => {
+                      const v = typeof r.diferenca_pagamento === 'number' ? r.diferenca_pagamento : 0;
+                      if (Math.abs(v) < 0.005) return <span className="text-xs text-text-muted">R$ 0,00</span>;
+                      const cls = v > 0 ? 'text-emerald-500' : 'text-amber-500';
+                      const sign = v > 0 ? '+' : '-';
+                      return <span className={`text-xs font-semibold ${cls}`}>{`${sign} R$ ${Math.abs(v).toFixed(2)}`}</span>;
+                    })()}
+                  </td>
+                  <td className="px-4 py-2 text-right font-semibold whitespace-nowrap">{fmtMoney(r.total)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {/* Mobile card list */}
+        <div className="sm:hidden divide-y divide-border">
+          {filtered.length === 0 && (
+            <div className="p-4 text-center text-text-muted">Nenhuma comanda encontrada no período.</div>
+          )}
+          {filtered.map(r => (
+            <button
+              key={r.id}
+              className="w-full text-left p-3 active:bg-warning/10"
+              onClick={() => openDetail(r.id)}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="text-xs text-text-secondary">{r.mesa_id == null ? 'Balcão' : (r.mesaNumero != null ? `Mesa ${r.mesaNumero}` : 'Comanda')}</div>
+                  <div className="font-semibold truncate max-w-[220px]">
+                    {r.clientesStr || 'Sem cliente'}
+                  </div>
+                </div>
+                <div>
+                  <div className={cn("inline-flex items-center text-[10px] font-medium px-2 py-0.5 rounded-full border", statusBadgeClass(r.statusDerived || r.status))}>
+                    {statusPt(r.statusDerived || r.status)}
+                  </div>
+                </div>
+              </div>
+              <div className="mt-1 text-xs text-text-secondary truncate">
+                {r.finalizadorasStr || '—'}
+              </div>
+              <div className="mt-2 flex items-center justify-between gap-2">
+                <div className="flex-1 min-w-0 text-[11px] text-text-muted truncate pr-2">
+                  {fmtDate(r.aberto_em)}{r.fechado_em ? ` • ${fmtDate(r.fechado_em)}` : ''}
+                </div>
+                <div className="flex-shrink-0 text-right min-w-[84px]">
+                  <div className="text-[11px]">
+                    {(() => {
+                      const v = typeof r.diferenca_pagamento === 'number' ? r.diferenca_pagamento : 0;
+                      if (Math.abs(v) < 0.005) return <span className="text-text-muted">Dif.: R$ 0,00</span>;
+                      const cls = v > 0 ? 'text-emerald-500' : 'text-amber-500';
+                      const sign = v > 0 ? '+' : '-';
+                      return <span className={cls}>{`Dif.: ${sign} R$ ${Math.abs(v).toFixed(2)}`}</span>;
+                    })()}
+                  </div>
+                  <div className="font-mono font-semibold whitespace-nowrap">{fmtMoney(r.total)}</div>
+                </div>
+              </div>
+            </button>
+          ))}
+        </div>
+      </motion.div>
+
+      )}
+
+      {tab === 'fechamentos' && (
+      <>
+      {/* Toggle filtros mobile (fechamentos) */}
+      <div className="sm:hidden bg-surface rounded-lg border border-border p-3 mb-3">
+        <div className="flex items-center justify-between gap-2">
+          <div className="text-sm font-medium">Filtros</div>
+          <Button size="sm" variant="outline" onClick={() => setMobileFiltersOpen(v => !v)}>
+            {mobileFiltersOpen ? 'Ocultar filtros' : 'Mostrar filtros'}
+          </Button>
+        </div>
+      </div>
+      <motion.div variants={itemVariants} className={`bg-surface rounded-lg border border-border p-4 mb-4 ${mobileFiltersOpen ? '' : 'hidden'} sm:block`}>
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+          <div>
+            <Label className="mb-1 block">Período Inicial</Label>
+            <DateInput value={from} onChange={setFrom} />
+          </div>
+          <div>
+            <Label className="mb-1 block">Período Final</Label>
+            <DateInput value={to} onChange={setTo} />
+          </div>
+        </div>
+      </motion.div>
+
+      <motion.div variants={itemVariants} className="bg-surface rounded-lg border border-border p-4 overflow-hidden">
+        {/* Mobile: lista sem tabela */}
+        <div className="sm:hidden space-y-2">
+          {loading && (!rows || rows.length === 0) && (
+            <div className="px-2 py-3 text-center text-text-muted"><Loader2 className="inline mr-2 h-4 w-4 animate-spin"/>Carregando fechamentos…</div>
+          )}
+          {(!rows || rows.length === 0) && !loading && (
+            <div className="px-2 py-3 text-center text-text-muted">Nenhum fechamento encontrado no período.</div>
+          )}
+          {(rows || []).map(r => (
+            <button
+              key={r.id}
+              onClick={async () => {
+                try {
+                  setCashDetail({ open: true, loading: true, resumo: null, periodo: { from: r.aberto_em, to: r.fechado_em }, movs: [], movimentosAgg: null, saldos: { inicial: r?.saldo_inicial ?? null, final: r?.saldo_final ?? null } });
+                  const emp = getEmpresaCodigoFromCache();
+                  const [snap, movs] = await Promise.all([
+                    getCaixaResumo({ caixaSessaoId: r.id, codigoEmpresa: emp }).catch(() => null),
+                    listarMovimentacoesCaixa({ caixaSessaoId: r.id, codigoEmpresa: emp }).catch(() => [])
+                  ]);
+                  let movimentosAgg = snap?.movimentos || null;
+                  if (!movimentosAgg && Array.isArray(movs)) {
+                    const acc = { suprimentos: 0, sangrias: 0, ajustes: 0, troco: 0 };
+                    for (const m of movs) {
+                      const t = String(m?.tipo || '').toLowerCase();
+                      const v = Number(m?.valor || 0);
+                      if (t === 'suprimento') acc.suprimentos += v;
+                      else if (t === 'sangria') acc.sangrias += v;
+                      else if (t === 'ajuste') acc.ajustes += v;
+                      else if (t === 'troco') acc.troco += v;
+                    }
+                    movimentosAgg = acc;
+                  }
+                  const resumo = snap ? {
+                    totalDescontos: Number(snap.total_descontos || 0),
+                    totalVendasLiquidas: Number(snap.total_liquido || 0),
+                    totalEntradas: Number(snap.total_entradas || 0),
+                    totalPorFinalizadora: snap.por_finalizadora || {}
+                  } : null;
+                  setCashDetail({
+                    open: true,
+                    loading: false,
+                    resumo,
+                    periodo: { from: snap?.periodo_de || r.aberto_em, to: snap?.periodo_ate || r.fechado_em },
+                    movs: movs || [],
+                    movimentosAgg,
+                    saldos: { inicial: r?.saldo_inicial ?? null, final: r?.saldo_final ?? null }
+                  });
+                } catch {
+                  setCashDetail({ open: true, loading: false, resumo: null, periodo: { from: r.aberto_em, to: r.fechado_em }, movs: [], movimentosAgg: null, saldos: { inicial: r?.saldo_inicial ?? null, final: r?.saldo_final ?? null } });
+                }
+              }}
+              className="w-full text-left p-3 rounded-lg border border-border hover:bg-surface-2 transition"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-xs text-text-secondary">
+                  {fmtDate(r.aberto_em)}<span className="mx-1">→</span>{fmtDate(r.fechado_em)}
+                </div>
+                <div className="text-[11px] px-2 py-0.5 rounded-full border bg-success/10 text-success border-success/30">{statusCaixaPt(r.status)}</div>
+              </div>
+              <div className="mt-1 grid grid-cols-2 gap-2 text-xs">
+                <div className="bg-surface-2 rounded p-2 border border-border">
+                  <div className="text-[10px] text-text-secondary">Saldo Inicial</div>
+                  <div className="font-semibold">{r?.saldo_inicial != null ? fmtMoney(r.saldo_inicial) : '—'}</div>
+                </div>
+                <div className="bg-surface-2 rounded p-2 border border-border">
+                  <div className="text-[10px] text-text-secondary">Saldo Final (contado)</div>
+                  <div className="font-semibold">{r?.valor_final_dinheiro != null ? fmtMoney(r.valor_final_dinheiro) : '—'}</div>
+                </div>
+              </div>
+            </button>
+          ))}
+        </div>
+
+        {/* Desktop: tabela */}
+        <div className="hidden sm:block overflow-x-auto max-h-[60vh] overflow-y-auto pr-2 sm:pr-3">
+          <table className="min-w-full text-sm">
+            <thead className="bg-surface-2 text-text-secondary">
+              <tr>
+                <th className="text-left px-4 py-3">Abertura</th>
+                <th className="text-left px-4 py-3">Fechamento</th>
+                <th className="text-left px-4 py-3">Status</th>
+                <th className="text-right px-4 py-3">Saldo Inicial</th>
+                <th className="text-right px-4 py-3">Saldo Final (contado)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading && (!rows || rows.length === 0) && (
+                <tr><td colSpan={5} className="px-4 py-6 text-center text-text-muted"><Loader2 className="inline mr-2 h-4 w-4 animate-spin"/>Carregando fechamentos…</td></tr>
+              )}
+              {(!rows || rows.length === 0) && (
+                <tr><td colSpan={5} className="px-4 py-6 text-center text-text-muted">Nenhum fechamento encontrado no período.</td></tr>
+              )}
+              {(rows || []).map(r => (
+                <tr key={r.id} className="border-t border-border/70 hover:bg-success/10 cursor-pointer transition-all duration-150 hover:translate-x-[1px]" onClick={async () => {
+                  // Abrir detalhes do fechamento preferindo snapshot e incluindo movimentações
+                  try {
+                    setCashDetail({ open: true, loading: true, resumo: null, periodo: { from: r.aberto_em, to: r.fechado_em }, movs: [], movimentosAgg: null, saldos: { inicial: r?.saldo_inicial ?? null, final: r?.saldo_final ?? null } });
+                    const loadResumo = async () => {
+                      const emp = getEmpresaCodigoFromCache();
+                      const [snap, movs] = await Promise.all([
+                        getCaixaResumo({ caixaSessaoId: r.id, codigoEmpresa: emp }).catch(() => null),
+                        listarMovimentacoesCaixa({ caixaSessaoId: r.id, codigoEmpresa: emp }).catch(() => [])
+                      ]);
+                      return { snap, movs };
+                    };
+                    let { snap, movs } = await loadResumo();
+                    if (!snap) {
+                      // Retry leve se snapshot ainda não disponível
+                      await new Promise(rs => setTimeout(rs, 700));
+                      ({ snap, movs } = await loadResumo());
+                    }
+                    if (snap) {
+                      const resumo = {
+                        totalDescontos: Number(snap.total_descontos || 0),
+                        totalVendasLiquidas: Number(snap.total_liquido || 0),
+                        totalEntradas: Number(snap.total_entradas || 0),
+                        totalPorFinalizadora: snap.por_finalizadora || {}
+                      }
+                      // Se o snapshot não tiver movimentos agregados, calcular a partir da lista de movimentações
+                      let movimentosAgg = snap.movimentos || null;
+                      if (!movimentosAgg && Array.isArray(movs)) {
+                        const acc = { suprimentos: 0, sangrias: 0, ajustes: 0, troco: 0 };
+                        for (const m of movs) {
+                          const t = String(m?.tipo || '').toLowerCase();
+                          const v = Number(m?.valor || 0);
+                          if (t === 'suprimento') acc.suprimentos += v;
+                          else if (t === 'sangria') acc.sangrias += v;
+                          else if (t === 'ajuste') acc.ajustes += v;
+                          else if (t === 'troco') acc.troco += v;
+                        }
+                        movimentosAgg = acc;
+                      }
+                      setCashDetail({
+                        open: true,
+                        loading: false,
+                        resumo,
+                        periodo: { from: snap.periodo_de || r.aberto_em, to: snap.periodo_ate || r.fechado_em },
+                        movs: movs || [],
+                        movimentosAgg,
+                        saldos: {
+                          inicial: (typeof snap.saldo_inicial !== 'undefined') ? Number(snap.saldo_inicial) : (r?.saldo_inicial ?? null),
+                          final: (typeof snap.valor_final_dinheiro !== 'undefined') ? Number(snap.valor_final_dinheiro) : (r?.valor_final_dinheiro ?? null)
+                        }
+                      });
+                    } else {
+                      const emp = getEmpresaCodigoFromCache();
+                      const res = await listarResumoPeriodo({ from: r.aberto_em, to: r.fechado_em || new Date().toISOString(), codigoEmpresa: emp });
+                      // Sem snapshot: agrega movimentos manualmente para exibir sangrias/suprimentos
+                      let movimentosAgg = null;
+                      if (Array.isArray(movs)) {
+                        const acc = { suprimentos: 0, sangrias: 0, ajustes: 0, troco: 0 };
+                        for (const m of movs) {
+                          const t = String(m?.tipo || '').toLowerCase();
+                          const v = Number(m?.valor || 0);
+                          if (t === 'suprimento') acc.suprimentos += v;
+                          else if (t === 'sangria') acc.sangrias += v;
+                          else if (t === 'ajuste') acc.ajustes += v;
+                          else if (t === 'troco') acc.troco += v;
+                        }
+                        movimentosAgg = acc;
+                      }
+                      setCashDetail({ open: true, loading: false, resumo: res || null, periodo: { from: r.aberto_em, to: r.fechado_em }, movs: movs || [], movimentosAgg, saldos: { inicial: r?.saldo_inicial ?? null, final: r?.valor_final_dinheiro ?? null } });
+                    }
+                  } catch (e) {
+                    setCashDetail({ open: true, loading: false, resumo: null, periodo: { from: r.aberto_em, to: r.fechado_em }, movs: [], movimentosAgg: null, saldos: { inicial: r?.saldo_inicial ?? null, final: r?.valor_final_dinheiro ?? null } });
+                  }
+                }}>
+                  <td className="px-4 py-2">{fmtDate(r.aberto_em)}</td>
+                  <td className="px-4 py-2">{fmtDate(r.fechado_em)}</td>
+                  <td className="px-4 py-2">{statusCaixaPt(r.status)}</td>
+                  <td className="px-4 py-2 text-right">{r?.saldo_inicial != null ? fmtMoney(r.saldo_inicial) : '—'}</td>
+                  <td className="px-4 py-2 text-right">{r?.valor_final_dinheiro != null ? fmtMoney(r.valor_final_dinheiro) : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </motion.div>
+      </>
+      )}
+
+      {tab === 'comandas' && (
+      <Dialog open={!!detailId} onOpenChange={(v) => { if (!v) { detailOpenRef.current = false; setDetailId(null); setDetail({ loading: false, itens: [], pagamentos: [] }); setDetailMeta(null); } else { detailOpenRef.current = true; } }}>
+        <DialogContent className="sm:max-w-4xl w-[92vw] max-h-[90vh] overflow-hidden flex flex-col animate-none" onKeyDown={(e) => e.stopPropagation()}>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 flex-wrap">
+              <span>
+                {detailMeta ? (
+                  <span>
+                    {detailMeta.mesaLabel}
+                    {detailMeta.clientesStr ? <span className="text-text-secondary"> • {detailMeta.clientesStr}</span> : null}
+                  </span>
+                ) : (
+                  <>Comanda #{detailId || '—'}</>
+                )}
+              </span>
+              {detailMeta && (
+                <div className="flex gap-2">
+                  <span className={cn("text-xs px-2 py-0.5 rounded-full border", statusBadgeClass(detailMeta.status))}>
+                    {detailMeta.status === 'closed' ? 'Fechada' : detailMeta.status === 'open' ? 'Aberta' : 'Cancelada'}
+                  </span>
+                  <span className="text-xs px-2 py-0.5 rounded-full border bg-info/10 text-info border-info/30">
+                    {detailMeta.tipo === 'balcao' ? 'Balcão' : detailMeta.tipo === 'comanda' ? 'Mesa' : 'Importada'}
+                  </span>
+                </div>
+              )}
+            </DialogTitle>
+            <DialogDescription className="space-y-1">
+              {detailMeta ? (
+                <>
+                  <div>
+                    {detailMeta.aberto_em ? <>Abertura: {fmtDate(detailMeta.aberto_em)}</> : '—'}
+                    {detailMeta.fechado_em && (
+                      <>
+                        {" "}•{" "}
+                        Fechamento: {fmtDate(detailMeta.fechado_em)}
+                        {(() => {
+                          const inicio = new Date(detailMeta.aberto_em);
+                          const fim = new Date(detailMeta.fechado_em);
+                          const diffMs = fim - inicio;
+                          const diffMins = Math.floor(diffMs / 60000);
+                          const hours = Math.floor(diffMins / 60);
+                          const mins = diffMins % 60;
+                          return diffMins > 0 ? <span className="text-text-muted"> ({hours > 0 ? `${hours}h ` : ''}{mins}min)</span> : null;
+                        })()}
+                      </>
+                    )}
+                  </div>
+                  {detailMeta.observacao && (
+                    <div className="text-xs text-text-muted">
+                      {detailMeta.observacao.includes('Importado de XML') ? (
+                        <span className="text-warning">📄 {detailMeta.observacao.split('\n')[0]}</span>
+                      ) : (
+                        <span>Obs: {detailMeta.observacao}</span>
+                      )}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <>Itens e pagamentos registrados.</>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          {detail.loading ? (
+            <div className="p-6 text-center text-text-muted"><Loader2 className="mr-2 inline h-4 w-4 animate-spin" /> Carregando...</div>
+          ) : (
+            <div className="space-y-4 overflow-y-auto flex-1 px-1">
+              {/* Resumo Financeiro */}
+              {(() => {
+                const subtotalItens = detail.itens.reduce((acc, it) => acc + (Number(it.quantidade||0) * Number(it.preco_unitario||0)), 0);
+                const totalDescontos = detail.itens.reduce((acc, it) => acc + Number(it.desconto||0), 0);
+                const totalItens = subtotalItens - totalDescontos;
+                const totalPagamentos = detail.pagamentos.reduce((acc, pg) => acc + Number(pg.valor||0), 0);
+                const diffDb = typeof detailMeta?.diferenca_pagamento === 'number' ? detailMeta.diferenca_pagamento : null;
+                const diferenca = diffDb != null ? diffDb : (totalPagamentos - totalItens);
+
+                return (
+                  <div className="bg-surface-2 rounded-lg p-4 border border-border">
+                    <h3 className="font-semibold mb-3">Resumo Financeiro</h3>
+                    <div className="space-y-2 text-sm">
+                      <div className="flex items-center gap-4">
+                        <div className="flex items-center gap-2">
+                          <span className="text-text-muted">Subtotal</span>
+                          <span className="font-mono font-semibold">R$ {subtotalItens.toFixed(2)}</span>
+                        </div>
+                        {totalDescontos > 0 && (
+                          <div className="flex items-center gap-2 text-warning">
+                            <span>Desconto</span>
+                            <span className="font-mono font-semibold">-R$ {totalDescontos.toFixed(2)}</span>
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex justify-between font-semibold pt-2 border-t border-border">
+                        <span>Total:</span>
+                        <span className="font-mono text-lg">R$ {totalItens.toFixed(2)}</span>
+                      </div>
+                      <div className="flex items-center gap-4 text-xs">
+                        <div className="flex items-center gap-2 text-success">
+                          <span>Pagamentos</span>
+                          <span className="font-mono">R$ {totalPagamentos.toFixed(2)}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-text-secondary">Diferença</span>
+                          <span className={cn("font-semibold", Math.abs(diferenca) < 0.005 ? 'text-text-muted' : (diferenca > 0 ? 'text-emerald-500' : 'text-amber-500'))}>
+                            {Math.abs(diferenca) < 0.005 ? 'R$ 0,00' : `${diferenca > 0 ? '+' : '-'} R$ ${Math.abs(diferenca).toFixed(2)}`}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+              
+              {/* Itens e Pagamentos */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="border rounded-md p-3">
+                  <div className="font-semibold mb-2">Itens ({detail.itens.length})</div>
+                  {detail.itens.length === 0 ? (
+                    <div className="text-sm text-text-muted">Sem itens.</div>
+                  ) : (
+                    <ul className="text-sm space-y-2 max-h-64 overflow-auto thin-scroll">
+                      {detail.itens.map(it => {
+                        const subtotal = Number(it.quantidade||0) * Number(it.preco_unitario||0);
+                        const desconto = Number(it.desconto||0);
+                        const total = subtotal - desconto;
+                        return (
+                          <li key={it.id} className="border-b border-border/50 pb-2 last:border-0">
+                            <div className="flex justify-between items-start gap-2">
+                              <span className="flex-1 min-w-0">
+                                <div className="font-medium truncate">{it.descricao}</div>
+                                <div className="text-xs text-text-muted">
+                                  {it.quantidade} x R$ {Number(it.preco_unitario||0).toFixed(2)}
+                                  {desconto > 0 && <span className="text-warning"> (desc: R$ {desconto.toFixed(2)})</span>}
+                                </div>
+                              </span>
+                              <span className="font-mono font-semibold whitespace-nowrap">R$ {total.toFixed(2)}</span>
+                            </div>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </div>
+                <div className="border rounded-md p-3">
+                  <div className="font-semibold mb-2">Pagamentos ({detail.pagamentos.length})</div>
+                  {detail.pagamentos.length === 0 ? (
+                    <div className="text-sm text-text-muted">Sem registros.</div>
+                  ) : (
+                    <ul className="text-sm space-y-2 max-h-64 overflow-auto thin-scroll">
+                      {detail.pagamentos.map(pg => (
+                        <li key={pg.id} className="flex justify-between gap-2 border-b border-border/50 pb-2 last:border-0">
+                          <span className="pr-2 break-words flex-1">
+                            {pg.cliente_nome ? <div className="font-medium">{pg.cliente_nome}</div> : <div className="text-text-muted">Sem cliente</div>}
+                            <div className="text-xs text-text-secondary">{pg.finalizadora_nome || 'Outros'}</div>
+                          </span>
+                          <span className="font-mono font-semibold whitespace-nowrap">R$ {Number(pg.valor||0).toFixed(2)}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button size="sm" variant="secondary" onClick={() => { setDetailId(null); }}>Fechar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      )}
+
+      {tab === 'fechamentos' && (
+      <Dialog open={cashDetail.open} onOpenChange={(v) => { if (!v) setCashDetail({ open: false, loading: false, resumo: null, periodo: { from: null, to: null } }); }}>
+        <DialogContent 
+          className="sm:max-w-2xl w-[92vw] max-h-[85vh] animate-none flex flex-col overflow-hidden overflow-x-hidden"
+          onKeyDown={(e) => e.stopPropagation()}
+        >
+          <DialogHeader>
+            <DialogTitle>Fechamento do Período</DialogTitle>
+            <DialogDescription>
+              {cashDetail.periodo.from ? fmtDate(cashDetail.periodo.from) : '—'}
+              {" "}até{" "}
+              {cashDetail.periodo.to ? fmtDate(cashDetail.periodo.to) : '—'}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex-1 overflow-y-auto pr-1">
+          {cashDetail.loading ? (
+            <div className="p-3 sm:p-4 text-text-muted"><Loader2 className="inline mr-2 h-4 w-4 animate-spin"/>Carregando resumo…</div>
+          ) : (
+            <div className="space-y-3 sm:space-y-4">
+              {/* KPIs principais: Saldo Inicial / Entradas / Saldo Final */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-3">
+                <div className="bg-surface-2 rounded-lg p-3 border border-border">
+                  <p className="text-xs text-text-secondary">Saldo Inicial</p>
+                  <p className="text-xl font-bold">{fmtMoney(cashDetail?.saldos?.inicial ?? 0)}</p>
+                </div>
+                <div className="bg-surface-2 rounded-lg p-3 border border-border">
+                  <p className="text-xs text-text-secondary">Entradas (pagamentos)</p>
+                  <p className="text-xl font-bold text-success">{fmtMoney(cashDetail.resumo?.totalEntradas || 0)}</p>
+                </div>
+                <div className="bg-surface-2 rounded-lg p-3 border border-border col-span-2 sm:col-span-1">
+                  <p className="text-xs text-text-secondary">Saldo Final (contado)</p>
+                  <p className="text-xl font-bold">{cashDetail?.saldos?.final != null ? fmtMoney(cashDetail.saldos.final) : '—'}</p>
+                </div>
+              </div>
+
+              {/* KPIs de Vendas (sem Bruto) */}
+              <div className="grid grid-cols-2 sm:grid-cols-2 gap-2 sm:gap-3">
+                <div className="bg-surface-2 rounded-lg p-3 border border-border">
+                  <p className="text-xs text-text-secondary">Descontos</p>
+                  <p className="text-xl font-bold text-warning">{fmtMoney(cashDetail.resumo?.totalDescontos || 0)}</p>
+                </div>
+                <div className="bg-surface-2 rounded-lg p-3 border border-border">
+                  <p className="text-xs text-text-secondary">Líquido</p>
+                  <p className="text-xl font-bold">{fmtMoney(cashDetail.resumo?.totalVendasLiquidas || 0)}</p>
+                </div>
+              </div>
+
+              <div>
+                <div className="text-sm font-semibold mb-1">Por Finalizadora</div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {cashDetail.resumo?.totalPorFinalizadora && Object.keys(cashDetail.resumo.totalPorFinalizadora).length > 0 ? (
+                    Object.entries(cashDetail.resumo.totalPorFinalizadora).map(([metodo, valor]) => (
+                      <div key={metodo} className="flex items-center justify-between bg-surface-2 rounded-md p-2 border border-border">
+                        <span className="text-sm text-text-secondary">{String(metodo)}</span>
+                        <span className="text-sm font-semibold">{fmtMoney(valor)}</span>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="text-sm text-text-muted">Sem dados de finalizadoras</div>
+                  )}
+                </div>
+              </div>
+              {/* Resumo de Movimentações */}
+              <div>
+                <div className="text-sm font-semibold mb-1">Resumo de Movimentações</div>
+                {!cashDetail.movimentosAgg ? (
+                  <div className="text-sm text-text-muted">Sem movimentações agregadas nesta sessão.</div>
+                ) : (
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
+                    <div className="bg-surface-2 rounded-lg p-3 border border-border">
+                      <p className="text-xs text-text-secondary">Suprimentos</p>
+                      <p className="text-lg font-bold text-success">{fmtMoney(cashDetail.movimentosAgg?.suprimentos || 0)}</p>
+                    </div>
+                    <div className="bg-surface-2 rounded-lg p-3 border border-border">
+                      <p className="text-xs text-text-secondary">Sangrias</p>
+                      <p className="text-lg font-bold text-danger">{fmtMoney(cashDetail.movimentosAgg?.sangrias || 0)}</p>
+                    </div>
+                    <div className="bg-surface-2 rounded-lg p-3 border border-border">
+                      <p className="text-xs text-text-secondary">Ajustes</p>
+                      <p className="text-lg font-bold">{fmtMoney(cashDetail.movimentosAgg?.ajustes || 0)}</p>
+                    </div>
+                    <div className="bg-surface-2 rounded-lg p-3 border border-border">
+                      <p className="text-xs text-text-secondary">Troco</p>
+                      <p className="text-lg font-bold">{fmtMoney(cashDetail.movimentosAgg?.troco || 0)}</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Movimentações detalhadas */}
+              <div>
+                <div className="text-sm font-semibold mb-1">Movimentações</div>
+                {!cashDetail.movs || cashDetail.movs.length === 0 ? (
+                  <div className="text-sm text-text-muted">Nenhuma movimentação registrada</div>
+                ) : (
+                  <>
+                    {/* Mobile: lista empilhada, sem tabela */}
+                    <ul className="sm:hidden divide-y divide-border rounded-md border border-border overflow-hidden">
+                      {cashDetail.movs.map((m, idx) => (
+                        <li key={idx} className="px-3 py-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-xs text-text-secondary whitespace-nowrap">{fmtDate(m.criado_em)}</span>
+                            <span className="text-sm font-semibold whitespace-nowrap">{fmtMoney(m.valor || 0)}</span>
+                          </div>
+                          <div className="mt-0.5 flex items-center gap-2 text-xs">
+                            <span className="px-1.5 py-0.5 rounded bg-surface-2 border border-border text-text-secondary whitespace-nowrap">{String(m.tipo || '').toUpperCase()}</span>
+                            <span className="text-xs text-text-primary whitespace-normal break-words flex-1">{m.observacao || '—'}</span>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                    {/* Desktop (>= sm): tabela */}
+                    <div className="hidden sm:block rounded-md border border-border overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead className="bg-surface-2">
+                          <tr>
+                            <th className="text-left px-3 py-2">Data</th>
+                            <th className="text-left px-3 py-2">Tipo</th>
+                            <th className="text-left px-3 py-2">Obs</th>
+                            <th className="text-right px-3 py-2">Valor</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {cashDetail.movs.map((m, idx) => (
+                            <tr key={idx} className="border-t border-border/60">
+                              <td className="px-3 py-2 whitespace-nowrap">{fmtDate(m.criado_em)}</td>
+                              <td className="px-3 py-2 whitespace-nowrap">{String(m.tipo || '').toUpperCase()}</td>
+                              <td className="px-3 py-2 whitespace-normal break-words">{m.observacao || '—'}</td>
+                              <td className="px-3 py-2 text-right font-semibold whitespace-nowrap">{fmtMoney(m.valor || 0)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+          </div>
+        </DialogContent>
+      </Dialog>
+      )}
+      
+      <XMLSalesImportModal
+        open={isXmlImportOpen}
+        onOpenChange={setIsXmlImportOpen}
+        codigoEmpresa={userProfile?.codigo_empresa}
+        onSuccess={async (dataEmissao) => {
+          setIsXmlImportOpen(false);
+          // Ajustar filtro de data para incluir a data da nota
+          if (dataEmissao) {
+            setFrom(dataEmissao);
+            setTo(dataEmissao);
+          }
+          // Aguardar um pouco para garantir que o banco processou
+          await new Promise(resolve => setTimeout(resolve, 500));
+          // Resetar offset e recarregar do zero
+          setOffset(0);
+          await load({ append: false });
+        }}
+      />
+    </motion.div>
+  );
+}
