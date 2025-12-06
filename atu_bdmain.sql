@@ -66,6 +66,19 @@ create extension if not exists pgcrypto;
 create extension if not exists pgjwt;
 
 -- --------------------------------------------------------------------------
+-- Função para obter JWT secret em DEV (evita ALTER DATABASE)
+-- --------------------------------------------------------------------------
+create or replace function public.get_jwt_secret()
+returns text
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  select 'your-dev-secret-change-me'::text;
+$$;
+
+-- --------------------------------------------------------------------------
 -- Estrutura da tabela usuarios (ajustes para custom auth)
 -- --------------------------------------------------------------------------
 -- Observação: usamos ALTER ADD COLUMN IF NOT EXISTS para ser seguro na MAIN
@@ -105,7 +118,7 @@ create or replace function public.auth_login_dev(p_email text, p_password text)
 returns jsonb
 language plpgsql
 security definer
-set search_path = public
+set search_path = public, extensions
 as $$
 declare
   v_user record;
@@ -113,6 +126,7 @@ declare
   v_exp_seconds integer := 60*60*24*45; -- 45 dias
   v_secret text;
   v_token text;
+  v_is_match boolean;
 begin
   select u.* into v_user
     from public.usuarios u
@@ -127,13 +141,29 @@ begin
     raise exception 'user blocked';
   end if;
 
-  if crypt(p_password, v_user.senha_hash) = v_user.senha_hash then
-    v_secret := current_setting('app.settings.jwt_secret', true);
+  -- Suporte a legado: se senha_hash não for bcrypt, comparar texto plano e atualizar para bcrypt
+  if v_user.senha_hash like '$2%' then
+    v_is_match := (extensions.crypt(p_password, v_user.senha_hash) = v_user.senha_hash);
+  else
+    v_is_match := (v_user.senha_hash = p_password);
+  end if;
+
+  if v_is_match then
+    -- Upgrade transparente para bcrypt se estava em texto plano
+    if v_user.senha_hash not like '$2%' then
+      update public.usuarios
+         set senha_hash = extensions.crypt(p_password, extensions.gen_salt('bf'::text)),
+             senha_alg = 'bcrypt',
+             senha_atualizada_em = now()
+       where id = v_user.id;
+    end if;
+
+    v_secret := public.get_jwt_secret();
     if coalesce(v_secret, '') = '' then
       raise exception 'jwt secret not configured';
     end if;
 
-    v_token := sign(
+    v_token := extensions.sign(
       json_build_object(
         'aud','authenticated',
         'iss','supabase',
