@@ -1349,6 +1349,26 @@ function AgendaPage({ sidebarVisible = false }) {
         try { dbg('Realtime:debounced fetchBookings fire'); pulseLog('rt:debounced:fire'); setUiBusy(1200); fetchBookings(); } catch {}
       }, 400);
     };
+    // Mudanças em participantes de agendamento (qualquer operação em agendamento_participantes)
+    const onParticipantsChange = (payload) => {
+      const row = payload?.new || payload?.old;
+      if (!row) return;
+      if (row.codigo_empresa !== userProfile.codigo_empresa) return;
+      try { console.debug('[Realtime] agendamento_participantes change', { event: payload.eventType, agendamento_id: row.agendamento_id }); } catch {}
+      if (realtimeDebounceRef.current) clearTimeout(realtimeDebounceRef.current);
+      try { setLastRealtimeEventAtMs(Date.now()); } catch {}
+      if (modalOpenRef.current) {
+        dbg('Realtime:onParticipantsChange deferred due to modal open');
+        pendingRealtimeRefreshRef.current = true;
+        pulseLog('rt:participants:deferred', { agendamento_id: row.agendamento_id, event: payload.eventType });
+        return;
+      }
+      dbg('Realtime:onParticipantsChange scheduling fetchBookings');
+      pulseLog('rt:participants', { agendamento_id: row.agendamento_id, event: payload.eventType });
+      realtimeDebounceRef.current = setTimeout(() => {
+        try { dbg('Realtime:participants debounced fetchBookings fire'); pulseLog('rt:participants:debounced:fire'); setUiBusy(1200); fetchBookings(); } catch {}
+      }, 400);
+    };
     // ✅ REAL-TIME: escuta mudanças nos agendamentos da empresa atual
     const channel = supabase
       .channel(`agendamentos:${userProfile.codigo_empresa}`)
@@ -1357,6 +1377,11 @@ function AgendaPage({ sidebarVisible = false }) {
         try { console.debug('[Realtime] channel status', status); } catch {}
         try { setRealtimeStatus(String(status || 'unknown')); } catch {}
       });
+    // ✅ REAL-TIME: escuta mudanças em participantes (inserção/atualização/exclusão)
+    const channelParticipants = supabase
+      .channel(`agendamento_participantes:${userProfile.codigo_empresa}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'agendamento_participantes', filter: `codigo_empresa=eq.${userProfile.codigo_empresa}` }, onParticipantsChange)
+      .subscribe();
     
     // ✅ POLLING: Recarrega agendamentos a cada 30 segundos
     const pollingInterval = setInterval(() => {
@@ -1368,6 +1393,7 @@ function AgendaPage({ sidebarVisible = false }) {
     return () => {
       try { if (realtimeDebounceRef.current) clearTimeout(realtimeDebounceRef.current); } catch {}
       try { supabase.removeChannel(channel); } catch {}
+      try { supabase.removeChannel(channelParticipants); } catch {}
       try { clearInterval(pollingInterval); } catch {}
       try { setRealtimeStatus('polling'); } catch {}
     };
@@ -2584,6 +2610,111 @@ function AgendaPage({ sidebarVisible = false }) {
         setChipsSnapshotSafe(arr);
       }
     }, [form.selectedClients, persistLastNonEmpty]);
+
+    // Persistir imediatamente alterações nos chips (adicionar/remover) no modal de edição
+    const prevChipsSnapRef = useRef('');
+    const chipsSavingRef = useRef(false);
+    useEffect(() => {
+      try {
+        if (!isModalOpen) return;
+        if (!editingBooking?.id) return; // somente no modo edição
+        const sel = Array.isArray(form.selectedClients) ? form.selectedClients : [];
+        const snap = JSON.stringify(sel.map(c => ({ id: c?.id, nome: c?.nome || null, codigo: c?.codigo ?? null })));
+        if (snap === prevChipsSnapRef.current) return; // sem mudança real
+        prevChipsSnapRef.current = snap;
+        (async () => {
+          if (chipsSavingRef.current) return;
+          chipsSavingRef.current = true;
+          try {
+            const agendamentoId = editingBooking.id;
+            const codigo = userProfile?.codigo_empresa;
+            if (!agendamentoId || !codigo) return;
+            // Proteção: não persistir se a seleção está vazia (evita zerar participantes ao abrir)
+            if (sel.length === 0) {
+              console.log('🛡️ [EDIT-MODAL] seleção vazia detectada (skip persist)');
+              return;
+            }
+            // Evitar salvar se seleção atual é igual ao que já está no banco (ordem e ids)
+            try {
+              const loaded = Array.isArray(participantsByAgendamento?.[agendamentoId]) ? participantsByAgendamento[agendamentoId] : [];
+              const sameLen = loaded.length === sel.length;
+              const sameSeq = sameLen && loaded.every((p, i) => String(p?.cliente_id) === String(sel[i]?.id));
+              if (sameSeq) {
+                console.log('🛡️ [EDIT-MODAL] seleção igual ao banco (skip persist)');
+                return;
+              }
+            } catch {}
+            console.log('💾 [EDIT-MODAL] Mudança em selectedClients detectada. Salvando participantes...');
+            // Buscar participantes atuais para preservar dados por posição quando possível
+            const { data: currentParticipants } = await supabase
+              .from('agendamento_participantes')
+              .select('*')
+              .eq('codigo_empresa', codigo)
+              .eq('agendamento_id', agendamentoId)
+              .order('ordem', { ascending: true })
+              .order('id', { ascending: true });
+            const currentArray = currentParticipants || [];
+            // Deletar todos e recriar conforme os chips atuais
+            await supabase
+              .from('agendamento_participantes')
+              .delete()
+              .eq('codigo_empresa', codigo)
+              .eq('agendamento_id', agendamentoId);
+            if (sel.length > 0) {
+              const rows = sel.map((c, index) => {
+                const existing = currentArray[index];
+                const preserve = existing && existing.cliente_id === c.id;
+                return {
+                  codigo_empresa: codigo,
+                  agendamento_id: agendamentoId,
+                  cliente_id: c.id,
+                  nome: c.nome,
+                  ordem: index + 1,
+                  valor_cota: preserve ? (existing.valor_cota ?? 0) : 0,
+                  status_pagamento: preserve ? (existing.status_pagamento ?? 'Pendente') : 'Pendente',
+                  finalizadora_id: preserve ? (existing.finalizadora_id ?? null) : null,
+                  aplicar_taxa: preserve ? (existing.aplicar_taxa ?? false) : false,
+                };
+              });
+              await supabase
+                .from('agendamento_participantes')
+                .insert(rows);
+            }
+            // Atualizar agendamentos (cliente primário e lista de clientes)
+            const primary = sel[0] || null;
+            const clientesArr = sel.map(c => c?.nome).filter(Boolean);
+            await supabase
+              .from('agendamentos')
+              .update({ cliente_id: primary?.id ?? null, clientes: clientesArr })
+              .eq('codigo_empresa', codigo)
+              .eq('id', agendamentoId);
+            // Atualizações locais imediatas
+            setBookings(prev => prev.map(b => b.id === agendamentoId ? { ...b, customer: primary?.nome || b.customer, cliente_id: primary?.id ?? null, clientes: clientesArr } : b));
+            const updatedParticipants = sel.map((c, index) => {
+              const existing = currentArray[index];
+              const preserve = existing && existing.cliente_id === c.id;
+              return {
+                cliente_id: c.id,
+                nome: c.nome,
+                codigo: c.codigo ?? null,
+                valor_cota: preserve ? (existing.valor_cota ?? 0) : 0,
+                status_pagamento: preserve ? (existing.status_pagamento ?? 'Pendente') : 'Pendente',
+                finalizadora_id: preserve ? (existing.finalizadora_id ?? null) : null,
+                aplicar_taxa: preserve ? (existing.aplicar_taxa ?? false) : false,
+                ordem: index + 1,
+              };
+            });
+            setParticipantsByAgendamento(prev => ({ ...prev, [agendamentoId]: updatedParticipants }));
+            setParticipantsForm(updatedParticipants);
+            console.log('✅ [EDIT-MODAL] Participantes salvos imediatamente');
+          } catch (err) {
+            console.error('❌ [EDIT-MODAL] Falha ao salvar mudança de chips:', err);
+          } finally {
+            chipsSavingRef.current = false;
+          }
+        })();
+      } catch {}
+    }, [isModalOpen, editingBooking?.id, form.selectedClients]);
 
     // Ao fechar o picker, se a seleção ficou vazia de forma inesperada, restaura
     useEffect(() => {

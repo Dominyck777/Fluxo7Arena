@@ -138,6 +138,10 @@ export default function PaymentModal({
   // Estado para indicador visual de auto-save
   const [isAutoSaving, setIsAutoSaving] = useState(false);
   
+  // Ref para detectar remoções (salvar imediatamente ao remover)
+  const prevLengthRef = useRef(null);
+  const prevListRef = useRef([]);
+  
   // Estado para modal de confirmação de status de pagamento
   const [statusConfirmationModal, setStatusConfirmationModal] = useState({
     isOpen: false,
@@ -520,8 +524,8 @@ export default function PaymentModal({
         return;
       }
       
-      // Usar TODOS participantes como fonte da verdade (ocultos no UI continuam sendo salvos)
-      const effectiveParticipants = (localParticipantsForm || []);
+      // Usar APENAS participantes visíveis como fonte da verdade (itens ocultos são tratados como removidos)
+      const effectiveParticipants = (localParticipantsForm || []).filter((_, idx) => !(paymentHiddenIndexes || []).includes(idx));
       
       // Calcular pendentes
       const pendingCount = effectiveParticipants.reduce((acc, p) => {
@@ -577,7 +581,7 @@ export default function PaymentModal({
         const novo = effectiveParticipants[i];
         
         if (!novo) {
-          console.log(`⚠️ Posição #${i + 1}: Sem participante novo, pulando`);
+          console.log(`⚠️ Posição #${i + 1}: Sem participante novo, pulando update`);
           continue;
         }
         
@@ -606,9 +610,28 @@ export default function PaymentModal({
           throw updateErr;
         }
       }
+      // Tamanho original no banco (antes de inserir/deletar)
+      const originalLen = originalParticipants.length;
+
+      // Remover participantes excedentes quando a nova lista for menor que a original
+      if (effectiveParticipants.length < originalLen) {
+        const toDelete = originalParticipants.slice(effectiveParticipants.length).map(p => p.id);
+        if (toDelete.length > 0) {
+          console.log('➖ Removendo participantes excedentes:', toDelete.length);
+          const { error: delErr } = await supabase
+            .from('agendamento_participantes')
+            .delete()
+            .in('id', toDelete)
+            .eq('codigo_empresa', codigo)
+            .eq('agendamento_id', agendamentoId);
+          if (delErr) {
+            console.error('❌ Erro ao remover participantes excedentes:', delErr);
+            throw delErr;
+          }
+        }
+      }
       
       // Inserir novos participantes que foram adicionados no PaymentModal
-      const originalLen = originalParticipants.length;
       if (effectiveParticipants.length > originalLen) {
         console.log('➕ Inserindo participantes adicionais:', effectiveParticipants.length - originalLen);
         const rowsToInsert = effectiveParticipants.slice(originalLen).map((novo, idx) => {
@@ -670,6 +693,8 @@ export default function PaymentModal({
         clientes: clientesArr,
       } : b));
       
+      // Alinhar UI local ao que foi salvo (remover definitivamente os ocultos)
+      setLocalParticipantsForm(effectiveParticipants);
       setPaymentHiddenIndexes([]);
       
       // Toast de sucesso (apenas se não for auto-save)
@@ -1110,6 +1135,73 @@ export default function PaymentModal({
       }
     };
   }, [isPaymentModalOpen, payMethods, getDefaultPayMethod, participantsForm, form?.selectedClients, localCustomers]);
+
+  // Salvar imediatamente quando houver remoção de participante (redução de length)
+  useEffect(() => {
+    if (!isPaymentModalOpen) return;
+    const currentLen = (localParticipantsForm || []).length;
+    if (prevLengthRef.current == null) {
+      prevLengthRef.current = currentLen;
+      prevListRef.current = Array.isArray(localParticipantsForm) ? localParticipantsForm : [];
+      return;
+    }
+    const decreased = currentLen < prevLengthRef.current;
+    // Detectar quais foram removidos (best-effort, por cliente_id+nome)
+    let removed = [];
+    try {
+      const prevList = Array.isArray(prevListRef.current) ? prevListRef.current : [];
+      const curList = Array.isArray(localParticipantsForm) ? localParticipantsForm : [];
+      const key = (p) => `${p?.cliente_id ?? ''}|${(p?.nome ?? '').toLowerCase()}`;
+      const curKeys = new Set(curList.map(key));
+      removed = prevList.filter(p => !curKeys.has(key(p)));
+    } catch {}
+    prevLengthRef.current = currentLen;
+    prevListRef.current = Array.isArray(localParticipantsForm) ? localParticipantsForm : [];
+    if (decreased && editingBooking?.id) {
+      // Cancelar debounce pendente e salvar agora
+      if (autoSaveTimeoutRef.current) {
+        clearTimeout(autoSaveTimeoutRef.current);
+        autoSaveTimeoutRef.current = null;
+      }
+      autoSaveEnabledRef.current = true;
+      (async () => {
+        try {
+          const names = removed.map(r => r?.nome).filter(Boolean);
+          const count = removed.length;
+          console.log('🗑️ [PaymentModal] Participante(s) removido(s):', names);
+          console.log('💾 [Auto-save imediato] Remoção detectada, salvando agora...');
+          // Sem toast: apenas logs e evento global
+          try {
+            window.dispatchEvent(new CustomEvent('payments:participant-removed', { detail: { agendamentoId: editingBooking?.id, removed } }));
+          } catch {}
+          await handleSavePayments({ autoSave: true });
+          console.log('✅ [Auto-save imediato] Remoção salva');
+        } catch (err) {
+          console.error('❌ [Auto-save imediato] Erro ao salvar após remoção:', err);
+        }
+      })();
+    }
+  }, [isPaymentModalOpen, localParticipantsForm, editingBooking?.id, handleSavePayments]);
+
+  // Auto-save imediato quando marcar participantes como ocultos (remover no banco)
+  useEffect(() => {
+    if (!isPaymentModalOpen) return;
+    // Detecta crescimento na lista de ocultos
+    const prev = (useRef.__prevHidden = useRef.__prevHidden || { len: 0 });
+    const curLen = (paymentHiddenIndexes || []).length;
+    const grew = curLen > (prev.len || 0);
+    prev.len = curLen;
+    if (grew && editingBooking?.id) {
+      try { console.log('🗑️ [PaymentModal] Índices ocultados (remoção lógica):', paymentHiddenIndexes); } catch {}
+      // Salvar imediatamente considerando apenas visíveis
+      if (autoSaveTimeoutRef.current) {
+        clearTimeout(autoSaveTimeoutRef.current);
+        autoSaveTimeoutRef.current = null;
+      }
+      autoSaveEnabledRef.current = true;
+      handleSavePayments({ autoSave: true }).catch((e) => console.error('❌ [PaymentModal] Erro ao salvar remoção imediata:', e));
+    }
+  }, [paymentHiddenIndexes, isPaymentModalOpen, editingBooking?.id, handleSavePayments]);
   
   // Resetar initializedRef quando o agendamento mudar (não quando o modal fechar)
   useEffect(() => {
