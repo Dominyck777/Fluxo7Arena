@@ -5,6 +5,8 @@ schema,extensions,extensions,null,null,postgres,null
 schema,vault,vault,null,null,supabase_admin,null
 schema,graphql_public,graphql_public,null,null,supabase_admin,null
 schema,graphql,graphql,null,null,supabase_admin,null
+schema,net,net,null,null,supabase_admin,null
+schema,supabase_functions,supabase_functions,null,null,supabase_admin,null
 schema,supabase_migrations,supabase_migrations,null,null,postgres,null
 schema,auth,auth,null,null,supabase_admin,null
 schema,storage,storage,null,null,supabase_admin,null
@@ -40,10 +42,10 @@ table,realtime,schema_migrations,null,table,supabase_admin,null
 table,realtime,subscription,null,table,supabase_admin,null
 table,public,v_agendamento_participantes,null,view,postgres,null
 table,public,empresas,null,table,postgres,null
-table,public,agendamento_participantes,null,table,postgres,Cotas de valor por participante do agendamento
 table,storage,s3_multipart_uploads_parts,null,table,supabase_storage_admin,null
 table,public,quadras,null,table,postgres,null
 table,storage,s3_multipart_uploads,null,table,supabase_storage_admin,null
+table,public,agendamento_participantes,null,table,postgres,Cotas de valor por participante do agendamento
 table,public,estoque_baixa_log,null,table,postgres,null
 table,public,agendamentos,null,table,postgres,null
 table,public,empresa_counters,null,table,postgres,null
@@ -91,6 +93,10 @@ table,public,comanda_itens,null,table,postgres,null
 table,public,comanda_historico,null,table,postgres,Auditoria de alterações em comandas para rastreabilidade
 table,public,estoque_reservado,null,table,postgres,Controle de estoque reservado para evitar overselling
 table,public,comandas,null,table,postgres,null
+table,net,http_request_queue,null,table,supabase_admin,null
+table,net,_http_response,null,table,supabase_admin,null
+table,supabase_functions,migrations,null,table,supabase_functions_admin,null
+table,supabase_functions,hooks,null,table,supabase_functions_admin,Supabase Functions Hooks: Audit trail for triggered hooks.
 column,public,lower,idx_produtos_categoria,text default null,null,null
 column,auth,id,sso_providers_pkey,uuid default null,null,null
 column,auth,lower,sso_providers_resource_id_idx,text default null,null,null
@@ -540,20 +546,6 @@ column,public,cnpj,empresas,character varying(18) default null,null,null
 column,public,email,empresas,text default null,null,null
 column,public,logo_url,empresas,text default null,null,null
 column,public,codigo_empresa,uq_caixa_aberto_por_empresa,text default null,null,null
-column,public,id,agendamento_participantes,uuid default gen_random_uuid(),null,null
-column,public,agendamento_id,agendamento_participantes,uuid default null,null,null
-column,public,cliente_id,agendamento_participantes,uuid default null,null,null
-column,public,nome,agendamento_participantes,text default null,null,null
-column,public,valor_cota,agendamento_participantes,"numeric(10,2) default 0",null,Valor atribuído ao participante
-column,public,status_pagamento,agendamento_participantes,payment_status default 'Pendente'::payment_status,null,null
-column,public,pago_em,agendamento_participantes,timestamp with time zone default null,null,null
-column,public,metodo_pagamento,agendamento_participantes,text default null,null,null
-column,public,codigo_empresa,agendamento_participantes,character varying(10) default null,null,null
-column,public,created_at,agendamento_participantes,timestamp with time zone default now(),null,null
-column,public,updated_at,agendamento_participantes,timestamp with time zone default now(),null,null
-column,public,finalizadora_id,agendamento_participantes,uuid default null,null,null
-column,public,aplicar_taxa,agendamento_participantes,boolean default false,null,null
-column,public,ordem,agendamento_participantes,integer default 1,null,Ordem do participante no agendamento (1=representante/primeiro)
 column,storage,id,s3_multipart_uploads_parts,uuid default gen_random_uuid(),null,null
 column,storage,upload_id,s3_multipart_uploads_parts,text default null,null,null
 column,storage,size,s3_multipart_uploads_parts,bigint default 0,null,null
@@ -598,6 +590,20 @@ column,realtime,value,wal_column,jsonb default null,null,null
 column,realtime,is_pkey,wal_column,boolean default null,null,null
 column,realtime,is_selectable,wal_column,boolean default null,null,null
 column,public,codigo_empresa,idx_colaboradores_codigo_empresa,text default null,null,null
+column,public,id,agendamento_participantes,uuid default gen_random_uuid(),null,null
+column,public,agendamento_id,agendamento_participantes,uuid default null,null,null
+column,public,cliente_id,agendamento_participantes,uuid default null,null,null
+column,public,nome,agendamento_participantes,text default null,null,null
+column,public,valor_cota,agendamento_participantes,"numeric(10,2) default 0",null,Valor atribuído ao participante
+column,public,status_pagamento,agendamento_participantes,payment_status default 'Pendente'::payment_status,null,null
+column,public,pago_em,agendamento_participantes,timestamp with time zone default null,null,null
+column,public,metodo_pagamento,agendamento_participantes,text default null,null,null
+column,public,codigo_empresa,agendamento_participantes,character varying(10) default null,null,null
+column,public,created_at,agendamento_participantes,timestamp with time zone default now(),null,null
+column,public,updated_at,agendamento_participantes,timestamp with time zone default now(),null,null
+column,public,finalizadora_id,agendamento_participantes,uuid default null,null,null
+column,public,aplicar_taxa,agendamento_participantes,boolean default false,null,null
+column,public,ordem,agendamento_participantes,integer default 1,null,Ordem do participante no agendamento (1=representante/primeiro)
 column,realtime,id,pk_subscription,bigint default null,null,null
 column,realtime,subscription_id,subscription_subscription_id_entity_filters_key,uuid default null,null,null
 column,realtime,entity,subscription_subscription_id_entity_filters_key,regclass default null,null,null
@@ -1441,6 +1447,45 @@ column,public,comissao_valor,comandas,"numeric(10,2) default NULL::numeric",null
 column,public,agendamento_id,comandas,uuid default null,null,Agendamento vinculado (se venda relacionada a agendamento)
 column,public,versao_sincronizacao,comandas,integer default 1,null,Versão para sincronização realtime
 column,public,ultima_atualizacao,comandas,timestamp with time zone default now(),null,null
+column,net,created,_http_response_created_idx,timestamp with time zone default null,null,null
+column,net,status_code,http_response,integer default null,null,null
+column,net,headers,http_response,jsonb default null,null,null
+column,net,body,http_response,text default null,null,null
+column,net,status,http_response_result,net.request_status default null,null,null
+column,net,message,http_response_result,text default null,null,null
+column,net,response,http_response_result,net.http_response default null,null,null
+column,net,last_value,http_request_queue_id_seq,bigint default null,null,null
+column,net,log_cnt,http_request_queue_id_seq,bigint default null,null,null
+column,net,is_called,http_request_queue_id_seq,boolean default null,null,null
+column,net,id,http_request_queue,bigint default nextval('net.http_request_queue_id_seq'::regclass),null,null
+column,net,method,http_request_queue,net.http_method default null,null,null
+column,net,url,http_request_queue,text default null,null,null
+column,net,headers,http_request_queue,jsonb default null,null,null
+column,net,body,http_request_queue,bytea default null,null,null
+column,net,timeout_milliseconds,http_request_queue,integer default null,null,null
+column,net,id,_http_response,bigint default null,null,null
+column,net,status_code,_http_response,integer default null,null,null
+column,net,content_type,_http_response,text default null,null,null
+column,net,headers,_http_response,jsonb default null,null,null
+column,net,content,_http_response,text default null,null,null
+column,net,timed_out,_http_response,boolean default null,null,null
+column,net,error_msg,_http_response,text default null,null,null
+column,net,created,_http_response,timestamp with time zone default now(),null,null
+column,supabase_functions,version,migrations_pkey,text default null,null,null
+column,supabase_functions,version,migrations,text default null,null,null
+column,supabase_functions,inserted_at,migrations,timestamp with time zone default now(),null,null
+column,supabase_functions,id,hooks,bigint default nextval('supabase_functions.hooks_id_seq'::regclass),null,null
+column,supabase_functions,hook_table_id,hooks,integer default null,null,null
+column,supabase_functions,hook_name,hooks,text default null,null,null
+column,supabase_functions,created_at,hooks,timestamp with time zone default now(),null,null
+column,supabase_functions,request_id,hooks,bigint default null,null,null
+column,supabase_functions,id,hooks_pkey,bigint default null,null,null
+column,supabase_functions,request_id,supabase_functions_hooks_request_id_idx,bigint default null,null,null
+column,supabase_functions,hook_table_id,supabase_functions_hooks_h_table_id_h_name_idx,integer default null,null,null
+column,supabase_functions,hook_name,supabase_functions_hooks_h_table_id_h_name_idx,text default null,null,null
+column,supabase_functions,last_value,hooks_id_seq,bigint default null,null,null
+column,supabase_functions,log_cnt,hooks_id_seq,bigint default null,null,null
+column,supabase_functions,is_called,hooks_id_seq,boolean default null,null,null
 constraint,auth,domain not empty,sso_domains,CHECK ((char_length(domain) > 0)),null,null
 constraint,auth,sso_domains_pkey,sso_domains,PRIMARY KEY (id),null,null
 constraint,auth,sso_domains_sso_provider_id_fkey,sso_domains,FOREIGN KEY (sso_provider_id) REFERENCES auth.sso_providers(id) ON DELETE CASCADE,null,null
@@ -1508,13 +1553,6 @@ constraint,realtime,pk_subscription,subscription,PRIMARY KEY (id),null,null
 constraint,public,companies_company_code_key,empresas,UNIQUE (codigo_empresa),null,null
 constraint,public,companies_pkey,empresas,PRIMARY KEY (id),null,null
 constraint,public,empresas_codigo_empresa_unique,empresas,UNIQUE (codigo_empresa),null,null
-constraint,public,agendamento_participantes_agendamento_id_fkey,agendamento_participantes,FOREIGN KEY (agendamento_id) REFERENCES agendamentos(id) ON DELETE CASCADE,null,null
-constraint,public,agendamento_participantes_cliente_id_fkey,agendamento_participantes,FOREIGN KEY (cliente_id) REFERENCES clientes(id) ON UPDATE CASCADE ON DELETE RESTRICT,null,null
-constraint,public,agendamento_participantes_pkey,agendamento_participantes,PRIMARY KEY (id),null,null
-constraint,public,agendamento_participantes_valor_cota_check,agendamento_participantes,CHECK ((valor_cota >= (0)::numeric)),null,null
-constraint,public,agp_codigo_empresa_fkey,agendamento_participantes,FOREIGN KEY (codigo_empresa) REFERENCES empresas(codigo_empresa) ON UPDATE CASCADE ON DELETE RESTRICT,null,null
-constraint,public,agp_finalizadora_id_fkey,agendamento_participantes,FOREIGN KEY (finalizadora_id) REFERENCES finalizadoras(id) ON UPDATE CASCADE ON DELETE SET NULL,null,null
-constraint,public,fk_agp_cliente,agendamento_participantes,FOREIGN KEY (cliente_id) REFERENCES clientes(id) ON UPDATE CASCADE ON DELETE RESTRICT,null,null
 constraint,storage,s3_multipart_uploads_parts_bucket_id_fkey,s3_multipart_uploads_parts,FOREIGN KEY (bucket_id) REFERENCES storage.buckets(id),null,null
 constraint,storage,s3_multipart_uploads_parts_pkey,s3_multipart_uploads_parts,PRIMARY KEY (id),null,null
 constraint,storage,s3_multipart_uploads_parts_upload_id_fkey,s3_multipart_uploads_parts,FOREIGN KEY (upload_id) REFERENCES storage.s3_multipart_uploads(id) ON DELETE CASCADE,null,null
@@ -1524,6 +1562,13 @@ constraint,public,quadras_horario_valido,quadras,CHECK (((hora_fim > hora_inicio
 constraint,public,quadras_valor_nonneg,quadras,CHECK (((valor IS NULL) OR (valor >= (0)::numeric))),null,null
 constraint,storage,s3_multipart_uploads_bucket_id_fkey,s3_multipart_uploads,FOREIGN KEY (bucket_id) REFERENCES storage.buckets(id),null,null
 constraint,storage,s3_multipart_uploads_pkey,s3_multipart_uploads,PRIMARY KEY (id),null,null
+constraint,public,agendamento_participantes_agendamento_id_fkey,agendamento_participantes,FOREIGN KEY (agendamento_id) REFERENCES agendamentos(id) ON DELETE CASCADE,null,null
+constraint,public,agendamento_participantes_cliente_id_fkey,agendamento_participantes,FOREIGN KEY (cliente_id) REFERENCES clientes(id) ON UPDATE CASCADE ON DELETE RESTRICT,null,null
+constraint,public,agendamento_participantes_pkey,agendamento_participantes,PRIMARY KEY (id),null,null
+constraint,public,agendamento_participantes_valor_cota_check,agendamento_participantes,CHECK ((valor_cota >= (0)::numeric)),null,null
+constraint,public,agp_codigo_empresa_fkey,agendamento_participantes,FOREIGN KEY (codigo_empresa) REFERENCES empresas(codigo_empresa) ON UPDATE CASCADE ON DELETE RESTRICT,null,null
+constraint,public,agp_finalizadora_id_fkey,agendamento_participantes,FOREIGN KEY (finalizadora_id) REFERENCES finalizadoras(id) ON UPDATE CASCADE ON DELETE SET NULL,null,null
+constraint,public,fk_agp_cliente,agendamento_participantes,FOREIGN KEY (cliente_id) REFERENCES clientes(id) ON UPDATE CASCADE ON DELETE RESTRICT,null,null
 constraint,public,estoque_baixa_log_pkey,estoque_baixa_log,PRIMARY KEY (comanda_id),null,null
 constraint,realtime,messages_pkey,messages,"PRIMARY KEY (id, inserted_at)",null,null
 constraint,public,agendamentos_codigo_empresa_fkey,agendamentos,FOREIGN KEY (codigo_empresa) REFERENCES empresas(codigo_empresa) ON UPDATE CASCADE ON DELETE RESTRICT,null,null
@@ -1664,6 +1709,8 @@ constraint,public,comandas_mesa_id_fkey,comandas,FOREIGN KEY (mesa_id) REFERENCE
 constraint,public,comandas_origem_check,comandas,"CHECK (((origem = ANY (ARRAY['manual'::text, 'xml'::text, 'api'::text])) OR (origem IS NULL)))",null,null
 constraint,public,comandas_pkey,comandas,PRIMARY KEY (id),null,null
 constraint,public,fk_comandas_mesa,comandas,FOREIGN KEY (mesa_id) REFERENCES mesas(id) ON DELETE SET NULL,null,null
+constraint,supabase_functions,migrations_pkey,migrations,PRIMARY KEY (version),null,null
+constraint,supabase_functions,hooks_pkey,hooks,PRIMARY KEY (id),null,null
 index,auth,sso_domains_pkey,sso_domains,CREATE UNIQUE INDEX sso_domains_pkey ON auth.sso_domains USING btree (id),null,null
 index,auth,sso_domains_sso_provider_id_idx,sso_domains,CREATE INDEX sso_domains_sso_provider_id_idx ON auth.sso_domains USING btree (sso_provider_id),null,null
 index,auth,sso_domains_domain_idx,sso_domains,CREATE UNIQUE INDEX sso_domains_domain_idx ON auth.sso_domains USING btree (lower(domain)),null,null
@@ -1751,17 +1798,17 @@ index,public,companies_pkey,empresas,CREATE UNIQUE INDEX companies_pkey ON publi
 index,public,companies_company_code_key,empresas,CREATE UNIQUE INDEX companies_company_code_key ON public.empresas USING btree (codigo_empresa),null,null
 index,public,companies_code_idx,empresas,CREATE INDEX companies_code_idx ON public.empresas USING btree (codigo_empresa),null,null
 index,public,empresas_codigo_empresa_unique,empresas,CREATE UNIQUE INDEX empresas_codigo_empresa_unique ON public.empresas USING btree (codigo_empresa),null,null
+index,storage,s3_multipart_uploads_parts_pkey,s3_multipart_uploads_parts,CREATE UNIQUE INDEX s3_multipart_uploads_parts_pkey ON storage.s3_multipart_uploads_parts USING btree (id),null,null
+index,public,courts_pkey,quadras,CREATE UNIQUE INDEX courts_pkey ON public.quadras USING btree (id),null,null
+index,public,quadras_codigo_empresa_idx,quadras,CREATE INDEX quadras_codigo_empresa_idx ON public.quadras USING btree (codigo_empresa),null,null
+index,storage,s3_multipart_uploads_pkey,s3_multipart_uploads,CREATE UNIQUE INDEX s3_multipart_uploads_pkey ON storage.s3_multipart_uploads USING btree (id),null,null
+index,storage,idx_multipart_uploads_list,s3_multipart_uploads,"CREATE INDEX idx_multipart_uploads_list ON storage.s3_multipart_uploads USING btree (bucket_id, key, created_at)",null,null
 index,public,agendamento_participantes_pkey,agendamento_participantes,CREATE UNIQUE INDEX agendamento_participantes_pkey ON public.agendamento_participantes USING btree (id),null,null
 index,public,agendamento_participantes_agendamento_id_idx,agendamento_participantes,CREATE INDEX agendamento_participantes_agendamento_id_idx ON public.agendamento_participantes USING btree (agendamento_id),null,null
 index,public,idx_agp_codigo_empresa,agendamento_participantes,CREATE INDEX idx_agp_codigo_empresa ON public.agendamento_participantes USING btree (codigo_empresa),null,null
 index,public,idx_agendamento_participantes_ordem,agendamento_participantes,"CREATE INDEX idx_agendamento_participantes_ordem ON public.agendamento_participantes USING btree (agendamento_id, ordem)",null,null
 index,public,idx_agp_agendamento,agendamento_participantes,CREATE INDEX idx_agp_agendamento ON public.agendamento_participantes USING btree (agendamento_id),null,null
 index,public,idx_agp_finalizadora,agendamento_participantes,CREATE INDEX idx_agp_finalizadora ON public.agendamento_participantes USING btree (finalizadora_id),null,null
-index,storage,s3_multipart_uploads_parts_pkey,s3_multipart_uploads_parts,CREATE UNIQUE INDEX s3_multipart_uploads_parts_pkey ON storage.s3_multipart_uploads_parts USING btree (id),null,null
-index,public,courts_pkey,quadras,CREATE UNIQUE INDEX courts_pkey ON public.quadras USING btree (id),null,null
-index,public,quadras_codigo_empresa_idx,quadras,CREATE INDEX quadras_codigo_empresa_idx ON public.quadras USING btree (codigo_empresa),null,null
-index,storage,s3_multipart_uploads_pkey,s3_multipart_uploads,CREATE UNIQUE INDEX s3_multipart_uploads_pkey ON storage.s3_multipart_uploads USING btree (id),null,null
-index,storage,idx_multipart_uploads_list,s3_multipart_uploads,"CREATE INDEX idx_multipart_uploads_list ON storage.s3_multipart_uploads USING btree (bucket_id, key, created_at)",null,null
 index,public,estoque_baixa_log_pkey,estoque_baixa_log,CREATE UNIQUE INDEX estoque_baixa_log_pkey ON public.estoque_baixa_log USING btree (comanda_id),null,null
 index,realtime,messages_pkey,messages,"CREATE UNIQUE INDEX messages_pkey ON ONLY realtime.messages USING btree (id, inserted_at)",null,null
 index,realtime,messages_inserted_at_topic_index,messages,"CREATE INDEX messages_inserted_at_topic_index ON ONLY realtime.messages USING btree (inserted_at DESC, topic) WHERE ((extension = 'broadcast'::text) AND (private IS TRUE))",null,null
@@ -1952,6 +1999,11 @@ index,public,idx_comandas_fechado_em,comandas,CREATE INDEX idx_comandas_fechado_
 index,public,idx_comandas_empresa_fechado,comandas,"CREATE INDEX idx_comandas_empresa_fechado ON public.comandas USING btree (codigo_empresa, fechado_em)",null,null
 index,public,idx_comandas_origem,comandas,CREATE INDEX idx_comandas_origem ON public.comandas USING btree (origem),null,null
 index,public,idx_comandas_xml_chave,comandas,CREATE INDEX idx_comandas_xml_chave ON public.comandas USING btree (xml_chave),null,null
+index,net,_http_response_created_idx,_http_response,CREATE INDEX _http_response_created_idx ON net._http_response USING btree (created),null,null
+index,supabase_functions,migrations_pkey,migrations,CREATE UNIQUE INDEX migrations_pkey ON supabase_functions.migrations USING btree (version),null,null
+index,supabase_functions,hooks_pkey,hooks,CREATE UNIQUE INDEX hooks_pkey ON supabase_functions.hooks USING btree (id),null,null
+index,supabase_functions,supabase_functions_hooks_request_id_idx,hooks,CREATE INDEX supabase_functions_hooks_request_id_idx ON supabase_functions.hooks USING btree (request_id),null,null
+index,supabase_functions,supabase_functions_hooks_h_table_id_h_name_idx,hooks,"CREATE INDEX supabase_functions_hooks_h_table_id_h_name_idx ON supabase_functions.hooks USING btree (hook_table_id, hook_name)",null,null
 trigger,public,trg_ag_participantes_set_empresa,agendamento_participantes,CREATE TRIGGER trg_ag_participantes_set_empresa BEFORE INSERT OR UPDATE OF agendamento_id ON public.agendamento_participantes FOR EACH ROW EXECUTE FUNCTION set_ag_participantes_codigo_empresa(),null,null
 trigger,public,trg_mov_saldo_apply,movimentos_saldo,CREATE TRIGGER trg_mov_saldo_apply AFTER INSERT OR DELETE OR UPDATE ON public.movimentos_saldo FOR EACH ROW EXECUTE FUNCTION fn_mov_saldo_apply(),null,null
 trigger,public,trg_mesas_updated_at,mesas,CREATE TRIGGER trg_mesas_updated_at BEFORE UPDATE ON public.mesas FOR EACH ROW EXECUTE FUNCTION set_updated_at(),null,null
@@ -2004,7 +2056,13 @@ function,public,clientes_next_codigo,null,() returns trigger,postgres,null
 function,public,set_current_empresa,null,(empresa_codigo text) returns void,postgres,null
 function,public,atualizar_ultima_atualizacao_comanda,null,() returns trigger,postgres,null
 function,public,atualizar_ultima_atualizacao_item,null,() returns trigger,postgres,null
+function,public,app_current_empresa,null,() returns text,postgres,null
 function,public,atualizar_observacoes_comanda,null,"(p_comanda_id uuid, p_observacoes text) returns json",postgres,null
+function,net,check_worker_is_up,null,() returns void,supabase_admin,"raises an exception if the pg_net background worker is not up, otherwise it doesn't return anything"
+function,net,_await_response,null,(request_id bigint) returns boolean,supabase_admin,null
+function,net,_urlencode_string,null,(string character varying) returns text,supabase_admin,null
+function,net,_encode_url_with_params_array,null,"(url text, params_array text[]) returns text",supabase_admin,null
+function,net,worker_restart,null,() returns boolean,supabase_admin,null
 function,public,agendamentos_set_codigo_fn,null,() returns trigger,postgres,null
 function,storage,search_v2,null,"(prefix text, bucket_name text, limits integer, levels integer, start_after text, sort_order text, sort_column text, sort_column_after text) returns TABLE(key text, name text, id uuid, updated_at timestamp with time zone, created_at timestamp with time zone, last_accessed_at timestamp with time zone, metadata jsonb)",supabase_storage_admin,null
 function,storage,lock_top_prefixes,null,"(bucket_ids text[], names text[]) returns void",supabase_storage_admin,null
@@ -2044,6 +2102,7 @@ function,public,gtrgm_in,null,(cstring) returns gtrgm,supabase_admin,null
 function,public,gtrgm_out,null,(gtrgm) returns cstring,supabase_admin,null
 function,public,gtrgm_consistent,null,"(internal, text, smallint, oid, internal) returns boolean",supabase_admin,null
 function,public,gtrgm_distance,null,"(internal, text, smallint, oid, internal) returns double precision",supabase_admin,null
+function,net,http_get,null,"(url text, params jsonb, headers jsonb, timeout_milliseconds integer) returns bigint",supabase_admin,null
 function,public,gtrgm_compress,null,(internal) returns internal,supabase_admin,null
 function,public,gtrgm_decompress,null,(internal) returns internal,supabase_admin,null
 function,public,gtrgm_penalty,null,"(internal, internal, internal) returns internal",supabase_admin,null
@@ -2079,6 +2138,10 @@ function,storage,delete_leaf_prefixes,null,"(bucket_ids text[], names text[]) re
 function,public,trg_contas_receber_set_updated_at,null,() returns trigger,postgres,null
 function,public,get_my_company_id,null,() returns uuid,postgres,null
 function,public,set_agendamento_empresa_from_user,null,() returns trigger,postgres,null
+function,net,http_post,null,"(url text, body jsonb, params jsonb, headers jsonb, timeout_milliseconds integer) returns bigint",supabase_admin,null
+function,net,http_delete,null,"(url text, params jsonb, headers jsonb, timeout_milliseconds integer) returns bigint",supabase_admin,null
+function,net,_http_collect_response,null,"(request_id bigint, async boolean) returns net.http_response_result",supabase_admin,null
+function,net,http_collect_response,null,"(request_id bigint, async boolean) returns net.http_response_result",supabase_admin,null
 function,public,set_ag_participantes_codigo_empresa,null,() returns trigger,postgres,null
 function,extensions,gen_random_bytes,null,(integer) returns bytea,postgres,null
 function,public,clientes_set_codigo_fn,null,() returns trigger,postgres,null
@@ -2106,6 +2169,11 @@ function,public,set_company_code_default,null,() returns trigger,postgres,null
 function,extensions,grant_pg_graphql_access,null,() returns event_trigger,supabase_admin,Grants access to pg_graphql
 function,storage,search_v1_optimised,null,"(prefix text, bucketname text, limits integer, levels integer, offsets integer, search text, sortcolumn text, sortorder text) returns TABLE(name text, id uuid, updated_at timestamp with time zone, created_at timestamp with time zone, last_accessed_at timestamp with time zone, metadata jsonb)",supabase_storage_admin,null
 function,storage,search_legacy_v1,null,"(prefix text, bucketname text, limits integer, levels integer, offsets integer, search text, sortcolumn text, sortorder text) returns TABLE(name text, id uuid, updated_at timestamp with time zone, created_at timestamp with time zone, last_accessed_at timestamp with time zone, metadata jsonb)",supabase_storage_admin,null
+function,public,unaccent,null,"(regdictionary, text) returns text",supabase_admin,null
+function,public,unaccent,null,(text) returns text,supabase_admin,null
+function,public,unaccent_init,null,(internal) returns internal,supabase_admin,null
+function,public,unaccent_lexize,null,"(internal, internal, internal, internal) returns internal",supabase_admin,null
+function,public,normalize_slug,null,(txt text) returns text,postgres,null
 function,graphql,get_schema_version,null,() returns integer,supabase_admin,null
 function,graphql,comment_directive,null,(comment_ text) returns jsonb,supabase_admin,null
 function,graphql,_internal_resolve,null,"(query text, variables jsonb, ""operationName"" text, extensions jsonb) returns jsonb",supabase_admin,null
@@ -2114,6 +2182,7 @@ function,storage,search,null,"(prefix text, bucketname text, limits integer, lev
 function,storage,get_size_by_bucket,null,"() returns TABLE(size bigint, bucket_id text)",supabase_storage_admin,null
 function,storage,objects_update_prefix_trigger,null,() returns trigger,supabase_storage_admin,null
 function,storage,enforce_bucket_name_length,null,() returns trigger,supabase_storage_admin,null
+function,supabase_functions,http_request,null,() returns trigger,supabase_functions_admin,null
 function,vault,_crypto_aead_det_encrypt,null,"(message bytea, additional bytea, key_id bigint, context bytea, nonce bytea) returns bytea",supabase_admin,null
 function,public,gen_codigo_produto,null,() returns trigger,postgres,null
 function,public,normalize_codigo_produto,null,() returns trigger,postgres,null
@@ -2123,6 +2192,7 @@ function,storage,can_insert_object,null,"(bucketid text, name text, owner uuid, 
 function,storage,list_objects_with_delimiter,null,"(bucket_id text, prefix_param text, delimiter_param text, max_keys integer, start_after text, next_token text) returns TABLE(name text, id uuid, metadata jsonb, updated_at timestamp with time zone)",supabase_storage_admin,null
 function,storage,list_multipart_uploads_with_delimiter,null,"(bucket_id text, prefix_param text, delimiter_param text, max_keys integer, next_key_token text, next_upload_token text) returns TABLE(key text, id text, created_at timestamp with time zone)",supabase_storage_admin,null
 function,storage,operation,null,() returns text,supabase_storage_admin,null
+function,public,get_empresa_public_by_slug,null,"(p_slug text) returns TABLE(codigo_empresa text, nome_fantasia text, razao_social text, nome text, logo_url text)",postgres,null
 function,vault,create_secret,null,"(new_secret text, new_name text, new_description text, new_key_id uuid) returns uuid",supabase_admin,null
 function,vault,update_secret,null,"(secret_id uuid, new_secret text, new_name text, new_description text, new_key_id uuid) returns void",supabase_admin,null
 function,vault,_crypto_aead_det_decrypt,null,"(message bytea, additional bytea, key_id bigint, context bytea, nonce bytea) returns bytea",supabase_admin,null
@@ -2144,10 +2214,10 @@ function,extensions,pgp_pub_decrypt_bytea,null,"(bytea, bytea) returns bytea",po
 function,extensions,pg_stat_statements,null,"(showtext boolean, OUT userid oid, OUT dbid oid, OUT toplevel boolean, OUT queryid bigint, OUT query text, OUT plans bigint, OUT total_plan_time double precision, OUT min_plan_time double precision, OUT max_plan_time double precision, OUT mean_plan_time double precision, OUT stddev_plan_time double precision, OUT calls bigint, OUT total_exec_time double precision, OUT min_exec_time double precision, OUT max_exec_time double precision, OUT mean_exec_time double precision, OUT stddev_exec_time double precision, OUT rows bigint, OUT shared_blks_hit bigint, OUT shared_blks_read bigint, OUT shared_blks_dirtied bigint, OUT shared_blks_written bigint, OUT local_blks_hit bigint, OUT local_blks_read bigint, OUT local_blks_dirtied bigint, OUT local_blks_written bigint, OUT temp_blks_read bigint, OUT temp_blks_written bigint, OUT shared_blk_read_time double precision, OUT shared_blk_write_time double precision, OUT local_blk_read_time double precision, OUT local_blk_write_time double precision, OUT temp_blk_read_time double precision, OUT temp_blk_write_time double precision, OUT wal_records bigint, OUT wal_fpi bigint, OUT wal_bytes numeric, OUT jit_functions bigint, OUT jit_generation_time double precision, OUT jit_inlining_count bigint, OUT jit_inlining_time double precision, OUT jit_optimization_count bigint, OUT jit_optimization_time double precision, OUT jit_emission_count bigint, OUT jit_emission_time double precision, OUT jit_deform_count bigint, OUT jit_deform_time double precision, OUT stats_since timestamp with time zone, OUT minmax_stats_since timestamp with time zone) returns SETOF record",postgres,null
 function,extensions,pgrst_drop_watch,null,() returns event_trigger,supabase_admin,null
 function,extensions,set_graphql_placeholder,null,() returns event_trigger,supabase_admin,Reintroduces placeholder function for graphql_public.graphql
-function,extensions,grant_pg_net_access,null,() returns event_trigger,supabase_admin,Grants access to pg_net
 function,public,current_empresa_id,null,() returns uuid,postgres,null
 function,public,protect_consumidor_final,null,() returns trigger,postgres,null
 function,public,trg_contas_pagar_set_updated_at,null,() returns trigger,postgres,null
+function,extensions,grant_pg_net_access,null,() returns event_trigger,supabase_admin,Grants access to pg_net
 function,public,produtos_set_company_code,null,() returns trigger,postgres,null
 function,graphql_public,graphql,null,"(""operationName"" text, query text, variables jsonb, extensions jsonb) returns jsonb",supabase_admin,null
 function,graphql,exception,null,(message text) returns text,supabase_admin,null
@@ -2187,6 +2257,8 @@ sequence,auth,refresh_tokens_id_seq,null,"increment 1, min 1, max 92233720368547
 sequence,realtime,subscription_id_seq,null,"increment 1, min 1, max 9223372036854775807",supabase_admin,null
 sequence,public,caixa_resumos_id_seq,null,"increment 1, min 1, max 9223372036854775807",postgres,null
 sequence,public,caixa_movimentacoes_id_seq,null,"increment 1, min 1, max 9223372036854775807",postgres,null
+sequence,net,http_request_queue_id_seq,null,"increment 1, min 1, max 9223372036854775807",supabase_admin,null
+sequence,supabase_functions,hooks_id_seq,null,"increment 1, min 1, max 9223372036854775807",supabase_functions_admin,null
 type,extensions,pg_stat_statements_info,null,pg_stat_statements_info,null,null
 type,extensions,pg_stat_statements,null,pg_stat_statements,null,null
 type,auth,users,null,auth.users,null,null
@@ -2289,8 +2361,18 @@ type,public,compras,null,compras,null,null
 type,public,compras_itens,null,compras_itens,null,null
 type,public,quadras_dias_funcionamento,null,quadras_dias_funcionamento,null,null
 type,public,v_agendamentos_isis,null,v_agendamentos_isis,null,null
+type,net,http_method,null,net.http_method,null,null
+type,net,http_request_queue,null,net.http_request_queue,null,null
+type,net,_http_response,null,net._http_response,null,null
+type,net,request_status,null,net.request_status,null,null
+type,net,http_response,null,net.http_response,null,null
+type,net,http_response_result,null,net.http_response_result,null,null
+type,supabase_functions,migrations,null,supabase_functions.migrations,null,null
+type,supabase_functions,hooks,null,supabase_functions.hooks,null,null
 extension,pg_catalog,plpgsql,null,1.0,null,PL/pgSQL procedural language
+extension,public,unaccent,null,1.1,null,text search dictionary that removes accents
 extension,public,pg_trgm,null,1.6,null,text similarity measurement and index searching based on trigrams
+extension,extensions,pg_net,null,0.14.0,null,Async HTTP
 extension,extensions,pgcrypto,null,1.3,null,cryptographic functions
 extension,extensions,uuid-ossp,null,1.1,null,generate universally unique identifiers (UUIDs)
 extension,extensions,pg_stat_statements,null,1.11,null,track planning and execution statistics of all SQL statements executed
@@ -2452,7 +2534,6 @@ grant,public,agendamento_participantes_agendamento_id_idx,null,null,postgres,nul
 grant,public,v_agendamento_participantes,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
 grant,public,empresas,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
 grant,public,uq_caixa_aberto_por_empresa,null,null,postgres,null
-grant,public,agendamento_participantes,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
 grant,storage,s3_multipart_uploads_parts,null,"supabase_storage_admin=arwdDxtm/supabase_storage_admin,service_role=arwdDxtm/supabase_storage_admin,authenticated=r/supabase_storage_admin,anon=r/supabase_storage_admin",supabase_storage_admin,null
 grant,public,quadras,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
 grant,storage,s3_multipart_uploads,null,"supabase_storage_admin=arwdDxtm/supabase_storage_admin,service_role=arwdDxtm/supabase_storage_admin,authenticated=r/supabase_storage_admin,anon=r/supabase_storage_admin",supabase_storage_admin,null
@@ -2463,6 +2544,7 @@ grant,public,gin_trgm_clientes_email,null,null,postgres,null
 grant,public,gin_trgm_clientes_telefone,null,null,postgres,null
 grant,realtime,wal_column,null,null,supabase_admin,null
 grant,public,idx_colaboradores_codigo_empresa,null,null,postgres,null
+grant,public,agendamento_participantes,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
 grant,realtime,pk_subscription,null,null,supabase_admin,null
 grant,realtime,subscription_subscription_id_entity_filters_key,null,null,supabase_admin,null
 grant,realtime,subscription_id_seq,null,"supabase_admin=rwU/supabase_admin,postgres=rwU/supabase_admin,dashboard_user=rwU/supabase_admin,anon=U/supabase_admin,authenticated=U/supabase_admin,service_role=U/supabase_admin,supabase_realtime_admin=rwU/supabase_admin",supabase_admin,null
@@ -2674,3 +2756,16 @@ grant,public,idx_estoque_reservado_ativo,null,null,postgres,null
 grant,public,idx_comandas_vendedor_id,null,null,postgres,null
 grant,public,idx_comandas_ultima_atualizacao,null,null,postgres,null
 grant,public,comandas,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
+grant,net,_http_response_created_idx,null,null,supabase_admin,null
+grant,net,http_response,null,null,supabase_admin,null
+grant,net,http_response_result,null,null,supabase_admin,null
+grant,net,http_request_queue_id_seq,null,"supabase_admin=rwU/supabase_admin,=rwU/supabase_admin",supabase_admin,null
+grant,net,http_request_queue,null,"supabase_admin=arwdDxtm/supabase_admin,=arwdDxtm/supabase_admin",supabase_admin,null
+grant,net,_http_response,null,"supabase_admin=arwdDxtm/supabase_admin,=arwdDxtm/supabase_admin",supabase_admin,null
+grant,supabase_functions,migrations_pkey,null,null,supabase_functions_admin,null
+grant,supabase_functions,migrations,null,"supabase_functions_admin=arwdDxtm/supabase_functions_admin,postgres=arwdDxtm/supabase_functions_admin,anon=arwdDxtm/supabase_functions_admin,authenticated=arwdDxtm/supabase_functions_admin,service_role=arwdDxtm/supabase_functions_admin",supabase_functions_admin,null
+grant,supabase_functions,hooks,null,"supabase_functions_admin=arwdDxtm/supabase_functions_admin,postgres=arwdDxtm/supabase_functions_admin,anon=arwdDxtm/supabase_functions_admin,authenticated=arwdDxtm/supabase_functions_admin,service_role=arwdDxtm/supabase_functions_admin",supabase_functions_admin,null
+grant,supabase_functions,hooks_pkey,null,null,supabase_functions_admin,null
+grant,supabase_functions,supabase_functions_hooks_request_id_idx,null,null,supabase_functions_admin,null
+grant,supabase_functions,supabase_functions_hooks_h_table_id_h_name_idx,null,null,supabase_functions_admin,null
+grant,supabase_functions,hooks_id_seq,null,"supabase_functions_admin=rwU/supabase_functions_admin,postgres=rwU/supabase_functions_admin,anon=rwU/supabase_functions_admin,authenticated=rwU/supabase_functions_admin,service_role=rwU/supabase_functions_admin",supabase_functions_admin,null

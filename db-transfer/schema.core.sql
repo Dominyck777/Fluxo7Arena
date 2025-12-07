@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict xphx7gwY9Bsk7YcBsp8udCbC8fGxGTSbNZSxcs7C2Le90K7rLXYVkMgfboEDGmp
+\restrict qND9pasIVbpOLHD1vhuDXAZISeTbjdUZPfaYM0jdIKGb4w3OUdnrs2keRR4KQyo
 
 -- Dumped from database version 17.4
 -- Dumped by pg_dump version 18.1
@@ -275,6 +275,20 @@ begin
 
   return new;
 end;
+$$;
+
+
+--
+-- Name: app_current_empresa(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.app_current_empresa() RETURNS text
+    LANGUAGE sql STABLE
+    AS $$
+  select coalesce(
+    nullif(current_setting('request.jwt.claim.codigo_empresa', true), ''),
+    nullif(current_setting('app.current_empresa', true), '')
+  )::text;
 $$;
 
 
@@ -749,6 +763,27 @@ $_$;
 
 
 --
+-- Name: get_empresa_public_by_slug(text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.get_empresa_public_by_slug(p_slug text) RETURNS TABLE(codigo_empresa text, nome_fantasia text, razao_social text, nome text, logo_url text)
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public'
+    AS $$
+  select
+    e.codigo_empresa::text,
+    e.nome_fantasia,
+    e.razao_social,
+    e.nome,
+    e.logo_url
+  from public.empresas e
+  where normalize_slug(coalesce(e.nome_fantasia, e.nome, e.razao_social))
+        = normalize_slug(p_slug)
+  limit 1;
+$$;
+
+
+--
 -- Name: get_my_company_code(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -810,6 +845,17 @@ begin
   end if;
   return new;
 end;
+$$;
+
+
+--
+-- Name: normalize_slug(text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.normalize_slug(txt text) RETURNS text
+    LANGUAGE sql IMMUTABLE
+    AS $$
+  select regexp_replace(lower(unaccent(coalesce(txt, ''))), '[^a-z0-9]', '', 'g')
 $$;
 
 
@@ -1292,6 +1338,8 @@ CREATE TABLE public.agendamento_participantes (
     CONSTRAINT agendamento_participantes_valor_cota_check CHECK ((valor_cota >= (0)::numeric))
 );
 
+ALTER TABLE ONLY public.agendamento_participantes REPLICA IDENTITY FULL;
+
 
 --
 -- Name: TABLE agendamento_participantes; Type: COMMENT; Schema: public; Owner: -
@@ -1334,6 +1382,8 @@ CREATE TABLE public.agendamentos (
     codigo bigint NOT NULL,
     CONSTRAINT agendamentos_valor_nonneg CHECK (((valor_total IS NULL) OR (valor_total >= (0)::numeric)))
 );
+
+ALTER TABLE ONLY public.agendamentos REPLICA IDENTITY FULL;
 
 
 --
@@ -2778,10 +2828,31 @@ CREATE INDEX agendamento_participantes_agendamento_id_idx ON public.agendamento_
 
 
 --
+-- Name: agendamento_participantes_agendamento_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX agendamento_participantes_agendamento_idx ON public.agendamento_participantes USING btree (agendamento_id);
+
+
+--
+-- Name: agendamento_participantes_empresa_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX agendamento_participantes_empresa_idx ON public.agendamento_participantes USING btree (codigo_empresa);
+
+
+--
 -- Name: agendamentos_codigo_empresa_idx; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE INDEX agendamentos_codigo_empresa_idx ON public.agendamentos USING btree (codigo_empresa);
+
+
+--
+-- Name: agendamentos_inicio_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX agendamentos_inicio_idx ON public.agendamentos USING btree (inicio);
 
 
 --
@@ -4912,6 +4983,15 @@ CREATE POLICY agendamentos_update_policy ON public.agendamentos FOR UPDATE USING
 
 
 --
+-- Name: agendamento_participantes agp_select_company; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY agp_select_company ON public.agendamento_participantes FOR SELECT TO authenticated, anon USING ((((codigo_empresa)::text = public.app_current_empresa()) OR (EXISTS ( SELECT 1
+   FROM public.agendamentos a
+  WHERE ((a.id = agendamento_participantes.agendamento_id) AND (a.codigo_empresa = public.app_current_empresa()))))));
+
+
+--
 -- Name: caixa_movimentacoes caixa_mov_delete; Type: POLICY; Schema: public; Owner: -
 --
 
@@ -5700,6 +5780,20 @@ CREATE POLICY quadras_update_policy ON public.quadras FOR UPDATE USING (((codigo
 
 
 --
+-- Name: agendamentos rt select agendamentos by company; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY "rt select agendamentos by company" ON public.agendamentos FOR SELECT TO authenticated USING ((codigo_empresa = COALESCE((auth.jwt() ->> 'codigo_empresa'::text), ''::text)));
+
+
+--
+-- Name: agendamento_participantes rt select participantes by company; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY "rt select participantes by company" ON public.agendamento_participantes FOR SELECT TO authenticated USING (((codigo_empresa)::text = COALESCE((auth.jwt() ->> 'codigo_empresa'::text), ''::text)));
+
+
+--
 -- Name: user_ui_settings; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
@@ -5756,5 +5850,5 @@ CREATE POLICY vendas_update_empresa ON public.vendas FOR UPDATE USING (((codigo_
 -- PostgreSQL database dump complete
 --
 
-\unrestrict xphx7gwY9Bsk7YcBsp8udCbC8fGxGTSbNZSxcs7C2Le90K7rLXYVkMgfboEDGmp
+\unrestrict qND9pasIVbpOLHD1vhuDXAZISeTbjdUZPfaYM0jdIKGb4w3OUdnrs2keRR4KQyo
 

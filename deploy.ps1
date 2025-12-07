@@ -13,7 +13,7 @@ $CURRENT  = "$ROOT_DIR/current"
 $INCOMING = "$ROOT_DIR/incoming"
 $sshTarget = "$VPS_USER@$VPS_IP"
 
-# (Opcional) Mitigar travas do esbuild no Windows
+# (Opcional) Mitigar travas esporádicas do esbuild no Windows
 try { Stop-Process -Name node -Force -ErrorAction SilentlyContinue } catch {}
 try { Stop-Process -Name esbuild -Force -ErrorAction SilentlyContinue } catch {}
 try { Remove-Item -Recurse -Force ".\node_modules\esbuild" -ErrorAction SilentlyContinue } catch {}
@@ -32,6 +32,9 @@ if ($LASTEXITCODE -ne 0) { throw "npm run build falhou" }
 
 if (!(Test-Path -Path "dist")) { throw "Pasta 'dist' não encontrada." }
 
+# Remover artefatos indesejados
+try { Remove-Item -Force -ErrorAction SilentlyContinue "dist\OneDrive - Personal - Atalho.lnk" } catch {}
+
 # Versão do deploy (vai junto no scp)
 $ts = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
 try { Set-Content -Path "dist\DEPLOY_VERSION.txt" -Value "Build: $ts" -Encoding UTF8 } catch {}
@@ -48,19 +51,50 @@ Write-Host "Enviando build para pasta temporária: $remoteIncoming" -ForegroundC
 scp -r -C ./dist/* "${sshTarget}:${remoteIncoming}/"
 if ($LASTEXITCODE -ne 0) { throw "Falha no envio (scp)" }
 
-# Fase 2: publicar assets e só então o index.html (evita MIME text/html em scripts)
+# Fase 2: publicar assets e só então o index.html
 Write-Host "Publicando release (assets primeiro, index.html por último)..." -ForegroundColor Cyan
 
-# Construir comando remoto em uma única linha para evitar problemas de here-string/EOF
-$remoteCmd = "set -e; " +
-  "if [ -f '$remoteIncoming/index.html' ]; then mv '$remoteIncoming/index.html' '$remoteIncoming/index.html.deployhold'; fi; " +
-  "mkdir -p '$CURRENT'; " +
-  "cp -r '$remoteIncoming/'* '$CURRENT/' 2>/dev/null || true; " +
-  "if [ -f '$remoteIncoming/index.html.deployhold' ]; then mv '$remoteIncoming/index.html.deployhold' '$CURRENT/index.html'; fi; " +
-  "rm -rf '$remoteIncoming'"
+# 2.1 Cria script POSIX local com LF
+$remoteScript = @'
+set -e
 
-# Use sh -lc para garantir execução consistente
-ssh $sshTarget "sh -lc ""$remoteCmd"""
+# 1) Segura o index.html
+if [ -f "$REMOTE_INCOMING/index.html" ]; then
+  mv "$REMOTE_INCOMING/index.html" "$REMOTE_INCOMING/index.html.deployhold"
+fi
+
+# 2) Copia tudo para a pasta atual (assets primeiro; o index está segurado)
+mkdir -p "$CURRENT"
+cp -r "$REMOTE_INCOMING/"* "$CURRENT/" 2>/dev/null || true
+
+# 3) Publica o index.html por último
+if [ -f "$REMOTE_INCOMING/index.html.deployhold" ]; then
+  mv "$REMOTE_INCOMING/index.html.deployhold" "$CURRENT/index.html"
+fi
+
+# 4) Limpa pasta temporária
+rm -rf "$REMOTE_INCOMING"
+
+# 5) Normaliza permissões (dirs 755, arquivos 644)
+find "$CURRENT" -type d -exec chmod 755 {} \;
+find "$CURRENT" -type f -exec chmod 644 {} \;
+'@
+
+# Converte CRLF -> LF e grava em arquivo temporário
+$remoteScriptLF = ($remoteScript -replace "`r`n", "`n") -replace "`r", "`n"
+$tempScript = Join-Path $env:TEMP ("publish-" + $releaseName + ".sh")
+[System.IO.File]::WriteAllText($tempScript, $remoteScriptLF, (New-Object System.Text.UTF8Encoding($false)))
+
+# 2.2 Envia script para a VPS e executa com variáveis de ambiente
+$remoteScriptPath = "/tmp/publish-$releaseName.sh"
+scp $tempScript "${sshTarget}:${remoteScriptPath}"
+if ($LASTEXITCODE -ne 0) { throw "Falha ao enviar script de publicação" }
+
+$envRun = "REMOTE_INCOMING='$remoteIncoming' CURRENT='$CURRENT' bash '$remoteScriptPath' && rm -f '$remoteScriptPath'"
+ssh $sshTarget $envRun
 if ($LASTEXITCODE -ne 0) { throw "Falha ao publicar release" }
+
+# Limpa o temp local
+try { Remove-Item -Force $tempScript } catch {}
 
 Write-Host "Deploy concluído com sucesso!" -ForegroundColor Green

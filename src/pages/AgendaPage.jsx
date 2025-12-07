@@ -1349,12 +1349,14 @@ function AgendaPage({ sidebarVisible = false }) {
         try { dbg('Realtime:debounced fetchBookings fire'); pulseLog('rt:debounced:fire'); setUiBusy(1200); fetchBookings(); } catch {}
       }, 400);
     };
-    // 🔴 REAL-TIME DESABILITADO - Plano gratuito Supabase limita a 2 conexões simultâneas
-    // Para reabilitar: remova os comentários abaixo
-    // const channel = supabase
-    //   .channel(`agendamentos:${userProfile.codigo_empresa}`)
-    //   .on('postgres_changes', { event: '*', schema: 'public', table: 'agendamentos', filter: `codigo_empresa=eq.${userProfile.codigo_empresa}` }, onChange)
-    //   .subscribe((status) => { try { console.debug('[Realtime] channel status', status); } catch {}; try { setRealtimeStatus(String(status || 'unknown')); } catch {} });
+    // ✅ REAL-TIME: escuta mudanças nos agendamentos da empresa atual
+    const channel = supabase
+      .channel(`agendamentos:${userProfile.codigo_empresa}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'agendamentos', filter: `codigo_empresa=eq.${userProfile.codigo_empresa}` }, onChange)
+      .subscribe((status) => {
+        try { console.debug('[Realtime] channel status', status); } catch {}
+        try { setRealtimeStatus(String(status || 'unknown')); } catch {}
+      });
     
     // ✅ POLLING: Recarrega agendamentos a cada 30 segundos
     const pollingInterval = setInterval(() => {
@@ -1365,7 +1367,7 @@ function AgendaPage({ sidebarVisible = false }) {
     
     return () => {
       try { if (realtimeDebounceRef.current) clearTimeout(realtimeDebounceRef.current); } catch {}
-      // try { supabase.removeChannel(channel); } catch {}
+      try { supabase.removeChannel(channel); } catch {}
       try { clearInterval(pollingInterval); } catch {}
       try { setRealtimeStatus('polling'); } catch {}
     };
