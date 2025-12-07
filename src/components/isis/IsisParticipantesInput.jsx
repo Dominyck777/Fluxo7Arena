@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { UserPlus, Check, X } from 'lucide-react';
+import { UserPlus, Check, X, Maximize2, Minimize2 } from 'lucide-react';
 import { IsisAvatar } from '@/components/isis/IsisAvatar';
 import { supabase } from '@/lib/supabase';
 import { createPortal } from 'react-dom';
@@ -30,6 +30,9 @@ export const IsisParticipantesInput = ({
   const [hasProcessed, setHasProcessed] = useState(false);
   const [selfDetected, setSelfDetected] = useState(false);
   const [selfMatchedKey, setSelfMatchedKey] = useState(null);
+  const [expandedList, setExpandedList] = useState(false);
+  const listRef = useRef(null);
+  const toolbarRef = useRef(null);
 
   // Detecta se é mobile
   useEffect(() => {
@@ -290,6 +293,28 @@ export const IsisParticipantesInput = ({
     setSelfMatchedKey(null);
   };
 
+  const exportarLista = async () => {
+    try {
+      const lines = (participantesAtuais || []).map((p, i) => `${i + 1}) ${p.nome}`);
+      const text = lines.join('\n');
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.top = '0';
+        ta.style.left = '0';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+    } catch {}
+  };
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -297,7 +322,7 @@ export const IsisParticipantesInput = ({
       transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
       className="flex flex-col gap-3 w-full"
     >
-      <div className="flex items-center justify-end">
+      <div ref={toolbarRef} className="flex items-center justify-end gap-2 scroll-mt-24 md:scroll-mt-28">
         <button
           type="button"
           disabled={disabled}
@@ -306,10 +331,28 @@ export const IsisParticipantesInput = ({
         >
           Importar lista
         </button>
+        <button
+          type="button"
+          onClick={() => {
+            setExpandedList(v => {
+              const next = !v;
+              try { window.dispatchEvent(new CustomEvent('isis-participantes-expand', { detail: { expanded: next } })); } catch {}
+              return next;
+            });
+            setTimeout(() => {
+              try { toolbarRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch {}
+            }, 50);
+          }}
+          className={`p-2 rounded-lg border transition-all ${expandedList ? 'bg-white/10 border-brand/40 text-brand shadow-sm' : 'hover:bg-white/10 border-white/10'}`}
+          aria-label={expandedList ? 'Recolher lista' : 'Expandir lista'}
+          aria-pressed={expandedList}
+        >
+          {expandedList ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+        </button>
       </div>
       {/* Lista de Participantes - Compacta no mobile */}
       {participantesAtuais.length > 0 && (
-        <div className="flex flex-col gap-1.5 max-h-[140px] overflow-y-auto px-1">
+        <div ref={listRef} className={`flex flex-col gap-1.5 ${expandedList ? 'max-h-[240px] md:max-h-[320px]' : 'max-h-[140px]'} overflow-y-auto px-1 transition-all`}>
           {participantesAtuais.map((p, index) => (
             <motion.div
               key={index}
@@ -323,6 +366,11 @@ export const IsisParticipantesInput = ({
                   : 'bg-surface/50 border border-white/10'
               }`}
             >
+              <span className="w-7 shrink-0">
+                <span className={`inline-flex items-center justify-center px-2 py-0.5 rounded-md text-[11px] font-extrabold ${p.principal ? 'bg-brand/20 text-brand' : 'bg-white/10 text-text-primary'}`}>
+                  {index + 1}
+                </span>
+              </span>
               <span className="text-base shrink-0">
                 {p.principal ? '👤' : '👥'}
               </span>
@@ -502,12 +550,17 @@ export const IsisParticipantesInput = ({
                         </div>
                       ) : (
                         <ul className="divide-y divide-white/5">
-                          {suggested.map((n) => {
+                          {suggested.map((n, idx) => {
                             const key = canonicalKey(n);
                             const isSelf = hasProcessed && selfDetected && selfMatchedKey && key === selfMatchedKey;
                             return (
                               <li key={key} className={`flex items-center justify-between px-3 py-2 ${isSelf ? 'bg-white/5' : ''}`}>
                                 <div className="flex items-center gap-2 min-w-0">
+                                  <span className="w-7 shrink-0">
+                                    <span className={`inline-flex items-center justify-center px-2 py-0.5 rounded-md text-[11px] font-extrabold ${isSelf ? 'bg-emerald-600/25 text-emerald-400' : 'bg-white/10 text-text-primary'}`}>
+                                      {idx + 1}
+                                    </span>
+                                  </span>
                                   <span className="text-sm truncate pr-1">{n}</span>
                                   {isSelf && (
                                     <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 shrink-0">Você</span>

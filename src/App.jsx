@@ -138,6 +138,19 @@ function App() {
   const [active, setActive] = useState(false);
   const envMaintenance = String(import.meta.env.VITE_MAINTENANCE_MODE || '').toLowerCase() === 'true';
 
+  // Detecta subdomínio para experiência da Ísis Cliente: nomedaempresa.f7arena.com
+  const hostNomeFantasia = React.useMemo(() => {
+    try {
+      if (typeof window === 'undefined') return null;
+      const host = window.location.host || '';
+      const base = 'f7arena.com';
+      if (!host.endsWith(base)) return null;
+      const sub = host.slice(0, -base.length).replace(/\.$/, '').toLowerCase();
+      if (!sub || sub === 'www') return null;
+      return sub;
+    } catch { return null; }
+  }, []);
+
   useEffect(() => {
     try {
       const computeActive = () => {
@@ -188,6 +201,15 @@ function App() {
       <Routes>
         <Route path="/maintenance" element={<MaintenancePage />} />
         <Route path="*" element={<Navigate to="/maintenance" replace />} />
+      </Routes>
+    );
+  }
+
+  // Se estamos em um subdomínio (nomedaempresa.f7arena.com), roteia tudo para a página da Ísis
+  if (hostNomeFantasia) {
+    return (
+      <Routes>
+        <Route path="/*" element={<IsisBookingPage />} />
       </Routes>
     );
   }

@@ -1460,7 +1460,7 @@ function AgendaPage({ sidebarVisible = false }) {
       const reqId = ++participantsReqIdRef.current;
       const { data, error } = await supabase
         .from('agendamento_participantes')
-        .select('id, agendamento_id, codigo_empresa, cliente_id, nome, valor_cota, status_pagamento, finalizadora_id, aplicar_taxa, cliente:clientes!agendamento_participantes_cliente_id_fkey(nome, codigo)')
+        .select('id, agendamento_id, codigo_empresa, cliente_id, nome, valor_cota, status_pagamento, finalizadora_id, aplicar_taxa, ordem, cliente:clientes!agendamento_participantes_cliente_id_fkey(nome, codigo)')
         .in('agendamento_id', ids)
         .order('ordem', { ascending: true }); // Ordena por campo ordem explícito
       // Ignora respostas atrasadas
@@ -1959,6 +1959,19 @@ function AgendaPage({ sidebarVisible = false }) {
           try { result = await Promise.race([guard, timeout]); } catch {}
           // Prefira o booking atualizado retornado; senão busque do estado; fallback para o original
           const picked = (result && result.booking) || (bookings.find(b => b.id === booking.id) || booking);
+          // DIAGNÓSTICO: ordem dos participantes no clique
+          try {
+            const parts = participantsByAgendamento[booking.id] || [];
+            console.log('[ORDER:CLICK] booking', {
+              id: booking.id,
+              customer: picked?.customer || booking.customer,
+              partsCount: parts.length,
+            });
+            if (parts.length > 0) {
+              console.table(parts.map((p, i) => ({ idx: i + 1, ordem: p?.ordem, nome: p?.nome, cliente_id: p?.cliente_id })));
+            }
+            console.log('[ORDER:CLICK] agendamento.clientes', picked?.clientes ?? '(sem campo clientes)');
+          } catch {}
           
           setEditingBooking(picked);
           openBookingModal();
@@ -2149,6 +2162,75 @@ function AgendaPage({ sidebarVisible = false }) {
     
     const [isCustomerPickerOpen, setIsCustomerPickerOpen] = useState(false);
     const [customerQuery, setCustomerQuery] = useState('');
+    
+    // Ao abrir um agendamento existente, aplica a ordem persistida dos participantes (campo 'ordem')
+    const appliedFromParticipantsRef = useRef(false);
+    useEffect(() => {
+      try {
+        if (!isModalOpen) return;                 // somente com modal aberto
+        if (!editingBooking?.id) return;          // apenas no modo edição
+        if (appliedFromParticipantsRef.current) return; // evita múltiplas aplicações na mesma sessão
+        const list = participantsByAgendamento[editingBooking.id] || [];
+        if (!Array.isArray(list) || list.length === 0) return; // aguarda carregamento
+        // chips na ordem vinda do banco (SELECT ... ORDER BY ordem ASC)
+        const chips = list.map(p => ({ id: p.cliente_id, nome: p.nome, codigo: p.codigo ?? null }));
+        const cur = Array.isArray(form.selectedClients) ? form.selectedClients : [];
+        const same = cur.length === chips.length && cur.every((c, i) => c && chips[i] && c.id === chips[i].id);
+        if (!same) {
+          setForm(f => ({ ...f, selectedClients: chips }));
+          try { lastNonEmptySelectionRef.current = chips; } catch {}
+          try { setChipsSnapshotSafe(chips); } catch {}
+          try { userSelectedOnceRef.current = true; } catch {}
+          // Persiste imediatamente para evitar restaurações tardias com ordem antiga
+          try { sessionStorage.setItem(persistLastKey, JSON.stringify(chips)); } catch {}
+          // Curta trava para impedir efeitos concorrentes de limparem os chips logo após abrir
+          try { selectionLockUntilRef.current = Date.now() + 1500; } catch {}
+          // Log de abertura para comparar ordem aplicada vs carregada
+          try {
+            console.log('[ORDER:OPEN_MODAL] chips (aplicados)', chips.map(c => c.nome));
+            console.table(list.map((p, i) => ({ idx: i + 1, ordem: p?.ordem, nome: p?.nome, cliente_id: p?.cliente_id })));
+          } catch {}
+        }
+        appliedFromParticipantsRef.current = true;
+      } catch {}
+    }, [isModalOpen, editingBooking?.id, participantsByAgendamento]);
+    
+    // Enforce ordem dos chips = ordem persistida (protege contra efeitos tardios que mudem a ordem)
+    useEffect(() => {
+      try {
+        if (!isModalOpen) return;
+        if (!editingBooking?.id) return;
+        const list = participantsByAgendamento[editingBooking.id] || [];
+        if (!Array.isArray(list) || list.length === 0) return;
+        const desiredIds = list.map(p => p.cliente_id);
+        const cur = Array.isArray(form.selectedClients) ? form.selectedClients : [];
+        if (cur.length === 0) return;
+        // Reordenar cur conforme desiredIds (mantém desconhecidos na cauda)
+        const idPos = new Map(desiredIds.map((id, idx) => [id, idx]));
+        const reordered = [...cur].sort((a, b) => {
+          const pa = idPos.has(a.id) ? idPos.get(a.id) : Number.MAX_SAFE_INTEGER;
+          const pb = idPos.has(b.id) ? idPos.get(b.id) : Number.MAX_SAFE_INTEGER;
+          return pa - pb;
+        });
+        const changed = reordered.length === cur.length && reordered.some((c, i) => c?.id !== cur[i]?.id);
+        if (changed) {
+          console.log('[ORDER:ENFORCE] Ajustando chips ->', reordered.map(c => c.nome));
+          setForm(f => ({ ...f, selectedClients: reordered }));
+          try { lastNonEmptySelectionRef.current = reordered; } catch {}
+          try { setChipsSnapshotSafe(reordered); } catch {}
+          try { sessionStorage.setItem(persistLastKey, JSON.stringify(reordered)); } catch {}
+        }
+      } catch {}
+    }, [isModalOpen, editingBooking?.id, participantsByAgendamento, form.selectedClients]);
+    
+    // Log qualquer mudança relevante nos chips para depurar ordem
+    useEffect(() => {
+      try {
+        if (!isModalOpen) return;
+        const arr = Array.isArray(form.selectedClients) ? form.selectedClients : [];
+        if (arr.length > 0) console.log('[ORDER:CHIPS] atual:', arr.map(c => c.nome));
+      } catch {}
+    }, [isModalOpen, form.selectedClients]);
     const [focusedCustomerIndex, setFocusedCustomerIndex] = useState(0);
     // Janela de bloqueio para ignorar fechamentos logo após retornar à aba
     const pickerBlockUntilRef = useRef(0);
@@ -2353,6 +2435,22 @@ function AgendaPage({ sidebarVisible = false }) {
             if (idx > 0) {
               const primary = finalArr[idx];
               finalArr = [primary, ...finalArr.filter((_, i) => i !== idx)];
+            }
+          }
+        } catch {}
+        // Em modo edição, reordenar segundo a 'ordem' persistida dos participantes (representante primeiro)
+        try {
+          if (editingBooking?.id) {
+            const list = participantsByAgendamento[editingBooking.id] || [];
+            if (Array.isArray(list) && list.length > 0) {
+              const desiredIds = list.map(p => p.cliente_id);
+              const idPos = new Map(desiredIds.map((id, idx) => [id, idx]));
+              finalArr = [...finalArr].sort((a, b) => {
+                const pa = idPos.has(a.id) ? idPos.get(a.id) : Number.MAX_SAFE_INTEGER;
+                const pb = idPos.has(b.id) ? idPos.get(b.id) : Number.MAX_SAFE_INTEGER;
+                return pa - pb;
+              });
+              console.log('[ORDER:APPLY] Ajustado por ordem persistida ->', finalArr.map(c => c.nome));
             }
           }
         } catch {}

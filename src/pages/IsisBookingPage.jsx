@@ -25,6 +25,20 @@ import { ArrowLeft, Calendar, Clock, Users, MapPin, Bot, Trophy, Building2 } fro
  */
 const IsisBookingPageContent = () => {
   const { nomeFantasia } = useParams();
+  const nomeFantasiaHost = React.useMemo(() => {
+    try {
+      if (typeof window === 'undefined') return null;
+      const host = window.location.host || '';
+      const base = 'f7arena.com';
+      if (!host.endsWith(base)) return null;
+      const sub = host.slice(0, -base.length).replace(/\.$/, '');
+      if (!sub) return null; // apex
+      const subLower = sub.toLowerCase();
+      if (subLower === 'www') return null;
+      return subLower; // nomedaempresa
+    } catch { return null; }
+  }, []);
+  const nomeFantasiaEfetivo = nomeFantasia || nomeFantasiaHost;
   const navigate = useNavigate();
   const [codigoEmpresa, setCodigoEmpresa] = useState(null);
   
@@ -62,19 +76,19 @@ const IsisBookingPageContent = () => {
     return empresa?.logo_url || '';
   }, [empresa?.logo_url]);
   
-  // Busca código da empresa pelo nome fantasia
+  // Busca código da empresa pelo nome fantasia (rota ou subdomínio)
   useEffect(() => {
     const buscarEmpresaPorNome = async () => {
-      if (!nomeFantasia) {
+      if (!nomeFantasiaEfetivo) {
         setLoadingEmpresa(false);
         return;
       }
       
       try {
-        console.log('[Isis] Buscando empresa por nome fantasia:', nomeFantasia);
+        console.log('[Isis] Buscando empresa por nome fantasia:', nomeFantasiaEfetivo);
         
         // Busca empresa pelo nome fantasia (URL-friendly)
-        const nomeDecodificado = decodeURIComponent(nomeFantasia);
+        const nomeDecodificado = decodeURIComponent(nomeFantasiaEfetivo);
         
         // Normaliza o nome para busca flexível (remove espaços, hífens, etc.)
         const nomeNormalizado = nomeDecodificado
@@ -83,39 +97,47 @@ const IsisBookingPageContent = () => {
           .trim();
         
         console.log('[Isis] Nome normalizado para busca:', nomeNormalizado);
-        
-        // Busca EXATA - apenas normaliza espaços e hífens, sem adivinhação
-        const { data: todasEmpresas, error } = await supabase
-          .from('empresas')
-          .select('codigo_empresa, nome_fantasia, razao_social, logo_url');
-        
-        let empresaData = null;
-        
-        if (!error && todasEmpresas) {
-          // Busca EXATA: normaliza apenas espaços e hífens
-          const empresaEncontrada = todasEmpresas.find(emp => {
-            const nomeNorm = (emp.nome_fantasia || '').toLowerCase().replace(/[\s\-_]+/g, '');
-            const razaoNorm = (emp.razao_social || '').toLowerCase().replace(/[\s\-_]+/g, '');
-            
-            // APENAS igualdade exata após normalização
-            return nomeNorm === nomeNormalizado || razaoNorm === nomeNormalizado;
-          });
-          
-          if (empresaEncontrada) {
-            empresaData = [empresaEncontrada];
+        // 1) Tenta via RPC (melhor para contornar RLS). Se a função não existir, cai no fallback abaixo.
+        let empresaEncontradaViaRpc = null;
+        try {
+          const { data: rpcData, error: rpcErr } = await supabase.rpc('get_empresa_public_by_slug', { p_slug: nomeNormalizado });
+          if (!rpcErr && rpcData && rpcData.length > 0) {
+            empresaEncontradaViaRpc = rpcData[0];
+          }
+        } catch (_) {}
+
+        let empresaFinal = empresaEncontradaViaRpc || null;
+
+        // 2) Fallback local: tenta selecionar e filtrar (pode falhar por RLS). Inclui 'nome' como candidato.
+        if (!empresaFinal) {
+          const { data: todasEmpresas, error } = await supabase
+            .from('empresas')
+            .select('codigo_empresa, nome_fantasia, razao_social, nome, logo_url');
+
+          if (!error && Array.isArray(todasEmpresas)) {
+            const emp = todasEmpresas.find((e) => {
+              const candidatos = [
+                (e?.nome_fantasia || ''),
+                (e?.razao_social || ''),
+                (e?.nome || ''),
+              ];
+              return candidatos.some((c) => c.toLowerCase().replace(/[\s\-_]+/g, '').trim() === nomeNormalizado);
+            });
+            if (emp) empresaFinal = emp;
           }
         }
-        
-        if (error || !empresaData || empresaData.length === 0) {
-          console.error('[Isis] Empresa não encontrada:', error);
+
+        if (!empresaFinal) {
+          console.error('[Isis] Empresa não encontrada (RPC e fallback)');
           setCodigoEmpresa(null);
           setLoadingEmpresa(false);
           return;
         }
-        
-        const empresa = empresaData[0]; // Pega o primeiro resultado
-        console.log('[Isis] Empresa encontrada:', empresa);
-        setCodigoEmpresa(empresa.codigo_empresa);
+
+        console.log('[Isis] Empresa encontrada:', empresaFinal);
+        setCodigoEmpresa(empresaFinal.codigo_empresa);
+        setEmpresa(empresaFinal);
+        setLoadingEmpresa(false);
         
       } catch (error) {
         console.error('[Isis] Erro ao buscar empresa:', error);
@@ -125,7 +147,7 @@ const IsisBookingPageContent = () => {
     };
     
     buscarEmpresaPorNome();
-  }, [nomeFantasia]);
+  }, [nomeFantasiaEfetivo]);
   
   // Inicia conversa com identificação do cliente
   useEffect(() => {
@@ -710,6 +732,11 @@ const IsisBookingPageContent = () => {
         icon: '✏️'
       },
       {
+        label: 'Informei o telefone errado',
+        value: 'corrigir_telefone',
+        icon: '☎️'
+      },
+      {
         label: 'Finalizar Atendimento',
         value: 'finalizar_atendimento',
         icon: '👋'
@@ -932,8 +959,7 @@ const IsisBookingPageContent = () => {
           }
         ];
         
-        addIsisMessage('Para qual dia você gostaria de agendar?', 800);
-        addIsisMessageWithButtons('', dataButtons, 1000);
+        addIsisMessageWithButtons('Para qual dia você gostaria de agendar?', dataButtons, 800);
         nextStep('data');
       }, 1200);
       
@@ -1788,11 +1814,31 @@ const IsisBookingPageContent = () => {
     console.log('- Valor dividido:', valorDividido);
     
     // Resumo com emojis e formatação limpa
-    const resumo = `📋 **RESUMO DO AGENDAMENTO**\n\n🏟️ **Quadra**\n${quadraFinal.nome}\n\n📅 **Data**\n${dataFormatada} (${diaSemana})\n\n⏰ **Horário**\n${horarioFinal.inicio} às ${horarioFinal.fim}\n⏱️ Duração: **${duracaoTexto}**\n\n🏆 **Modalidade**\n${esporteFinal}\n\n👥 **Participantes** (${participantesFinal.length})\n${listaNomes}\n\n💰 **Valor Total**\nR$ **${valorTotal.toFixed(2).replace('.', ',')}**\n💵 **Valor Dividido**\nR$ **${valorDividido.toFixed(2).replace('.', ',')}** por pessoa\n\n👤 **Responsável**\n${selections.cliente.nome}\n📞 ${selections.cliente.telefone || selections.cliente.whatsapp || 'N/A'}`;
+    // Endereço da empresa (opcional)
+    const enderecoEmpresa = selections?.empresa?.endereco && String(selections.empresa.endereco).trim().length > 0
+      ? String(selections.empresa.endereco).trim()
+      : null;
+
+    const blocoEndereco = enderecoEmpresa ? `\n📍 **Endereço**\n${enderecoEmpresa}\n` : '';
+
+    // Formata contato do responsável (telefone/whatsapp) com máscara BR
+    const formatTelBR = (v) => {
+      if (!v) return 'N/A';
+      const d = String(v).replace(/\D/g, '');
+      if (d.length === 11) return `(${d.slice(0,2)}) ${d.slice(2,7)}-${d.slice(7)}`;
+      if (d.length === 10) return `(${d.slice(0,2)}) ${d.slice(2,6)}-${d.slice(6)}`;
+      return v;
+    };
+    const contatoBruto = selections.cliente.telefone || selections.cliente.whatsapp || null;
+    const contatoFormatado = formatTelBR(contatoBruto);
+
+    const resumo = `📋 **RESUMO DO AGENDAMENTO**\n\n🏟️ **Quadra**\n${quadraFinal.nome}${blocoEndereco}\n📅 **Data**\n${dataFormatada} (${diaSemana})\n\n⏰ **Horário**\n${horarioFinal.inicio} às ${horarioFinal.fim}\n⏱️ Duração: **${duracaoTexto}**\n\n🏆 **Modalidade**\n${esporteFinal}\n\n👥 **Participantes** (${participantesFinal.length})\n${listaNomes}\n\n💰 **Valor Total**\nR$ **${valorTotal.toFixed(2).replace('.', ',')}**\n💵 **Valor Dividido**\nR$ **${valorDividido.toFixed(2).replace('.', ',')}** por pessoa\n\n👤 **Responsável**\n${selections.cliente.nome}\n📞 ${contatoFormatado}`;
     
     // Delay menor se for modo edição inicial
     const delay = modoEdicaoInicial ? 200 : 1000;
-    addIsisMessage({ text: resumo, copyable: true, copyText: resumo }, delay);
+    // Converte **negrito** (markdown) para *negrito* (WhatsApp) apenas no texto de cópia
+    const resumoCopyText = resumo.replace(/\*\*(.+?)\*\*/g, '*$1*');
+    addIsisMessage({ text: resumo, copyable: true, copyText: resumoCopyText }, delay);
     
     // Botões de confirmação e edição
     const confirmButtons = [
@@ -1835,6 +1881,15 @@ const IsisBookingPageContent = () => {
       value: 'edit_participantes',
       icon: '👥'
     });
+    
+    // Gerar Times (somente quando estiver editando um agendamento já existente ou em modo de edição inicial)
+    if (agendamentoFinal || modoEdicaoInicial) {
+      editButtons.push({
+        label: 'Gerar Times',
+        value: 'gerar_times',
+        icon: '🎲'
+      });
+    }
     
     // Cancelar Agendamento (só se estiver editando um agendamento existente)
     if (agendamentoFinal) {
@@ -1890,12 +1945,18 @@ const IsisBookingPageContent = () => {
     const valorTotal = Math.round(valorPorMeiaHora * slots * 100) / 100;
     
     // Resumo final (visual diferente - mais limpo e focado)
+    // Endereço da empresa para o resumo final (opcional)
+    const enderecoEmpresaFinal = selections?.empresa?.endereco && String(selections.empresa.endereco).trim().length > 0
+      ? String(selections.empresa.endereco).trim()
+      : null;
+    const blocoEnderecoFinal = enderecoEmpresaFinal ? `\n📍 **Endereço**\n${enderecoEmpresaFinal}\n` : '';
+
     const resumoFinal = `🎉 **AGENDAMENTO CONFIRMADO**
 
 🆔 **Código:** #${agendamento.codigo}
 
 📍 **Local**
-${selections.quadra.nome}
+${selections.quadra.nome}${blocoEnderecoFinal}
 
 📅 **Quando**
 ${dataFormatada} (${diaSemana})
@@ -1911,10 +1972,16 @@ ${listaNomes}
 
 👤 **Responsável:** ${selections.cliente.nome}`;
     
-    addIsisMessage({ text: resumoFinal, copyable: true, copyText: resumoFinal }, 1200);
+    const resumoFinalCopyText = resumoFinal.replace(/\*\*(.+?)\*\*/g, '*$1*');
+    addIsisMessage({ text: resumoFinal, copyable: true, copyText: resumoFinalCopyText }, 1200);
     
     // Botões finais
     const finalButtons = [
+      {
+        label: 'Gerar Times',
+        value: 'gerar_times',
+        icon: '🎲'
+      },
       {
         label: 'Finalizar Atendimento',
         value: 'finalizar',
@@ -1935,6 +2002,88 @@ ${listaNomes}
     addIsisMessageWithButtons('O que você gostaria de fazer?', finalButtons, 1800);
   };
   
+  // Gera times com base na modalidade e apresenta no chat (com opção de regenerar)
+  const gerarTimesEApresentar = async () => {
+    try {
+      const nomes = (selections.participantes || []).map(p => String(p?.nome || '').trim()).filter(Boolean);
+      if (!nomes || nomes.length === 0) {
+        addIsisMessage('Não há participantes suficientes para formar times.');
+        return;
+      }
+      const rawModalidade = String(selections?.esporte || selections?.quadra?.tipo || '').toLowerCase();
+      let teamSize = 0;
+      // Tenta inferir via Edge Function (OpenAI)
+      try {
+        const { data } = await supabase.functions.invoke('infer-team-size', {
+          body: { modalidade: rawModalidade, quadra: selections?.quadra || null },
+        });
+        if (data && Number(data.teamSize) > 0) teamSize = Number(data.teamSize);
+      } catch {}
+      // Heurística de fallback
+      if (!teamSize) {
+        if (/areia/.test(rawModalidade)) teamSize = 2; // vôlei de praia
+        else if (/(v[ôo]lei)/.test(rawModalidade)) teamSize = 6; // vôlei indoor
+        else if (/(hand|handebol)/.test(rawModalidade)) teamSize = 7; // handebol
+        else if (/(futsal|society)/.test(rawModalidade)) teamSize = 5; // futsal / society
+        else if (/(futebol|campo)/.test(rawModalidade)) teamSize = 11; // futebol de campo
+        else teamSize = 5; // default
+      }
+      // Embaralha para aleatoriedade
+      const arr = nomes.slice();
+      for (let i = arr.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [arr[i], arr[j]] = [arr[j], arr[i]]; }
+      // Gera o máximo de times completos possível e define reservas
+      if (teamSize < 2) teamSize = 2;
+      const fmt = (xs) => xs.map((n, i) => `${i + 1}) ${n}`).join('\n') || '—';
+      const teamCount = Math.floor(arr.length / teamSize);
+      const titleModalidade = rawModalidade ? (rawModalidade[0].toUpperCase() + rawModalidade.slice(1)) : 'modalidade';
+      let text = `🏆 **Times gerados (${titleModalidade})**`;
+      const teamIcons = ['🟠', '🔵', '🟢', '🟣', '🟡', '🟤'];
+      if (teamCount >= 2) {
+        const teams = [];
+        for (let i = 0; i < teamCount; i++) {
+          teams.push(arr.slice(i * teamSize, (i + 1) * teamSize));
+        }
+        const reservas = arr.slice(teamCount * teamSize);
+        teams.forEach((t, idx) => {
+          const icon = teamIcons[idx % teamIcons.length];
+          text += `\n\n**${icon} Time ${idx + 1} (${t.length})**:\n${fmt(t)}`;
+        });
+        if (reservas.length) {
+          text += `\n\n**🪑 Reservas (${reservas.length})**:\n${fmt(reservas)}`;
+        }
+      } else {
+        // Participantes insuficientes para 2 times completos: ainda assim montar 2 times balanceados
+        if (arr.length === 0) {
+          addIsisMessage('Não há participantes suficientes para formar times.');
+          return;
+        }
+        if (arr.length === 1) {
+          // Caso limite: apenas 1 jogador
+          text += `\n\nℹ️ Ainda não há jogadores suficientes para formar 2 times. Adicione mais participantes.`;
+          text += `\n\n**🟠 Time 1 (1)**:\n1) ${arr[0]}`;
+        } else {
+          const t1Count = Math.min(teamSize, Math.ceil(arr.length / 2));
+          const t2Count = Math.min(teamSize, arr.length - t1Count);
+          const t1 = arr.slice(0, t1Count);
+          const t2 = arr.slice(t1Count, t1Count + t2Count);
+          text += `\n\n⚠️ Jogadores insuficientes para 2 equipes completas de ${teamSize}. Montei 2 times balanceados de ${t1.length} e ${t2.length}.`;
+          text += `\n\n**🟠 Time 1 (${t1.length})**:\n${fmt(t1)}`;
+          text += `\n\n**🔵 Time 2 (${t2.length})**:\n${fmt(t2)}`;
+        }
+      }
+      const copyText = text.replace(/\*\*(.+?)\*\*/g, '*$1*');
+      addIsisMessage({ text, copyable: true, copyText }, 800);
+      const again = [
+        { label: 'Gerar novamente', value: 'gerar_times_again', icon: '🎲' },
+        { label: 'Concluir', value: 'aceitar_times', icon: '✅' },
+      ];
+      // Mostra as opções logo abaixo do balão de times, com rótulo visível
+      addIsisMessageWithButtons('Tudo certo com os times?', again, 1400);
+    } catch (e) {
+      addIsisMessage('Não foi possível gerar times agora. Tente novamente.');
+    }
+  };
+
   // Handler para confirmação final
   const handleConfirmacao = async (button) => {
     // Se o botão tem propriedade 'quadra', é um botão de seleção de quadra
@@ -1961,6 +2110,34 @@ ${listaNomes}
     }
     
     switch (button.value) {
+      case 'corrigir_telefone': {
+        addUserMessage('☎️ Informei o telefone errado');
+        updateSelection('cliente', null);
+        updateSelection('identificacao_valor', null);
+        setTipoIdentificacao('telefone');
+        setShowInput(true);
+        nextStep('identificacao');
+        break;
+      }
+      case 'continuar_fluxo': {
+        perguntarAcaoInicial();
+        break;
+      }
+      case 'gerar_times':
+      case 'gerar_times_again': {
+        addUserMessage(button.value === 'gerar_times_again' ? '🎲 Gerar novamente' : '🎲 Gerar Times');
+        await gerarTimesEApresentar();
+        break;
+      }
+      case 'aceitar_times': {
+        addUserMessage('✅ Concluir');
+        // Pergunta o que fazer agora e mostra o mesmo menu inicial pós-identificação
+        addIsisMessage('Beleza! O que você gostaria de fazer agora?', 400);
+        setTimeout(() => {
+          perguntarAcaoInicial();
+        }, 800);
+        break;
+      }
       case 'confirm':
         // Marca botão como clicado (usuário vê)
         const confirmText = agendamentoCriado ? '✅ Salvar Alterações' : '✅ Confirmar Agendamento';
@@ -2284,7 +2461,7 @@ ${listaNomes}
           }
           
           // Recalcula valor correto baseado na duração e valor da quadra
-          const valorPorMeiaHora = ag.quadras.valor || 0;
+          const valorPorMeiaHora = Number(ag.quadras?.valor ?? 0);
           const slots = duracaoMinutos / 30; // Slots de 30 minutos
           const valorCorreto = Math.round(valorPorMeiaHora * slots * 100) / 100;
           
@@ -2309,7 +2486,7 @@ ${listaNomes}
             label: `${dataDisplay} • ${horaInicio}-${horaFim}`,
             value: `editar_agendamento_${ag.id}`,
             icon: '🏟️',
-            subtitle: `${ag.quadras.nome} • ${ag.modalidade} • ${duracaoTexto} • R$ ${valorFormatado}`,
+            subtitle: `${(ag.quadras?.nome || 'Quadra')} • ${(ag.modalidade || '—')} • ${duracaoTexto} • R$ ${valorFormatado}`,
             agendamento: ag
           };
         });
@@ -2340,6 +2517,7 @@ ${listaNomes}
       // setIsLoading(true);
       
       // Busca dados completos do agendamento
+      console.debug('[carregarAgendamentoParaEdicao] Iniciando JOIN: agendamentos ⇢ quadras, agendamento_participantes');
       const { data: agendamentoCompleto, error: agendamentoError } = await supabase
         .from('agendamentos')
         .select(`
@@ -2349,6 +2527,12 @@ ${listaNomes}
         `)
         .eq('id', agendamento.id)
         .single();
+      console.debug('[carregarAgendamentoParaEdicao] Resultado JOIN:', {
+        hasError: !!agendamentoError,
+        error: agendamentoError?.message,
+        code: agendamentoError?.code,
+        participantes_len: Array.isArray(agendamentoCompleto?.agendamento_participantes) ? agendamentoCompleto.agendamento_participantes.length : null
+      });
       
       if (agendamentoError) {
         console.error('[Isis] Erro ao buscar agendamento:', agendamentoError);
@@ -2394,7 +2578,29 @@ ${listaNomes}
       
       // Monta lista de participantes garantindo que o cliente responsável seja o principal
       const participanteClienteId = agendamentoCompleto.cliente_id || selections.cliente?.id || null;
-      const brutos = agendamentoCompleto.agendamento_participantes || [];
+      let brutos = agendamentoCompleto.agendamento_participantes || [];
+
+      // Se o JOIN não trouxe participantes (possível bloqueio de RLS), tenta SELECT direto para log/contorno
+      if (!brutos || brutos.length === 0) {
+        try {
+          console.debug('[carregarAgendamentoParaEdicao] JOIN sem participantes. Fazendo SELECT direto em agendamento_participantes...');
+          const { data: partsDirect, error: partsErr } = await supabase
+            .from('agendamento_participantes')
+            .select('nome, cliente_id, codigo_empresa')
+            .eq('agendamento_id', agendamento.id);
+          console.debug('[carregarAgendamentoParaEdicao] SELECT direto participantes:', {
+            hasError: !!partsErr,
+            error: partsErr?.message,
+            code: partsErr?.code,
+            count: Array.isArray(partsDirect) ? partsDirect.length : null
+          });
+          if (Array.isArray(partsDirect) && partsDirect.length > 0) {
+            brutos = partsDirect.map(p => ({ nome: p.nome, cliente_id: p.cliente_id }));
+          }
+        } catch (e) {
+          console.debug('[carregarAgendamentoParaEdicao] Falha no SELECT direto participantes:', e?.message || e);
+        }
+      }
       let principalParticipante = null;
       const outrosParticipantes = [];
 
@@ -3114,6 +3320,14 @@ ${listaNomes}
           onSubmit={handleCadastroSubmit}
           valorInicial={selections.identificacao_valor}
           tipoInicial={selections.identificacao_tipo || 'telefone'}
+          onCorrigirTelefone={() => {
+            try { addIsisMessage('Sem problemas! Informe seu telefone novamente:', 400); } catch {}
+            updateSelection('cliente', null);
+            updateSelection('identificacao_valor', null);
+            setTipoIdentificacao('telefone');
+            nextStep('identificacao');
+            setShowInput(true);
+          }}
         />
       );
     }
@@ -3127,6 +3341,23 @@ ${listaNomes}
         <IsisHorarioInput
           onSubmit={handleHorarioSubmit}
           onMudarData={handleMudarData}
+          onMudarQuadra={() => {
+            try {
+              // Força modo edição de horário para que handleQuadraSelection recarregue os horários
+              setShowInput(false);
+              setEditingType('horario');
+              nextStep('review');
+              const quadraButtons = (quadras || []).map(q => ({
+                label: q.nome,
+                value: q.id,
+                icon: '🏟️',
+                subtitle: q.descricao || q.tipo || null,
+                quadra: q
+              }));
+              if (quadraButtons.length > 0) addIsisMessageWithButtons('Qual quadra você quer?', quadraButtons, 600);
+            } catch {}
+          }}
+          hasMultipleQuadras={(quadras || []).length > 1}
           horariosDisponiveis={horariosDisponiveis}
           esportes={selections.quadra?.modalidades || []}
         />
@@ -3146,8 +3377,8 @@ ${listaNomes}
     return null;
   };
   
-  // Tela quando não há nome fantasia na URL
-  if (!nomeFantasia) {
+  // Tela quando não há nome fantasia via rota NEM via subdomínio
+  if (!nomeFantasiaEfetivo) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center p-4">
         <motion.div

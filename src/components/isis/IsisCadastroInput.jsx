@@ -5,7 +5,7 @@ import { User, Phone, Mail } from 'lucide-react';
 /**
  * Formulário completo de cadastro (nome, telefone, email) - Estilo Ísis
  */
-export const IsisCadastroInput = ({ onSubmit, disabled = false, valorInicial = null, tipoInicial = 'telefone' }) => {
+export const IsisCadastroInput = ({ onSubmit, disabled = false, valorInicial = null, tipoInicial = 'telefone', onCorrigirTelefone }) => {
   const [nome, setNome] = useState('');
   const [telefone, setTelefone] = useState(tipoInicial === 'telefone' ? valorInicial || '' : '');
   const [email, setEmail] = useState(tipoInicial === 'email' ? valorInicial || '' : '');
@@ -111,6 +111,18 @@ export const IsisCadastroInput = ({ onSubmit, disabled = false, valorInicial = n
           className="flex-1 bg-transparent text-text-primary placeholder:text-text-muted outline-none text-[17px] md:text-base font-medium"
         />
       </div>
+
+      {onCorrigirTelefone && (
+        <div className="-mt-1 mb-1">
+          <button
+            type="button"
+            onClick={onCorrigirTelefone}
+            className="text-xs text-brand/80 hover:text-brand underline underline-offset-4 px-1 py-0.5 rounded-md hover:bg-brand/5"
+          >
+            Informei o telefone errado
+          </button>
+        </div>
+      )}
 
       {/* Campo Email (opcional) */}
       <div className={`

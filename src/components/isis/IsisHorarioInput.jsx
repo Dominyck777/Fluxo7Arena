@@ -7,7 +7,7 @@ import { cn } from '@/lib/utils';
 /**
  * Select triplo para horário (início, fim e esporte) - Estilo Ísis
  */
-export const IsisHorarioInput = ({ onSubmit, onMudarData, disabled = false, horariosDisponiveis = [], esportes = [] }) => {
+export const IsisHorarioInput = ({ onSubmit, onMudarData, onMudarQuadra, hasMultipleQuadras = false, disabled = false, horariosDisponiveis = [], esportes = [] }) => {
   const [inicio, setInicio] = useState('');
   const [fim, setFim] = useState('');
   const [esporte, setEsporte] = useState('');
@@ -24,7 +24,7 @@ export const IsisHorarioInput = ({ onSubmit, onMudarData, disabled = false, hora
     }
     // steps conta blocos de 30min consecutivos após o início
     // mínimo de 2 blocos (>= 60min)
-    const available = steps >= 2;
+    const available = steps >= 1;
     return {
       value: slot.inicio,
       label: slot.inicio,
@@ -47,7 +47,7 @@ export const IsisHorarioInput = ({ onSubmit, onMudarData, disabled = false, hora
       if (current.inicio !== expected) break;
       steps++;
       // só libera opções de fim quando atingirmos >= 60min (2 steps)
-      if (steps >= 2) {
+      if (steps >= 1) {
         options.push({ value: current.fim, label: current.fim, available: true });
       }
       expected = current.fim;
@@ -94,23 +94,16 @@ export const IsisHorarioInput = ({ onSubmit, onMudarData, disabled = false, hora
               <SelectValue placeholder="Selecione" />
             </SelectTrigger>
             <SelectContent className="max-h-[300px] z-[60]">
-              {opcoesInicio.map((opt) => (
-                <SelectItem
-                  key={opt.value}
-                  value={opt.value}
-                  disabled={!opt.available}
-                  className={cn(!opt.available && 'opacity-60')}
-                >
-                  <span className="inline-flex items-center gap-2">
-                    {opt.available ? (
+              {opcoesInicio
+                .filter((opt) => opt.available)
+                .map((opt) => (
+                  <SelectItem key={opt.value} value={opt.value}>
+                    <span className="inline-flex items-center gap-2">
                       <Clock className="w-4 h-4 opacity-80" />
-                    ) : (
-                      <Lock className="w-4 h-4 opacity-80" />
-                    )}
-                    {opt.label}
-                  </span>
-                </SelectItem>
-              ))}
+                      {opt.label}
+                    </span>
+                  </SelectItem>
+                ))}
             </SelectContent>
           </Select>
         </div>
@@ -128,29 +121,22 @@ export const IsisHorarioInput = ({ onSubmit, onMudarData, disabled = false, hora
               <SelectValue placeholder="Selecione" />
             </SelectTrigger>
             <SelectContent className="max-h-[300px] z-[60]">
-              {opcoesFim.map((opt) => (
-                <SelectItem
-                  key={opt.value}
-                  value={opt.value}
-                  disabled={!opt.available}
-                  className={cn(!opt.available && 'opacity-60')}
-                >
-                  <span className="inline-flex items-center gap-2">
-                    {opt.available ? (
+              {opcoesFim
+                .filter((opt) => opt.available)
+                .map((opt) => (
+                  <SelectItem key={opt.value} value={opt.value}>
+                    <span className="inline-flex items-center gap-2">
                       <Clock className="w-4 h-4 opacity-80" />
-                    ) : (
-                      <Lock className="w-4 h-4 opacity-80" />
-                    )}
-                    {opt.label}
-                  </span>
-                </SelectItem>
-              ))}
+                      {opt.label}
+                    </span>
+                  </SelectItem>
+                ))}
             </SelectContent>
           </Select>
         </div>
       </div>
 
-      {/* Select de Esporte e Botão Mudar Data */}
+      {/* Select de Esporte e Botões de ação (Mudar Data / Mudar Quadra) */}
       <div className="flex items-end gap-2 md:gap-3">
         {/* Select de Esporte - Largura reduzida */}
         <div className="flex-1">
@@ -193,6 +179,31 @@ export const IsisHorarioInput = ({ onSubmit, onMudarData, disabled = false, hora
             <Calendar className="w-4 h-4" />
             <span className="hidden md:inline">Mudar Data</span>
             <span className="md:hidden">Mudar Data</span>
+          </motion.button>
+        )}
+
+        {/* Botão Mudar Quadra (exibe apenas se houver mais de uma quadra) */}
+        {hasMultipleQuadras && onMudarQuadra && (
+          <motion.button
+            type="button"
+            onClick={onMudarQuadra}
+            disabled={disabled}
+            whileHover={{ scale: disabled ? 1 : 1.05 }}
+            whileTap={{ scale: disabled ? 1 : 0.95 }}
+            className={`
+              px-4 py-2.5 rounded-xl font-medium text-sm
+              transition-all duration-300 shrink-0
+              flex items-center gap-2
+              ${
+                disabled
+                  ? 'bg-surface/30 text-text-muted cursor-not-allowed'
+                  : 'bg-surface/70 backdrop-blur-sm border border-white/10 text-text-primary hover:bg-surface/90 hover:border-white/20'
+              }
+            `}
+          >
+            <Trophy className="w-4 h-4" />
+            <span className="hidden md:inline">Mudar Quadra</span>
+            <span className="md:hidden">Quadra</span>
           </motion.button>
         )}
       </div>

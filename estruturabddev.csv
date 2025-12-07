@@ -9,32 +9,23 @@ schema,graphql,graphql,null,null,supabase_admin,null
 schema,auth,auth,null,null,supabase_admin,null
 schema,storage,storage,null,null,supabase_admin,null
 schema,public,public,null,null,postgres,standard public schema
-table,public,usuarios,null,table,postgres,null
-table,public,agendamentos,null,table,postgres,null
+table,public,quadras_dias_funcionamento,null,table,postgres,ConfiguraÃ§Ã£o de dias de funcionamento das quadras por dia da semana e fechamentos especÃ­ficos
 table,extensions,pg_stat_statements_info,null,view,postgres,null
 table,extensions,pg_stat_statements,null,view,postgres,null
 table,auth,sso_domains,null,table,supabase_auth_admin,Auth: Manages SSO email address domain mapping to an SSO Identity Provider.
 table,auth,saml_providers,null,table,supabase_auth_admin,Auth: Manages SAML Identity Provider connections.
 table,auth,sso_providers,null,table,supabase_auth_admin,Auth: Manages SSO identity provider information; see saml_providers for SAML.
-table,public,usuarios_safe,null,view,postgres,null
 table,auth,instances,null,table,supabase_auth_admin,Auth: Manages users across multiple sites.
-table,public,produtos,null,table,postgres,null
-table,public,colaboradores,null,table,postgres,null
-table,public,pagamentos,null,table,postgres,null
-table,public,compras,null,table,postgres,Registro de compras (NF-es de entrada) importadas via XML
+table,public,agendamentos,null,table,postgres,null
+table,public,produto_categorias,null,table,postgres,null
 table,storage,buckets,null,table,supabase_storage_admin,null
 table,storage,objects,null,table,supabase_storage_admin,null
 table,auth,refresh_tokens,null,table,supabase_auth_admin,Auth: Store of tokens used to refresh JWT tokens once they expire.
 table,storage,migrations,null,table,supabase_storage_admin,null
 table,vault,secrets,null,table,supabase_admin,Table with encrypted `secret` column for storing sensitive information on disk.
 table,vault,decrypted_secrets,null,view,supabase_admin,null
-table,public,agendamento_participantes,null,table,postgres,Cotas de valor por participante do agendamento
-table,public,contas_pagar_baixas,null,table,postgres,null
-table,public,comandas,null,table,postgres,null
-table,public,mesas,null,table,postgres,null
-table,public,empresa_counters,null,table,postgres,null
-table,public,quadras,null,table,postgres,null
-table,public,caixa_sessoes,null,table,postgres,null
+table,public,estoque_reservado,null,table,postgres,Controle de estoque reservado para evitar overselling
+table,public,contas_receber,null,table,postgres,null
 table,auth,schema_migrations,null,table,supabase_auth_admin,Auth: Manages updates to the auth system.
 table,auth,users,null,table,supabase_auth_admin,Auth: Stores user login data within a secure schema.
 table,auth,audit_log_entries,null,table,supabase_auth_admin,Auth: Audit trail for user actions.
@@ -43,82 +34,71 @@ table,auth,mfa_amr_claims,null,table,supabase_auth_admin,auth: stores authentica
 table,auth,flow_state,null,table,supabase_auth_admin,stores metadata for pkce logins
 table,auth,identities,null,table,supabase_auth_admin,Auth: Stores identities associated to a user.
 table,auth,one_time_tokens,null,table,supabase_auth_admin,null
-table,public,user_ui_settings,null,table,postgres,null
+table,public,caixa_resumos,null,table,postgres,null
+table,public,colaboradores,null,table,postgres,null
 table,auth,oauth_authorizations,null,table,supabase_auth_admin,null
 table,auth,mfa_challenges,null,table,supabase_auth_admin,auth: stores metadata about challenge requests made
+table,public,finalizadoras,null,table,postgres,null
+table,public,usuarios,null,table,postgres,null
+table,public,agenda_settings,null,table,postgres,ConfiguraÃ§Ãµes de automaÃ§Ã£o da agenda por empresa (1:1 com empresas).
 table,auth,oauth_consents,null,table,supabase_auth_admin,null
+table,public,empresas,null,table,postgres,null
 table,auth,oauth_clients,null,table,supabase_auth_admin,null
 table,auth,mfa_factors,null,table,supabase_auth_admin,auth: stores metadata about factors
+table,public,estoque_baixa_log,null,table,postgres,null
 table,auth,sessions,null,table,supabase_auth_admin,Auth: Stores session data associated to a user.
+table,public,contas_receber_baixas,null,table,postgres,null
+table,public,empresa_counters,null,table,postgres,null
+table,public,mesas,null,table,postgres,null
 table,realtime,schema_migrations,null,table,supabase_admin,null
 table,storage,s3_multipart_uploads,null,table,supabase_storage_admin,null
+table,public,comanda_clientes,null,table,postgres,null
+table,public,vendas,null,table,postgres,null
 table,realtime,subscription,null,table,supabase_admin,null
 table,storage,s3_multipart_uploads_parts,null,table,supabase_storage_admin,null
+table,public,caixa_movimentos,null,table,postgres,null
 table,storage,buckets_vectors,null,table,supabase_storage_admin,null
 table,storage,vector_indexes,null,table,supabase_storage_admin,null
 table,storage,prefixes,null,table,supabase_storage_admin,null
+table,public,movimentos_saldo,null,table,postgres,null
 table,storage,buckets_analytics,null,table,supabase_storage_admin,null
 table,net,http_request_queue,null,table,supabase_admin,null
 table,net,_http_response,null,table,supabase_admin,null
 table,supabase_functions,migrations,null,table,supabase_functions_admin,null
 table,supabase_functions,hooks,null,table,supabase_functions_admin,Supabase Functions Hooks: Audit trail for triggered hooks.
+table,public,compras,null,table,postgres,Registro de compras (NF-es de entrada) importadas via XML
+table,public,v_agendamentos_isis,null,view,postgres,null
+table,public,contas_pagar_baixas,null,table,postgres,null
 table,public,v_agendamento_participantes,null,view,postgres,null
 table,public,v_agendamentos_detalhado,null,view,postgres,"View detalhada dos agendamentos com participantes e finalizadoras. 
 Cada linha representa um participante do agendamento. 
 Agendamentos sem participantes tambÃ©m aparecem (com dados de participante NULL)."
-table,public,v_agendamentos_isis,null,view,postgres,null
-table,public,produto_categorias,null,table,postgres,null
-table,public,quadras_dias_funcionamento,null,table,postgres,ConfiguraÃ§Ã£o de dias de funcionamento das quadras por dia da semana e fechamentos especÃ­ficos
-table,public,vendas,null,table,postgres,null
-table,public,caixa_movimentacoes,null,table,postgres,null
-table,public,itens_venda,null,table,postgres,null
-table,public,comanda_historico,null,table,postgres,Auditoria de alteraÃ§Ãµes em comandas para rastreabilidade
-table,public,contas_receber_baixas,null,table,postgres,null
-table,public,comanda_clientes,null,table,postgres,null
-table,public,contas_pagar,null,table,postgres,null
-table,public,comanda_itens,null,table,postgres,null
-table,public,movimentos_saldo,null,table,postgres,null
-table,public,caixa_movimentos,null,table,postgres,null
-table,public,estoque_baixa_log,null,table,postgres,null
-table,public,caixa_resumos,null,table,postgres,null
-table,public,agenda_settings,null,table,postgres,ConfiguraÃ§Ãµes de automaÃ§Ã£o da agenda por empresa (1:1 com empresas).
-table,public,contas_receber,null,table,postgres,null
-table,public,estoque_reservado,null,table,postgres,Controle de estoque reservado para evitar overselling
-table,public,compras_itens,null,table,postgres,Itens individuais de cada compra (NF-e)
-table,public,finalizadoras,null,table,postgres,null
-table,public,empresas,null,table,postgres,null
 table,public,clientes,null,table,postgres,null
-column,public,id,usuarios,uuid default null,null,null
-column,public,nome,usuarios,character varying(255) default null,null,null
-column,public,email,usuarios,character varying(255) default null,null,null
-column,public,papel,usuarios,character varying(50) default 'user'::character varying,null,null
-column,public,criado_em,usuarios,timestamp with time zone default now(),null,null
-column,public,atualizado_em,usuarios,timestamp with time zone default now(),null,null
-column,public,codigo_empresa,usuarios,character varying(10) default null,null,null
-column,public,senha_hash,usuarios,text default null,null,Hash da senha (gerado na Edge Function; ex.: argon2id). Nunca armazene senha em claro.
-column,public,senha_alg,usuarios,text default 'argon2id'::text,null,"Algoritmo de hashing usado (ex.: argon2id, bcrypt)."
-column,public,senha_atualizada_em,usuarios,timestamp with time zone default now(),null,Timestamp da última atualização de senha.
-column,public,reset_token,usuarios,text default null,null,Token de recuperação de senha (link único).
-column,public,reset_token_expires_at,usuarios,timestamp with time zone default null,null,Validade do token de recuperação.
-column,public,tentativas_invalidas,usuarios,integer default 0,null,Contador de tentativas falhas para rate-limit/bloqueio progressivo.
-column,public,login_bloqueado,usuarios,boolean default false,null,Flag de bloqueio de login por exceder tentativas ou ação administrativa.
-column,public,last_login_at,usuarios,timestamp with time zone default null,null,Último login com sucesso.
-column,public,force_password_reset,usuarios,boolean default false,null,"Se true, força usuário a trocar a senha no próximo login."
+table,public,produtos,null,table,postgres,null
+table,public,agendamento_participantes,null,table,postgres,Cotas de valor por participante do agendamento
+table,public,compras_itens,null,table,postgres,Itens individuais de cada compra (NF-e)
+table,public,pagamentos,null,table,postgres,null
+table,public,caixa_sessoes,null,table,postgres,null
+table,public,comandas,null,table,postgres,null
+table,public,user_ui_settings,null,table,postgres,null
+table,public,comanda_itens,null,table,postgres,null
+table,public,quadras,null,table,postgres,null
+table,public,itens_venda,null,table,postgres,null
+table,public,caixa_movimentacoes,null,table,postgres,null
+table,public,contas_pagar,null,table,postgres,null
+table,public,comanda_historico,null,table,postgres,Auditoria de alteraÃ§Ãµes em comandas para rastreabilidade
 column,auth,id,sso_providers_pkey,uuid default null,null,null
 column,auth,lower,sso_providers_resource_id_idx,text default null,null,null
-column,public,id,agendamentos,uuid default gen_random_uuid(),null,null
-column,public,quadra_id,agendamentos,uuid default null,null,null
-column,public,cliente_id,agendamentos,uuid default null,null,null
-column,public,clientes,agendamentos,text[] default null,null,Participantes do agendamento (nomes livres)
-column,public,inicio,agendamentos,timestamp with time zone default null,null,null
-column,public,fim,agendamentos,timestamp with time zone default null,null,null
-column,public,modalidade,agendamentos,character varying(100) default null,null,null
-column,public,status,agendamentos,character varying(20) default 'scheduled'::character varying,null,null
-column,public,valor_total,agendamentos,"numeric(10,2) default null",null,PreÃ§o total do agendamento para meia hora (R$)
-column,public,criado_em,agendamentos,timestamp with time zone default now(),null,null
-column,public,codigo_empresa,agendamentos,text default null,null,null
-column,public,auto_disabled,agendamentos,boolean default false,null,"Quando true, desativa QUALQUER automaÃ§Ã£o (auto-confirmar, auto-iniciar, auto-finalizar) para este agendamento."
-column,public,codigo,agendamentos,bigint default null,null,null
+column,public,id,quadras_dias_funcionamento,uuid default gen_random_uuid(),null,null
+column,public,quadra_id,quadras_dias_funcionamento,uuid default null,null,null
+column,public,codigo_empresa,quadras_dias_funcionamento,text default null,null,null
+column,public,tipo,quadras_dias_funcionamento,character varying(20) default null,null,Tipo de configuraÃ§Ã£o: dia_semana ou data_fechamento
+column,public,dia_semana,quadras_dias_funcionamento,integer default null,null,"Dia da semana (0=domingo, 1=segunda, ..., 6=sÃ¡bado)"
+column,public,data_fechamento,quadras_dias_funcionamento,date default null,null,Data especÃ­fica de fechamento
+column,public,funciona,quadras_dias_funcionamento,boolean default true,null,"Se a quadra funciona neste dia/data (true=aberta, false=fechada)"
+column,public,observacao,quadras_dias_funcionamento,text default null,null,null
+column,public,created_at,quadras_dias_funcionamento,timestamp with time zone default now(),null,null
+column,public,updated_at,quadras_dias_funcionamento,timestamp with time zone default now(),null,null
 column,auth,id,sso_domains_pkey,uuid default null,null,null
 column,auth,sso_provider_id,sso_domains_sso_provider_id_idx,uuid default null,null,null
 column,auth,lower,sso_domains_domain_idx,text default null,null,null
@@ -210,24 +190,6 @@ column,auth,updated_at,sso_providers,timestamp with time zone default null,null,
 column,auth,disabled,sso_providers,boolean default null,null,null
 column,public,codigo_empresa,usuarios_empresa_email_idx,character varying(10) default null,null,null
 column,public,lower,usuarios_empresa_email_idx,text default null,null,null
-column,public,last_value,caixa_movimentacoes_id_seq,bigint default null,null,null
-column,public,log_cnt,caixa_movimentacoes_id_seq,bigint default null,null,null
-column,public,is_called,caixa_movimentacoes_id_seq,boolean default null,null,null
-column,public,id,usuarios_safe,uuid default null,null,null
-column,public,nome,usuarios_safe,character varying(255) default null,null,null
-column,public,email,usuarios_safe,character varying(255) default null,null,null
-column,public,papel,usuarios_safe,character varying(50) default null,null,null
-column,public,codigo_empresa,usuarios_safe,character varying(10) default null,null,null
-column,public,criado_em,usuarios_safe,timestamp with time zone default null,null,null
-column,public,atualizado_em,usuarios_safe,timestamp with time zone default null,null,null
-column,public,last_login_at,usuarios_safe,timestamp with time zone default null,null,null
-column,public,senha_atualizada_em,usuarios_safe,timestamp with time zone default null,null,null
-column,public,login_bloqueado,usuarios_safe,boolean default null,null,null
-column,public,tentativas_invalidas,usuarios_safe,integer default null,null,null
-column,public,force_password_reset,usuarios_safe,boolean default null,null,null
-column,public,last_value,caixa_resumos_id_seq,bigint default null,null,null
-column,public,log_cnt,caixa_resumos_id_seq,bigint default null,null,null
-column,public,is_called,caixa_resumos_id_seq,boolean default null,null,null
 column,auth,id,refresh_tokens_pkey,bigint default null,null,null
 column,auth,instance_id,refresh_tokens_instance_id_idx,uuid default null,null,null
 column,auth,instance_id,refresh_tokens_instance_id_user_id_idx,uuid default null,null,null
@@ -238,87 +200,27 @@ column,auth,uuid,instances,uuid default null,null,null
 column,auth,raw_base_config,instances,text default null,null,null
 column,auth,created_at,instances,timestamp with time zone default null,null,null
 column,auth,updated_at,instances,timestamp with time zone default null,null,null
-column,public,id,produtos,uuid default gen_random_uuid(),null,null
-column,public,nome,produtos,character varying(255) default null,null,null
-column,public,valor_venda,produtos,"numeric(10,2) default null",null,null
-column,public,categoria,produtos,character varying(100) default null,null,null
-column,public,status,produtos,character varying(20) default 'active'::character varying,null,null
-column,public,criado_em,produtos,timestamp with time zone default now(),null,null
-column,public,codigo_empresa,produtos,character varying(10) default null,null,null
-column,public,valor_custo,produtos,"numeric(10,2) default 0",null,null
-column,public,validade,produtos,date default null,null,null
-column,public,estoque,produtos,integer default 0,null,null
-column,public,estoque_minimo,produtos,integer default 0,null,null
-column,public,tipo_produto,produtos,character varying(20) default 'venda'::character varying,null,null
-column,public,codigo_produto,produtos,text default null,null,null
-column,public,codigo_barras,produtos,character varying(13) default null,null,null
-column,public,codigo_barras_caixa,produtos,character varying(13) default null,null,null
-column,public,referencia,produtos,character varying(100) default null,null,null
-column,public,marca,produtos,character varying(100) default null,null,null
-column,public,grupo,produtos,character varying(100) default null,null,null
-column,public,unidade,produtos,character varying(10) default null,null,null
-column,public,estoque_inicial,produtos,integer default null,null,null
-column,public,estoque_atual,produtos,integer default null,null,null
-column,public,peso,produtos,"numeric(10,3) default null",null,null
-column,public,preco_compra,produtos,"numeric(12,2) default null",null,null
-column,public,custos_percent,produtos,"numeric(7,4) default null",null,null
-column,public,preco_custo,produtos,"numeric(12,2) default null",null,null
-column,public,lucro_percent,produtos,"numeric(7,4) default null",null,null
-column,public,preco_venda,produtos,"numeric(12,2) default null",null,null
-column,public,qtd_atacado,produtos,integer default null,null,null
-column,public,preco_atacado,produtos,"numeric(12,2) default null",null,null
-column,public,comissao_percent,produtos,"numeric(7,4) default null",null,null
-column,public,desconto_percent,produtos,"numeric(7,4) default null",null,null
-column,public,cfop_interno,produtos,character(4) default null,null,null
-column,public,cst_icms_interno,produtos,character(3) default null,null,null
-column,public,csosn_interno,produtos,character(3) default null,null,null
-column,public,aliquota_icms_interno,produtos,"numeric(7,4) default null",null,null
-column,public,cfop_externo,produtos,character(4) default null,null,null
-column,public,cst_icms_externo,produtos,character(3) default null,null,null
-column,public,csosn_externo,produtos,character(3) default null,null,null
-column,public,aliquota_icms_externo,produtos,"numeric(7,4) default null",null,null
-column,public,cst_pis_entrada,produtos,character(2) default null,null,null
-column,public,cst_pis_saida,produtos,character(2) default null,null,null
-column,public,aliquota_pis_percent,produtos,"numeric(7,4) default null",null,null
-column,public,aliquota_cofins_percent,produtos,"numeric(7,4) default null",null,null
-column,public,cst_ipi,produtos,character(2) default null,null,null
-column,public,aliquota_ipi_percent,produtos,"numeric(7,4) default null",null,null
-column,public,fcp_percent,produtos,"numeric(7,4) default null",null,null
-column,public,mva_percent,produtos,"numeric(7,4) default null",null,null
-column,public,base_reduzida_percent,produtos,"numeric(7,4) default null",null,null
-column,public,ncm,produtos,character varying(10) default null,null,null
-column,public,descricao_ncm,produtos,text default null,null,null
-column,public,cest,produtos,character(7) default null,null,null
-column,public,ativo,produtos,boolean default true,null,null
-column,public,permite_venda,produtos,boolean default true,null,null
-column,public,paga_comissao,produtos,boolean default false,null,null
-column,public,preco_variavel,produtos,boolean default false,null,null
-column,public,composicao,produtos,boolean default false,null,null
-column,public,servico,produtos,boolean default false,null,null
-column,public,grade,produtos,boolean default false,null,null
-column,public,usar_tabela_preco,produtos,boolean default false,null,null
-column,public,combustivel,produtos,boolean default false,null,null
-column,public,usa_imei,produtos,boolean default false,null,null
-column,public,controle_estoque_por_grade,produtos,boolean default false,null,null
-column,public,mostrar_no_app,produtos,boolean default false,null,null
-column,public,importado_via_xml,produtos,boolean default false,null,Indica se o produto foi importado de um XML de NF-e
-column,public,xml_chave,produtos,text default null,null,null
-column,public,xml_numero,produtos,text default null,null,null
-column,public,xml_serie,produtos,text default null,null,null
-column,public,xml_emissao,produtos,timestamp with time zone default null,null,null
-column,public,fornecedor_id,produtos,uuid default null,null,ID do fornecedor (cliente com flag_fornecedor=true)
-column,public,data_importacao,produtos,timestamp with time zone default null,null,Data/hora da Ãºltima importaÃ§Ã£o via XML
-column,public,xml_chave_nfe,produtos,character varying(44) default null,null,Chave de acesso da NF-e de origem (44 dÃ­gitos)
-column,public,xml_numero_nfe,produtos,character varying(20) default null,null,NÃºmero da NF-e de origem
+column,public,id,agendamentos,uuid default gen_random_uuid(),null,null
+column,public,quadra_id,agendamentos,uuid default null,null,null
+column,public,cliente_id,agendamentos,uuid default null,null,null
+column,public,clientes,agendamentos,text[] default null,null,Participantes do agendamento (nomes livres)
+column,public,inicio,agendamentos,timestamp with time zone default null,null,null
+column,public,fim,agendamentos,timestamp with time zone default null,null,null
+column,public,modalidade,agendamentos,character varying(100) default null,null,null
+column,public,status,agendamentos,character varying(20) default 'scheduled'::character varying,null,null
+column,public,valor_total,agendamentos,"numeric(10,2) default null",null,PreÃ§o total do agendamento para meia hora (R$)
+column,public,criado_em,agendamentos,timestamp with time zone default now(),null,null
+column,public,codigo_empresa,agendamentos,text default null,null,null
+column,public,auto_disabled,agendamentos,boolean default false,null,"Quando true, desativa QUALQUER automaÃ§Ã£o (auto-confirmar, auto-iniciar, auto-finalizar) para este agendamento."
+column,public,codigo,agendamentos,bigint default null,null,null
 column,auth,token,refresh_tokens_token_unique,character varying(255) default null,null,null
-column,public,id,colaboradores,uuid default gen_random_uuid(),null,null
-column,public,nome,colaboradores,character varying(255) default null,null,null
-column,public,cargo,colaboradores,character varying(50) default 'user'::character varying,null,null
-column,public,criado_em,colaboradores,timestamp with time zone default now(),null,null
-column,public,atualizado_em,colaboradores,timestamp with time zone default now(),null,null
-column,public,ativo,colaboradores,boolean default true,null,null
-column,public,codigo_empresa,colaboradores,text default null,null,null
-column,public,updated_at,colaboradores,timestamp with time zone default now(),null,null
+column,public,id,produto_categorias,uuid default gen_random_uuid(),null,null
+column,public,codigo_empresa,produto_categorias,text default null,null,null
+column,public,nome,produto_categorias,text default null,null,null
+column,public,descricao,produto_categorias,text default null,null,null
+column,public,ativa,produto_categorias,boolean default true,null,null
+column,public,created_at,produto_categorias,timestamp with time zone default now(),null,null
+column,public,updated_at,produto_categorias,timestamp with time zone default now(),null,null
 column,auth,id,audit_log_entries_pkey,uuid default null,null,null
 column,auth,instance_id,audit_logs_instance_id_idx,uuid default null,null,null
 column,auth,id,instances_pkey,uuid default null,null,null
@@ -336,53 +238,7 @@ column,auth,email_change_token_new,email_change_token_new_idx,character varying(
 column,auth,parent,refresh_tokens_parent_idx,character varying(255) default null,null,null
 column,auth,confirmation_token,confirmation_token_idx,character varying(255) default null,null,null
 column,auth,reauthentication_token,reauthentication_token_idx,character varying(255) default null,null,null
-column,public,id,pagamentos,uuid default gen_random_uuid(),null,null
-column,public,codigo_empresa,pagamentos,text default get_my_company_code(),null,null
-column,public,comanda_id,pagamentos,uuid default null,null,null
-column,public,caixa_id,pagamentos,uuid default null,null,null
-column,public,metodo,pagamentos,text default null,null,null
-column,public,valor,pagamentos,"numeric(12,2) default null",null,null
-column,public,status,pagamentos,text default 'Pago'::text,null,null
-column,public,recebido_em,pagamentos,timestamp with time zone default now(),null,null
-column,public,created_at,pagamentos,timestamp with time zone default now(),null,null
-column,public,updated_at,pagamentos,timestamp with time zone default now(),null,null
-column,public,finalizadora_id,pagamentos,uuid default null,null,null
-column,public,origem,pagamentos,text default 'manual'::text,null,null
-column,public,xml_chave,pagamentos,text default null,null,null
-column,public,cliente_id,pagamentos,uuid default null,null,null
 column,storage,id,buckets_pkey,text default null,null,null
-column,public,id,compras,uuid default gen_random_uuid(),null,null
-column,public,codigo_empresa,compras,integer default null,null,null
-column,public,fornecedor_id,compras,uuid default null,null,null
-column,public,chave_nfe,compras,character varying(44) default null,null,Chave de acesso Ãºnica da NF-e (44 dÃ­gitos)
-column,public,numero_nfe,compras,character varying(20) default null,null,null
-column,public,serie_nfe,compras,character varying(10) default null,null,null
-column,public,data_emissao,compras,timestamp with time zone default null,null,null
-column,public,data_entrada,compras,timestamp with time zone default now(),null,null
-column,public,tipo_operacao,compras,character varying(20) default 'Entrada'::character varying,null,null
-column,public,natureza_operacao,compras,character varying(100) default null,null,null
-column,public,valor_produtos,compras,"numeric(15,2) default 0",null,null
-column,public,valor_frete,compras,"numeric(15,2) default 0",null,null
-column,public,valor_seguro,compras,"numeric(15,2) default 0",null,null
-column,public,valor_desconto,compras,"numeric(15,2) default 0",null,null
-column,public,valor_outras_despesas,compras,"numeric(15,2) default 0",null,null
-column,public,valor_total,compras,"numeric(15,2) default 0",null,null
-column,public,valor_icms,compras,"numeric(15,2) default 0",null,null
-column,public,valor_ipi,compras,"numeric(15,2) default 0",null,null
-column,public,valor_pis,compras,"numeric(15,2) default 0",null,null
-column,public,valor_cofins,compras,"numeric(15,2) default 0",null,null
-column,public,status,compras,character varying(20) default 'processada'::character varying,null,null
-column,public,observacoes,compras,text default null,null,null
-column,public,xml_completo,compras,text default null,null,XML completo da NF-e para auditoria (opcional)
-column,public,criado_em,compras,timestamp with time zone default now(),null,null
-column,public,atualizado_em,compras,timestamp with time zone default now(),null,null
-column,public,criado_por,compras,uuid default null,null,null
-column,public,forma_pagamento,compras,character varying(100) default null,null,"Forma de pagamento da NF-e (Dinheiro, PIX, CartÃ£o, etc)"
-column,public,ativo,compras,boolean default true,null,Indicates if the purchase is active (true) or soft deleted (false)
-column,public,motivo_inativacao,compras,text default null,null,Reason for inactivating the purchase
-column,public,inativado_em,compras,timestamp with time zone default null,null,Timestamp when the purchase was inativated
-column,public,inativado_por,compras,uuid default null,null,User who inactivated the purchase
-column,public,modelo_nfe,compras,character(2) default null,null,"Modelo da NF-e/NFC-e: 55 = NF-e, 65 = NFC-e"
 column,storage,name,bname,text default null,null,null
 column,storage,id,buckets,text default null,null,null
 column,storage,name,buckets,text default null,null,null
@@ -452,85 +308,42 @@ column,vault,key_id,decrypted_secrets,uuid default null,null,null
 column,vault,nonce,decrypted_secrets,bytea default null,null,null
 column,vault,created_at,decrypted_secrets,timestamp with time zone default null,null,null
 column,vault,updated_at,decrypted_secrets,timestamp with time zone default null,null,null
-column,public,id,agendamento_participantes,uuid default gen_random_uuid(),null,null
-column,public,agendamento_id,agendamento_participantes,uuid default null,null,null
-column,public,cliente_id,agendamento_participantes,uuid default null,null,null
-column,public,nome,agendamento_participantes,text default null,null,null
-column,public,valor_cota,agendamento_participantes,"numeric(10,2) default 0",null,Valor atribuÃ­do ao participante
-column,public,status_pagamento,agendamento_participantes,payment_status default 'Pendente'::payment_status,null,null
-column,public,pago_em,agendamento_participantes,timestamp with time zone default null,null,null
-column,public,metodo_pagamento,agendamento_participantes,text default null,null,null
-column,public,codigo_empresa,agendamento_participantes,character varying(10) default null,null,null
-column,public,created_at,agendamento_participantes,timestamp with time zone default now(),null,null
-column,public,updated_at,agendamento_participantes,timestamp with time zone default now(),null,null
-column,public,finalizadora_id,agendamento_participantes,uuid default null,null,null
-column,public,aplicar_taxa,agendamento_participantes,boolean default false,null,null
-column,public,ordem,agendamento_participantes,integer default 1,null,Ordem do participante no agendamento (1=representante/primeiro)
-column,public,id,contas_pagar_baixas,uuid default gen_random_uuid(),null,null
-column,public,codigo_empresa,contas_pagar_baixas,text default null,null,null
-column,public,conta_id,contas_pagar_baixas,uuid default null,null,null
-column,public,data_baixa,contas_pagar_baixas,date default null,null,null
-column,public,valor_baixa,contas_pagar_baixas,"numeric(12,2) default null",null,null
-column,public,forma_pagamento,contas_pagar_baixas,text default null,null,null
-column,public,caixa_movimentacao_id,contas_pagar_baixas,bigint default null,null,null
-column,public,observacao,contas_pagar_baixas,text default null,null,null
-column,public,criado_em,contas_pagar_baixas,timestamp with time zone default now(),null,null
-column,public,id,comandas,uuid default gen_random_uuid(),null,null
-column,public,codigo_empresa,comandas,text default get_my_company_code(),null,null
-column,public,mesa_id,comandas,uuid default null,null,null
-column,public,cliente_id,comandas,uuid default null,null,null
-column,public,aberto_em,comandas,timestamp with time zone default now(),null,null
-column,public,fechado_em,comandas,timestamp with time zone default null,null,null
-column,public,observacao,comandas,text default null,null,null
-column,public,created_at,comandas,timestamp with time zone default now(),null,null
-column,public,updated_at,comandas,timestamp with time zone default now(),null,null
-column,public,is_balcao,comandas,boolean default (mesa_id IS NULL),null,True quando a comanda nÃ£o possui mesa (BalcÃ£o).
-column,public,tipo,comandas,"text default 
-CASE
-    WHEN (mesa_id IS NULL) THEN 'balcao'::text
-    ELSE 'comanda'::text
-END",null,Tipo da comanda: balcao | comanda
-column,public,status,comandas,text default 'open'::text,null,null
-column,public,origem,comandas,text default 'manual'::text,null,null
-column,public,xml_chave,comandas,text default null,null,null
-column,public,diferenca_pagamento,comandas,"numeric(12,2) default 0",null,null
-column,public,desconto_tipo,comandas,character varying(20) default NULL::character varying,null,Tipo de desconto: percentual ou fixo
-column,public,desconto_valor,comandas,"numeric(10,2) default 0",null,Valor do desconto (% ou R$)
-column,public,desconto_motivo,comandas,character varying(255) default NULL::character varying,null,null
-column,public,total_com_desconto,comandas,"numeric(10,2) default NULL::numeric",null,null
-column,public,observacoes,comandas,text default null,null,"Notas/observaÃ§Ãµes da comanda (ex: sem cebola, urgente)"
-column,public,observacoes_atualizadas_em,comandas,timestamp with time zone default null,null,null
-column,public,vendedor_id,comandas,uuid default null,null,UsuÃ¡rio que realizou a venda (para comissÃ£o)
-column,public,comissao_percentual,comandas,"numeric(5,2) default NULL::numeric",null,null
-column,public,comissao_valor,comandas,"numeric(10,2) default NULL::numeric",null,null
-column,public,agendamento_id,comandas,uuid default null,null,Agendamento vinculado (se venda relacionada a agendamento)
-column,public,versao_sincronizacao,comandas,integer default 1,null,VersÃ£o para sincronizaÃ§Ã£o realtime
-column,public,ultima_atualizacao,comandas,timestamp with time zone default now(),null,null
 column,auth,created_at,flow_state_created_at_idx,timestamp with time zone default null,null,null
 column,auth,id,saml_relay_states_pkey,uuid default null,null,null
 column,auth,sso_provider_id,saml_relay_states_sso_provider_id_idx,uuid default null,null,null
 column,auth,for_email,saml_relay_states_for_email_idx,text default null,null,null
-column,public,id,mesas,uuid default gen_random_uuid(),null,null
-column,public,codigo_empresa,mesas,text default get_my_company_code(),null,null
-column,public,numero,mesas,integer default null,null,null
-column,public,nome,mesas,text default null,null,Nome amigÃ¡vel da mesa (ex.: PÃ¡tio 1)
-column,public,status,mesas,mesa_status default 'available'::mesa_status,null,null
-column,public,created_at,mesas,timestamp with time zone default now(),null,null
-column,public,updated_at,mesas,timestamp with time zone default now(),null,null
 column,auth,created_at,saml_relay_states_created_at_idx,timestamp with time zone default null,null,null
 column,auth,email,users_email_partial_key,character varying(255) default null,null,null
 column,auth,not_after,sessions_not_after_idx,timestamp with time zone default null,null,null
 column,auth,phone,users_phone_key,text default null,null,null
+column,public,id,estoque_reservado,uuid default gen_random_uuid(),null,null
+column,public,codigo_empresa,estoque_reservado,integer default null,null,null
+column,public,produto_id,estoque_reservado,uuid default null,null,null
+column,public,comanda_id,estoque_reservado,uuid default null,null,null
+column,public,quantidade,estoque_reservado,"numeric(10,2) default null",null,null
+column,public,reservado_em,estoque_reservado,timestamp with time zone default now(),null,null
+column,public,liberado_em,estoque_reservado,timestamp with time zone default null,null,null
 column,auth,created_at,mfa_challenge_created_at_idx,timestamp with time zone default null,null,null
 column,auth,id,flow_state_pkey,uuid default null,null,null
 column,auth,auth_code,idx_auth_code,text default null,null,null
 column,auth,user_id,idx_user_id_auth_method,uuid default null,null,null
 column,auth,authentication_method,idx_user_id_auth_method,text default null,null,null
 column,auth,updated_at,refresh_tokens_updated_at_idx,timestamp with time zone default null,null,null
+column,public,id,contas_receber,uuid default gen_random_uuid(),null,null
+column,public,codigo_empresa,contas_receber,text default null,null,null
+column,public,cliente_id,contas_receber,uuid default null,null,null
+column,public,origem_tipo,contas_receber,text default null,null,null
+column,public,origem_id,contas_receber,uuid default null,null,null
+column,public,descricao,contas_receber,text default null,null,null
+column,public,valor_total,contas_receber,"numeric(12,2) default null",null,null
+column,public,valor_aberto,contas_receber,"numeric(12,2) default null",null,null
+column,public,data_emissao,contas_receber,date default null,null,null
+column,public,data_vencimento,contas_receber,date default null,null,null
+column,public,status,contas_receber,text default 'aberto'::text,null,null
+column,public,observacoes,contas_receber,text default null,null,null
+column,public,criado_em,contas_receber,timestamp with time zone default now(),null,null
+column,public,atualizado_em,contas_receber,timestamp with time zone default now(),null,null
 column,auth,user_id,mfa_factors_user_id_idx,uuid default null,null,null
-column,public,empresa_id,empresa_counters,uuid default null,null,null
-column,public,next_cliente_codigo,empresa_counters,integer default 1,null,null
-column,public,next_agendamento_codigo,empresa_counters,bigint default 1,null,null
 column,auth,user_id,identities_user_id_idx,uuid default null,null,null
 column,auth,email,identities_email_idx,text default null,null,null
 column,auth,id,identities_pkey,uuid default null,null,null
@@ -542,28 +355,6 @@ column,auth,token_hash,one_time_tokens_token_hash_hash_idx,integer default null,
 column,auth,relates_to,one_time_tokens_relates_to_hash_idx,integer default null,null,null
 column,auth,user_id,one_time_tokens_user_id_token_type_key,uuid default null,null,null
 column,auth,token_type,one_time_tokens_user_id_token_type_key,auth.one_time_token_type default null,null,null
-column,public,id,quadras,uuid default gen_random_uuid(),null,null
-column,public,nome,quadras,character varying(255) default null,null,null
-column,public,modalidades,quadras,text[] default null,null,null
-column,public,tipo,quadras,character varying(50) default null,null,null
-column,public,status,quadras,character varying(20) default 'Ativa'::character varying,null,null
-column,public,criado_em,quadras,timestamp with time zone default now(),null,null
-column,public,valor,quadras,"numeric(10,2) default null",null,PreÃ§o por meia hora (R$) para locaÃ§Ã£o da quadra
-column,public,hora_inicio,quadras,time without time zone default null,null,HorÃ¡rio padrÃ£o de abertura da quadra
-column,public,hora_fim,quadras,time without time zone default null,null,HorÃ¡rio padrÃ£o de fechamento da quadra
-column,public,codigo_empresa,quadras,text default null,null,null
-column,public,descricao,quadras,text default null,null,"DescriÃ§Ã£o detalhada da quadra (dimensÃµes, caracterÃ­sticas, comodidades)"
-column,public,id,caixa_sessoes,uuid default gen_random_uuid(),null,null
-column,public,codigo_empresa,caixa_sessoes,text default get_my_company_code(),null,null
-column,public,usuario_id,caixa_sessoes,uuid default null,null,null
-column,public,aberto_em,caixa_sessoes,timestamp with time zone default now(),null,null
-column,public,fechado_em,caixa_sessoes,timestamp with time zone default null,null,null
-column,public,status,caixa_sessoes,text default 'open'::text,null,null
-column,public,saldo_inicial,caixa_sessoes,"numeric(12,2) default 0",null,null
-column,public,saldo_final,caixa_sessoes,"numeric(12,2) default null",null,null
-column,public,observacao,caixa_sessoes,text default null,null,null
-column,public,created_at,caixa_sessoes,timestamp with time zone default now(),null,null
-column,public,updated_at,caixa_sessoes,timestamp with time zone default now(),null,null
 column,auth,version,schema_migrations,character varying(255) default null,null,null
 column,auth,instance_id,users,uuid default null,null,null
 column,auth,id,users,uuid default null,null,null
@@ -646,14 +437,30 @@ column,auth,token_hash,one_time_tokens,text default null,null,null
 column,auth,relates_to,one_time_tokens,text default null,null,null
 column,auth,created_at,one_time_tokens,timestamp without time zone default now(),null,null
 column,auth,updated_at,one_time_tokens,timestamp without time zone default now(),null,null
-column,public,user_id,user_ui_settings,uuid default null,null,null
-column,public,scope,user_ui_settings,text default null,null,null
-column,public,settings,user_ui_settings,jsonb default '{}'::jsonb,null,null
-column,public,created_at,user_ui_settings,timestamp with time zone default now(),null,null
-column,public,updated_at,user_ui_settings,timestamp with time zone default now(),null,null
+column,public,id,caixa_resumos,bigint default nextval('caixa_resumos_id_seq'::regclass),null,null
+column,public,codigo_empresa,caixa_resumos,text default null,null,null
+column,public,caixa_sessao_id,caixa_resumos,uuid default null,null,null
+column,public,periodo_de,caixa_resumos,timestamp with time zone default null,null,null
+column,public,periodo_ate,caixa_resumos,timestamp with time zone default null,null,null
+column,public,total_bruto,caixa_resumos,"numeric(14,2) default 0",null,null
+column,public,total_descontos,caixa_resumos,"numeric(14,2) default 0",null,null
+column,public,total_liquido,caixa_resumos,"numeric(14,2) default 0",null,null
+column,public,total_entradas,caixa_resumos,"numeric(14,2) default 0",null,null
+column,public,por_finalizadora,caixa_resumos,jsonb default '{}'::jsonb,null,null
+column,public,criado_em,caixa_resumos,timestamp with time zone default now(),null,null
+column,public,valor_final_dinheiro,caixa_resumos,numeric default null,null,Valor contado informado no fechamento do caixa (em dinheiro total no caixa no momento do fechamento).
+column,public,diferenca_dinheiro,caixa_resumos,numeric default null,null,DiferenÃ§a entre o valor contado e o saldo final calculado (contado - saldo_final_calculado).
 column,auth,last_challenged_at,mfa_factors_last_challenged_at_key,timestamp with time zone default null,null,null
 column,auth,user_id,unique_phone_factor_per_user,uuid default null,null,null
 column,auth,phone,unique_phone_factor_per_user,text default null,null,null
+column,public,id,colaboradores,uuid default gen_random_uuid(),null,null
+column,public,nome,colaboradores,character varying(255) default null,null,null
+column,public,cargo,colaboradores,character varying(50) default 'user'::character varying,null,null
+column,public,criado_em,colaboradores,timestamp with time zone default now(),null,null
+column,public,atualizado_em,colaboradores,timestamp with time zone default now(),null,null
+column,public,ativo,colaboradores,boolean default true,null,null
+column,public,codigo_empresa,colaboradores,text default null,null,null
+column,public,updated_at,colaboradores,timestamp with time zone default now(),null,null
 column,auth,id,oauth_authorizations,uuid default null,null,null
 column,auth,authorization_id,oauth_authorizations,text default null,null,null
 column,auth,client_id,oauth_authorizations,uuid default null,null,null
@@ -681,9 +488,46 @@ column,auth,web_authn_session_data,mfa_challenges,jsonb default null,null,null
 column,auth,resource_id,sso_providers_resource_id_pattern_idx,text default null,null,null
 column,auth,id,oauth_clients_pkey,uuid default null,null,null
 column,auth,deleted_at,oauth_clients_deleted_at_idx,timestamp with time zone default null,null,null
+column,public,id,finalizadoras,uuid default gen_random_uuid(),null,null
+column,public,codigo_empresa,finalizadoras,text default null,null,null
+column,public,nome,finalizadoras,text default null,null,null
+column,public,tipo,finalizadoras,text default 'outros'::text,null,null
+column,public,ativo,finalizadoras,boolean default true,null,null
+column,public,ordem,finalizadoras,integer default 0,null,null
+column,public,taxa_percentual,finalizadoras,"numeric(8,4) default null",null,null
+column,public,observacao,finalizadoras,text default null,null,null
+column,public,created_at,finalizadoras,timestamp with time zone default now(),null,null
+column,public,updated_at,finalizadoras,timestamp with time zone default now(),null,null
+column,public,codigo_interno,finalizadoras,text default null,null,"CÃ³digo interno sequencial (01, 02, 03...)"
+column,public,codigo_sefaz,finalizadoras,text default null,null,CÃ³digo oficial SEFAZ para XML NF-e/NFC-e
 column,auth,id,oauth_authorizations_pkey,uuid default null,null,null
 column,auth,authorization_id,oauth_authorizations_authorization_id_key,text default null,null,null
 column,auth,authorization_code,oauth_authorizations_authorization_code_key,text default null,null,null
+column,public,id,usuarios,uuid default null,null,null
+column,public,nome,usuarios,character varying(255) default null,null,null
+column,public,email,usuarios,character varying(255) default null,null,null
+column,public,criado_em,usuarios,timestamp with time zone default now(),null,null
+column,public,codigo_empresa,usuarios,character varying(10) default null,null,null
+column,public,senha_alg,usuarios,text default 'argon2id'::text,null,"Algoritmo de hashing usado (ex.: argon2id, bcrypt)."
+column,public,senha_atualizada_em,usuarios,timestamp with time zone default now(),null,Timestamp da última atualização de senha.
+column,public,reset_token,usuarios,text default null,null,Token de recuperação de senha (link único).
+column,public,reset_token_expires_at,usuarios,timestamp with time zone default null,null,Validade do token de recuperação.
+column,public,force_password_reset,usuarios,boolean default false,null,"Se true, força usuário a trocar a senha no próximo login."
+column,public,papel,usuarios,character varying(50) default 'user'::character varying,null,null
+column,public,atualizado_em,usuarios,timestamp with time zone default now(),null,null
+column,public,senha_hash,usuarios,text default null,null,null
+column,public,tentativas_invalidas,usuarios,integer default 0,null,null
+column,public,login_bloqueado,usuarios,boolean default false,null,null
+column,public,last_login_at,usuarios,timestamp with time zone default null,null,null
+column,public,empresa_id,agenda_settings,uuid default null,null,null
+column,public,auto_confirm_enabled,agenda_settings,boolean default false,null,null
+column,public,auto_confirm_hours,agenda_settings,integer default null,null,null
+column,public,auto_cancel_if_not_confirmed_enabled,agenda_settings,boolean default false,null,null
+column,public,auto_cancel_hours,agenda_settings,integer default null,null,null
+column,public,auto_start_enabled,agenda_settings,boolean default true,null,null
+column,public,auto_finish_enabled,agenda_settings,boolean default true,null,null
+column,public,created_at,agenda_settings,timestamp with time zone default now(),null,null
+column,public,updated_at,agenda_settings,timestamp with time zone default now(),null,null
 column,auth,expires_at,oauth_auth_pending_exp_idx,timestamp with time zone default null,null,null
 column,auth,id,oauth_consents_pkey,uuid default null,null,null
 column,auth,user_id,oauth_consents_user_client_unique,uuid default null,null,null
@@ -694,6 +538,18 @@ column,auth,client_id,oauth_consents,uuid default null,null,null
 column,auth,scopes,oauth_consents,text default null,null,null
 column,auth,granted_at,oauth_consents,timestamp with time zone default now(),null,null
 column,auth,revoked_at,oauth_consents,timestamp with time zone default null,null,null
+column,public,id,empresas,uuid default gen_random_uuid(),null,null
+column,public,codigo_empresa,empresas,character varying(10) default null,null,null
+column,public,nome,empresas,character varying(255) default null,null,null
+column,public,telefone,empresas,character varying(20) default null,null,null
+column,public,endereco,empresas,text default null,null,null
+column,public,criado_em,empresas,timestamp with time zone default now(),null,null
+column,public,atualizado_em,empresas,timestamp with time zone default now(),null,null
+column,public,razao_social,empresas,text default null,null,null
+column,public,nome_fantasia,empresas,text default null,null,null
+column,public,cnpj,empresas,character varying(18) default null,null,null
+column,public,email,empresas,text default null,null,null
+column,public,logo_url,empresas,text default null,null,null
 column,auth,user_id,oauth_consents_active_user_client_idx,uuid default null,null,null
 column,auth,client_id,oauth_consents_active_user_client_idx,uuid default null,null,null
 column,auth,user_id,oauth_consents_user_order_idx,uuid default null,null,null
@@ -725,6 +581,8 @@ column,auth,last_challenged_at,mfa_factors,timestamp with time zone default null
 column,auth,web_authn_credential,mfa_factors,jsonb default null,null,null
 column,auth,web_authn_aaguid,mfa_factors,uuid default null,null,null
 column,auth,last_webauthn_challenge_data,mfa_factors,jsonb default null,null,Stores the latest WebAuthn challenge data including attestation/assertion for customer verification
+column,public,comanda_id,estoque_baixa_log,uuid default null,null,null
+column,public,baixado_em,estoque_baixa_log,timestamp with time zone default now(),null,null
 column,auth,id,sessions,uuid default null,null,null
 column,auth,user_id,sessions,uuid default null,null,null
 column,auth,created_at,sessions,timestamp with time zone default null,null,null
@@ -744,16 +602,35 @@ column,realtime,version,schema_migrations_pkey,bigint default null,null,null
 column,realtime,column_name,user_defined_filter,text default null,null,null
 column,realtime,op,user_defined_filter,realtime.equality_op default null,null,null
 column,realtime,value,user_defined_filter,text default null,null,null
+column,public,id,contas_receber_baixas,uuid default gen_random_uuid(),null,null
+column,public,codigo_empresa,contas_receber_baixas,text default null,null,null
+column,public,conta_id,contas_receber_baixas,uuid default null,null,null
+column,public,data_baixa,contas_receber_baixas,date default null,null,null
+column,public,valor_baixa,contas_receber_baixas,"numeric(12,2) default null",null,null
+column,public,finalizadora_id,contas_receber_baixas,uuid default null,null,null
+column,public,pagamento_id,contas_receber_baixas,uuid default null,null,null
+column,public,observacao,contas_receber_baixas,text default null,null,null
+column,public,criado_em,contas_receber_baixas,timestamp with time zone default now(),null,null
 column,realtime,name,wal_column,text default null,null,null
 column,realtime,type_name,wal_column,text default null,null,null
 column,realtime,type_oid,wal_column,oid default null,null,null
 column,realtime,value,wal_column,jsonb default null,null,null
 column,realtime,is_pkey,wal_column,boolean default null,null,null
 column,realtime,is_selectable,wal_column,boolean default null,null,null
+column,public,empresa_id,empresa_counters,uuid default null,null,null
+column,public,next_cliente_codigo,empresa_counters,integer default 1,null,null
+column,public,next_agendamento_codigo,empresa_counters,bigint default 1,null,null
 column,realtime,wal,wal_rls,jsonb default null,null,null
 column,realtime,is_rls_enabled,wal_rls,boolean default null,null,null
 column,realtime,subscription_ids,wal_rls,uuid[] default null,null,null
 column,realtime,errors,wal_rls,text[] default null,null,null
+column,public,id,mesas,uuid default gen_random_uuid(),null,null
+column,public,codigo_empresa,mesas,text default get_my_company_code(),null,null
+column,public,numero,mesas,integer default null,null,null
+column,public,nome,mesas,text default null,null,Nome amigÃ¡vel da mesa (ex.: PÃ¡tio 1)
+column,public,status,mesas,mesa_status default 'available'::mesa_status,null,null
+column,public,created_at,mesas,timestamp with time zone default now(),null,null
+column,public,updated_at,mesas,timestamp with time zone default now(),null,null
 column,realtime,version,schema_migrations,bigint default null,null,null
 column,realtime,inserted_at,schema_migrations,timestamp(0) without time zone default null,null,null
 column,realtime,last_value,subscription_id_seq,bigint default null,null,null
@@ -774,6 +651,19 @@ column,storage,created_at,s3_multipart_uploads,timestamp with time zone default 
 column,storage,user_metadata,s3_multipart_uploads,jsonb default null,null,null
 column,storage,bucket_id,idx_objects_bucket_id_name,text default null,null,null
 column,storage,name,idx_objects_bucket_id_name,text default null,null,null
+column,public,id,comanda_clientes,uuid default gen_random_uuid(),null,null
+column,public,comanda_id,comanda_clientes,uuid default null,null,null
+column,public,cliente_id,comanda_clientes,uuid default null,null,null
+column,public,nome_livre,comanda_clientes,text default null,null,null
+column,public,codigo_empresa,comanda_clientes,text default null,null,null
+column,public,created_at,comanda_clientes,timestamp with time zone default now(),null,null
+column,public,id,vendas,uuid default gen_random_uuid(),null,null
+column,public,cliente_id,vendas,uuid default null,null,null
+column,public,numero_mesa,vendas,integer default null,null,null
+column,public,valor_total,vendas,"numeric(10,2) default null",null,null
+column,public,status,vendas,character varying(20) default 'pending'::character varying,null,null
+column,public,criado_em,vendas,timestamp with time zone default now(),null,null
+column,public,codigo_empresa,vendas,character varying(10) default null,null,null
 column,realtime,id,subscription,bigint default null,null,null
 column,realtime,subscription_id,subscription,uuid default null,null,null
 column,realtime,entity,subscription,regclass default null,null,null
@@ -795,6 +685,17 @@ column,storage,etag,s3_multipart_uploads_parts,text default null,null,null
 column,storage,owner_id,s3_multipart_uploads_parts,text default null,null,null
 column,storage,version,s3_multipart_uploads_parts,text default null,null,null
 column,storage,created_at,s3_multipart_uploads_parts,timestamp with time zone default now(),null,null
+column,public,id,caixa_movimentos,uuid default gen_random_uuid(),null,null
+column,public,codigo_empresa,caixa_movimentos,text default get_my_company_code(),null,null
+column,public,caixa_id,caixa_movimentos,uuid default null,null,null
+column,public,tipo,caixa_movimentos,caixa_mov_tipo default null,null,null
+column,public,origem,caixa_movimentos,text default null,null,null
+column,public,metodo,caixa_movimentos,payment_method default null,null,null
+column,public,valor,caixa_movimentos,"numeric(12,2) default null",null,null
+column,public,referencia_id,caixa_movimentos,uuid default null,null,null
+column,public,observacao,caixa_movimentos,text default null,null,null
+column,public,created_at,caixa_movimentos,timestamp with time zone default now(),null,null
+column,public,updated_at,caixa_movimentos,timestamp with time zone default now(),null,null
 column,storage,id,s3_multipart_uploads_parts_pkey,uuid default null,null,null
 column,storage,id,buckets_vectors,text default null,null,null
 column,storage,type,buckets_vectors,storage.buckettype default 'VECTOR'::storage.buckettype,null,null
@@ -833,6 +734,14 @@ column,storage,bucket_id,idx_prefixes_lower_name,text default null,null,null
 column,storage,level,idx_prefixes_lower_name,integer default null,null,null
 column,storage,string_to_array,idx_prefixes_lower_name,text default null,null,null
 column,storage,lower,idx_prefixes_lower_name,text default null,null,null
+column,public,id,movimentos_saldo,uuid default gen_random_uuid(),null,null
+column,public,codigo_empresa,movimentos_saldo,text default null,null,null
+column,public,cliente_id,movimentos_saldo,uuid default null,null,null
+column,public,agendamento_id,movimentos_saldo,uuid default null,null,null
+column,public,tipo,movimentos_saldo,text default null,null,null
+column,public,valor,movimentos_saldo,"numeric(12,2) default null",null,null
+column,public,motivo,movimentos_saldo,text default null,null,null
+column,public,created_at,movimentos_saldo,timestamp with time zone default now(),null,null
 column,storage,id,buckets_vectors_pkey,text default null,null,null
 column,storage,id,vector_indexes_pkey,text default null,null,null
 column,storage,id,buckets_analytics_pkey,uuid default null,null,null
@@ -896,6 +805,66 @@ column,supabase_functions,hook_name,supabase_functions_hooks_h_table_id_h_name_i
 column,supabase_functions,last_value,hooks_id_seq,bigint default null,null,null
 column,supabase_functions,log_cnt,hooks_id_seq,bigint default null,null,null
 column,supabase_functions,is_called,hooks_id_seq,boolean default null,null,null
+column,public,id,compras,uuid default gen_random_uuid(),null,null
+column,public,codigo_empresa,compras,integer default null,null,null
+column,public,fornecedor_id,compras,uuid default null,null,null
+column,public,chave_nfe,compras,character varying(44) default null,null,Chave de acesso Ãºnica da NF-e (44 dÃ­gitos)
+column,public,numero_nfe,compras,character varying(20) default null,null,null
+column,public,serie_nfe,compras,character varying(10) default null,null,null
+column,public,data_emissao,compras,timestamp with time zone default null,null,null
+column,public,data_entrada,compras,timestamp with time zone default now(),null,null
+column,public,tipo_operacao,compras,character varying(20) default 'Entrada'::character varying,null,null
+column,public,natureza_operacao,compras,character varying(100) default null,null,null
+column,public,valor_produtos,compras,"numeric(15,2) default 0",null,null
+column,public,valor_frete,compras,"numeric(15,2) default 0",null,null
+column,public,valor_seguro,compras,"numeric(15,2) default 0",null,null
+column,public,valor_desconto,compras,"numeric(15,2) default 0",null,null
+column,public,valor_outras_despesas,compras,"numeric(15,2) default 0",null,null
+column,public,valor_total,compras,"numeric(15,2) default 0",null,null
+column,public,valor_icms,compras,"numeric(15,2) default 0",null,null
+column,public,valor_ipi,compras,"numeric(15,2) default 0",null,null
+column,public,valor_pis,compras,"numeric(15,2) default 0",null,null
+column,public,valor_cofins,compras,"numeric(15,2) default 0",null,null
+column,public,status,compras,character varying(20) default 'processada'::character varying,null,null
+column,public,observacoes,compras,text default null,null,null
+column,public,xml_completo,compras,text default null,null,XML completo da NF-e para auditoria (opcional)
+column,public,criado_em,compras,timestamp with time zone default now(),null,null
+column,public,atualizado_em,compras,timestamp with time zone default now(),null,null
+column,public,criado_por,compras,uuid default null,null,null
+column,public,forma_pagamento,compras,character varying(100) default null,null,"Forma de pagamento da NF-e (Dinheiro, PIX, CartÃ£o, etc)"
+column,public,ativo,compras,boolean default true,null,Indicates if the purchase is active (true) or soft deleted (false)
+column,public,motivo_inativacao,compras,text default null,null,Reason for inactivating the purchase
+column,public,inativado_em,compras,timestamp with time zone default null,null,Timestamp when the purchase was inativated
+column,public,inativado_por,compras,uuid default null,null,User who inactivated the purchase
+column,public,modelo_nfe,compras,character(2) default null,null,"Modelo da NF-e/NFC-e: 55 = NF-e, 65 = NFC-e"
+column,public,last_value,caixa_movimentacoes_id_seq,bigint default null,null,null
+column,public,log_cnt,caixa_movimentacoes_id_seq,bigint default null,null,null
+column,public,is_called,caixa_movimentacoes_id_seq,boolean default null,null,null
+column,public,last_value,caixa_resumos_id_seq,bigint default null,null,null
+column,public,log_cnt,caixa_resumos_id_seq,bigint default null,null,null
+column,public,is_called,caixa_resumos_id_seq,boolean default null,null,null
+column,public,agendamento_id,v_agendamentos_isis,uuid default null,null,null
+column,public,agendamento_codigo,v_agendamentos_isis,bigint default null,null,null
+column,public,codigo_empresa,v_agendamentos_isis,text default null,null,null
+column,public,inicio,v_agendamentos_isis,timestamp with time zone default null,null,null
+column,public,fim,v_agendamentos_isis,timestamp with time zone default null,null,null
+column,public,modalidade,v_agendamentos_isis,character varying(100) default null,null,null
+column,public,agendamento_status,v_agendamentos_isis,character varying(20) default null,null,null
+column,public,quadra_id,v_agendamentos_isis,uuid default null,null,null
+column,public,quadra_nome,v_agendamentos_isis,character varying(255) default null,null,null
+column,public,representante_nome,v_agendamentos_isis,text default null,null,null
+column,public,participantes_total,v_agendamentos_isis,bigint default null,null,null
+column,public,participantes_pagos,v_agendamentos_isis,bigint default null,null,null
+column,public,participantes_pendentes,v_agendamentos_isis,bigint default null,null,null
+column,public,id,contas_pagar_baixas,uuid default gen_random_uuid(),null,null
+column,public,codigo_empresa,contas_pagar_baixas,text default null,null,null
+column,public,conta_id,contas_pagar_baixas,uuid default null,null,null
+column,public,data_baixa,contas_pagar_baixas,date default null,null,null
+column,public,valor_baixa,contas_pagar_baixas,"numeric(12,2) default null",null,null
+column,public,forma_pagamento,contas_pagar_baixas,text default null,null,null
+column,public,caixa_movimentacao_id,contas_pagar_baixas,bigint default null,null,null
+column,public,observacao,contas_pagar_baixas,text default null,null,null
+column,public,criado_em,contas_pagar_baixas,timestamp with time zone default now(),null,null
 column,public,id,v_agendamento_participantes,uuid default null,null,null
 column,public,agendamento_id,v_agendamento_participantes,uuid default null,null,null
 column,public,codigo_empresa,v_agendamento_participantes,character varying(10) default null,null,null
@@ -936,19 +905,6 @@ column,public,valor_pago,v_agendamentos_detalhado,numeric default null,null,null
 column,public,valor_pendente,v_agendamentos_detalhado,numeric default null,null,null
 column,public,duracao_minutos,v_agendamentos_detalhado,numeric default null,null,null
 column,public,status_pagamento_legivel,v_agendamentos_detalhado,text default null,null,null
-column,public,agendamento_id,v_agendamentos_isis,uuid default null,null,null
-column,public,agendamento_codigo,v_agendamentos_isis,bigint default null,null,null
-column,public,codigo_empresa,v_agendamentos_isis,text default null,null,null
-column,public,inicio,v_agendamentos_isis,timestamp with time zone default null,null,null
-column,public,fim,v_agendamentos_isis,timestamp with time zone default null,null,null
-column,public,modalidade,v_agendamentos_isis,character varying(100) default null,null,null
-column,public,agendamento_status,v_agendamentos_isis,character varying(20) default null,null,null
-column,public,quadra_id,v_agendamentos_isis,uuid default null,null,null
-column,public,quadra_nome,v_agendamentos_isis,character varying(255) default null,null,null
-column,public,representante_nome,v_agendamentos_isis,text default null,null,null
-column,public,participantes_total,v_agendamentos_isis,bigint default null,null,null
-column,public,participantes_pagos,v_agendamentos_isis,bigint default null,null,null
-column,public,participantes_pendentes,v_agendamentos_isis,bigint default null,null,null
 column,public,empresa_id,empresa_counters_pkey,uuid default null,null,null
 column,public,id,user_profiles_pkey,uuid default null,null,null
 column,public,codigo_empresa,colaboradores_codigo_empresa_idx,text default null,null,null
@@ -960,26 +916,9 @@ column,public,codigo_empresa,ux_agendamentos_empresa_codigo,text default null,nu
 column,public,codigo,ux_agendamentos_empresa_codigo,bigint default null,null,null
 column,public,id,courts_pkey,uuid default null,null,null
 column,public,codigo_empresa,quadras_codigo_empresa_idx,text default null,null,null
-column,public,id,produto_categorias,uuid default gen_random_uuid(),null,null
-column,public,codigo_empresa,produto_categorias,text default null,null,null
-column,public,nome,produto_categorias,text default null,null,null
-column,public,descricao,produto_categorias,text default null,null,null
-column,public,ativa,produto_categorias,boolean default true,null,null
-column,public,created_at,produto_categorias,timestamp with time zone default now(),null,null
-column,public,updated_at,produto_categorias,timestamp with time zone default now(),null,null
 column,public,id,produto_categorias_pkey,uuid default null,null,null
 column,public,codigo_empresa,ux_produto_categorias_empresa_nome,text default null,null,null
 column,public,lower,ux_produto_categorias_empresa_nome,text default null,null,null
-column,public,id,quadras_dias_funcionamento,uuid default gen_random_uuid(),null,null
-column,public,quadra_id,quadras_dias_funcionamento,uuid default null,null,null
-column,public,codigo_empresa,quadras_dias_funcionamento,text default null,null,null
-column,public,tipo,quadras_dias_funcionamento,character varying(20) default null,null,Tipo de configuraÃ§Ã£o: dia_semana ou data_fechamento
-column,public,dia_semana,quadras_dias_funcionamento,integer default null,null,"Dia da semana (0=domingo, 1=segunda, ..., 6=sÃ¡bado)"
-column,public,data_fechamento,quadras_dias_funcionamento,date default null,null,Data especÃ­fica de fechamento
-column,public,funciona,quadras_dias_funcionamento,boolean default true,null,"Se a quadra funciona neste dia/data (true=aberta, false=fechada)"
-column,public,observacao,quadras_dias_funcionamento,text default null,null,null
-column,public,created_at,quadras_dias_funcionamento,timestamp with time zone default now(),null,null
-column,public,updated_at,quadras_dias_funcionamento,timestamp with time zone default now(),null,null
 column,public,id,quadras_dias_funcionamento_pkey,uuid default null,null,null
 column,public,data_fechamento,idx_quadras_dias_funcionamento_data,date default null,null,null
 column,public,codigo_empresa,idx_quadras_dias_funcionamento_empresa,text default null,null,null
@@ -990,24 +929,10 @@ column,public,quadra_id,idx_quadras_dias_funcionamento_quadra_dia_semana,uuid de
 column,public,dia_semana,idx_quadras_dias_funcionamento_quadra_dia_semana,integer default null,null,null
 column,public,id,users_pkey,uuid default null,null,null
 column,public,codigo_empresa,usuarios_codigo_empresa_idx,character varying(10) default null,null,null
-column,public,id,vendas,uuid default gen_random_uuid(),null,null
-column,public,cliente_id,vendas,uuid default null,null,null
-column,public,numero_mesa,vendas,integer default null,null,null
-column,public,valor_total,vendas,"numeric(10,2) default null",null,null
-column,public,status,vendas,character varying(20) default 'pending'::character varying,null,null
-column,public,criado_em,vendas,timestamp with time zone default now(),null,null
-column,public,codigo_empresa,vendas,character varying(10) default null,null,null
 column,public,id,sales_pkey,uuid default null,null,null
 column,public,criado_em,idx_vendas_criado_em,timestamp with time zone default null,null,null
 column,public,codigo_empresa,idx_vendas_empresa_status,character varying(10) default null,null,null
 column,public,status,idx_vendas_empresa_status,character varying(20) default null,null,null
-column,public,id,caixa_movimentacoes,bigint default nextval('caixa_movimentacoes_id_seq'::regclass),null,null
-column,public,codigo_empresa,caixa_movimentacoes,text default null,null,null
-column,public,caixa_sessao_id,caixa_movimentacoes,uuid default null,null,null
-column,public,tipo,caixa_movimentacoes,text default null,null,null
-column,public,valor,caixa_movimentacoes,"numeric(14,2) default null",null,null
-column,public,observacao,caixa_movimentacoes,text default null,null,null
-column,public,criado_em,caixa_movimentacoes,timestamp with time zone default now(),null,null
 column,public,id,caixa_movimentacoes_pkey,bigint default null,null,null
 column,public,codigo_empresa,idx_caixa_mov_empresa_sessao,text default null,null,null
 column,public,caixa_sessao_id,idx_caixa_mov_empresa_sessao,uuid default null,null,null
@@ -1022,35 +947,12 @@ column,public,codigo_empresa,uq_mesas_empresa_numero,text default null,null,null
 column,public,numero,uq_mesas_empresa_numero,integer default null,null,null
 column,public,user_id,user_ui_settings_pkey,uuid default null,null,null
 column,public,scope,user_ui_settings_pkey,text default null,null,null
-column,public,id,itens_venda,uuid default gen_random_uuid(),null,null
-column,public,venda_id,itens_venda,uuid default null,null,null
-column,public,produto_id,itens_venda,uuid default null,null,null
-column,public,quantidade,itens_venda,integer default null,null,null
-column,public,preco_unitario,itens_venda,"numeric(10,2) default null",null,null
-column,public,preco_total,itens_venda,"numeric(10,2) default null",null,null
-column,public,codigo_empresa,itens_venda,character varying(10) default null,null,null
 column,public,id,sale_items_pkey,uuid default null,null,null
 column,public,codigo_empresa,idx_itens_venda_empresa,character varying(10) default null,null,null
-column,public,id,comanda_historico,uuid default gen_random_uuid(),null,null
-column,public,codigo_empresa,comanda_historico,integer default null,null,null
-column,public,comanda_id,comanda_historico,uuid default null,null,null
-column,public,tipo_alteracao,comanda_historico,character varying(50) default null,null,null
-column,public,descricao,comanda_historico,text default null,null,null
-column,public,usuario_id,comanda_historico,uuid default null,null,null
-column,public,criado_em,comanda_historico,timestamp with time zone default now(),null,null
 column,public,id,comanda_historico_pkey,uuid default null,null,null
 column,public,codigo_empresa,idx_comanda_historico_codigo_empresa,integer default null,null,null
 column,public,comanda_id,idx_comanda_historico_comanda_id,uuid default null,null,null
 column,public,tipo_alteracao,idx_comanda_historico_tipo,character varying(50) default null,null,null
-column,public,id,contas_receber_baixas,uuid default gen_random_uuid(),null,null
-column,public,codigo_empresa,contas_receber_baixas,text default null,null,null
-column,public,conta_id,contas_receber_baixas,uuid default null,null,null
-column,public,data_baixa,contas_receber_baixas,date default null,null,null
-column,public,valor_baixa,contas_receber_baixas,"numeric(12,2) default null",null,null
-column,public,finalizadora_id,contas_receber_baixas,uuid default null,null,null
-column,public,pagamento_id,contas_receber_baixas,uuid default null,null,null
-column,public,observacao,contas_receber_baixas,text default null,null,null
-column,public,criado_em,contas_receber_baixas,timestamp with time zone default now(),null,null
 column,public,id,contas_receber_baixas_pkey,uuid default null,null,null
 column,public,codigo_empresa,idx_cr_baixas_empresa_conta,text default null,null,null
 column,public,conta_id,idx_cr_baixas_empresa_conta,uuid default null,null,null
@@ -1068,12 +970,6 @@ column,public,codigo_empresa,idx_compras_empresa_modelo_nfe,integer default null
 column,public,modelo_nfe,idx_compras_empresa_modelo_nfe,character(2) default null,null,null
 column,public,fornecedor_id,idx_compras_fornecedor,uuid default null,null,null
 column,public,status,idx_compras_status,character varying(20) default null,null,null
-column,public,id,comanda_clientes,uuid default gen_random_uuid(),null,null
-column,public,comanda_id,comanda_clientes,uuid default null,null,null
-column,public,cliente_id,comanda_clientes,uuid default null,null,null
-column,public,nome_livre,comanda_clientes,text default null,null,null
-column,public,codigo_empresa,comanda_clientes,text default null,null,null
-column,public,created_at,comanda_clientes,timestamp with time zone default now(),null,null
 column,public,id,comanda_clientes_pkey,uuid default null,null,null
 column,public,cliente_id,comanda_clientes_cliente_idx,uuid default null,null,null
 column,public,comanda_id,comanda_clientes_comanda_idx,uuid default null,null,null
@@ -1081,21 +977,6 @@ column,public,codigo_empresa,comanda_clientes_empresa_idx,text default null,null
 column,public,cliente_id,idx_comanda_clientes_cliente,uuid default null,null,null
 column,public,comanda_id,idx_comanda_clientes_comanda,uuid default null,null,null
 column,public,codigo_empresa,idx_comanda_clientes_empresa,text default null,null,null
-column,public,id,contas_pagar,uuid default gen_random_uuid(),null,null
-column,public,codigo_empresa,contas_pagar,text default null,null,null
-column,public,fornecedor_id,contas_pagar,uuid default null,null,null
-column,public,origem_tipo,contas_pagar,text default null,null,null
-column,public,origem_id,contas_pagar,uuid default null,null,null
-column,public,descricao,contas_pagar,text default null,null,null
-column,public,categoria,contas_pagar,text default null,null,null
-column,public,valor_total,contas_pagar,"numeric(12,2) default null",null,null
-column,public,valor_aberto,contas_pagar,"numeric(12,2) default null",null,null
-column,public,data_emissao,contas_pagar,date default null,null,null
-column,public,data_vencimento,contas_pagar,date default null,null,null
-column,public,status,contas_pagar,text default 'aberto'::text,null,null
-column,public,observacoes,contas_pagar,text default null,null,null
-column,public,criado_em,contas_pagar,timestamp with time zone default now(),null,null
-column,public,atualizado_em,contas_pagar,timestamp with time zone default now(),null,null
 column,public,id,contas_pagar_pkey,uuid default null,null,null
 column,public,codigo_empresa,idx_contas_pagar_empresa_fornecedor,text default null,null,null
 column,public,fornecedor_id,idx_contas_pagar_empresa_fornecedor,uuid default null,null,null
@@ -1141,21 +1022,6 @@ column,public,codigo_empresa,idx_caixa_sessoes_empresa,text default null,null,nu
 column,public,codigo_empresa,idx_caixa_sessoes_empresa_status,text default null,null,null
 column,public,status,idx_caixa_sessoes_empresa_status,text default null,null,null
 column,public,codigo_empresa,uq_caixa_aberto_por_empresa,text default null,null,null
-column,public,id,comanda_itens,uuid default gen_random_uuid(),null,null
-column,public,codigo_empresa,comanda_itens,text default get_my_company_code(),null,null
-column,public,comanda_id,comanda_itens,uuid default null,null,null
-column,public,produto_id,comanda_itens,uuid default null,null,null
-column,public,descricao,comanda_itens,text default null,null,null
-column,public,quantidade,comanda_itens,"numeric(12,3) default null",null,null
-column,public,preco_unitario,comanda_itens,"numeric(12,2) default null",null,null
-column,public,desconto,comanda_itens,"numeric(12,2) default 0",null,null
-column,public,total,comanda_itens,"numeric(12,2) default ((quantidade * preco_unitario) - desconto)",null,null
-column,public,created_at,comanda_itens,timestamp with time zone default now(),null,null
-column,public,updated_at,comanda_itens,timestamp with time zone default now(),null,null
-column,public,desconto_tipo,comanda_itens,character varying(20) default NULL::character varying,null,null
-column,public,desconto_valor,comanda_itens,"numeric(10,2) default 0",null,null
-column,public,desconto_motivo,comanda_itens,character varying(255) default NULL::character varying,null,null
-column,public,preco_com_desconto,comanda_itens,"numeric(10,2) default NULL::numeric",null,null
 column,public,id,comanda_itens_pkey,uuid default null,null,null
 column,public,codigo_empresa,idx_comanda_itens_codigo_empresa,text default null,null,null
 column,public,comanda_id,idx_comanda_itens_comanda,uuid default null,null,null
@@ -1170,48 +1036,14 @@ column,public,ordem,idx_agendamento_participantes_ordem,integer default null,nul
 column,public,agendamento_id,idx_agp_agendamento,uuid default null,null,null
 column,public,codigo_empresa,idx_agp_codigo_empresa,character varying(10) default null,null,null
 column,public,finalizadora_id,idx_agp_finalizadora,uuid default null,null,null
-column,public,id,movimentos_saldo,uuid default gen_random_uuid(),null,null
-column,public,codigo_empresa,movimentos_saldo,text default null,null,null
-column,public,cliente_id,movimentos_saldo,uuid default null,null,null
-column,public,agendamento_id,movimentos_saldo,uuid default null,null,null
-column,public,tipo,movimentos_saldo,text default null,null,null
-column,public,valor,movimentos_saldo,"numeric(12,2) default null",null,null
-column,public,motivo,movimentos_saldo,text default null,null,null
-column,public,created_at,movimentos_saldo,timestamp with time zone default now(),null,null
 column,public,id,movimentos_saldo_pkey,uuid default null,null,null
 column,public,agendamento_id,idx_mov_saldo_agendamento,uuid default null,null,null
 column,public,cliente_id,idx_mov_saldo_cliente,uuid default null,null,null
 column,public,codigo_empresa,idx_mov_saldo_empresa,text default null,null,null
-column,public,id,caixa_movimentos,uuid default gen_random_uuid(),null,null
-column,public,codigo_empresa,caixa_movimentos,text default get_my_company_code(),null,null
-column,public,caixa_id,caixa_movimentos,uuid default null,null,null
-column,public,tipo,caixa_movimentos,caixa_mov_tipo default null,null,null
-column,public,origem,caixa_movimentos,text default null,null,null
-column,public,metodo,caixa_movimentos,payment_method default null,null,null
-column,public,valor,caixa_movimentos,"numeric(12,2) default null",null,null
-column,public,referencia_id,caixa_movimentos,uuid default null,null,null
-column,public,observacao,caixa_movimentos,text default null,null,null
-column,public,created_at,caixa_movimentos,timestamp with time zone default now(),null,null
-column,public,updated_at,caixa_movimentos,timestamp with time zone default now(),null,null
 column,public,id,caixa_movimentos_pkey,uuid default null,null,null
 column,public,caixa_id,idx_caixa_movimentos_caixa,uuid default null,null,null
 column,public,codigo_empresa,idx_caixa_movimentos_empresa,text default null,null,null
-column,public,comanda_id,estoque_baixa_log,uuid default null,null,null
-column,public,baixado_em,estoque_baixa_log,timestamp with time zone default now(),null,null
 column,public,comanda_id,estoque_baixa_log_pkey,uuid default null,null,null
-column,public,id,caixa_resumos,bigint default nextval('caixa_resumos_id_seq'::regclass),null,null
-column,public,codigo_empresa,caixa_resumos,text default null,null,null
-column,public,caixa_sessao_id,caixa_resumos,uuid default null,null,null
-column,public,periodo_de,caixa_resumos,timestamp with time zone default null,null,null
-column,public,periodo_ate,caixa_resumos,timestamp with time zone default null,null,null
-column,public,total_bruto,caixa_resumos,"numeric(14,2) default 0",null,null
-column,public,total_descontos,caixa_resumos,"numeric(14,2) default 0",null,null
-column,public,total_liquido,caixa_resumos,"numeric(14,2) default 0",null,null
-column,public,total_entradas,caixa_resumos,"numeric(14,2) default 0",null,null
-column,public,por_finalizadora,caixa_resumos,jsonb default '{}'::jsonb,null,null
-column,public,criado_em,caixa_resumos,timestamp with time zone default now(),null,null
-column,public,valor_final_dinheiro,caixa_resumos,numeric default null,null,Valor contado informado no fechamento do caixa (em dinheiro total no caixa no momento do fechamento).
-column,public,diferenca_dinheiro,caixa_resumos,numeric default null,null,DiferenÃ§a entre o valor contado e o saldo final calculado (contado - saldo_final_calculado).
 column,public,id,caixa_resumos_pkey,bigint default null,null,null
 column,public,codigo_empresa,idx_caixa_resumos_empresa_sessao,text default null,null,null
 column,public,caixa_sessao_id,idx_caixa_resumos_empresa_sessao,uuid default null,null,null
@@ -1219,15 +1051,6 @@ column,public,periodo_de,idx_caixa_resumos_periodo,timestamp with time zone defa
 column,public,periodo_ate,idx_caixa_resumos_periodo,timestamp with time zone default null,null,null
 column,public,caixa_sessao_id,idx_caixa_resumos_sessao_criado_em,uuid default null,null,null
 column,public,criado_em,idx_caixa_resumos_sessao_criado_em,timestamp with time zone default null,null,null
-column,public,empresa_id,agenda_settings,uuid default null,null,null
-column,public,auto_confirm_enabled,agenda_settings,boolean default false,null,null
-column,public,auto_confirm_hours,agenda_settings,integer default null,null,null
-column,public,auto_cancel_if_not_confirmed_enabled,agenda_settings,boolean default false,null,null
-column,public,auto_cancel_hours,agenda_settings,integer default null,null,null
-column,public,auto_start_enabled,agenda_settings,boolean default true,null,null
-column,public,auto_finish_enabled,agenda_settings,boolean default true,null,null
-column,public,created_at,agenda_settings,timestamp with time zone default now(),null,null
-column,public,updated_at,agenda_settings,timestamp with time zone default now(),null,null
 column,public,empresa_id,agenda_settings_pkey,uuid default null,null,null
 column,public,id,products_pkey,uuid default null,null,null
 column,public,lower,idx_produtos_categoria,text default null,null,null
@@ -1245,20 +1068,6 @@ column,public,lower,produtos_codigo_empresa_nome_unidade_unique,text default nul
 column,public,coalesce,produtos_codigo_empresa_nome_unidade_unique,text default null,null,null
 column,public,codigo_empresa,ux_produtos_empresa_codigo_produto,character varying(10) default null,null,null
 column,public,lower,ux_produtos_empresa_codigo_produto,text default null,null,null
-column,public,id,contas_receber,uuid default gen_random_uuid(),null,null
-column,public,codigo_empresa,contas_receber,text default null,null,null
-column,public,cliente_id,contas_receber,uuid default null,null,null
-column,public,origem_tipo,contas_receber,text default null,null,null
-column,public,origem_id,contas_receber,uuid default null,null,null
-column,public,descricao,contas_receber,text default null,null,null
-column,public,valor_total,contas_receber,"numeric(12,2) default null",null,null
-column,public,valor_aberto,contas_receber,"numeric(12,2) default null",null,null
-column,public,data_emissao,contas_receber,date default null,null,null
-column,public,data_vencimento,contas_receber,date default null,null,null
-column,public,status,contas_receber,text default 'aberto'::text,null,null
-column,public,observacoes,contas_receber,text default null,null,null
-column,public,criado_em,contas_receber,timestamp with time zone default now(),null,null
-column,public,atualizado_em,contas_receber,timestamp with time zone default now(),null,null
 column,public,id,contas_receber_pkey,uuid default null,null,null
 column,public,codigo_empresa,idx_contas_receber_empresa_cliente,text default null,null,null
 column,public,cliente_id,idx_contas_receber_empresa_cliente,uuid default null,null,null
@@ -1266,13 +1075,6 @@ column,public,codigo_empresa,idx_contas_receber_empresa_status,text default null
 column,public,status,idx_contas_receber_empresa_status,text default null,null,null
 column,public,codigo_empresa,idx_contas_receber_empresa_vencimento,text default null,null,null
 column,public,data_vencimento,idx_contas_receber_empresa_vencimento,date default null,null,null
-column,public,id,estoque_reservado,uuid default gen_random_uuid(),null,null
-column,public,codigo_empresa,estoque_reservado,integer default null,null,null
-column,public,produto_id,estoque_reservado,uuid default null,null,null
-column,public,comanda_id,estoque_reservado,uuid default null,null,null
-column,public,quantidade,estoque_reservado,"numeric(10,2) default null",null,null
-column,public,reservado_em,estoque_reservado,timestamp with time zone default now(),null,null
-column,public,liberado_em,estoque_reservado,timestamp with time zone default null,null,null
 column,public,id,estoque_reservado_pkey,uuid default null,null,null
 column,public,liberado_em,idx_estoque_reservado_ativo,timestamp with time zone default null,null,null
 column,public,comanda_id,idx_estoque_reservado_comanda_id,uuid default null,null,null
@@ -1310,62 +1112,10 @@ column,public,codigo_empresa,uq_clientes_empresa_cpf,text default null,null,null
 column,public,cpf,uq_clientes_empresa_cpf,character varying(14) default null,null,null
 column,public,codigo_empresa,uq_clientes_empresa_email_lower,text default null,null,null
 column,public,lower,uq_clientes_empresa_email_lower,text default null,null,null
-column,public,id,compras_itens,uuid default gen_random_uuid(),null,null
-column,public,compra_id,compras_itens,uuid default null,null,null
-column,public,produto_id,compras_itens,uuid default null,null,null
-column,public,codigo_produto_xml,compras_itens,character varying(60) default null,null,CÃ³digo do produto conforme consta no XML
-column,public,nome_produto_xml,compras_itens,character varying(255) default null,null,null
-column,public,ean_xml,compras_itens,character varying(14) default null,null,null
-column,public,ncm_xml,compras_itens,character varying(8) default null,null,null
-column,public,cfop_xml,compras_itens,character varying(4) default null,null,null
-column,public,unidade_xml,compras_itens,character varying(6) default null,null,null
-column,public,quantidade,compras_itens,"numeric(15,4) default null",null,null
-column,public,valor_unitario,compras_itens,"numeric(15,4) default null",null,null
-column,public,valor_total,compras_itens,"numeric(15,2) default null",null,null
-column,public,valor_desconto,compras_itens,"numeric(15,2) default 0",null,null
-column,public,valor_frete,compras_itens,"numeric(15,2) default 0",null,null
-column,public,valor_seguro,compras_itens,"numeric(15,2) default 0",null,null
-column,public,valor_outras_despesas,compras_itens,"numeric(15,2) default 0",null,null
-column,public,icms_aliquota,compras_itens,"numeric(5,2) default null",null,null
-column,public,icms_valor,compras_itens,"numeric(15,2) default null",null,null
-column,public,ipi_aliquota,compras_itens,"numeric(5,2) default null",null,null
-column,public,ipi_valor,compras_itens,"numeric(15,2) default null",null,null
-column,public,pis_aliquota,compras_itens,"numeric(5,2) default null",null,null
-column,public,pis_valor,compras_itens,"numeric(15,2) default null",null,null
-column,public,cofins_aliquota,compras_itens,"numeric(5,2) default null",null,null
-column,public,cofins_valor,compras_itens,"numeric(15,2) default null",null,null
-column,public,vinculado_manualmente,compras_itens,boolean default false,null,Indica se o produto foi vinculado manualmente pelo usuÃ¡rio
-column,public,observacoes,compras_itens,text default null,null,null
-column,public,criado_em,compras_itens,timestamp with time zone default now(),null,null
-column,public,selecionado_na_importacao,compras_itens,boolean default true,null,Indica se este produto foi selecionado pelo usuÃ¡rio durante a importaÃ§Ã£o original do XML. Usado para manter consistÃªncia no reprocessamento.
 column,public,id,compras_itens_pkey,uuid default null,null,null
 column,public,compra_id,idx_compras_itens_compra,uuid default null,null,null
 column,public,produto_id,idx_compras_itens_produto,uuid default null,null,null
 column,public,selecionado_na_importacao,idx_compras_itens_selecionado,boolean default null,null,null
-column,public,id,finalizadoras,uuid default gen_random_uuid(),null,null
-column,public,codigo_empresa,finalizadoras,text default null,null,null
-column,public,nome,finalizadoras,text default null,null,null
-column,public,tipo,finalizadoras,text default 'outros'::text,null,null
-column,public,ativo,finalizadoras,boolean default true,null,null
-column,public,ordem,finalizadoras,integer default 0,null,null
-column,public,taxa_percentual,finalizadoras,"numeric(8,4) default null",null,null
-column,public,observacao,finalizadoras,text default null,null,null
-column,public,created_at,finalizadoras,timestamp with time zone default now(),null,null
-column,public,updated_at,finalizadoras,timestamp with time zone default now(),null,null
-column,public,codigo_interno,finalizadoras,text default null,null,"CÃ³digo interno sequencial (01, 02, 03...)"
-column,public,codigo_sefaz,finalizadoras,text default null,null,CÃ³digo oficial SEFAZ para XML NF-e/NFC-e
-column,public,id,empresas,uuid default gen_random_uuid(),null,null
-column,public,codigo_empresa,empresas,character varying(10) default null,null,null
-column,public,nome,empresas,character varying(255) default null,null,null
-column,public,telefone,empresas,character varying(20) default null,null,null
-column,public,endereco,empresas,text default null,null,null
-column,public,criado_em,empresas,timestamp with time zone default now(),null,null
-column,public,atualizado_em,empresas,timestamp with time zone default now(),null,null
-column,public,razao_social,empresas,text default null,null,null
-column,public,nome_fantasia,empresas,text default null,null,null
-column,public,cnpj,empresas,character varying(18) default null,null,null
-column,public,email,empresas,text default null,null,null
-column,public,logo_url,empresas,text default null,null,null
 column,public,id,clientes,uuid default gen_random_uuid(),null,null
 column,public,nome,clientes,character varying(255) default null,null,null
 column,public,cpf,clientes,character varying(14) default null,null,null
@@ -1411,6 +1161,243 @@ column,public,nome_mae,clientes,text default null,null,null
 column,public,nome_pai,clientes,text default null,null,null
 column,public,observacoes,clientes,text default null,null,null
 column,public,is_consumidor_final,clientes,boolean default false,null,"Identifica cliente padrÃ£o ""Consumidor Final"" que nÃ£o pode ser editado/excluÃ­do. Sempre recebe cÃ³digo 0."
+column,public,id,produtos,uuid default gen_random_uuid(),null,null
+column,public,nome,produtos,character varying(255) default null,null,null
+column,public,valor_venda,produtos,"numeric(10,2) default null",null,null
+column,public,categoria,produtos,character varying(100) default null,null,null
+column,public,status,produtos,character varying(20) default 'active'::character varying,null,null
+column,public,criado_em,produtos,timestamp with time zone default now(),null,null
+column,public,codigo_empresa,produtos,character varying(10) default null,null,null
+column,public,valor_custo,produtos,"numeric(10,2) default 0",null,null
+column,public,validade,produtos,date default null,null,null
+column,public,estoque,produtos,integer default 0,null,null
+column,public,estoque_minimo,produtos,integer default 0,null,null
+column,public,tipo_produto,produtos,character varying(20) default 'venda'::character varying,null,null
+column,public,codigo_produto,produtos,text default null,null,null
+column,public,codigo_barras,produtos,character varying(13) default null,null,null
+column,public,codigo_barras_caixa,produtos,character varying(13) default null,null,null
+column,public,referencia,produtos,character varying(100) default null,null,null
+column,public,marca,produtos,character varying(100) default null,null,null
+column,public,grupo,produtos,character varying(100) default null,null,null
+column,public,unidade,produtos,character varying(10) default null,null,null
+column,public,estoque_inicial,produtos,integer default null,null,null
+column,public,estoque_atual,produtos,integer default null,null,null
+column,public,peso,produtos,"numeric(10,3) default null",null,null
+column,public,preco_compra,produtos,"numeric(12,2) default null",null,null
+column,public,custos_percent,produtos,"numeric(7,4) default null",null,null
+column,public,preco_custo,produtos,"numeric(12,2) default null",null,null
+column,public,lucro_percent,produtos,"numeric(7,4) default null",null,null
+column,public,preco_venda,produtos,"numeric(12,2) default null",null,null
+column,public,qtd_atacado,produtos,integer default null,null,null
+column,public,preco_atacado,produtos,"numeric(12,2) default null",null,null
+column,public,comissao_percent,produtos,"numeric(7,4) default null",null,null
+column,public,desconto_percent,produtos,"numeric(7,4) default null",null,null
+column,public,cfop_interno,produtos,character(4) default null,null,null
+column,public,cst_icms_interno,produtos,character(3) default null,null,null
+column,public,csosn_interno,produtos,character(3) default null,null,null
+column,public,aliquota_icms_interno,produtos,"numeric(7,4) default null",null,null
+column,public,cfop_externo,produtos,character(4) default null,null,null
+column,public,cst_icms_externo,produtos,character(3) default null,null,null
+column,public,csosn_externo,produtos,character(3) default null,null,null
+column,public,aliquota_icms_externo,produtos,"numeric(7,4) default null",null,null
+column,public,cst_pis_entrada,produtos,character(2) default null,null,null
+column,public,cst_pis_saida,produtos,character(2) default null,null,null
+column,public,aliquota_pis_percent,produtos,"numeric(7,4) default null",null,null
+column,public,aliquota_cofins_percent,produtos,"numeric(7,4) default null",null,null
+column,public,cst_ipi,produtos,character(2) default null,null,null
+column,public,aliquota_ipi_percent,produtos,"numeric(7,4) default null",null,null
+column,public,fcp_percent,produtos,"numeric(7,4) default null",null,null
+column,public,mva_percent,produtos,"numeric(7,4) default null",null,null
+column,public,base_reduzida_percent,produtos,"numeric(7,4) default null",null,null
+column,public,ncm,produtos,character varying(10) default null,null,null
+column,public,descricao_ncm,produtos,text default null,null,null
+column,public,cest,produtos,character(7) default null,null,null
+column,public,ativo,produtos,boolean default true,null,null
+column,public,permite_venda,produtos,boolean default true,null,null
+column,public,paga_comissao,produtos,boolean default false,null,null
+column,public,preco_variavel,produtos,boolean default false,null,null
+column,public,composicao,produtos,boolean default false,null,null
+column,public,servico,produtos,boolean default false,null,null
+column,public,grade,produtos,boolean default false,null,null
+column,public,usar_tabela_preco,produtos,boolean default false,null,null
+column,public,combustivel,produtos,boolean default false,null,null
+column,public,usa_imei,produtos,boolean default false,null,null
+column,public,controle_estoque_por_grade,produtos,boolean default false,null,null
+column,public,mostrar_no_app,produtos,boolean default false,null,null
+column,public,importado_via_xml,produtos,boolean default false,null,Indica se o produto foi importado de um XML de NF-e
+column,public,xml_chave,produtos,text default null,null,null
+column,public,xml_numero,produtos,text default null,null,null
+column,public,xml_serie,produtos,text default null,null,null
+column,public,xml_emissao,produtos,timestamp with time zone default null,null,null
+column,public,fornecedor_id,produtos,uuid default null,null,ID do fornecedor (cliente com flag_fornecedor=true)
+column,public,data_importacao,produtos,timestamp with time zone default null,null,Data/hora da Ãºltima importaÃ§Ã£o via XML
+column,public,xml_chave_nfe,produtos,character varying(44) default null,null,Chave de acesso da NF-e de origem (44 dÃ­gitos)
+column,public,xml_numero_nfe,produtos,character varying(20) default null,null,NÃºmero da NF-e de origem
+column,public,id,agendamento_participantes,uuid default gen_random_uuid(),null,null
+column,public,agendamento_id,agendamento_participantes,uuid default null,null,null
+column,public,cliente_id,agendamento_participantes,uuid default null,null,null
+column,public,nome,agendamento_participantes,text default null,null,null
+column,public,valor_cota,agendamento_participantes,"numeric(10,2) default 0",null,Valor atribuÃ­do ao participante
+column,public,status_pagamento,agendamento_participantes,payment_status default 'Pendente'::payment_status,null,null
+column,public,pago_em,agendamento_participantes,timestamp with time zone default null,null,null
+column,public,metodo_pagamento,agendamento_participantes,text default null,null,null
+column,public,codigo_empresa,agendamento_participantes,character varying(10) default null,null,null
+column,public,created_at,agendamento_participantes,timestamp with time zone default now(),null,null
+column,public,updated_at,agendamento_participantes,timestamp with time zone default now(),null,null
+column,public,finalizadora_id,agendamento_participantes,uuid default null,null,null
+column,public,aplicar_taxa,agendamento_participantes,boolean default false,null,null
+column,public,ordem,agendamento_participantes,integer default 1,null,Ordem do participante no agendamento (1=representante/primeiro)
+column,public,id,compras_itens,uuid default gen_random_uuid(),null,null
+column,public,compra_id,compras_itens,uuid default null,null,null
+column,public,produto_id,compras_itens,uuid default null,null,null
+column,public,codigo_produto_xml,compras_itens,character varying(60) default null,null,CÃ³digo do produto conforme consta no XML
+column,public,nome_produto_xml,compras_itens,character varying(255) default null,null,null
+column,public,ean_xml,compras_itens,character varying(14) default null,null,null
+column,public,ncm_xml,compras_itens,character varying(8) default null,null,null
+column,public,cfop_xml,compras_itens,character varying(4) default null,null,null
+column,public,unidade_xml,compras_itens,character varying(6) default null,null,null
+column,public,quantidade,compras_itens,"numeric(15,4) default null",null,null
+column,public,valor_unitario,compras_itens,"numeric(15,4) default null",null,null
+column,public,valor_total,compras_itens,"numeric(15,2) default null",null,null
+column,public,valor_desconto,compras_itens,"numeric(15,2) default 0",null,null
+column,public,valor_frete,compras_itens,"numeric(15,2) default 0",null,null
+column,public,valor_seguro,compras_itens,"numeric(15,2) default 0",null,null
+column,public,valor_outras_despesas,compras_itens,"numeric(15,2) default 0",null,null
+column,public,icms_aliquota,compras_itens,"numeric(5,2) default null",null,null
+column,public,icms_valor,compras_itens,"numeric(15,2) default null",null,null
+column,public,ipi_aliquota,compras_itens,"numeric(5,2) default null",null,null
+column,public,ipi_valor,compras_itens,"numeric(15,2) default null",null,null
+column,public,pis_aliquota,compras_itens,"numeric(5,2) default null",null,null
+column,public,pis_valor,compras_itens,"numeric(15,2) default null",null,null
+column,public,cofins_aliquota,compras_itens,"numeric(5,2) default null",null,null
+column,public,cofins_valor,compras_itens,"numeric(15,2) default null",null,null
+column,public,vinculado_manualmente,compras_itens,boolean default false,null,Indica se o produto foi vinculado manualmente pelo usuÃ¡rio
+column,public,observacoes,compras_itens,text default null,null,null
+column,public,criado_em,compras_itens,timestamp with time zone default now(),null,null
+column,public,selecionado_na_importacao,compras_itens,boolean default true,null,Indica se este produto foi selecionado pelo usuÃ¡rio durante a importaÃ§Ã£o original do XML. Usado para manter consistÃªncia no reprocessamento.
+column,public,id,pagamentos,uuid default gen_random_uuid(),null,null
+column,public,codigo_empresa,pagamentos,text default get_my_company_code(),null,null
+column,public,comanda_id,pagamentos,uuid default null,null,null
+column,public,caixa_id,pagamentos,uuid default null,null,null
+column,public,metodo,pagamentos,text default null,null,null
+column,public,valor,pagamentos,"numeric(12,2) default null",null,null
+column,public,status,pagamentos,text default 'Pago'::text,null,null
+column,public,recebido_em,pagamentos,timestamp with time zone default now(),null,null
+column,public,created_at,pagamentos,timestamp with time zone default now(),null,null
+column,public,updated_at,pagamentos,timestamp with time zone default now(),null,null
+column,public,finalizadora_id,pagamentos,uuid default null,null,null
+column,public,origem,pagamentos,text default 'manual'::text,null,null
+column,public,xml_chave,pagamentos,text default null,null,null
+column,public,cliente_id,pagamentos,uuid default null,null,null
+column,public,id,caixa_sessoes,uuid default gen_random_uuid(),null,null
+column,public,codigo_empresa,caixa_sessoes,text default get_my_company_code(),null,null
+column,public,usuario_id,caixa_sessoes,uuid default null,null,null
+column,public,aberto_em,caixa_sessoes,timestamp with time zone default now(),null,null
+column,public,fechado_em,caixa_sessoes,timestamp with time zone default null,null,null
+column,public,status,caixa_sessoes,text default 'open'::text,null,null
+column,public,saldo_inicial,caixa_sessoes,"numeric(12,2) default 0",null,null
+column,public,saldo_final,caixa_sessoes,"numeric(12,2) default null",null,null
+column,public,observacao,caixa_sessoes,text default null,null,null
+column,public,created_at,caixa_sessoes,timestamp with time zone default now(),null,null
+column,public,updated_at,caixa_sessoes,timestamp with time zone default now(),null,null
+column,public,id,comandas,uuid default gen_random_uuid(),null,null
+column,public,codigo_empresa,comandas,text default get_my_company_code(),null,null
+column,public,mesa_id,comandas,uuid default null,null,null
+column,public,cliente_id,comandas,uuid default null,null,null
+column,public,aberto_em,comandas,timestamp with time zone default now(),null,null
+column,public,fechado_em,comandas,timestamp with time zone default null,null,null
+column,public,observacao,comandas,text default null,null,null
+column,public,created_at,comandas,timestamp with time zone default now(),null,null
+column,public,updated_at,comandas,timestamp with time zone default now(),null,null
+column,public,is_balcao,comandas,boolean default (mesa_id IS NULL),null,True quando a comanda nÃ£o possui mesa (BalcÃ£o).
+column,public,tipo,comandas,"text default 
+CASE
+    WHEN (mesa_id IS NULL) THEN 'balcao'::text
+    ELSE 'comanda'::text
+END",null,Tipo da comanda: balcao | comanda
+column,public,status,comandas,text default 'open'::text,null,null
+column,public,origem,comandas,text default 'manual'::text,null,null
+column,public,xml_chave,comandas,text default null,null,null
+column,public,diferenca_pagamento,comandas,"numeric(12,2) default 0",null,null
+column,public,desconto_tipo,comandas,character varying(20) default NULL::character varying,null,Tipo de desconto: percentual ou fixo
+column,public,desconto_valor,comandas,"numeric(10,2) default 0",null,Valor do desconto (% ou R$)
+column,public,desconto_motivo,comandas,character varying(255) default NULL::character varying,null,null
+column,public,total_com_desconto,comandas,"numeric(10,2) default NULL::numeric",null,null
+column,public,observacoes,comandas,text default null,null,"Notas/observaÃ§Ãµes da comanda (ex: sem cebola, urgente)"
+column,public,observacoes_atualizadas_em,comandas,timestamp with time zone default null,null,null
+column,public,vendedor_id,comandas,uuid default null,null,UsuÃ¡rio que realizou a venda (para comissÃ£o)
+column,public,comissao_percentual,comandas,"numeric(5,2) default NULL::numeric",null,null
+column,public,comissao_valor,comandas,"numeric(10,2) default NULL::numeric",null,null
+column,public,agendamento_id,comandas,uuid default null,null,Agendamento vinculado (se venda relacionada a agendamento)
+column,public,versao_sincronizacao,comandas,integer default 1,null,VersÃ£o para sincronizaÃ§Ã£o realtime
+column,public,ultima_atualizacao,comandas,timestamp with time zone default now(),null,null
+column,public,user_id,user_ui_settings,uuid default null,null,null
+column,public,scope,user_ui_settings,text default null,null,null
+column,public,settings,user_ui_settings,jsonb default '{}'::jsonb,null,null
+column,public,created_at,user_ui_settings,timestamp with time zone default now(),null,null
+column,public,updated_at,user_ui_settings,timestamp with time zone default now(),null,null
+column,public,id,comanda_itens,uuid default gen_random_uuid(),null,null
+column,public,codigo_empresa,comanda_itens,text default get_my_company_code(),null,null
+column,public,comanda_id,comanda_itens,uuid default null,null,null
+column,public,produto_id,comanda_itens,uuid default null,null,null
+column,public,descricao,comanda_itens,text default null,null,null
+column,public,quantidade,comanda_itens,"numeric(12,3) default null",null,null
+column,public,preco_unitario,comanda_itens,"numeric(12,2) default null",null,null
+column,public,desconto,comanda_itens,"numeric(12,2) default 0",null,null
+column,public,total,comanda_itens,"numeric(12,2) default ((quantidade * preco_unitario) - desconto)",null,null
+column,public,created_at,comanda_itens,timestamp with time zone default now(),null,null
+column,public,updated_at,comanda_itens,timestamp with time zone default now(),null,null
+column,public,desconto_tipo,comanda_itens,character varying(20) default NULL::character varying,null,null
+column,public,desconto_valor,comanda_itens,"numeric(10,2) default 0",null,null
+column,public,desconto_motivo,comanda_itens,character varying(255) default NULL::character varying,null,null
+column,public,preco_com_desconto,comanda_itens,"numeric(10,2) default NULL::numeric",null,null
+column,public,id,quadras,uuid default gen_random_uuid(),null,null
+column,public,nome,quadras,character varying(255) default null,null,null
+column,public,modalidades,quadras,text[] default null,null,null
+column,public,tipo,quadras,character varying(50) default null,null,null
+column,public,status,quadras,character varying(20) default 'Ativa'::character varying,null,null
+column,public,criado_em,quadras,timestamp with time zone default now(),null,null
+column,public,valor,quadras,"numeric(10,2) default null",null,PreÃ§o por meia hora (R$) para locaÃ§Ã£o da quadra
+column,public,hora_inicio,quadras,time without time zone default null,null,HorÃ¡rio padrÃ£o de abertura da quadra
+column,public,hora_fim,quadras,time without time zone default null,null,HorÃ¡rio padrÃ£o de fechamento da quadra
+column,public,codigo_empresa,quadras,text default null,null,null
+column,public,descricao,quadras,text default null,null,"DescriÃ§Ã£o detalhada da quadra (dimensÃµes, caracterÃ­sticas, comodidades)"
+column,public,id,itens_venda,uuid default gen_random_uuid(),null,null
+column,public,venda_id,itens_venda,uuid default null,null,null
+column,public,produto_id,itens_venda,uuid default null,null,null
+column,public,quantidade,itens_venda,integer default null,null,null
+column,public,preco_unitario,itens_venda,"numeric(10,2) default null",null,null
+column,public,preco_total,itens_venda,"numeric(10,2) default null",null,null
+column,public,codigo_empresa,itens_venda,character varying(10) default null,null,null
+column,public,id,caixa_movimentacoes,bigint default nextval('caixa_movimentacoes_id_seq'::regclass),null,null
+column,public,codigo_empresa,caixa_movimentacoes,text default null,null,null
+column,public,caixa_sessao_id,caixa_movimentacoes,uuid default null,null,null
+column,public,tipo,caixa_movimentacoes,text default null,null,null
+column,public,valor,caixa_movimentacoes,"numeric(14,2) default null",null,null
+column,public,observacao,caixa_movimentacoes,text default null,null,null
+column,public,criado_em,caixa_movimentacoes,timestamp with time zone default now(),null,null
+column,public,id,contas_pagar,uuid default gen_random_uuid(),null,null
+column,public,codigo_empresa,contas_pagar,text default null,null,null
+column,public,fornecedor_id,contas_pagar,uuid default null,null,null
+column,public,origem_tipo,contas_pagar,text default null,null,null
+column,public,origem_id,contas_pagar,uuid default null,null,null
+column,public,descricao,contas_pagar,text default null,null,null
+column,public,categoria,contas_pagar,text default null,null,null
+column,public,valor_total,contas_pagar,"numeric(12,2) default null",null,null
+column,public,valor_aberto,contas_pagar,"numeric(12,2) default null",null,null
+column,public,data_emissao,contas_pagar,date default null,null,null
+column,public,data_vencimento,contas_pagar,date default null,null,null
+column,public,status,contas_pagar,text default 'aberto'::text,null,null
+column,public,observacoes,contas_pagar,text default null,null,null
+column,public,criado_em,contas_pagar,timestamp with time zone default now(),null,null
+column,public,atualizado_em,contas_pagar,timestamp with time zone default now(),null,null
+column,public,id,comanda_historico,uuid default gen_random_uuid(),null,null
+column,public,codigo_empresa,comanda_historico,integer default null,null,null
+column,public,comanda_id,comanda_historico,uuid default null,null,null
+column,public,tipo_alteracao,comanda_historico,character varying(50) default null,null,null
+column,public,descricao,comanda_historico,text default null,null,null
+column,public,usuario_id,comanda_historico,uuid default null,null,null
+column,public,criado_em,comanda_historico,timestamp with time zone default now(),null,null
 constraint,auth,users_pkey,users,PRIMARY KEY (id),null,null
 constraint,public,movimentos_saldo_valor_check,movimentos_saldo,CHECK ((valor > (0)::numeric)),null,null
 constraint,auth,refresh_tokens_pkey,refresh_tokens,PRIMARY KEY (id),null,null
@@ -1626,7 +1613,6 @@ constraint,public,sales_customer_id_fkey,vendas,FOREIGN KEY (cliente_id) REFEREN
 constraint,public,user_ui_settings_user_id_fkey,user_ui_settings,FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE,null,null
 constraint,public,usuarios_codigo_empresa_fkey,usuarios,FOREIGN KEY (codigo_empresa) REFERENCES empresas(codigo_empresa) ON UPDATE CASCADE ON DELETE RESTRICT,null,null
 constraint,public,vendas_company_code_fkey,vendas,FOREIGN KEY (codigo_empresa) REFERENCES empresas(codigo_empresa) ON UPDATE CASCADE ON DELETE RESTRICT,null,null
-constraint,public,usuarios_tentativas_invalidas_nonneg,usuarios,CHECK (((tentativas_invalidas IS NULL) OR (tentativas_invalidas >= 0))),null,null
 index,auth,users_pkey,users,CREATE UNIQUE INDEX users_pkey ON auth.users USING btree (id),null,null
 index,auth,users_instance_id_idx,users,CREATE INDEX users_instance_id_idx ON auth.users USING btree (instance_id),null,null
 index,auth,refresh_tokens_pkey,refresh_tokens,CREATE UNIQUE INDEX refresh_tokens_pkey ON auth.refresh_tokens USING btree (id),null,null
@@ -1954,6 +1940,8 @@ trigger,public,trigger_registrar_historico_comanda,comandas,CREATE TRIGGER trigg
 trigger,public,trigger_update_compras_timestamp,compras,CREATE TRIGGER trigger_update_compras_timestamp BEFORE UPDATE ON public.compras FOR EACH ROW EXECUTE FUNCTION update_compras_timestamp(),null,null
 trigger,public,zz_agendamentos_set_codigo,agendamentos,CREATE TRIGGER zz_agendamentos_set_codigo BEFORE INSERT ON public.agendamentos FOR EACH ROW EXECUTE FUNCTION agendamentos_set_codigo_fn(),null,null
 trigger,public,zz_clientes_set_codigo,clientes,CREATE TRIGGER zz_clientes_set_codigo BEFORE INSERT ON public.clientes FOR EACH ROW EXECUTE FUNCTION clientes_set_codigo_fn(),null,null
+trigger,public,t_agendamentos_company,agendamentos,CREATE TRIGGER t_agendamentos_company BEFORE INSERT OR UPDATE ON public.agendamentos FOR EACH ROW EXECUTE FUNCTION enforce_company_claim(),null,null
+trigger,public,t_agp_company,agendamento_participantes,CREATE TRIGGER t_agp_company BEFORE INSERT OR UPDATE ON public.agendamento_participantes FOR EACH ROW EXECUTE FUNCTION enforce_company_claim(),null,null
 function,public,fx_claim_uuid,null,(key text) returns uuid,postgres,null
 function,public,app_user_role,null,() returns text,postgres,null
 function,public,app_company_code,null,() returns text,postgres,null
@@ -2044,6 +2032,7 @@ function,storage,objects_insert_prefix_trigger,null,() returns trigger,supabase_
 function,storage,delete_prefix_hierarchy_trigger,null,() returns trigger,supabase_storage_admin,null
 function,storage,foldername,null,(name text) returns text[],supabase_storage_admin,null
 function,realtime,apply_rls,null,"(wal jsonb, max_record_bytes integer) returns SETOF realtime.wal_rls",supabase_admin,null
+function,public,get_user_company_from_custom_auth,null,() returns text,postgres,null
 function,storage,list_objects_with_delimiter,null,"(bucket_id text, prefix_param text, delimiter_param text, max_keys integer, start_after text, next_token text) returns TABLE(name text, id uuid, metadata jsonb, updated_at timestamp with time zone)",supabase_storage_admin,null
 function,storage,update_updated_at_column,null,() returns trigger,supabase_storage_admin,null
 function,storage,can_insert_object,null,"(bucketid text, name text, owner uuid, metadata jsonb) returns void",supabase_storage_admin,null
@@ -2116,6 +2105,10 @@ function,net,http_delete,null,"(url text, params jsonb, headers jsonb, timeout_m
 function,net,_http_collect_response,null,"(request_id bigint, async boolean) returns net.http_response_result",supabase_admin,null
 function,net,http_collect_response,null,"(request_id bigint, async boolean) returns net.http_response_result",supabase_admin,null
 function,supabase_functions,http_request,null,() returns trigger,supabase_functions_admin,null
+function,public,auth_login_dev,null,"(p_email text, p_password text) returns jsonb",postgres,null
+function,public,app_user_id,null,() returns uuid,postgres,null
+function,public,fx_claim_text,null,(key text) returns text,postgres,null
+function,public,enforce_company_claim,null,() returns trigger,postgres,null
 function,public,_ensure_policy,null,"(tbl regclass, pol_name text, cmd text) returns void",postgres,null
 function,public,agendamentos_set_codigo_fn,null,() returns trigger,postgres,null
 function,public,atualizar_observacoes_comanda,null,"(p_comanda_id uuid, p_observacoes text) returns json",postgres,null
@@ -2160,18 +2153,16 @@ function,extensions,sign,null,"(payload json, secret text, algorithm text) retur
 function,extensions,try_cast_double,null,(inp text) returns double precision,supabase_admin,null
 function,extensions,verify,null,"(token text, secret text, algorithm text) returns TABLE(header json, payload json, valid boolean)",supabase_admin,null
 function,public,app_user_papel,null,() returns text,postgres,null
-function,public,app_user_id,null,() returns uuid,postgres,null
-function,public,fx_claim_text,null,(key text) returns text,postgres,null
-function,public,fx_claim_bigint,null,(key text) returns bigint,postgres,null
 function,public,fx_claim_int,null,(key text) returns integer,postgres,null
-function,public,auth_login_dev,null,"(p_email text, p_password text) returns jsonb",postgres,null
+function,public,get_jwt_secret,null,() returns text,postgres,null
+function,public,fx_claim_bigint,null,(key text) returns bigint,postgres,null
 sequence,graphql,seq_schema_version,null,"increment 1, min 1, max 2147483647",supabase_admin,null
-sequence,public,caixa_movimentacoes_id_seq,null,"increment 1, min 1, max 9223372036854775807",postgres,null
-sequence,public,caixa_resumos_id_seq,null,"increment 1, min 1, max 9223372036854775807",postgres,null
 sequence,auth,refresh_tokens_id_seq,null,"increment 1, min 1, max 9223372036854775807",supabase_auth_admin,null
 sequence,realtime,subscription_id_seq,null,"increment 1, min 1, max 9223372036854775807",supabase_admin,null
 sequence,net,http_request_queue_id_seq,null,"increment 1, min 1, max 9223372036854775807",supabase_admin,null
 sequence,supabase_functions,hooks_id_seq,null,"increment 1, min 1, max 9223372036854775807",supabase_functions_admin,null
+sequence,public,caixa_movimentacoes_id_seq,null,"increment 1, min 1, max 9223372036854775807",postgres,null
+sequence,public,caixa_resumos_id_seq,null,"increment 1, min 1, max 9223372036854775807",postgres,null
 type,extensions,pg_stat_statements_info,null,pg_stat_statements_info,null,null
 type,extensions,pg_stat_statements,null,pg_stat_statements,null,null
 type,auth,users,null,auth.users,null,null
@@ -2233,7 +2224,6 @@ type,net,http_response_result,null,net.http_response_result,null,null
 type,supabase_functions,migrations,null,supabase_functions.migrations,null,null
 type,public,v_agendamentos_detalhado,null,v_agendamentos_detalhado,null,null
 type,public,v_agendamentos_isis,null,v_agendamentos_isis,null,null
-type,public,usuarios_safe,null,usuarios_safe,null,null
 type,public,caixa_mov_tipo,null,caixa_mov_tipo,null,null
 type,public,comanda_status,null,comanda_status,null,null
 type,public,mesa_status,null,mesa_status,null,null
@@ -2283,10 +2273,9 @@ extension,graphql,pg_graphql,null,1.5.11,null,pg_graphql: GraphQL support
 extension,extensions,pg_net,null,0.19.5,null,Async HTTP
 extension,extensions,pg_trgm,null,1.6,null,text similarity measurement and index searching based on trigrams
 extension,extensions,pgjwt,null,0.2.0,null,JSON Web Token API for Postgresql
-grant,public,usuarios,null,postgres=arwdDxtm/postgres,postgres,null
 grant,auth,sso_providers_pkey,null,null,supabase_auth_admin,null
 grant,auth,sso_providers_resource_id_idx,null,null,supabase_auth_admin,null
-grant,public,agendamentos,null,"postgres=arwdDxtm/postgres,authenticated=r/postgres",postgres,null
+grant,public,quadras_dias_funcionamento,null,"postgres=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,anon=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
 grant,auth,sso_domains_pkey,null,null,supabase_auth_admin,null
 grant,auth,sso_domains_sso_provider_id_idx,null,null,supabase_auth_admin,null
 grant,auth,sso_domains_domain_idx,null,null,supabase_auth_admin,null
@@ -2307,17 +2296,14 @@ grant,public,usuarios_reset_token_unique,null,null,postgres,null
 grant,auth,saml_providers,null,"postgres=ar*wdDxtm/supabase_auth_admin,supabase_auth_admin=arwdDxtm/supabase_auth_admin,dashboard_user=arwdDxtm/supabase_auth_admin",supabase_auth_admin,null
 grant,auth,sso_providers,null,"postgres=ar*wdDxtm/supabase_auth_admin,supabase_auth_admin=arwdDxtm/supabase_auth_admin,dashboard_user=arwdDxtm/supabase_auth_admin",supabase_auth_admin,null
 grant,public,usuarios_empresa_email_idx,null,null,postgres,null
-grant,public,caixa_movimentacoes_id_seq,null,null,postgres,null
-grant,public,usuarios_safe,null,"postgres=arwdDxtm/postgres,anon=r/postgres,authenticated=r/postgres",postgres,null
-grant,public,caixa_resumos_id_seq,null,null,postgres,null
 grant,auth,refresh_tokens_pkey,null,null,supabase_auth_admin,null
 grant,auth,refresh_tokens_instance_id_idx,null,null,supabase_auth_admin,null
 grant,auth,refresh_tokens_instance_id_user_id_idx,null,null,supabase_auth_admin,null
 grant,auth,users_pkey,null,null,supabase_auth_admin,null
 grant,auth,instances,null,"supabase_auth_admin=arwdDxtm/supabase_auth_admin,dashboard_user=arwdDxtm/supabase_auth_admin,postgres=ar*wdDxtm/supabase_auth_admin",supabase_auth_admin,null
-grant,public,produtos,null,"postgres=arwdDxtm/postgres,authenticated=r/postgres",postgres,null
+grant,public,agendamentos,null,"postgres=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,anon=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
 grant,auth,refresh_tokens_token_unique,null,null,supabase_auth_admin,null
-grant,public,colaboradores,null,"postgres=arwdDxtm/postgres,authenticated=r/postgres",postgres,null
+grant,public,produto_categorias,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
 grant,auth,audit_log_entries_pkey,null,null,supabase_auth_admin,null
 grant,auth,audit_logs_instance_id_idx,null,null,supabase_auth_admin,null
 grant,auth,instances_pkey,null,null,supabase_auth_admin,null
@@ -2332,9 +2318,7 @@ grant,auth,email_change_token_new_idx,null,null,supabase_auth_admin,null
 grant,auth,refresh_tokens_parent_idx,null,null,supabase_auth_admin,null
 grant,auth,confirmation_token_idx,null,null,supabase_auth_admin,null
 grant,auth,reauthentication_token_idx,null,null,supabase_auth_admin,null
-grant,public,pagamentos,null,"postgres=arwdDxtm/postgres,authenticated=r/postgres",postgres,null
 grant,storage,buckets_pkey,null,null,supabase_storage_admin,null
-grant,public,compras,null,"postgres=arwdDxtm/postgres,authenticated=r/postgres",postgres,null
 grant,storage,bname,null,null,supabase_storage_admin,null
 grant,storage,buckets,null,"supabase_storage_admin=a*r*w*d*D*x*t*m*/supabase_storage_admin,anon=arwdDxtm/supabase_storage_admin,authenticated=arwdDxtm/supabase_storage_admin,service_role=arwdDxtm/supabase_storage_admin,postgres=a*r*w*d*D*x*t*m*/supabase_storage_admin",supabase_storage_admin,null
 grant,auth,mfa_factors_pkey,null,null,supabase_auth_admin,null
@@ -2353,25 +2337,22 @@ grant,vault,secrets_name_idx,null,null,supabase_admin,null
 grant,auth,mfa_amr_claims_session_id_authentication_method_pkey,null,null,supabase_auth_admin,null
 grant,vault,secrets,null,"supabase_admin=arwdDxtm/supabase_admin,postgres=r*d*D*x*/supabase_admin,service_role=rd/supabase_admin",supabase_admin,null
 grant,vault,decrypted_secrets,null,"supabase_admin=arwdDxtm/supabase_admin,postgres=r*d*D*x*/supabase_admin,service_role=rd/supabase_admin",supabase_admin,null
-grant,public,agendamento_participantes,null,"postgres=arwdDxtm/postgres,authenticated=r/postgres",postgres,null
-grant,public,contas_pagar_baixas,null,null,postgres,null
-grant,public,comandas,null,"postgres=arwdDxtm/postgres,authenticated=r/postgres",postgres,null
 grant,auth,flow_state_created_at_idx,null,null,supabase_auth_admin,null
 grant,auth,saml_relay_states_pkey,null,null,supabase_auth_admin,null
 grant,auth,saml_relay_states_sso_provider_id_idx,null,null,supabase_auth_admin,null
 grant,auth,saml_relay_states_for_email_idx,null,null,supabase_auth_admin,null
-grant,public,mesas,null,"postgres=arwdDxtm/postgres,authenticated=r/postgres",postgres,null
 grant,auth,saml_relay_states_created_at_idx,null,null,supabase_auth_admin,null
 grant,auth,users_email_partial_key,null,null,supabase_auth_admin,null
 grant,auth,sessions_not_after_idx,null,null,supabase_auth_admin,null
 grant,auth,users_phone_key,null,null,supabase_auth_admin,null
+grant,public,estoque_reservado,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
 grant,auth,mfa_challenge_created_at_idx,null,null,supabase_auth_admin,null
 grant,auth,flow_state_pkey,null,null,supabase_auth_admin,null
 grant,auth,idx_auth_code,null,null,supabase_auth_admin,null
 grant,auth,idx_user_id_auth_method,null,null,supabase_auth_admin,null
 grant,auth,refresh_tokens_updated_at_idx,null,null,supabase_auth_admin,null
+grant,public,contas_receber,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
 grant,auth,mfa_factors_user_id_idx,null,null,supabase_auth_admin,null
-grant,public,empresa_counters,null,null,postgres,null
 grant,auth,identities_user_id_idx,null,null,supabase_auth_admin,null
 grant,auth,identities_email_idx,null,null,supabase_auth_admin,null
 grant,auth,identities_pkey,null,null,supabase_auth_admin,null
@@ -2381,8 +2362,6 @@ grant,auth,one_time_tokens_pkey,null,null,supabase_auth_admin,null
 grant,auth,one_time_tokens_token_hash_hash_idx,null,null,supabase_auth_admin,null
 grant,auth,one_time_tokens_relates_to_hash_idx,null,null,supabase_auth_admin,null
 grant,auth,one_time_tokens_user_id_token_type_key,null,null,supabase_auth_admin,null
-grant,public,quadras,null,"postgres=arwdDxtm/postgres,authenticated=r/postgres",postgres,null
-grant,public,caixa_sessoes,null,"postgres=arwdDxtm/postgres,authenticated=r/postgres",postgres,null
 grant,auth,schema_migrations,null,"supabase_auth_admin=arwdDxtm/supabase_auth_admin,postgres=r*/supabase_auth_admin",supabase_auth_admin,null
 grant,auth,users,null,"supabase_auth_admin=arwdDxtm/supabase_auth_admin,dashboard_user=arwdDxtm/supabase_auth_admin,postgres=ar*wdDxtm/supabase_auth_admin",supabase_auth_admin,null
 grant,auth,audit_log_entries,null,"supabase_auth_admin=arwdDxtm/supabase_auth_admin,dashboard_user=arwdDxtm/supabase_auth_admin,postgres=ar*wdDxtm/supabase_auth_admin",supabase_auth_admin,null
@@ -2391,42 +2370,54 @@ grant,auth,mfa_amr_claims,null,"postgres=ar*wdDxtm/supabase_auth_admin,supabase_
 grant,auth,flow_state,null,"postgres=ar*wdDxtm/supabase_auth_admin,supabase_auth_admin=arwdDxtm/supabase_auth_admin,dashboard_user=arwdDxtm/supabase_auth_admin",supabase_auth_admin,null
 grant,auth,identities,null,"postgres=ar*wdDxtm/supabase_auth_admin,supabase_auth_admin=arwdDxtm/supabase_auth_admin,dashboard_user=arwdDxtm/supabase_auth_admin",supabase_auth_admin,null
 grant,auth,one_time_tokens,null,"postgres=ar*wdDxtm/supabase_auth_admin,supabase_auth_admin=arwdDxtm/supabase_auth_admin,dashboard_user=arwdDxtm/supabase_auth_admin",supabase_auth_admin,null
-grant,public,user_ui_settings,null,"postgres=arwdDxtm/postgres,authenticated=arw/postgres",postgres,null
+grant,public,caixa_resumos,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
 grant,auth,mfa_factors_last_challenged_at_key,null,null,supabase_auth_admin,null
 grant,auth,unique_phone_factor_per_user,null,null,supabase_auth_admin,null
+grant,public,colaboradores,null,"postgres=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,anon=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
 grant,auth,oauth_authorizations,null,"postgres=arwdDxtm/supabase_auth_admin,supabase_auth_admin=arwdDxtm/supabase_auth_admin,dashboard_user=arwdDxtm/supabase_auth_admin",supabase_auth_admin,null
 grant,auth,mfa_challenges,null,"postgres=ar*wdDxtm/supabase_auth_admin,supabase_auth_admin=arwdDxtm/supabase_auth_admin,dashboard_user=arwdDxtm/supabase_auth_admin",supabase_auth_admin,null
 grant,auth,sso_providers_resource_id_pattern_idx,null,null,supabase_auth_admin,null
 grant,auth,oauth_clients_pkey,null,null,supabase_auth_admin,null
 grant,auth,oauth_clients_deleted_at_idx,null,null,supabase_auth_admin,null
+grant,public,finalizadoras,null,"postgres=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,anon=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
 grant,auth,oauth_authorizations_pkey,null,null,supabase_auth_admin,null
 grant,auth,oauth_authorizations_authorization_id_key,null,null,supabase_auth_admin,null
 grant,auth,oauth_authorizations_authorization_code_key,null,null,supabase_auth_admin,null
+grant,public,usuarios,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
+grant,public,agenda_settings,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
 grant,auth,oauth_auth_pending_exp_idx,null,null,supabase_auth_admin,null
 grant,auth,oauth_consents_pkey,null,null,supabase_auth_admin,null
 grant,auth,oauth_consents_user_client_unique,null,null,supabase_auth_admin,null
 grant,auth,oauth_consents,null,"postgres=arwdDxtm/supabase_auth_admin,supabase_auth_admin=arwdDxtm/supabase_auth_admin,dashboard_user=arwdDxtm/supabase_auth_admin",supabase_auth_admin,null
+grant,public,empresas,null,"postgres=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,anon=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
 grant,auth,oauth_consents_active_user_client_idx,null,null,supabase_auth_admin,null
 grant,auth,oauth_consents_user_order_idx,null,null,supabase_auth_admin,null
 grant,auth,oauth_consents_active_client_idx,null,null,supabase_auth_admin,null
 grant,auth,oauth_clients,null,"postgres=arwdDxtm/supabase_auth_admin,supabase_auth_admin=arwdDxtm/supabase_auth_admin,dashboard_user=arwdDxtm/supabase_auth_admin",supabase_auth_admin,null
 grant,auth,sessions_oauth_client_id_idx,null,null,supabase_auth_admin,null
 grant,auth,mfa_factors,null,"postgres=ar*wdDxtm/supabase_auth_admin,supabase_auth_admin=arwdDxtm/supabase_auth_admin,dashboard_user=arwdDxtm/supabase_auth_admin",supabase_auth_admin,null
+grant,public,estoque_baixa_log,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
 grant,auth,sessions,null,"postgres=ar*wdDxtm/supabase_auth_admin,supabase_auth_admin=arwdDxtm/supabase_auth_admin,dashboard_user=arwdDxtm/supabase_auth_admin",supabase_auth_admin,null
 grant,realtime,schema_migrations_pkey,null,null,supabase_admin,null
 grant,realtime,user_defined_filter,null,null,supabase_admin,null
+grant,public,contas_receber_baixas,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
 grant,realtime,wal_column,null,null,supabase_admin,null
+grant,public,empresa_counters,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
 grant,realtime,wal_rls,null,null,supabase_admin,null
+grant,public,mesas,null,"postgres=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,anon=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
 grant,realtime,schema_migrations,null,"supabase_admin=arwdDxtm/supabase_admin,postgres=arwdDxtm/supabase_admin,dashboard_user=arwdDxtm/supabase_admin,anon=r/supabase_admin,authenticated=r/supabase_admin,service_role=r/supabase_admin,supabase_realtime_admin=arwdDxtm/supabase_admin",supabase_admin,null
 grant,realtime,subscription_id_seq,null,"supabase_admin=rwU/supabase_admin,postgres=rwU/supabase_admin,dashboard_user=rwU/supabase_admin,anon=U/supabase_admin,authenticated=U/supabase_admin,service_role=U/supabase_admin,supabase_realtime_admin=rwU/supabase_admin",supabase_admin,null
 grant,realtime,pk_subscription,null,null,supabase_admin,null
 grant,realtime,subscription_subscription_id_entity_filters_key,null,null,supabase_admin,null
 grant,storage,s3_multipart_uploads,null,"supabase_storage_admin=arwdDxtm/supabase_storage_admin,service_role=arwdDxtm/supabase_storage_admin,authenticated=r/supabase_storage_admin,anon=r/supabase_storage_admin",supabase_storage_admin,null
 grant,storage,idx_objects_bucket_id_name,null,null,supabase_storage_admin,null
+grant,public,comanda_clientes,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
+grant,public,vendas,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
 grant,realtime,subscription,null,"supabase_admin=arwdDxtm/supabase_admin,postgres=arwdDxtm/supabase_admin,dashboard_user=arwdDxtm/supabase_admin,anon=r/supabase_admin,authenticated=r/supabase_admin,service_role=r/supabase_admin,supabase_realtime_admin=arwdDxtm/supabase_admin",supabase_admin,null
 grant,storage,s3_multipart_uploads_pkey,null,null,supabase_storage_admin,null
 grant,storage,idx_multipart_uploads_list,null,null,supabase_storage_admin,null
 grant,storage,s3_multipart_uploads_parts,null,"supabase_storage_admin=arwdDxtm/supabase_storage_admin,service_role=arwdDxtm/supabase_storage_admin,authenticated=r/supabase_storage_admin,anon=r/supabase_storage_admin",supabase_storage_admin,null
+grant,public,caixa_movimentos,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
 grant,storage,s3_multipart_uploads_parts_pkey,null,null,supabase_storage_admin,null
 grant,storage,buckets_vectors,null,"supabase_storage_admin=arwdDxtm/supabase_storage_admin,service_role=r/supabase_storage_admin,authenticated=r/supabase_storage_admin,anon=r/supabase_storage_admin",supabase_storage_admin,null
 grant,storage,prefixes_pkey,null,null,supabase_storage_admin,null
@@ -2437,6 +2428,7 @@ grant,storage,idx_name_bucket_level_unique,null,null,supabase_storage_admin,null
 grant,storage,objects_bucket_id_level_idx,null,null,supabase_storage_admin,null
 grant,storage,idx_objects_lower_name,null,null,supabase_storage_admin,null
 grant,storage,idx_prefixes_lower_name,null,null,supabase_storage_admin,null
+grant,public,movimentos_saldo,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
 grant,storage,buckets_vectors_pkey,null,null,supabase_storage_admin,null
 grant,storage,vector_indexes_pkey,null,null,supabase_storage_admin,null
 grant,storage,buckets_analytics_pkey,null,null,supabase_storage_admin,null
@@ -2459,9 +2451,13 @@ grant,supabase_functions,hooks_pkey,null,null,supabase_functions_admin,null
 grant,supabase_functions,supabase_functions_hooks_request_id_idx,null,null,supabase_functions_admin,null
 grant,supabase_functions,supabase_functions_hooks_h_table_id_h_name_idx,null,null,supabase_functions_admin,null
 grant,supabase_functions,hooks_id_seq,null,"supabase_functions_admin=rwU/supabase_functions_admin,postgres=rwU/supabase_functions_admin,anon=rwU/supabase_functions_admin,authenticated=rwU/supabase_functions_admin,service_role=rwU/supabase_functions_admin",supabase_functions_admin,null
-grant,public,v_agendamento_participantes,null,null,postgres,null
-grant,public,v_agendamentos_detalhado,null,null,postgres,null
-grant,public,v_agendamentos_isis,null,null,postgres,null
+grant,public,compras,null,"postgres=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,anon=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
+grant,public,caixa_movimentacoes_id_seq,null,"postgres=rwU/postgres,anon=rwU/postgres,authenticated=rwU/postgres,service_role=rwU/postgres",postgres,null
+grant,public,caixa_resumos_id_seq,null,"postgres=rwU/postgres,anon=rwU/postgres,authenticated=rwU/postgres,service_role=rwU/postgres",postgres,null
+grant,public,v_agendamentos_isis,null,"postgres=arwdDxtm/postgres,authenticated=r/postgres",postgres,null
+grant,public,contas_pagar_baixas,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
+grant,public,v_agendamento_participantes,null,"postgres=arwdDxtm/postgres,authenticated=r/postgres",postgres,null
+grant,public,v_agendamentos_detalhado,null,"postgres=arwdDxtm/postgres,authenticated=r/postgres",postgres,null
 grant,public,empresa_counters_pkey,null,null,postgres,null
 grant,public,user_profiles_pkey,null,null,postgres,null
 grant,public,colaboradores_codigo_empresa_idx,null,null,postgres,null
@@ -2472,10 +2468,8 @@ grant,public,agendamentos_codigo_empresa_idx,null,null,postgres,null
 grant,public,ux_agendamentos_empresa_codigo,null,null,postgres,null
 grant,public,courts_pkey,null,null,postgres,null
 grant,public,quadras_codigo_empresa_idx,null,null,postgres,null
-grant,public,produto_categorias,null,null,postgres,null
 grant,public,produto_categorias_pkey,null,null,postgres,null
 grant,public,ux_produto_categorias_empresa_nome,null,null,postgres,null
-grant,public,quadras_dias_funcionamento,null,null,postgres,null
 grant,public,quadras_dias_funcionamento_pkey,null,null,postgres,null
 grant,public,idx_quadras_dias_funcionamento_data,null,null,postgres,null
 grant,public,idx_quadras_dias_funcionamento_empresa,null,null,postgres,null
@@ -2484,11 +2478,9 @@ grant,public,idx_quadras_dias_funcionamento_quadra_data_fechamento,null,null,pos
 grant,public,idx_quadras_dias_funcionamento_quadra_dia_semana,null,null,postgres,null
 grant,public,users_pkey,null,null,postgres,null
 grant,public,usuarios_codigo_empresa_idx,null,null,postgres,null
-grant,public,vendas,null,null,postgres,null
 grant,public,sales_pkey,null,null,postgres,null
 grant,public,idx_vendas_criado_em,null,null,postgres,null
 grant,public,idx_vendas_empresa_status,null,null,postgres,null
-grant,public,caixa_movimentacoes,null,null,postgres,null
 grant,public,caixa_movimentacoes_pkey,null,null,postgres,null
 grant,public,idx_caixa_mov_empresa_sessao,null,null,postgres,null
 grant,public,idx_caixa_mov_tipo,null,null,postgres,null
@@ -2499,15 +2491,12 @@ grant,public,idx_mesas_empresa,null,null,postgres,null
 grant,public,idx_mesas_nome,null,null,postgres,null
 grant,public,uq_mesas_empresa_numero,null,null,postgres,null
 grant,public,user_ui_settings_pkey,null,null,postgres,null
-grant,public,itens_venda,null,null,postgres,null
 grant,public,sale_items_pkey,null,null,postgres,null
 grant,public,idx_itens_venda_empresa,null,null,postgres,null
-grant,public,comanda_historico,null,null,postgres,null
 grant,public,comanda_historico_pkey,null,null,postgres,null
 grant,public,idx_comanda_historico_codigo_empresa,null,null,postgres,null
 grant,public,idx_comanda_historico_comanda_id,null,null,postgres,null
 grant,public,idx_comanda_historico_tipo,null,null,postgres,null
-grant,public,contas_receber_baixas,null,null,postgres,null
 grant,public,contas_receber_baixas_pkey,null,null,postgres,null
 grant,public,idx_cr_baixas_empresa_conta,null,null,postgres,null
 grant,public,idx_cr_baixas_empresa_data,null,null,postgres,null
@@ -2521,7 +2510,6 @@ grant,public,idx_compras_empresa_ativo,null,null,postgres,null
 grant,public,idx_compras_empresa_modelo_nfe,null,null,postgres,null
 grant,public,idx_compras_fornecedor,null,null,postgres,null
 grant,public,idx_compras_status,null,null,postgres,null
-grant,public,comanda_clientes,null,null,postgres,null
 grant,public,comanda_clientes_pkey,null,null,postgres,null
 grant,public,comanda_clientes_cliente_idx,null,null,postgres,null
 grant,public,comanda_clientes_comanda_idx,null,null,postgres,null
@@ -2529,7 +2517,6 @@ grant,public,comanda_clientes_empresa_idx,null,null,postgres,null
 grant,public,idx_comanda_clientes_cliente,null,null,postgres,null
 grant,public,idx_comanda_clientes_comanda,null,null,postgres,null
 grant,public,idx_comanda_clientes_empresa,null,null,postgres,null
-grant,public,contas_pagar,null,null,postgres,null
 grant,public,contas_pagar_pkey,null,null,postgres,null
 grant,public,idx_contas_pagar_empresa_fornecedor,null,null,postgres,null
 grant,public,idx_contas_pagar_empresa_status,null,null,postgres,null
@@ -2566,7 +2553,6 @@ grant,public,idx_caixa_empresa,null,null,postgres,null
 grant,public,idx_caixa_sessoes_empresa,null,null,postgres,null
 grant,public,idx_caixa_sessoes_empresa_status,null,null,postgres,null
 grant,public,uq_caixa_aberto_por_empresa,null,null,postgres,null
-grant,public,comanda_itens,null,null,postgres,null
 grant,public,comanda_itens_pkey,null,null,postgres,null
 grant,public,idx_comanda_itens_codigo_empresa,null,null,postgres,null
 grant,public,idx_comanda_itens_comanda,null,null,postgres,null
@@ -2580,23 +2566,18 @@ grant,public,idx_agendamento_participantes_ordem,null,null,postgres,null
 grant,public,idx_agp_agendamento,null,null,postgres,null
 grant,public,idx_agp_codigo_empresa,null,null,postgres,null
 grant,public,idx_agp_finalizadora,null,null,postgres,null
-grant,public,movimentos_saldo,null,null,postgres,null
 grant,public,movimentos_saldo_pkey,null,null,postgres,null
 grant,public,idx_mov_saldo_agendamento,null,null,postgres,null
 grant,public,idx_mov_saldo_cliente,null,null,postgres,null
 grant,public,idx_mov_saldo_empresa,null,null,postgres,null
-grant,public,caixa_movimentos,null,null,postgres,null
 grant,public,caixa_movimentos_pkey,null,null,postgres,null
 grant,public,idx_caixa_movimentos_caixa,null,null,postgres,null
 grant,public,idx_caixa_movimentos_empresa,null,null,postgres,null
-grant,public,estoque_baixa_log,null,null,postgres,null
 grant,public,estoque_baixa_log_pkey,null,null,postgres,null
-grant,public,caixa_resumos,null,null,postgres,null
 grant,public,caixa_resumos_pkey,null,null,postgres,null
 grant,public,idx_caixa_resumos_empresa_sessao,null,null,postgres,null
 grant,public,idx_caixa_resumos_periodo,null,null,postgres,null
 grant,public,idx_caixa_resumos_sessao_criado_em,null,null,postgres,null
-grant,public,agenda_settings,null,null,postgres,null
 grant,public,agenda_settings_pkey,null,null,postgres,null
 grant,public,products_pkey,null,null,postgres,null
 grant,public,idx_produtos_categoria,null,null,postgres,null
@@ -2611,12 +2592,10 @@ grant,public,idx_produtos_ncm,null,null,postgres,null
 grant,public,idx_produtos_xml_chave,null,null,postgres,null
 grant,public,produtos_codigo_empresa_nome_unidade_unique,null,null,postgres,null
 grant,public,ux_produtos_empresa_codigo_produto,null,null,postgres,null
-grant,public,contas_receber,null,null,postgres,null
 grant,public,contas_receber_pkey,null,null,postgres,null
 grant,public,idx_contas_receber_empresa_cliente,null,null,postgres,null
 grant,public,idx_contas_receber_empresa_status,null,null,postgres,null
 grant,public,idx_contas_receber_empresa_vencimento,null,null,postgres,null
-grant,public,estoque_reservado,null,null,postgres,null
 grant,public,estoque_reservado_pkey,null,null,postgres,null
 grant,public,idx_estoque_reservado_ativo,null,null,postgres,null
 grant,public,idx_estoque_reservado_comanda_id,null,null,postgres,null
@@ -2645,11 +2624,21 @@ grant,public,idx_clientes_empresa_telefone,null,null,postgres,null
 grant,public,uq_clientes_empresa_codigo,null,null,postgres,null
 grant,public,uq_clientes_empresa_cpf,null,null,postgres,null
 grant,public,uq_clientes_empresa_email_lower,null,null,postgres,null
-grant,public,compras_itens,null,null,postgres,null
 grant,public,compras_itens_pkey,null,null,postgres,null
 grant,public,idx_compras_itens_compra,null,null,postgres,null
 grant,public,idx_compras_itens_produto,null,null,postgres,null
 grant,public,idx_compras_itens_selecionado,null,null,postgres,null
-grant,public,finalizadoras,null,"postgres=arwdDxtm/postgres,authenticated=r/postgres",postgres,null
-grant,public,empresas,null,"postgres=arwdDxtm/postgres,authenticated=r/postgres",postgres,null
-grant,public,clientes,null,"postgres=arwdDxtm/postgres,authenticated=r/postgres",postgres,null
+grant,public,clientes,null,"postgres=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,anon=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
+grant,public,produtos,null,"postgres=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,anon=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
+grant,public,agendamento_participantes,null,"postgres=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,anon=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
+grant,public,compras_itens,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
+grant,public,pagamentos,null,"postgres=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,anon=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
+grant,public,caixa_sessoes,null,"postgres=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,anon=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
+grant,public,comandas,null,"postgres=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,anon=arwdDxtm/postgres,=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
+grant,public,user_ui_settings,null,"postgres=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,anon=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
+grant,public,comanda_itens,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
+grant,public,quadras,null,"postgres=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,anon=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
+grant,public,itens_venda,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
+grant,public,caixa_movimentacoes,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
+grant,public,contas_pagar,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
+grant,public,comanda_historico,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null

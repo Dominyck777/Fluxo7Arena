@@ -87,7 +87,10 @@ serve(async (req: Request) => {
       });
     }
 
-    const systemPrompt = `Você extrairá nomes próprios de pessoas em português do Brasil a partir de um texto colado.\n\nRegras:\n- Retorne apenas JSON válido no formato: {"extracted": string[], "invalid": string[]}\n- Remova duplicatas.\n- Ignore e-mails, telefones, apelidos com @, números, times, emojis e texto sem nome válido.\n- Mantenha acentos.\n- Cada nome entre 2 e 60 caracteres.\n- Title Case apropriado em português (João da Silva, Ana Maria).\n- Não inclua comentários ou texto fora do JSON.`;
+    const systemPrompt = `Você extrairá nomes de participantes (pessoas) em pt-BR a partir de um texto colado (convocações, listas de jogadores/participantes/reserva).\n\nRegras obrigatórias:\n- Responda apenas com JSON válido no formato: {"extracted": string[], "invalid": string[]}\n- Inclua nomes completos OU apelidos de uma única palavra quando for claramente um nome/alcunha de pessoa no contexto da lista (ex.: "Peixe", "Fumaça", "Binho").\n- Aceite nomes de uma única palavra quando inseridos como participantes.\n- Remova duplicatas.\n- Ignore e-mails, telefones, apelidos com @, números isolados, nomes de times, emojis e qualquer linha que não represente uma pessoa.\n- Mantenha acentos.\n- Cada nome deve ter entre 2 e 60 caracteres.\n- Use Title Case apropriado em português (ex.: João da Silva, Ana Maria, Peixe).\n- Em caso de dúvida (ex.: apelido que parece animal/objeto como "Peixe"), se o contexto for de lista de jogadores/participantes/convocados, INCLUA em extracted.\n- Não inclua comentários ou texto fora do JSON.`;
+
+    const fewShotUser = `Texto (locale=pt-BR):\n\n* Convocados:\n01) Victor\n02) Diney\n03) Ronaldo\n\n*JOGADORES*\n01) Brayon\n02) Peixe\n\nResponda apenas com JSON.`;
+    const fewShotAssistant = { extracted: ["Victor", "Diney", "Ronaldo", "Brayon", "Peixe"], invalid: [] };
 
     const userPrompt = `Texto (locale=${locale}):\n\n${text}\n\nResponda apenas com JSON.`;
 
@@ -102,6 +105,8 @@ serve(async (req: Request) => {
         temperature: 0.2,
         messages: [
           { role: "system", content: systemPrompt },
+          { role: "user", content: fewShotUser },
+          { role: "assistant", content: JSON.stringify(fewShotAssistant) },
           { role: "user", content: userPrompt },
         ],
         response_format: { type: "json_object" },

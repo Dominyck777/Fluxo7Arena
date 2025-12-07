@@ -1,4 +1,5 @@
 import { useIsis } from '@/contexts/IsisContext';
+import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { IsisMessage } from './IsisMessage';
 import { IsisTypingIndicator } from './IsisTypingIndicator';
@@ -9,11 +10,25 @@ import { IsisResponseButtons } from './IsisResponseButtons';
  */
 export const IsisChat = ({ children, onButtonClick, hideButtonTexts = false }) => {
   const { messages, isTyping, chatEndRef } = useIsis();
+  const [extraBottomPad, setExtraBottomPad] = useState(0);
+
+  useEffect(() => {
+    const onExpand = (e) => {
+      const expanded = !!(e?.detail?.expanded);
+      const base = (typeof window !== 'undefined' && window.innerWidth < 768) ? 280 : 360; // deve casar com max-h expandido
+      const compact = 140; // deve casar com max-h compacto
+      const margin = 24; // respiro extra
+      const pad = Math.max(0, base - compact + margin);
+      setExtraBottomPad(expanded ? pad : 0);
+    };
+    try { window.addEventListener('isis-participantes-expand', onExpand); } catch {}
+    return () => { try { window.removeEventListener('isis-participantes-expand', onExpand); } catch {} };
+  }, []);
   
   return (
     <div className="flex flex-col min-h-full">
       {/* Mensagens */}
-      <div className="flex-1 px-3 md:px-6 py-4 md:py-8">
+      <div className="flex-1 px-3 md:px-6 py-4 md:py-8" style={{ paddingBottom: extraBottomPad }}>
         {messages.map((message) => (
           <motion.div
             key={message.id}

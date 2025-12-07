@@ -11,7 +11,7 @@ export default function BackendDeployPage() {
   // Carrega configurações ao iniciar
   useEffect(() => {
     try {
-      const maintActive = localStorage.getItem('maintenance:active') === 'true';
+      const maintActive = localStorage.getItem('maintenance:active') === 'false';
       const storedEnd = localStorage.getItem('maintenance:end') || '';
       const storedMsg = localStorage.getItem('maintenance:message') || 'Manutenção em andamento. Volte em breve!';
       
