@@ -2140,8 +2140,10 @@ ${listaNomes}
       }
       const copyText = text.replace(/\*\*(.+?)\*\*/g, '*$1*');
       addIsisMessage({ text, copyable: true, copyText }, 800);
+      // Se estiver editando um agendamento existente, não exibir 'Gerar novamente'
+      const allowRegen = !Boolean(selections?.editing_agendamento);
       const again = [
-        { label: 'Gerar novamente', value: 'gerar_times_again', icon: '🎲' },
+        ...(allowRegen ? [{ label: 'Gerar novamente', value: 'gerar_times_again', icon: '🎲' }] : []),
         { label: 'Concluir', value: 'aceitar_times', icon: '✅' },
       ];
       // Mostra as opções logo abaixo do balão de times, com rótulo visível
@@ -2697,6 +2699,8 @@ ${listaNomes}
           }));
       
       updateSelection('participantes', participantes);
+      // Marca que estamos no fluxo de edição de agendamento existente
+      try { updateSelection('editing_agendamento', true); } catch {}
       // Restaura papéis fixos a partir do banco (meta_roles); fallback para localStorage
       try {
         const meta = agendamentoCompleto?.meta_roles || null;
