@@ -122,6 +122,63 @@ function ClientFormModal({ open, onOpenChange, client, onSaved }) {
     setForm((prev) => ({ ...prev, [id]: value }));
   };
 
+  const handleBuscarCNPJ = async () => {
+    try {
+      const cnpjNum = sanitizers.digits(form.cnpj);
+      if (!cnpjNum || cnpjNum.length !== 14) {
+        toast({ title: 'CNPJ inválido', description: 'Informe 14 dígitos para buscar.', variant: 'destructive' });
+        return;
+      }
+      const res = await fetch(`https://brasilapi.com.br/api/cnpj/v1/${cnpjNum}`);
+      if (!res.ok) {
+        let msg = 'Falha ao consultar CNPJ';
+        try { const j = await res.json(); if (j?.message) msg = j.message; } catch {}
+        throw new Error(msg);
+      }
+      const data = await res.json();
+      try { console.info('[clientes] BuscarCNPJ:payload', data); } catch {}
+      const razao = data.razao_social || data.nome || '';
+      const fantasia = data.nome_fantasia || '';
+      const logradouro = data.logradouro || '';
+      const numero = String(data.numero || '');
+      const complemento = data.complemento || '';
+      const bairro = data.bairro || '';
+      const cidade = data.municipio || data.localidade || '';
+      const uf = data.uf || '';
+      const cep = sanitizers.digits(data.cep || '');
+      let codigoIBGE = '';
+      try {
+        if (cidade && uf) {
+          const r2 = await fetch(`https://brasilapi.com.br/api/ibge/municipios/v1/${uf}`);
+          if (r2.ok) {
+            const lista = await r2.json();
+            const norm = (s) => String(s || '').normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase().trim();
+            const alvo = norm(cidade);
+            const found = (lista || []).find((m) => norm(m.nome) === alvo);
+            if (found?.codigo_ibge || found?.codigo) codigoIBGE = String(found.codigo_ibge || found.codigo);
+          }
+        }
+      } catch {}
+      setForm((prev) => ({
+        ...prev,
+        nome: razao,
+        apelido: fantasia || razao,
+        endereco: logradouro,
+        numero,
+        complemento,
+        bairro,
+        cidade,
+        uf,
+        cep,
+        cidade_ibge: codigoIBGE || prev.cidade_ibge,
+      }));
+      try { console.info('[clientes] BuscarCNPJ:setForm', { razao, fantasia, logradouro, numero, complemento, bairro, cidade, uf, cep, codigoIBGE }); } catch {}
+      toast({ title: 'CNPJ carregado', description: 'Dados preenchidos.' });
+    } catch (e) {
+      toast({ title: 'Falha ao buscar CNPJ', description: e.message || 'Tente novamente.', variant: 'destructive' });
+    }
+  };
+
   const toNull = (v) => (v === '' ? null : v);
   const parseMoney = (v) => {
     if (v === null || v === undefined) return null;
@@ -419,7 +476,10 @@ function ClientFormModal({ open, onOpenChange, client, onSaved }) {
                 <>
                   <div className="col-span-12 sm:col-span-3">
                     <Label htmlFor="cnpj">CNPJ</Label>
-                    <Input id="cnpj" value={form.cnpj} onChange={(e)=>handleMaskedChange('cnpj', e.target.value)} placeholder="00.000.000/0000-00" />
+                    <div className="flex gap-2">
+                      <Input id="cnpj" value={form.cnpj} onChange={(e)=>handleMaskedChange('cnpj', e.target.value)} placeholder="00.000.000/0000-00" />
+                      <Button type="button" variant="outline" onClick={handleBuscarCNPJ}>Buscar</Button>
+                    </div>
                   </div>
                   <div className="col-span-12 sm:col-span-3">
                     <Label htmlFor="ie">Inscrição Estadual (IE)</Label>

@@ -665,38 +665,55 @@ export async function bulkClearNewFlag({ ids }) {
 
 // ===== Categorias =====
 // Retorna lista de nomes de categorias ativas (array de string)
-export async function listCategories() {
+export async function listCategories(options = {}) {
+  const { codigoEmpresa } = options
   // eslint-disable-next-line no-console
   console.info('[products.api] listCategories: start')
-  const { data, error } = await withTimeout((signal) =>
-    supabase
+  const { data, error } = await withTimeout((signal) => {
+    let q = supabase
       .from('produto_categorias')
       .select('nome')
       .eq('ativa', true)
       .order('nome', { ascending: true })
       .abortSignal(signal)
+    if (codigoEmpresa) q = q.eq('codigo_empresa', codigoEmpresa)
+    return q
+  }
   , 15000, 'Timeout listCategories (15s)')
   if (error) {
     // eslint-disable-next-line no-console
     console.error('[products.api] listCategories:error', error)
     throw error
   }
-  const names = (data || []).map(r => r.nome).filter(Boolean)
+  // Dedup case-insensitive para evitar keys duplicadas no Select
+  const names = []
+  const seen = new Set()
+  for (const r of (data || [])) {
+    const n = (r?.nome || '').trim()
+    if (!n) continue
+    const key = n.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    names.push(n)
+  }
   // eslint-disable-next-line no-console
   console.info('[products.api] listCategories: ok', { count: names.length })
   return names
 }
 
 // Cria uma categoria (ativa) por empresa; retorna o nome
-export async function createCategory(name) {
+export async function createCategory(name, options = {}) {
+  const { codigoEmpresa } = options
   const nome = String(name || '').trim()
   if (!nome) throw new Error('Nome da categoria inválido')
   // eslint-disable-next-line no-console
   console.info('[products.api] createCategory:', nome)
+  const payload = { nome }
+  if (codigoEmpresa) payload.codigo_empresa = codigoEmpresa
   const { data, error } = await withTimeout((signal) =>
     supabase
       .from('produto_categorias')
-      .insert({ nome })
+      .insert(payload)
       .select('nome')
       .single()
       .abortSignal(signal)
@@ -710,19 +727,24 @@ export async function createCategory(name) {
 }
 
 // Remove (desativa) uma categoria pelo nome (case-insensitive)
-export async function removeCategory(name) {
+export async function removeCategory(name, options = {}) {
+  const { codigoEmpresa } = options
   const nome = String(name || '').trim()
   if (!nome) throw new Error('Nome da categoria inválido')
   // eslint-disable-next-line no-console
   console.info('[products.api] removeCategory:', nome)
   // 1) Bloqueia se houver produtos ATIVOS vinculados
   const { count: prodCount, error: countErr } = await withTimeout((signal) =>
-    supabase
-      .from('produtos')
-      .select('id', { count: 'exact', head: true })
-      .eq('categoria', nome)
-      .neq('status', 'inactive')
-      .abortSignal(signal)
+    {
+      let q = supabase
+        .from('produtos')
+        .select('id', { count: 'exact', head: true })
+        .eq('categoria', nome)
+        .neq('status', 'inactive')
+        .abortSignal(signal)
+      if (codigoEmpresa) q = q.eq('codigo_empresa', codigoEmpresa)
+      return q
+    }
   , 15000, 'Timeout removeCategory:count (15s)')
   if (countErr) {
     // eslint-disable-next-line no-console
@@ -737,13 +759,16 @@ export async function removeCategory(name) {
   }
 
   // 2) Desativa categoria
-  const { data, error } = await withTimeout((signal) =>
-    supabase
+  const { data, error } = await withTimeout((signal) => {
+    let q = supabase
       .from('produto_categorias')
       .update({ ativa: false })
       .eq('nome', nome)
       .select('nome')
       .abortSignal(signal)
+    if (codigoEmpresa) q = q.eq('codigo_empresa', codigoEmpresa)
+    return q
+  }
   , 15000, 'Timeout removeCategory (15s)')
   if (error) {
     // eslint-disable-next-line no-console

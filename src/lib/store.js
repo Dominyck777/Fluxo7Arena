@@ -989,17 +989,16 @@ export async function fecharCaixa({ saldoFinal = null, valorFinalDinheiro = null
   
   // LIMPEZA PREVENTIVA: Corrigir comandas com status inconsistente (cancelled mas sem fechado_em)
   try {
-    console.log('[fecharCaixa] 🧹 Limpeza preventiva: corrigindo comandas inconsistentes...');
+    console.log('[fecharCaixa] 🧹 Limpeza preventiva: ajustando apenas comandas cancelled/closed sem fechado_em...');
     const { data: inconsistentes } = await supabase
       .from('comandas')
       .select('id, status, fechado_em')
       .eq('codigo_empresa', codigo)
       .is('fechado_em', null)
-      .neq('status', 'open')
-      .neq('status', 'awaiting-payment');
+      .in('status', ['cancelled', 'closed']);
     
     if (inconsistentes && inconsistentes.length > 0) {
-      console.log(`[fecharCaixa] 🔧 Encontradas ${inconsistentes.length} comandas inconsistentes, corrigindo...`);
+      console.log(`[fecharCaixa] 🔧 Encontradas ${inconsistentes.length} comandas (cancelled/closed) sem fechado_em, ajustando...`);
       const nowIso = new Date().toISOString();
       for (const cmd of inconsistentes) {
         try {
@@ -1008,11 +1007,11 @@ export async function fecharCaixa({ saldoFinal = null, valorFinalDinheiro = null
             .update({ fechado_em: nowIso })
             .eq('id', cmd.id)
             .eq('codigo_empresa', codigo);
-          console.log(`[fecharCaixa] ✅ Comanda ${cmd.id} (status: ${cmd.status}) corrigida`);
+          console.log(`[fecharCaixa] ✅ Comanda ${cmd.id} (status: ${cmd.status}) ajustada com fechado_em`);
         } catch {}
       }
     } else {
-      console.log('[fecharCaixa] ✅ Nenhuma comanda inconsistente encontrada');
+      console.log('[fecharCaixa] ✅ Nenhuma comanda cancelled/closed sem fechado_em encontrada');
     }
   } catch (e) {
     console.warn('[fecharCaixa] ⚠️ Erro na limpeza preventiva:', e?.message);

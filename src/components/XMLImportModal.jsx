@@ -365,6 +365,39 @@ export default function XMLImportModal({ open, onOpenChange, products, codigoEmp
               }
             }
           }
+
+          // Preencher campos fiscais que estiverem vazios no produto existente
+          try {
+            const ex = item.existing || {};
+            const imps = item.xml.impostos || {};
+            const icms = imps.icms || {};
+            const pis = imps.pis || {};
+            const cofins = imps.cofins || {};
+            const ipi = imps.ipi || {};
+            const patch = {};
+            const isEmpty = (v) => v == null || (typeof v === 'string' && v.trim() === '');
+            // Strings fiscais
+            if (isEmpty(ex.ncm) && item.xml.ncm) patch.ncm = item.xml.ncm;
+            if (isEmpty(ex.cfopInterno) && item.xml.cfop) patch.cfopInterno = item.xml.cfop;
+            if (isEmpty(ex.cstIcmsInterno) && icms.cst) patch.cstIcmsInterno = icms.cst;
+            if (isEmpty(ex.csosnInterno) && icms.csosn) patch.csosnInterno = icms.csosn;
+            if (isEmpty(ex.cstIpi) && ipi.cst) patch.cstIpi = ipi.cst;
+            if (isEmpty(ex.cstPisEntrada) && pis.cst) patch.cstPisEntrada = pis.cst;
+            // Numéricos: só preencher se atual é null/undefined
+            if (ex.aliqIcmsInterno == null && Number(icms.aliquota || 0) > 0) patch.aliqIcmsInterno = Number(icms.aliquota);
+            if (ex.aliqIpiPercent == null && Number(ipi.aliquota || 0) >= 0) patch.aliqIpiPercent = Number(ipi.aliquota);
+            if (ex.aliqPisPercent == null && Number(pis.aliquota || 0) >= 0) patch.aliqPisPercent = Number(pis.aliquota);
+            if (ex.aliqCofinsPercent == null && Number(cofins.aliquota || 0) >= 0) patch.aliqCofinsPercent = Number(cofins.aliquota);
+            if (ex.fcpPercent == null && Number(icms.fcpAliquota || 0) > 0) patch.fcpPercent = Number(icms.fcpAliquota);
+            if (ex.mvaPercent == null && Number(icms.mva || 0) > 0) patch.mvaPercent = Number(icms.mva);
+            if (ex.baseReduzidaPercent == null && Number(icms.pRedBC || 0) > 0) patch.baseReduzidaPercent = Number(icms.pRedBC);
+            if (Object.keys(patch).length > 0) {
+              await updateProduct(item.existing.id, patch);
+              console.log('[XMLImport] Produto existente atualizado com fiscais faltantes', { id: item.existing.id, patch });
+            }
+          } catch (e) {
+            console.warn('[XMLImport] Falha ao completar fiscais no produto existente', e);
+          }
           
           results.updated++;
           results.details.push({ 

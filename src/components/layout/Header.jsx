@@ -154,7 +154,7 @@ function Header({ onToggleSidebar, sidebarVisible, sidebarPinned }) {
       transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
       className="relative bg-surface/80 backdrop-blur-sm text-text-primary h-[72px] flex-shrink-0 flex items-center justify-between px-8 border-b border-border shadow-[0_1px_0_RGBA(255,255,255,0.04)]"
     >
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-4 min-w-0">
         <Button
           variant="ghost"
           size="icon"
@@ -166,7 +166,7 @@ function Header({ onToggleSidebar, sidebarVisible, sidebarPinned }) {
           <Menu className={`w-7 h-7 transition-colors ${sidebarVisible ? 'text-brand' : 'text-text-primary'}`} />
         </Button>
         <div
-          className="group pl-3 pr-5 py-1.5 border border-white/10 bg-gradient-to-b from-surface-2/60 to-surface/60 text-text-primary flex items-center gap-4 shadow-sm hover:border-white/20 transition-colors"
+          className="group pl-3 pr-5 py-1.5 border border-white/10 bg-gradient-to-b from-surface-2/60 to-surface/60 text-text-primary flex items-center gap-4 shadow-sm hover:border-white/20 transition-colors overflow-hidden max-w-[36vw] md:max-w-[30vw] lg:max-w-[24vw]"
           title={companyName}
         >
           <div className="relative w-11 h-11 shrink-0 overflow-hidden border border-white/10 bg-surface-2/60 grid place-items-center shadow-[0_0_0_3px_RGBA(0,0,0,0.2)]">
@@ -176,7 +176,7 @@ function Header({ onToggleSidebar, sidebarVisible, sidebarPinned }) {
               <Building className="w-6 h-6 opacity-80" />
             )}
           </div>
-          <span className="tracking-tight max-w-[240px] md:max-w-[320px] truncate leading-[44px] text-base text-text-primary font-semibold">
+          <span className="tracking-tight truncate leading-[44px] text-base text-text-primary font-semibold flex-1 min-w-0">
             {companyName}
           </span>
           {isDevTarget && (
@@ -190,7 +190,7 @@ function Header({ onToggleSidebar, sidebarVisible, sidebarPinned }) {
 
       {/* Título central da aba atual (overlay centralizado) - Oculto em mobile */}
       {isIsis ? (
-        <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 hidden md:block">
+        <div className="pointer-events-none absolute z-10 left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 hidden md:block">
           <div className="flex items-center gap-3">
             <div className="rounded-full p-[2px] bg-gradient-to-r from-fuchsia-500 via-violet-500 to-emerald-400 shadow-[0_0_12px_rgba(168,85,247,0.35)] w-8 h-8">
               <div className="rounded-full overflow-hidden bg-background w-full h-full">
@@ -201,7 +201,7 @@ function Header({ onToggleSidebar, sidebarVisible, sidebarPinned }) {
           </div>
         </div>
       ) : pageTitle ? (
-        <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 hidden md:block">
+        <div className="pointer-events-none absolute z-10 left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 hidden md:block">
           <h1 className="text-lg md:text-xl font-bold tracking-tight text-text-primary">{pageTitle}</h1>
         </div>
       ) : null}
@@ -285,3 +285,5 @@ function Header({ onToggleSidebar, sidebarVisible, sidebarPinned }) {
 }
 
 export default Header;
+
+

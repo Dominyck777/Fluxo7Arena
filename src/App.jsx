@@ -24,6 +24,8 @@ import FinalizadorasPage from '@/pages/FinalizadorasPage';
 import TestPage from '@/pages/TestPage';
 import BackendDeployPage from '@/pages/BackendDeployPage';
 import ResetPasswordPage from '@/pages/ResetPasswordPage';
+import ConfiguracaoFiscalPage from '@/pages/ConfiguracaoFiscalPage';
+import FiscalHubPage from '@/pages/FiscalHubPage';
 import IsisPremiumPage from '@/pages/IsisPremiumPage';
 import HistoricoComandasPage from '@/pages/HistoricoComandasPage';
 import PrintComandaPage from '@/pages/PrintComandaPage';
@@ -119,6 +121,8 @@ function PrivateApp() {
                   <Route path="/quadras" element={<QuadrasPage />} />
                   <Route path="/empresas" element={<EmpresasPage />} />
                   <Route path="/finalizadoras" element={<FinalizadorasPage />} />
+                  <Route path="/configuracao-fiscal" element={<ConfiguracaoFiscalPage />} />
+                  <Route path="/fiscal" element={<FiscalHubPage />} />
                   <Route path="/test-page" element={<TestPage />} />
                   <Route path="/historico" element={<HistoricoComandasPage />} />
                   <Route path="/suporte" element={<SuportePage />} />
