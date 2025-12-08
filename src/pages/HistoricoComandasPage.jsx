@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useToast } from '@/components/ui/use-toast';
 import { CalendarDays, FileText, Search, Loader2, Copy, Download } from 'lucide-react';
 import { listarComandas, listarItensDaComanda, listarTotaisPorComanda, listarPagamentos, listMesas, listarClientesDaComanda, listarFechamentosCaixa, listarResumoPeriodo, getCaixaResumo, listarMovimentacoesCaixa, listarClientesPorComandas, listarFinalizadorasPorComandas } from '@/lib/store';
+import { generateNfcePayloadPreview } from '@/lib/fiscal-mapper';
 import { gerarXMLNFe, downloadXML } from '@/lib/nfe';
 import { cn } from '@/lib/utils';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -53,6 +54,7 @@ function DateInput({ value, onChange }) {
       window.removeEventListener('scroll', onScroll, true);
       window.removeEventListener('resize', onScroll);
     };
+
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
@@ -271,6 +273,28 @@ export default function HistoricoComandasPage() {
   const [detail, setDetail] = useState({ loading: false, itens: [], pagamentos: [] });
   const [detailMeta, setDetailMeta] = useState(null); // { mesaLabel, clientesStr, aberto_em, fechado_em, tipo }
   const [cashDetail, setCashDetail] = useState({ open: false, loading: false, resumo: null, periodo: { from: null, to: null }, movs: [] });
+  // Pré-emissão NFC-e
+  const [preOpen, setPreOpen] = useState(false);
+  const [preLoading, setPreLoading] = useState(false);
+  const [prePayload, setPrePayload] = useState(null);
+  const [preMissing, setPreMissing] = useState([]);
+ 
+  // Pré-Emissão NFC-e (preview sem enviar)
+  const openPreviewFiscal = async (comandaId) => {
+    try {
+      setPreLoading(true);
+      const emp = getEmpresaCodigoFromCache();
+      if (!emp) throw new Error('Empresa não detectada');
+      const { payload, missing } = await generateNfcePayloadPreview({ comandaId, codigoEmpresa: emp });
+      setPrePayload(payload);
+      setPreMissing(missing || []);
+      setPreOpen(true);
+    } catch (e) {
+      toast({ title: 'Falha ao gerar prévia', description: e?.message || 'Tente novamente', variant: 'destructive' });
+    } finally {
+      setPreLoading(false);
+    }
+  };
   
   // XML Import
   const [isXmlImportOpen, setIsXmlImportOpen] = useState(false);
@@ -979,19 +1003,18 @@ export default function HistoricoComandasPage() {
       {tab === 'comandas' && (
       <motion.div variants={itemVariants} className="bg-surface rounded-lg border border-border p-0 overflow-hidden">
         {/* Desktop table (>= sm) */}
-        <div className="hidden sm:block overflow-x-auto pr-2 sm:pr-3">
+        <div className="hidden sm:block overflow-x-auto">
           <table className="min-w-full text-sm">
             <thead className="bg-surface-2 text-text-secondary">
               <tr>
-                <th className="text-left px-4 py-3 whitespace-nowrap">Mesa</th>
-                <th className="text-left px-4 py-3 whitespace-nowrap">Tipo</th>
+                <th className="text-left px-4 py-3 whitespace-nowrap">Local</th>
                 <th className="text-left px-4 py-3">Clientes</th>
                 <th className="text-left px-4 py-3">Status</th>
                 <th className="text-left px-4 py-3">Finalizadora</th>
                 <th className="text-left px-4 py-3 whitespace-nowrap">Abertura</th>
-                <th className="text-left px-4 py-3 whitespace-nowrap">Fechamento</th>
                 <th className="text-right px-4 py-3 whitespace-nowrap">Diferença</th>
                 <th className="text-right px-4 py-3">Total</th>
+                <th className="text-right px-4 py-3 whitespace-nowrap">Fiscal</th>
               </tr>
             </thead>
             <tbody>
@@ -1005,7 +1028,6 @@ export default function HistoricoComandasPage() {
                   onClick={() => openDetail(r.id)}
                 >
                   <td className="px-4 py-2 whitespace-nowrap">{r.mesa_id == null ? 'Balcão' : (r.mesaNumero != null ? `Mesa ${r.mesaNumero}` : '—')}</td>
-                  <td className="px-4 py-2 whitespace-nowrap">{r.mesa_id == null ? 'Balcão' : 'Comanda'}</td>
                   <td className="px-4 py-2 break-words" title={r.clientesStr || ''}>{r.clientesStr || '—'}</td>
                   <td className="px-4 py-2">
                     <span className={cn("inline-flex items-center text-[11px] font-medium px-2 py-0.5 rounded-full border", statusBadgeClass(r.statusDerived || r.status))}>
@@ -1014,7 +1036,6 @@ export default function HistoricoComandasPage() {
                   </td>
                   <td className="px-4 py-2 break-words" title={r.finalizadorasStr || ''}>{r.finalizadorasStr || '—'}</td>
                   <td className="px-4 py-2 whitespace-nowrap">{fmtDate(r.aberto_em)}</td>
-                  <td className="px-4 py-2 whitespace-nowrap">{fmtDate(r.fechado_em)}</td>
                   <td className="px-4 py-2 text-right whitespace-nowrap">
                     {(() => {
                       const v = typeof r.diferenca_pagamento === 'number' ? r.diferenca_pagamento : 0;
@@ -1025,6 +1046,14 @@ export default function HistoricoComandasPage() {
                     })()}
                   </td>
                   <td className="px-4 py-2 text-right font-semibold whitespace-nowrap">{fmtMoney(r.total)}</td>
+                  <td className="px-4 py-2 text-right whitespace-nowrap">
+                    {/* Botão de Pré-Emissão visível para comandas fechadas e sem nota ou rejeitadas */}
+                    {r.fechado_em && (!r.nf_status || r.nf_status === 'rejeitada') && (
+                      <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); openPreviewFiscal(r.id); }}>
+                        Pré-Emissão
+                      </Button>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -1074,12 +1103,51 @@ export default function HistoricoComandasPage() {
                   <div className="font-mono font-semibold whitespace-nowrap">{fmtMoney(r.total)}</div>
                 </div>
               </div>
+              {r.fechado_em && (!r.nf_status || r.nf_status === 'rejeitada') && (
+                <div className="mt-2 flex justify-end">
+                  <Button size="sm" variant="outline" onClick={(e) => { e.preventDefault(); e.stopPropagation(); openPreviewFiscal(r.id); }}>Pré-Emissão</Button>
+                </div>
+              )}
             </button>
           ))}
         </div>
       </motion.div>
 
       )}
+
+      {/* Dialog de Pré-Emissão NFC-e */}
+      <Dialog open={preOpen} onOpenChange={setPreOpen}>
+        <DialogContent className="max-w-[800px]">
+          <DialogHeader>
+            <DialogTitle>Pré-Emissão NFC-e</DialogTitle>
+            <DialogDescription>Revise os dados e pendências antes de emitir.</DialogDescription>
+          </DialogHeader>
+          {preLoading ? (
+            <div className="p-4 text-center text-text-muted">Gerando prévia…</div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="border border-border rounded p-2 bg-surface-2">
+                <div className="text-xs text-text-secondary mb-1">JSON (EnviarNfce)</div>
+                <pre className="text-[11px] whitespace-pre-wrap break-all max-h-[360px] overflow-auto">{prePayload ? JSON.stringify(prePayload, null, 2) : '—'}</pre>
+              </div>
+              <div className="border border-border rounded p-2 bg-surface-2">
+                <div className="text-xs text-text-secondary mb-1">Pendências</div>
+                {(!preMissing || preMissing.length===0) ? (
+                  <div className="text-sm text-emerald-500">Nenhuma pendência encontrada.</div>
+                ) : (
+                  <ul className="list-disc pl-5 text-sm">
+                    {preMissing.map((m,i)=> (<li key={i}>{m}</li>))}
+                  </ul>
+                )}
+              </div>
+            </div>
+          )}
+          <div className="flex justify-end gap-2 mt-3">
+            <Button variant="outline" onClick={()=>setPreOpen(false)}>Fechar</Button>
+            <Button disabled>Emitir (desabilitado)</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {tab === 'fechamentos' && (
       <>

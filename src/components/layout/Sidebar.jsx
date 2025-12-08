@@ -10,6 +10,7 @@ const navItems = [
   { to: '/agenda', icon: Calendar, label: 'Agenda' },
   { to: '/vendas', icon: ShoppingCart, label: 'Loja' },
   { to: '/financeiro', icon: Wallet, label: 'Financeiro' },
+  { to: '/fiscal', icon: Banknote, label: 'Central Fiscal' },
 ];
 
 const navItemVariants = {

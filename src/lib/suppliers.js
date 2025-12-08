@@ -60,10 +60,18 @@ export async function createSupplierFromXML(fornecedorData, codigoEmpresa) {
     // Endereço
     endereco: fornecedorData.endereco?.logradouro || null,
     numero: fornecedorData.endereco?.numero || null,
+    complemento: fornecedorData.endereco?.complemento || null,
     bairro: fornecedorData.endereco?.bairro || null,
     cidade: fornecedorData.endereco?.cidade || null,
     uf: fornecedorData.endereco?.uf || null,
     cep: fornecedorData.endereco?.cep?.replace(/\D/g, '') || null,
+    cidade_ibge: fornecedorData.endereco?.codigoIBGE || null,
+    telefone: fornecedorData.endereco?.fone || null,
+    // Fiscais
+    ie: fornecedorData.ie || null,
+    iest: fornecedorData.iest || null,
+    im: fornecedorData.im || null,
+    // Observação: CRT no XML refere-se ao emitente. Mantemos como informação auxiliar se houver campo compatível
   };
   
   try {
@@ -99,7 +107,31 @@ export async function findOrCreateSupplier(fornecedorData, codigoEmpresa) {
     const existing = await findSupplierByCNPJ(fornecedorData.cnpj, codigoEmpresa);
     
     if (existing) {
-      console.log('[Suppliers] Fornecedor encontrado:', existing.razao_social);
+      console.log('[Suppliers] Fornecedor encontrado:', existing.razao_social || existing.nome);
+      // Atualizar campos faltantes (opcional)
+      const patch = {};
+      const end = fornecedorData.endereco || {};
+      const clean = (s) => (s == null || String(s).trim() === '' ? null : s);
+      if (!clean(existing.ie) && clean(fornecedorData.ie)) patch.ie = fornecedorData.ie;
+      if (!clean(existing.iest) && clean(fornecedorData.iest)) patch.iest = fornecedorData.iest;
+      if (!clean(existing.im) && clean(fornecedorData.im)) patch.im = fornecedorData.im;
+      if (!clean(existing.endereco) && clean(end.logradouro)) patch.endereco = end.logradouro;
+      if (!clean(existing.numero) && clean(end.numero)) patch.numero = end.numero;
+      if (!clean(existing.complemento) && clean(end.complemento)) patch.complemento = end.complemento;
+      if (!clean(existing.bairro) && clean(end.bairro)) patch.bairro = end.bairro;
+      if (!clean(existing.cidade) && clean(end.cidade)) patch.cidade = end.cidade;
+      if (!clean(existing.uf) && clean(end.uf)) patch.uf = end.uf;
+      if (!clean(existing.cep) && clean(end.cep)) patch.cep = String(end.cep).replace(/\D/g, '');
+      if (!clean(existing.cidade_ibge) && clean(end.codigoIBGE)) patch.cidade_ibge = end.codigoIBGE;
+      if (!clean(existing.telefone) && clean(end.fone)) patch.telefone = end.fone;
+      // Nome/apelido somente se vazios
+      if (!clean(existing.nome) && clean(fornecedorData.razaoSocial)) patch.nome = fornecedorData.razaoSocial;
+      if (!clean(existing.apelido) && (clean(fornecedorData.nomeFantasia) || clean(fornecedorData.razaoSocial))) patch.apelido = fornecedorData.nomeFantasia || fornecedorData.razaoSocial;
+      if (Object.keys(patch).length > 0) {
+        await supabase.from('clientes').update(patch).eq('id', existing.id);
+        console.log('[Suppliers] Fornecedor atualizado com campos faltantes:', patch);
+        return { ...existing, ...patch };
+      }
       return existing;
     }
     

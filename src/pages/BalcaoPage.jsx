@@ -43,6 +43,7 @@ export default function BalcaoPage() {
   const [openCashDialogOpen, setOpenCashDialogOpen] = useState(false);
   const [cashLoading, setCashLoading] = useState(false);
   const [cashSummary, setCashSummary] = useState(null);
+  const [isCloseCashOpen, setIsCloseCashOpen] = useState(false);
 
   // Pagamento
   const [isPayOpen, setIsPayOpen] = useState(false);
@@ -136,6 +137,7 @@ export default function BalcaoPage() {
 
   // Estado inicial do caixa
   useEffect(() => {
+    if (isCloseCashOpen) return;
     let active = true;
     (async () => {
       try {
@@ -144,7 +146,7 @@ export default function BalcaoPage() {
       } catch { if (active) setIsCashierOpen(false); }
     })();
     return () => { active = false; };
-  }, [userProfile?.codigo_empresa]);
+  }, [userProfile?.codigo_empresa, isCloseCashOpen]);
 
   // ===== Caixa: funções iguais às de Vendas =====
   const reloadCashSummary = async () => {
@@ -485,7 +487,7 @@ export default function BalcaoPage() {
           <span className="ml-2 hidden md:inline">Abrir Caixa</span>
         </Button>
       </AlertDialogTrigger>
-      <AlertDialogContent className="sm:max-w-[425px] w-[92vw] animate-none" onKeyDown={(e) => e.stopPropagation()} onPointerDownOutside={(e) => { e.preventDefault(); e.stopPropagation(); }} onInteractOutside={(e) => { e.preventDefault(); e.stopPropagation(); }}>
+      <AlertDialogContent className="sm:max-w-[425px] w-[92vw] animate-none" onKeyDown={(e) => e.stopPropagation()} onEscapeKeyDown={(e) => { e.preventDefault(); e.stopPropagation(); }} onPointerDownOutside={(e) => { e.preventDefault(); e.stopPropagation(); }} onFocusOutside={(e) => { e.preventDefault(); e.stopPropagation(); }} onInteractOutside={(e) => { e.preventDefault(); e.stopPropagation(); }} onOpenAutoFocus={(e) => { e.preventDefault(); }} onCloseAutoFocus={(e) => { e.preventDefault(); }}>
         <OpenCashContent />
       </AlertDialogContent>
     </AlertDialog>
@@ -512,20 +514,20 @@ export default function BalcaoPage() {
     const suprimentosDinheiro = Number(cashSummary?.totalSuprimento || 0);
     const sangriasDinheiro = Number(cashSummary?.totalSangria || 0);
     return (
-      <AlertDialog onOpenChange={(open) => { if (open) { setConfirmStep(false); handlePrepareClose(); } }}>
+      <AlertDialog open={isCloseCashOpen} onOpenChange={(open) => { if (open) { setIsCloseCashOpen(true); setConfirmStep(false); handlePrepareClose(); } }}>
         <AlertDialogTrigger asChild>
           <Button
             variant="destructive"
             size="sm"
             disabled={!isCashierOpen}
-            onClick={handlePrepareClose}
+            onClick={() => { setIsCloseCashOpen(true); }}
             className="px-3"
           >
             <Lock className="h-4 w-4" />
             <span className="ml-2">Fechar Caixa</span>
           </Button>
         </AlertDialogTrigger>
-        <AlertDialogContent className="sm:max-w-[425px] animate-none" onKeyDown={(e) => e.stopPropagation()} onPointerDownOutside={(e) => { e.preventDefault(); e.stopPropagation(); }} onInteractOutside={(e) => { e.preventDefault(); e.stopPropagation(); }}>
+        <AlertDialogContent className="sm-max-w-[425px] animate-none" onKeyDown={(e) => e.stopPropagation()} onEscapeKeyDown={(e) => { e.preventDefault(); e.stopPropagation(); }} onPointerDownOutside={(e) => { e.preventDefault(); e.stopPropagation(); }} onFocusOutside={(e) => { e.preventDefault(); e.stopPropagation(); }} onInteractOutside={(e) => { e.preventDefault(); e.stopPropagation(); }} onOpenAutoFocus={(e) => { e.preventDefault(); }} onCloseAutoFocus={(e) => { e.preventDefault(); }}>
           <AlertDialogHeader>
             <AlertDialogTitle>Fechar Caixa</AlertDialogTitle>
             <AlertDialogDescription>Confira os valores e confirme o fechamento do caixa. Esta ação é irreversível.</AlertDialogDescription>
@@ -581,7 +583,7 @@ export default function BalcaoPage() {
           <AlertDialogFooter>
             {!confirmStep ? (
               <>
-                <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                <AlertDialogCancel onClick={() => setIsCloseCashOpen(false)}>Cancelar</AlertDialogCancel>
                 <Button onClick={() => setConfirmStep(true)}>Confirmar Fechamento</Button>
               </>
             ) : (
@@ -607,6 +609,7 @@ export default function BalcaoPage() {
                     const valorFinal = digits ? Number(digits) / 100 : 0;
                     await fecharCaixa({ codigoEmpresa: userProfile?.codigo_empresa, valorFinalDinheiro: valorFinal });
                     setIsCashierOpen(false);
+                    setIsCloseCashOpen(false);
                     toast({ title: 'Caixa fechado!', description: 'Fechamento registrado com sucesso.', variant: 'success' });
                   } catch (e) {
                     toast({ title: 'Falha ao fechar caixa', description: e?.message || 'Tente novamente', variant: 'destructive' });
@@ -1141,6 +1144,8 @@ export default function BalcaoPage() {
 
   // Buscar estoque reservado global (todas as comandas abertas)
   useEffect(() => {
+    // Pausar enquanto o modal de fechar caixa estiver aberto para evitar flicker/unmount
+    if (isCloseCashOpen) return;
     let active = true;
     const fetchReservedStock = async () => {
       try {
@@ -1180,9 +1185,10 @@ export default function BalcaoPage() {
       active = false; 
       clearInterval(interval);
     };
-  }, [userProfile?.codigo_empresa, items]); // Recarrega quando items muda
+  }, [userProfile?.codigo_empresa, items, isCloseCashOpen]); // Pausa quando modal de fechamento está aberto
 
   useEffect(() => {
+    if (isCloseCashOpen) return;
     let active = true;
     const t = setTimeout(async () => {
       try {
@@ -1203,7 +1209,7 @@ export default function BalcaoPage() {
       } catch { if (active) setClients([]); }
     }, 250);
     return () => { active = false; clearTimeout(t); };
-  }, [clientSearch, isClientWizardOpen]);
+  }, [clientSearch, isClientWizardOpen, isCloseCashOpen]);
 
   const total = useMemo(() => items.reduce((acc, it) => acc + Number(it.price || 0) * Number(it.quantity || 0), 0), [items]);
   

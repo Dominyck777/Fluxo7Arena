@@ -1938,7 +1938,7 @@ function ProdutosPage() {
         return next;
       });
       try {
-        await createCategory(name);
+        await createCategory(name, { codigoEmpresa: userProfile?.codigo_empresa });
         // Sincroniza com backend (ordem/casos)
         await reloadCategories();
       } catch (err) {
@@ -1962,7 +1962,7 @@ function ProdutosPage() {
       const prevList = categories;
       setCategories(prev => prev.filter(c => c !== name));
       try {
-        await removeCategory(name);
+        await removeCategory(name, { codigoEmpresa: userProfile?.codigo_empresa });
         await reloadCategories();
       } catch (err) {
         // rollback

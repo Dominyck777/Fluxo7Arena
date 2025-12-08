@@ -109,8 +109,14 @@ function extractFornecedor(xmlDoc) {
       bairro: getTextContent(emit, 'xBairro'),
       cidade: getTextContent(emit, 'xMun'),
       uf: getTextContent(emit, 'UF'),
-      cep: getTextContent(emit, 'CEP')
-    }
+      cep: getTextContent(emit, 'CEP'),
+      codigoIBGE: getTextContent(emit, 'cMun'),
+      fone: getTextContent(emit, 'fone')
+    },
+    ie: getTextContent(emit, 'IE'),
+    iest: getTextContent(emit, 'IEST'),
+    im: getTextContent(emit, 'IM'),
+    crt: getTextContent(emit, 'CRT')
   };
 }
 
@@ -250,7 +256,11 @@ function extractImpostos(impostoElement) {
         cst: getTextContent(icmsType, 'CST'),
         csosn: getTextContent(icmsType, 'CSOSN'),
         aliquota: parseFloat(getTextContent(icmsType, 'pICMS') || '0'),
-        valor: parseFloat(getTextContent(icmsType, 'vICMS') || '0')
+        valor: parseFloat(getTextContent(icmsType, 'vICMS') || '0'),
+        orig: getTextContent(icmsType, 'orig'),
+        fcpAliquota: parseFloat(getTextContent(icmsType, 'pFCP') || '0'),
+        mva: parseFloat(getTextContent(icmsType, 'pMVAST') || '0'),
+        pRedBC: parseFloat(getTextContent(icmsType, 'pRedBC') || '0')
       };
     }
   }
@@ -467,6 +477,9 @@ export function convertXMLProductToSystemFormat(produtoXML, codigoEmpresa) {
     cstIcmsInterno: produtoXML.impostos?.icms?.cst || '',
     csosnInterno: produtoXML.impostos?.icms?.csosn || '',
     aliqIcmsInterno: produtoXML.impostos?.icms?.aliquota || 0,
+    fcpPercent: produtoXML.impostos?.icms?.fcpAliquota || 0,
+    mvaPercent: produtoXML.impostos?.icms?.mva || 0,
+    baseReduzidaPercent: produtoXML.impostos?.icms?.pRedBC || 0,
     
     cstPisEntrada: produtoXML.impostos?.pis?.cst || '',
     aliqPisPercent: produtoXML.impostos?.pis?.aliquota || 0,
