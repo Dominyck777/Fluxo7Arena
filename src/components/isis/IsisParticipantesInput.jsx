@@ -15,7 +15,8 @@ export const IsisParticipantesInput = ({
   onFinalizar, 
   disabled = false,
   onAdicionarLote,
-  selfName: selfNameProp
+  selfName: selfNameProp,
+  onFixedRolesDetected
 }) => {
   const [nome, setNome] = useState('');
   const [focused, setFocused] = useState(false);
@@ -39,7 +40,6 @@ export const IsisParticipantesInput = ({
     const checkMobile = () => {
       setIsMobile(window.innerWidth < 768);
     };
-    
     checkMobile();
     window.addEventListener('resize', checkMobile);
     
@@ -127,6 +127,49 @@ export const IsisParticipantesInput = ({
     return keys;
   };
 
+  // Extrai seções de papéis fixos como LEVANTADORES e GOLEIROS do texto importado
+  const extractFixedRoles = (text) => {
+    const lines = String(text || '').split(/\r?\n/);
+    const roles = { levantadores: [], goleiros: [] };
+    let current = null; // 'levantadores' | 'goleiros' | null
+    for (let raw of lines) {
+      const norm = removeDiacritics(String(raw || '')).toLowerCase().trim();
+      // Detecta início de seção
+      if (/^\s*[*\-•°]?\s*levanta(dor|dores|dor(es)?)\b/i.test(norm)) { current = 'levantadores'; continue; }
+      if (/^\s*[*\-•°]?\s*goleir(o|os|a|as)\b/i.test(norm)) { current = 'goleiros'; continue; }
+      // Encerramento por novo cabeçalho comum (ex.: *JOGADORES*, Convocados, Lista de espera, Convidados, nova seção de papel)
+      if (current) {
+        if (/(^|\s)jogador(e|es)\b/.test(norm)) { current = null; continue; }
+        if (/^\s*[*\-•°]?\s*(convocad|lista\s+de\s+(espera|reserva)|convidad)\b/i.test(norm)) { current = null; continue; }
+        if (/^\s*[*_]{1,3}\s*[a-zà-ÿ]+/i.test(norm)) { current = null; continue; } // linhas de cabeçalho enfatizadas
+        if (/^\s*[*\-•°]?\s*(levanta|goleir)\b/i.test(norm)) { current = null; continue; } // troca de papel
+      }
+      if (!current) continue;
+      // Extrai nome da linha
+      const candidate = String(raw)
+        .replace(/^\s*[°•*\-]+\s*/g, '')
+        .replace(/^\s*\d+\)?\s*/g, '')
+        .replace(/^[\W_]+/, '')
+        .trim();
+      const hasLetters = /[A-Za-zÀ-ÖØ-öø-ÿ]/.test(candidate);
+      const ok = candidate && hasLetters && !/[0-9@]/.test(candidate) && candidate.length >= 2 && candidate.length <= 60;
+      if (!ok) continue;
+      // Normaliza para Title Case simples mantendo espaços simples
+      const title = candidate
+        .toLowerCase()
+        .split(/\s+/)
+        .map(w => (w ? w[0].toUpperCase() + w.slice(1) : w))
+        .join(' ');
+      const key = canonicalKey(title);
+      if (current === 'levantadores') {
+        if (!roles.levantadores.some(n => canonicalKey(n) === key)) roles.levantadores.push(title);
+      } else if (current === 'goleiros') {
+        if (!roles.goleiros.some(n => canonicalKey(n) === key)) roles.goleiros.push(title);
+      }
+    }
+    return roles;
+  };
+
   const handleSubmit = (e) => {
     e.preventDefault();
     
@@ -170,6 +213,7 @@ export const IsisParticipantesInput = ({
         console.log('[Isis Import] source=', data.source);
       }
       const waitlistKeys = extractWaitlistKeys(importText);
+      const fixedRoles = extractFixedRoles(importText);
       const extractedRaw = Array.isArray(data?.extracted) ? data.extracted : [];
       const extracted = extractedRaw.filter(n => !waitlistKeys.has(canonicalKey(n)));
       // detecta se o próprio usuário apareceu no texto processado (antes dos filtros)
@@ -206,8 +250,13 @@ export const IsisParticipantesInput = ({
       setSelectedMap(initialSel);
       setHasProcessed(true);
       setSelfDetected(detectedSelf || !!selfName);
+      try {
+        if (typeof onFixedRolesDetected === 'function') onFixedRolesDetected(fixedRoles);
+        else window.dispatchEvent(new CustomEvent('isis:fixed-roles', { detail: fixedRoles }));
+      } catch {}
     } catch (err) {
       const waitlistKeys = extractWaitlistKeys(importText);
+      const fixedRoles = extractFixedRoles(importText);
       const local = importText.split(/[\n,;]+/).map(s => s.trim()).filter(Boolean);
       const detectedSelf = local.some(item => {
         const cleaned = item.replace(/^[\W_]+|[\W_]+$/g, '');
@@ -241,6 +290,10 @@ export const IsisParticipantesInput = ({
       setSelectedMap(initialSel);
       setHasProcessed(true);
       setSelfDetected(detectedSelf || !!selfName);
+      try {
+        if (typeof onFixedRolesDetected === 'function') onFixedRolesDetected(fixedRoles);
+        else window.dispatchEvent(new CustomEvent('isis:fixed-roles', { detail: fixedRoles }));
+      } catch {}
     } finally {
       setIsProcessing(false);
     }

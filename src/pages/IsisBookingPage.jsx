@@ -2028,22 +2028,88 @@ ${listaNomes}
         else if (/(futebol|campo)/.test(rawModalidade)) teamSize = 11; // futebol de campo
         else teamSize = 5; // default
       }
-      // Embaralha para aleatoriedade
-      const arr = nomes.slice();
-      for (let i = arr.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [arr[i], arr[j]] = [arr[j], arr[i]]; }
+      // Identifica fixos (levantador/goleiro) vindos de selections.fixos (nomes exatos)
+      const norm = (s) => String(s || '').trim().toLowerCase();
+      // Conjunto de fixos pode vir em selections.fixos, selections.goleiros, selections.levantadores
+      const baseFixos = Array.isArray(selections?.fixos) ? selections.fixos : [];
+      const goleiros = Array.isArray(selections?.goleiros) ? selections.goleiros : [];
+      const levantadores = Array.isArray(selections?.levantadores) ? selections.levantadores : [];
+      const fixosSet = new Set([
+        ...baseFixos,
+        ...goleiros,
+        ...levantadores,
+      ].map(norm).filter(Boolean));
+      const isFixo = (n) => fixosSet.has(norm(n));
+      // labels opcionais por fixo: selections.fixoRoles = { nomeLower: 'Levantador'|'Goleiro' }
+      const fixoRolesMap = (() => {
+        const out = {};
+        // Explícitos (nomeLower -> role)
+        const raw = selections?.fixoRoles;
+        if (raw && typeof raw === 'object') {
+          for (const k of Object.keys(raw)) out[k] = raw[k];
+        }
+        // Derivados das listas específicas
+        goleiros.forEach(n => { out[norm(n)] = 'Goleiro'; });
+        levantadores.forEach(n => { out[norm(n)] = 'Levantador'; });
+        return out;
+      })();
+      const getFixoLabel = (n) => {
+        if (!isFixo(n)) return '';
+        const role = fixoRolesMap[norm(n)] || 'Fixo';
+        return ` (${role})`;
+      };
+
+      // Particiona em fixos e não-fixos
+      const fixos = nomes.filter(isFixo);
+      const livres = nomes.filter((n) => !isFixo(n));
+
+      // Embaralha apenas os não-fixos para aleatoriedade
+      const arrLivres = livres.slice();
+      for (let i = arrLivres.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [arrLivres[i], arrLivres[j]] = [arrLivres[j], arrLivres[i]]; }
+
       // Gera o máximo de times completos possível e define reservas
       if (teamSize < 2) teamSize = 2;
-      const fmt = (xs) => xs.map((n, i) => `${i + 1}) ${n}`).join('\n') || '—';
-      const teamCount = Math.floor(arr.length / teamSize);
+      const fmt = (xs) => xs.map((n, i) => `${i + 1}) ${n}${getFixoLabel(n)}`).join('\n') || '—';
+      const totalCount = nomes.length;
+      const teamCount = Math.floor(totalCount / teamSize);
       const titleModalidade = rawModalidade ? (rawModalidade[0].toUpperCase() + rawModalidade.slice(1)) : 'modalidade';
       let text = `🏆 **Times gerados (${titleModalidade})**`;
       const teamIcons = ['🟠', '🔵', '🟢', '🟣', '🟡', '🟤'];
       if (teamCount >= 2) {
-        const teams = [];
-        for (let i = 0; i < teamCount; i++) {
-          teams.push(arr.slice(i * teamSize, (i + 1) * teamSize));
+        // Cria recipientes vazios
+        const teams = Array.from({ length: teamCount }, () => []);
+        // 1) Distribui fixos em round-robin (não ultrapassar tamanho do time). Como entram primeiro, ficam em primeiro no time.
+        if (fixos.length > 0) {
+          let ti = 0;
+          for (const f of fixos) {
+            // procura próximo time que ainda tenha vaga
+            let tries = 0;
+            while (tries < teamCount && teams[ti].length >= teamSize) {
+              ti = (ti + 1) % teamCount;
+              tries++;
+            }
+            if (teams[ti].length < teamSize) teams[ti].push(f);
+            ti = (ti + 1) % teamCount;
+          }
         }
-        const reservas = arr.slice(teamCount * teamSize);
+        // 2) Preenche restantes com jogadores livres embaralhados
+        for (const p of arrLivres) {
+          // pega o time com menos jogadores no momento
+          let bestIdx = 0;
+          let bestLen = Infinity;
+          for (let i = 0; i < teams.length; i++) {
+            if (teams[i].length < bestLen && teams[i].length < teamSize) {
+              bestLen = teams[i].length;
+              bestIdx = i;
+            }
+          }
+          if (teams[bestIdx].length < teamSize) teams[bestIdx].push(p);
+        }
+        // 3) Reservas: o que sobrar (se total > teamCount*teamSize)
+        const usedCount = teamCount * teamSize;
+        const reservas = totalCount > usedCount
+          ? [...fixos, ...arrLivres].slice(usedCount)
+          : [];
         teams.forEach((t, idx) => {
           const icon = teamIcons[idx % teamIcons.length];
           text += `\n\n**${icon} Time ${idx + 1} (${t.length})**:\n${fmt(t)}`;
@@ -2053,6 +2119,7 @@ ${listaNomes}
         }
       } else {
         // Participantes insuficientes para 2 times completos: ainda assim montar 2 times balanceados
+        const arr = [...fixos, ...arrLivres];
         if (arr.length === 0) {
           addIsisMessage('Não há participantes suficientes para formar times.');
           return;
@@ -2060,7 +2127,7 @@ ${listaNomes}
         if (arr.length === 1) {
           // Caso limite: apenas 1 jogador
           text += `\n\nℹ️ Ainda não há jogadores suficientes para formar 2 times. Adicione mais participantes.`;
-          text += `\n\n**🟠 Time 1 (1)**:\n1) ${arr[0]}`;
+          text += `\n\n**🟠 Time 1 (1)**:\n1) ${arr[0]}${getFixoLabel(arr[0])}`;
         } else {
           const t1Count = Math.min(teamSize, Math.ceil(arr.length / 2));
           const t2Count = Math.min(teamSize, arr.length - t1Count);
@@ -2630,6 +2697,33 @@ ${listaNomes}
           }));
       
       updateSelection('participantes', participantes);
+      // Restaura papéis fixos a partir do banco (meta_roles); fallback para localStorage
+      try {
+        const meta = agendamentoCompleto?.meta_roles || null;
+        if (meta && typeof meta === 'object') {
+          const levs = Array.isArray(meta.levantadores) ? meta.levantadores : [];
+          const gols = Array.isArray(meta.goleiros) ? meta.goleiros : [];
+          const fixos = Array.isArray(meta.fixos) ? meta.fixos : Array.from(new Set([...levs, ...gols]));
+          const map = meta.fixoRoles && typeof meta.fixoRoles === 'object' ? meta.fixoRoles : {};
+          updateSelection('levantadores', levs);
+          updateSelection('goleiros', gols);
+          updateSelection('fixos', fixos);
+          updateSelection('fixoRoles', map);
+        } else {
+          const key = `f7a:fixos:${agendamentoCompleto.id}`;
+          const saved = JSON.parse(localStorage.getItem(key) || 'null');
+          if (saved && typeof saved === 'object') {
+            const levs = Array.isArray(saved.levantadores) ? saved.levantadores : [];
+            const gols = Array.isArray(saved.goleiros) ? saved.goleiros : [];
+            const fixos = Array.isArray(saved.fixos) ? saved.fixos : Array.from(new Set([...levs, ...gols]));
+            const map = saved.fixoRoles && typeof saved.fixoRoles === 'object' ? saved.fixoRoles : {};
+            updateSelection('levantadores', levs);
+            updateSelection('goleiros', gols);
+            updateSelection('fixos', fixos);
+            updateSelection('fixoRoles', map);
+          }
+        }
+      } catch {}
       
       // Armazena o agendamento para edição IMEDIATAMENTE
       setAgendamentoCriado(agendamentoCompleto);
@@ -3020,6 +3114,14 @@ ${listaNomes}
       const slots = duracaoMinutos / 30; // Slots de 30 minutos
       const valorTotal = Math.round(valorPorMeiaHora * slots * 100) / 100;
       
+      // Monta metaRoles a partir das selections (papéis fixos)
+      const metaRoles = {
+        levantadores: Array.isArray(selections.levantadores) ? selections.levantadores : [],
+        goleiros: Array.isArray(selections.goleiros) ? selections.goleiros : [],
+        fixos: Array.isArray(selections.fixos) ? selections.fixos : [],
+        fixoRoles: (selections.fixoRoles && typeof selections.fixoRoles === 'object') ? selections.fixoRoles : {},
+      };
+
       // Atualizar agendamento
       const { data: agendamento, error: agendamentoError } = await supabase
         .from('agendamentos')
@@ -3029,7 +3131,8 @@ ${listaNomes}
           inicio: selections.horario.inicioDate.toISOString(),
           fim: selections.horario.fimDate.toISOString(),
           modalidade: selections.esporte,
-          valor_total: valorTotal
+          valor_total: valorTotal,
+          meta_roles: metaRoles
         })
         .eq('id', agendamentoCriado.id)
         .select()
@@ -3067,6 +3170,17 @@ ${listaNomes}
       
       // Atualiza o agendamento armazenado
       setAgendamentoCriado(agendamento);
+      // Salva papéis fixos localmente para este agendamento
+      try {
+        const key = `f7a:fixos:${agendamento.id}`;
+        const payload = {
+          levantadores: selections.levantadores || [],
+          goleiros: selections.goleiros || [],
+          fixos: selections.fixos || [],
+          fixoRoles: selections.fixoRoles || {},
+        };
+        localStorage.setItem(key, JSON.stringify(payload));
+      } catch {}
       
       // Mostra resumo final do agendamento atualizado
       mostrarResumoFinal(agendamento, true);
@@ -3121,6 +3235,14 @@ ${listaNomes}
       const slots = duracaoMinutos / 30; // Slots de 30 minutos
       const valorTotal = Math.round(valorPorMeiaHora * slots * 100) / 100;
       
+      // Monta metaRoles a partir das selections (papéis fixos)
+      const metaRoles = {
+        levantadores: Array.isArray(selections.levantadores) ? selections.levantadores : [],
+        goleiros: Array.isArray(selections.goleiros) ? selections.goleiros : [],
+        fixos: Array.isArray(selections.fixos) ? selections.fixos : [],
+        fixoRoles: (selections.fixoRoles && typeof selections.fixoRoles === 'object') ? selections.fixoRoles : {},
+      };
+
       // Busca o maior código já usado para esta empresa
       const { data: ultimoAgendamento } = await supabase
         .from('agendamentos')
@@ -3155,7 +3277,8 @@ ${listaNomes}
             fim: selections.horario.fimDate.toISOString(),
             modalidade: selections.esporte,
             status: 'scheduled',
-            valor_total: valorTotal
+            valor_total: valorTotal,
+            meta_roles: metaRoles
           })
           .select('id, codigo')
           .single();
@@ -3224,6 +3347,17 @@ ${listaNomes}
       
       // Armazena o agendamento criado para edições posteriores
       setAgendamentoCriado(agendamento);
+      // Salva papéis fixos localmente para este agendamento
+      try {
+        const key = `f7a:fixos:${agendamento.id}`;
+        const payload = {
+          levantadores: selections.levantadores || [],
+          goleiros: selections.goleiros || [],
+          fixos: selections.fixos || [],
+          fixoRoles: selections.fixoRoles || {},
+        };
+        localStorage.setItem(key, JSON.stringify(payload));
+      } catch {}
       
       // Mostra resumo final do agendamento confirmado
       mostrarResumoFinal(agendamento);
@@ -3297,6 +3431,40 @@ ${listaNomes}
           onFinalizar={handleFinalizarParticipantes}
           onAdicionarLote={handleAdicionarParticipantesLote}
           selfName={selections.cliente?.nome}
+          onFixedRolesDetected={(roles) => {
+            try {
+              const levs = Array.isArray(roles?.levantadores) ? roles.levantadores : [];
+              const gols = Array.isArray(roles?.goleiros) ? roles.goleiros : [];
+              const norm = (s) => String(s || '').trim().toLowerCase();
+              const fixos = Array.from(new Set([...levs, ...gols]));
+              const map = {};
+              levs.forEach(n => { map[norm(n)] = 'Levantador'; });
+              gols.forEach(n => { map[norm(n)] = 'Goleiro'; });
+              updateSelection('levantadores', levs);
+              updateSelection('goleiros', gols);
+              updateSelection('fixos', fixos);
+              updateSelection('fixoRoles', map);
+              // Se já existe agendamento, persiste imediatamente no banco
+              if (agendamentoCriado?.id) {
+                (async () => {
+                  try {
+                    const metaRoles = {
+                      levantadores: levs,
+                      goleiros: gols,
+                      fixos,
+                      fixoRoles: map,
+                    };
+                    await supabase
+                      .from('agendamentos')
+                      .update({ meta_roles: metaRoles })
+                      .eq('id', agendamentoCriado.id);
+                  } catch (e) {
+                    console.debug('[Isis] Falha ao persistir meta_roles imediatos:', e?.message || e);
+                  }
+                })();
+              }
+            } catch {}
+          }}
         />
       );
     }
