@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Helmet } from 'react-helmet';
+import { useNavigate } from 'react-router-dom';
 import { useToast } from '@/components/ui/use-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -7,6 +8,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
+import { testarConexaoTN } from '@/lib/transmitenota';
 
 function field(v) { return v ?? ''; }
 function onlyDigits(v) { return String(v || '').replace(/\D/g, ''); }
@@ -14,6 +16,7 @@ function onlyDigits(v) { return String(v || '').replace(/\D/g, ''); }
 export default function ConfiguracaoFiscalPage() {
   const { userProfile } = useAuth();
   const { toast } = useToast();
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [empresa, setEmpresa] = useState(null);
@@ -37,6 +40,10 @@ export default function ConfiguracaoFiscalPage() {
     ambiente: 'homologacao',
     transmitenota_apikey: '',
     transmitenota_base_url: '',
+    transmitenota_base_url_hml: '',
+    transmitenota_apikey_hml: '',
+    transmitenota_base_url_prod: '',
+    transmitenota_apikey_prod: '',
   });
 
   useEffect(() => {
@@ -71,6 +78,10 @@ export default function ConfiguracaoFiscalPage() {
           ambiente: data.ambiente || 'homologacao',
           transmitenota_apikey: field(data.transmitenota_apikey),
           transmitenota_base_url: field(data.transmitenota_base_url),
+          transmitenota_base_url_hml: field(data.transmitenota_base_url_hml),
+          transmitenota_apikey_hml: field(data.transmitenota_apikey_hml),
+          transmitenota_base_url_prod: field(data.transmitenota_base_url_prod),
+          transmitenota_apikey_prod: field(data.transmitenota_apikey_prod),
         });
       }
       setLoading(false);
@@ -106,6 +117,10 @@ export default function ConfiguracaoFiscalPage() {
       ambiente: form.ambiente || 'homologacao',
       transmitenota_apikey: form.transmitenota_apikey?.trim() || null,
       transmitenota_base_url: form.transmitenota_base_url?.trim() || null,
+      transmitenota_base_url_hml: form.transmitenota_base_url_hml?.trim() || null,
+      transmitenota_apikey_hml: form.transmitenota_apikey_hml?.trim() || null,
+      transmitenota_base_url_prod: form.transmitenota_base_url_prod?.trim() || null,
+      transmitenota_apikey_prod: form.transmitenota_apikey_prod?.trim() || null,
     };
 
     try {
@@ -125,16 +140,59 @@ export default function ConfiguracaoFiscalPage() {
     }
   }
 
+  // Testar conexão Transmite Nota por ambiente
+  async function handleTestTN(env) {
+    const cnpjNum = onlyDigits(empresa?.cnpj || '');
+    if (cnpjNum.length !== 14) {
+      toast({ title: 'CNPJ inválido', description: 'Salve um CNPJ válido (14 dígitos) nos dados da empresa.', variant: 'destructive' });
+      return;
+    }
+    const isProd = env === 'prod';
+    const baseUrl = isProd ? (form.transmitenota_base_url_prod || '') : (form.transmitenota_base_url_hml || '');
+    const apiKey = isProd ? (form.transmitenota_apikey_prod || '') : (form.transmitenota_apikey_hml || '');
+    if (!baseUrl || !apiKey) {
+      toast({ title: 'Configuração incompleta', description: 'Preencha Base URL e ApiKey do ambiente selecionado.', variant: 'destructive' });
+      return;
+    }
+    try {
+      const r = await testarConexaoTN({ baseUrl, apiKey, cnpj: cnpjNum });
+      if (!r.reachable) {
+        toast({ title: 'Sem conexão', description: r.error || `Endpoint inacessível (${r.status||'sem status'})`, variant: 'destructive' });
+        return;
+      }
+      if (r.authorized === false) {
+        toast({ title: 'Credenciais inválidas', description: `HTTP ${r.status}. Verifique ApiKey e CNPJ.`, variant: 'destructive' });
+        return;
+      }
+      const okMsg = r.status === 200
+        ? 'OK'
+        : (r.status === 400
+          ? 'Conectado (dados mínimos ausentes, mas credenciais e URL válidas)'
+          : `Conectado (HTTP ${r.status})`);
+      toast({ title: `Conexão ${isProd ? 'PROD' : 'HML'}: sucesso`, description: okMsg });
+    } catch (e) {
+      toast({ title: 'Falha no teste', description: e.message || 'Erro inesperado', variant: 'destructive' });
+    }
+  }
+
   return (
-    <div className="container mx-auto p-4">
+    <div className="max-w-5xl mx-auto px-4 py-6">
       <Helmet>
         <title>Configuração Fiscal</title>
       </Helmet>
 
-      <h1 className="text-xl font-semibold mb-3">Configuração Fiscal</h1>
-      <p className="text-sm text-muted-foreground mb-6">Preencha os dados fiscais da empresa. Esses dados serão usados na emissão de NFC-e/NF-e.</p>
+      <div className="flex items-center justify-between mb-4">
+        <Button type="button" variant="outline" size="sm" onClick={() => navigate(-1)}>
+          Voltar
+        </Button>
+        <div className="text-right">
+          <h1 className="text-2xl font-semibold leading-tight">Configuração Fiscal</h1>
+          <p className="text-xs text-muted-foreground">Dados que serão usados na emissão de NFC-e/NF-e.</p>
+        </div>
+      </div>
 
-      <form onSubmit={handleSave} className="grid gap-4 max-w-3xl">
+      <form onSubmit={handleSave} className="grid gap-6 bg-surface border border-border rounded-lg p-4 shadow-sm">
+        {/* Identificação fiscal básica */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div>
             <Label>Inscrição Estadual</Label>
@@ -167,7 +225,8 @@ export default function ConfiguracaoFiscalPage() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+        {/* Endereço fiscal */}
+        <div className="border-t border-border/40 pt-4 grid grid-cols-1 sm:grid-cols-4 gap-3">
           <div className="sm:col-span-3">
             <Label>Logradouro</Label>
             <Input value={form.logradouro} onChange={onChange('logradouro')} />
@@ -202,7 +261,8 @@ export default function ConfiguracaoFiscalPage() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        {/* NFC-e */}
+        <div className="border-t border-border/40 pt-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div>
             <Label>NFC-e Série</Label>
             <Input value={form.nfce_serie} onChange={onChange('nfce_serie')} />
@@ -217,7 +277,8 @@ export default function ConfiguracaoFiscalPage() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        {/* NF-e */}
+        <div className="border-t border-border/40 pt-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div>
             <Label>NF-e Série (opcional)</Label>
             <Input value={form.nfe_serie} onChange={onChange('nfe_serie')} />
@@ -232,10 +293,33 @@ export default function ConfiguracaoFiscalPage() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <div className="sm:col-span-3">
-            <Label>Transmite Nota Base URL</Label>
-            <Input value={form.transmitenota_base_url} onChange={onChange('transmitenota_base_url')} placeholder="https://api.transmitenota.com.br" />
+        {/* Transmite Nota por ambiente */}
+        <div className="border-t border-border/40 pt-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="border border-border rounded-md p-3">
+            <div className="text-xs text-muted-foreground mb-2">Transmite Nota • Homologação</div>
+            <Label className="text-xs">Base URL (HML)</Label>
+            <Input value={form.transmitenota_base_url_hml} onChange={onChange('transmitenota_base_url_hml')} placeholder="https://..." />
+            <div className="mt-3" />
+            <Label className="text-xs">ApiKey (HML)</Label>
+            <Input value={form.transmitenota_apikey_hml} onChange={onChange('transmitenota_apikey_hml')} />
+            <div className="mt-3">
+              <Button type="button" variant="outline" size="sm" onClick={() => handleTestTN('hml')} disabled={saving || loading}>
+                {loading ? 'Testando...' : 'Testar conexão HML'}
+              </Button>
+            </div>
+          </div>
+          <div className="border border-border rounded-md p-3">
+            <div className="text-xs text-muted-foreground mb-2">Transmite Nota • Produção</div>
+            <Label className="text-xs">Base URL (PROD)</Label>
+            <Input value={form.transmitenota_base_url_prod} onChange={onChange('transmitenota_base_url_prod')} placeholder="https://..." />
+            <div className="mt-3" />
+            <Label className="text-xs">ApiKey (PROD)</Label>
+            <Input value={form.transmitenota_apikey_prod} onChange={onChange('transmitenota_apikey_prod')} />
+            <div className="mt-3">
+              <Button type="button" variant="outline" size="sm" onClick={() => handleTestTN('prod')} disabled={saving || loading}>
+                {loading ? 'Testando...' : 'Testar conexão PROD'}
+              </Button>
+            </div>
           </div>
         </div>
 

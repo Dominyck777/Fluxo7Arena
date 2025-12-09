@@ -1,0 +1,19 @@
+[
+  { "code": "1102", "desc": "Compra para industrialização, comercialização ou prestação de serviços" },
+  { "code": "5101", "desc": "Venda de produção do estabelecimento" },
+  { "code": "5102", "desc": "Venda de mercadoria adquirida de terceiros" },
+  { "code": "5103", "desc": "Venda de produção do estabelecimento, efetuada fora do estabelecimento" },
+  { "code": "5104", "desc": "Venda de mercadoria adquirida de terceiros, efetuada fora do estabelecimento" },
+  { "code": "5405", "desc": "Venda de mercadoria adquirida de terceiros, sujeita a ST" },
+  { "code": "5949", "desc": "Outras saídas de mercadorias não especificadas" },
+  { "code": "5915", "desc": "Remessa em bonificação, doação ou brinde" },
+  { "code": "5109", "desc": "Venda de produção do estabelecimento, destinada a não contribuinte" },
+  { "code": "5110", "desc": "Venda de mercadoria adquirida de terceiros, destinada a não contribuinte" },
+  { "code": "5401", "desc": "Venda de produção do estabelecimento, sujeita a ST" },
+  { "code": "5403", "desc": "Venda de mercadoria, de terceiros, sujeita a ST, efetuada pelo industrial substituto" },
+  { "code": "2102", "desc": "Compra para industrialização, comercialização ou prestação de serviços (fora do estado)" },
+  { "code": "6101", "desc": "Venda de produção do estabelecimento (fora do estado)" },
+  { "code": "6102", "desc": "Venda de mercadoria adquirida de terceiros (fora do estado)" },
+  { "code": "6403", "desc": "Venda de produção do estabelecimento, sujeita a ST (fora do estado)" },
+  { "code": "6915", "desc": "Remessa em bonificação, doação ou brinde (fora do estado)" }
+]

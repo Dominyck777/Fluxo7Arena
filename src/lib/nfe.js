@@ -7,7 +7,7 @@ import { supabase } from '@/lib/supabase';
  * @param {string} modelo - Modelo da nota: '55' (NF-e) ou '65' (NFC-e)
  * @returns {Promise<string>} XML gerado
  */
-export async function gerarXMLNFe({ comandaId, codigoEmpresa, modelo = '65' }) {
+export async function gerarXMLNFe({ comandaId, codigoEmpresa, modelo = '65', overrides = {} }) {
   if (!comandaId) throw new Error('ID da comanda é obrigatório');
   if (!codigoEmpresa) throw new Error('Código da empresa é obrigatório');
 
@@ -92,7 +92,6 @@ export async function gerarXMLNFe({ comandaId, codigoEmpresa, modelo = '65' }) {
       .single();
     cliente = clienteData;
   }
-
   // 6. Gerar XML
   return gerarXML({
     comanda,
@@ -100,17 +99,54 @@ export async function gerarXMLNFe({ comandaId, codigoEmpresa, modelo = '65' }) {
     pagamentos: pagamentos || [],
     empresa,
     cliente,
-    modelo
+    modelo,
+    overrides,
   });
+}
+
+export async function gerarXMLNFeFromData({ codigoEmpresa, empresa, cliente, itens, pagamentos, modelo = '55', overrides = {} }) {
+  let emp = empresa;
+  if (!emp) {
+    if (!codigoEmpresa) throw new Error('codigoEmpresa obrigatório quando empresa não for fornecida');
+    const { data: empData, error: empErr } = await supabase
+      .from('empresas')
+      .select('*')
+      .eq('codigo_empresa', codigoEmpresa)
+      .single();
+    if (empErr) throw new Error(`Erro ao buscar empresa: ${empErr.message}`);
+    emp = empData;
+  }
+  const comandaFake = { numero: overrides?.nNF || '1', desconto: 0 };
+  const itensNorm = Array.isArray(itens) ? itens.map((it) => ({
+    preco_unitario: Number(it.preco_unitario) || 0,
+    quantidade: Number(it.quantidade) || 1,
+    preco_total: Number(it.preco_total != null ? it.preco_total : (Number(it.preco_unitario)||0) * (Number(it.quantidade)||1)),
+    produtos: it.produtos || {
+      id: it.produto_id || it.id,
+      nome: it.nome || it.descricao || 'Produto',
+      codigo: it.codigo || String(it.produto_id || it.id || ''),
+      ncm: it.ncm || '',
+      cest: it.cest || '',
+      cfopInterno: it.cfop || it.cfopInterno,
+      cstIcmsInterno: it.cstIcmsInterno,
+      csosnInterno: it.csosnInterno,
+      aliqIcmsInterno: it.aliqIcmsInterno,
+      cstPisSaida: it.cstPisSaida,
+      aliqPisPercent: it.aliqPisPercent,
+      aliqCofinsPercent: it.aliqCofinsPercent,
+    },
+  })) : [];
+  const pags = Array.isArray(pagamentos) && pagamentos.length ? pagamentos : [{ finalizadoras: { codigo_sefaz: '99' }, valor: itensNorm.reduce((s, x) => s + (Number(x.preco_total)||0), 0) }];
+  return gerarXML({ comanda: comandaFake, itens: itensNorm, pagamentos: pags, empresa: emp, cliente, modelo, overrides });
 }
 
 /**
  * Gera o XML formatado
  */
-function gerarXML({ comanda, itens, pagamentos, empresa, cliente, modelo = '65' }) {
+function gerarXML({ comanda, itens, pagamentos, empresa, cliente, modelo = '65', overrides = {} }) {
   const now = new Date();
   const dhEmi = now.toISOString();
-  const nNF = comanda.numero || '1';
+  const nNF = String(overrides.nNF || comanda.numero || '1');
   const modeloNota = modelo === '55' ? '55' : '65'; // 55 = NF-e, 65 = NFC-e
   const tipoNota = modeloNota === '55' ? 'NF-e' : 'NFC-e';
   
@@ -118,6 +154,20 @@ function gerarXML({ comanda, itens, pagamentos, empresa, cliente, modelo = '65' 
   const vProd = itens.reduce((sum, item) => sum + (Number(item.preco_total) || 0), 0);
   const vDesc = Number(comanda.desconto) || 0;
   const vNF = vProd - vDesc;
+
+  // Overrides/derivações para IDE
+  const natOp = String(overrides.natOp || 'VENDA');
+  const serie = String(overrides.serie || '1');
+  const tpAmb = String(overrides.tpAmb || ((empresa.ambiente === 'producao') ? '1' : '2'));
+  const tpNF = String(overrides.tpNF || '1'); // 1=Saída (padrão), 0=Entrada
+  const indFinal = String(overrides.indFinal || '1');
+  const indPres = String(overrides.indPres || '1');
+  const idDestDefault = (cliente && cliente.uf && empresa.uf && cliente.uf !== empresa.uf) ? '2' : '1';
+  const idDest = String(overrides.idDest || idDestDefault);
+
+  const ufMap = { AC:'12', AL:'27', AM:'13', AP:'16', BA:'29', CE:'23', DF:'53', ES:'32', GO:'52', MA:'21', MG:'31', MS:'50', MT:'51', PA:'15', PB:'25', PE:'26', PI:'22', PR:'41', RJ:'33', RN:'24', RO:'11', RR:'14', RS:'43', SC:'42', SE:'28', SP:'35', TO:'17' };
+  const cUF = String(ufMap[(empresa.uf||'').toUpperCase()] || empresa.codigo_uf || '35');
+  const cMunFG = String(empresa.codigo_municipio_ibge || empresa.codigo_municipio || '');
 
   // Cliente (consumidor final se não informado)
   const dest = cliente ? `
@@ -128,8 +178,8 @@ function gerarXML({ comanda, itens, pagamentos, empresa, cliente, modelo = '65' 
         <xLgr>${escaparXML(cliente.logradouro || '')}</xLgr>
         <nro>${escaparXML(cliente.numero || 'S/N')}</nro>
         <xBairro>${escaparXML(cliente.bairro || '')}</xBairro>
-        <cMun>${cliente.codigo_municipio || ''}</cMun>
-        <xMun>${escaparXML(cliente.municipio || '')}</xMun>
+        <cMun>${cliente.codigo_municipio || cliente.codigo_municipio_ibge || ''}</cMun>
+        <xMun>${escaparXML(cliente.municipio || cliente.cidade || '')}</xMun>
         <UF>${cliente.uf || ''}</UF>
         <CEP>${(cliente.cep || '').replace(/\D/g, '')}</CEP>
         <cPais>1058</cPais>
@@ -224,22 +274,22 @@ function gerarXML({ comanda, itens, pagamentos, empresa, cliente, modelo = '65' 
   <NFe xmlns="http://www.portalfiscal.inf.br/nfe">
     <infNFe versao="4.00" Id="NFe${empresa.cnpj || ''}${nNF.padStart(9, '0')}">
       <ide>
-        <cUF>${empresa.codigo_uf || '35'}</cUF>
+        <cUF>${cUF}</cUF>
         <cNF>${nNF.padStart(8, '0')}</cNF>
-        <natOp>VENDA</natOp>
+        <natOp>${natOp}</natOp>
         <mod>${modeloNota}</mod>
-        <serie>1</serie>
+        <serie>${serie}</serie>
         <nNF>${nNF}</nNF>
         <dhEmi>${dhEmi}</dhEmi>
-        <tpNF>1</tpNF>
-        <idDest>1</idDest>
-        <cMunFG>${empresa.codigo_municipio || ''}</cMunFG>
+        <tpNF>${tpNF}</tpNF>
+        <idDest>${idDest}</idDest>
+        <cMunFG>${cMunFG}</cMunFG>
         <tpImp>4</tpImp>
         <tpEmis>1</tpEmis>
-        <tpAmb>2</tpAmb>
+        <tpAmb>${tpAmb}</tpAmb>
         <finNFe>1</finNFe>
-        <indFinal>1</indFinal>
-        <indPres>1</indPres>
+        <indFinal>${indFinal}</indFinal>
+        <indPres>${indPres}</indPres>
         <procEmi>0</procEmi>
         <verProc>1.0.0</verProc>
       </ide>
@@ -251,8 +301,8 @@ function gerarXML({ comanda, itens, pagamentos, empresa, cliente, modelo = '65' 
           <xLgr>${escaparXML(empresa.logradouro || '')}</xLgr>
           <nro>${escaparXML(empresa.numero || 'S/N')}</nro>
           <xBairro>${escaparXML(empresa.bairro || '')}</xBairro>
-          <cMun>${empresa.codigo_municipio || ''}</cMun>
-          <xMun>${escaparXML(empresa.municipio || '')}</xMun>
+          <cMun>${empresa.codigo_municipio_ibge || empresa.codigo_municipio || ''}</cMun>
+          <xMun>${escaparXML(empresa.municipio || empresa.cidade || '')}</xMun>
           <UF>${empresa.uf || ''}</UF>
           <CEP>${(empresa.cep || '').replace(/\D/g, '')}</CEP>
           <cPais>1058</cPais>
