@@ -178,7 +178,7 @@ export const IsisHorarioInput = ({ onSubmit, onMudarData, onMudarQuadra, hasMult
           >
             <Calendar className="w-4 h-4" />
             <span className="hidden md:inline">Mudar Data</span>
-            <span className="md:hidden">Mudar Data</span>
+            <span className="md:hidden">data</span>
           </motion.button>
         )}
 

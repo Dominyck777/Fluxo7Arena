@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Bell, LogOut, Menu, X, Eye, EyeOff, PanelLeft, PanelLeftClose, Lock, Unlock, Building, ArrowUpRight, Package, DollarSign, CalendarCheck, Clock, ShoppingCart, Store, Users, CalendarPlus, AlertTriangle, Info } from 'lucide-react';
+import { Bell, LogOut, Menu, X, Eye, EyeOff, PanelLeft, PanelLeftClose, Lock, Unlock, Building, ArrowUpRight, Package, DollarSign, CalendarCheck, Clock, ShoppingCart, Store, Users, CalendarPlus, AlertTriangle, Info, Link as LinkIcon, Copy } from 'lucide-react';
 import { IsisAvatar } from '@/components/isis/IsisAvatar';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
@@ -148,6 +148,45 @@ function Header({ onToggleSidebar, sidebarVisible, sidebarPinned }) {
 
   const isIsis = React.useMemo(() => String(location?.pathname || '').startsWith('/isis'), [location?.pathname]);
 
+  // Gera slug da empresa para montar link público de agendamento
+  const companySlug = React.useMemo(() => {
+    const base = company?.nome_fantasia || company?.nome || company?.razao_social || company?.codigoEmpresa || cachedCompanyName || '';
+    return String(base)
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '') // remove acentos
+      .replace(/[^a-z0-9]+/g, '') // remove espaços e símbolos
+      .trim();
+  }, [company?.nome_fantasia, company?.nome, company?.razao_social, company?.codigoEmpresa, cachedCompanyName]);
+
+  const agendaPublicUrl = React.useMemo(() => {
+    return companySlug ? `https://${companySlug}.f7arena.com` : '';
+  }, [companySlug]);
+
+  // Copia texto com fallback (igual padrão usado nas mensagens da Ísis)
+  const copyTextWithFallback = async (text) => {
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.top = '0';
+        ta.style.left = '0';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+      return true;
+    } catch (_) {
+      return false;
+    }
+  };
+
   return (
     <motion.header
       animate={{ opacity: 1, y: 0 }}
@@ -179,6 +218,7 @@ function Header({ onToggleSidebar, sidebarVisible, sidebarPinned }) {
           <span className="tracking-tight truncate leading-[44px] text-base text-text-primary font-semibold flex-1 min-w-0">
             {companyName}
           </span>
+          {/* Botão de copiar link de agendamento foi movido para a aba Agenda (no grid) */}
           {isDevTarget && (
             <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider bg-red-600 text-white shadow animate-pulse">
               Dev

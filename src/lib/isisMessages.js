@@ -97,7 +97,6 @@ export const messageVariations = {
   loading: [
     "Deixa eu verificar...",
     "Só um momento...",
-    "Já te respondo...",
     "Aguarda um pouquinho...",
     "Consultando aqui...",
     "Verificando pra você..."

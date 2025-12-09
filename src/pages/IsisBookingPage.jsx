@@ -68,6 +68,7 @@ const IsisBookingPageContent = () => {
   const [editingType, setEditingType] = useState(null); // Controla qual tipo de edição está ativa: 'participantes', 'horario', etc.
   const [agendamentoCriado, setAgendamentoCriado] = useState(null); // Armazena o agendamento criado para edições posteriores
   const [identificacaoIniciada, setIdentificacaoIniciada] = useState(false); // Flag para evitar múltiplas execuções
+  const [deferredPrompt, setDeferredPrompt] = useState(null); // Guardar evento de instalação PWA
   
   // Logo da empresa com cache-buster (igual ao Header principal)
   const empresaLogoSrc = React.useMemo(() => {
@@ -148,6 +149,16 @@ const IsisBookingPageContent = () => {
     
     buscarEmpresaPorNome();
   }, [nomeFantasiaEfetivo]);
+
+  // Captura o evento de instalação PWA para disparar quando o usuário clicar em "Instalar App"
+  useEffect(() => {
+    const handler = (e) => {
+      try { e.preventDefault(); } catch {}
+      setDeferredPrompt(e);
+    };
+    window.addEventListener('beforeinstallprompt', handler);
+    return () => window.removeEventListener('beforeinstallprompt', handler);
+  }, []);
   
   // Inicia conversa com identificação do cliente
   useEffect(() => {
@@ -575,8 +586,74 @@ const IsisBookingPageContent = () => {
   const criarNovoCliente = async (nome, email, telefone) => {
     try {
       setIsLoading(true);
-      addIsisMessage(getIsisMessage('loading'));
       
+      // Verificar duplicidade por telefone/email antes de criar
+      try {
+        // 1) Telefone: procurar cliente ativo com mesmo número (telefone/whatsapp/celular1)
+        if (telefone) {
+          const numeroLimpo = String(telefone || '').replace(/\D/g, '');
+          const { data: todosClientes, error: dupErrTel } = await supabase
+            .from('clientes')
+            .select('id, nome, email, telefone, whatsapp, celular1, codigo')
+            .eq('codigo_empresa', codigoEmpresa)
+            .eq('status', 'active');
+          if (!dupErrTel && Array.isArray(todosClientes)) {
+            const matchTel = todosClientes.find(c => {
+              const tel = (c.telefone || '').replace(/\D/g, '');
+              const whats = (c.whatsapp || '').replace(/\D/g, '');
+              const cel = (c.celular1 || '').replace(/\D/g, '');
+              return tel === numeroLimpo || whats === numeroLimpo || cel === numeroLimpo;
+            });
+            if (matchTel) {
+              setIsLoading(false);
+              updateSelection('cliente_sugerido', matchTel);
+              addIsisMessageWithButtons(
+                `Encontrei um cadastro existente para este telefone: **${getNomeCurto(matchTel.nome)}**. É você?`,
+                [
+                  { label: '✅ Sim, sou eu', value: 'confirm_cliente_existente' },
+                  { label: '❌ Não, quero corrigir', value: 'corrigir_cadastro' }
+                ],
+                200
+              );
+              setShowInput(false);
+              nextStep('confirmar_cliente_existente');
+              return; // aguarda confirmação do usuário
+            }
+          }
+        }
+        // 2) Email: procurar cliente ativo com mesmo email (case-insensitive)
+        if (email) {
+          const emailLc = String(email || '').trim().toLowerCase();
+          const { data: clientesEmail, error: dupErrEmail } = await supabase
+            .from('clientes')
+            .select('id, nome, email, telefone, whatsapp, codigo')
+            .eq('codigo_empresa', codigoEmpresa)
+            .eq('status', 'active')
+            .ilike('email', emailLc);
+          if (!dupErrEmail && Array.isArray(clientesEmail) && clientesEmail.length > 0) {
+            const matchEmail = clientesEmail.find(c => String(c.email || '').trim().toLowerCase() === emailLc) || null;
+            if (matchEmail) {
+              setIsLoading(false);
+              updateSelection('cliente_sugerido', matchEmail);
+              addIsisMessageWithButtons(
+                `Este e-mail já possui cadastro: **${getNomeCurto(matchEmail.nome)}**. É você?`,
+                [
+                  { label: '✅ Sim, sou eu', value: 'confirm_cliente_existente' },
+                  { label: '❌ Não, quero corrigir', value: 'corrigir_cadastro' }
+                ],
+                200
+              );
+              setShowInput(false);
+              nextStep('confirmar_cliente_existente');
+              return; // aguarda confirmação do usuário
+            }
+          }
+        }
+      } catch {}
+
+      // Prosseguindo com criação: exibe loading agora (não antes da pergunta)
+      addIsisMessage(getIsisMessage('loading'));
+
       // Busca próximo código disponível
       const { data: counter } = await supabase
         .from('empresa_counters')
@@ -736,14 +813,58 @@ const IsisBookingPageContent = () => {
         value: 'corrigir_telefone',
         icon: '☎️'
       },
+      // Inserimos o botão de instalar app antes de finalizar
+      {
+        label: 'Instalar App',
+        value: 'instalar_app',
+        icon: '📲'
+      },
       {
         label: 'Finalizar Atendimento',
         value: 'finalizar_atendimento',
         icon: '👋'
       }
     ];
+    // Se o usuário tentou identificar por e-mail, oferece correção de e-mail também
+    if (tipoIdentificacao === 'email' || selections?.identificacao_tipo === 'email') {
+      acaoButtons.splice(3, 0, {
+        label: 'Informei o e-mail errado',
+        value: 'corrigir_email',
+        icon: '✉️'
+      });
+    }
     
     addIsisMessageWithButtons(randomPergunta, acaoButtons, 600);
+  };
+
+  // Mostra um tutorial rápido de instalação PWA (Chrome e Safari)
+  const mostrarTutorialInstalacao = () => {
+    try {
+      const ua = navigator.userAgent || '';
+      const isIOS = /iPad|iPhone|iPod/.test(ua) && !window.MSStream;
+      const isSafari = /^((?!chrome|android).)*safari/i.test(ua);
+      const isStandalone = (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone;
+      if (isStandalone) {
+        addIsisMessage('Você já está com o app instalado! 🎉 Abra-o diretamente da sua tela inicial.', 400);
+        return;
+      }
+      const chromeSteps = [
+        'Toque no ícone ⋮ no canto superior direito',
+        'Escolha "Adicionar à tela inicial"',
+        'Confirme em "Adicionar"'
+      ].map(s => `• ${s}`).join('\n');
+      const safariSteps = [
+        'Toque no botão Compartilhar (ícone de quadrado com seta para cima)',
+        'Escolha "Adicionar à Tela de Início"',
+        'Toque em "Adicionar" no topo'
+      ].map(s => `• ${s}`).join('\n');
+      const msg = (isIOS || isSafari)
+        ? `📲 Para instalar no Safari (iPhone/iPad):\n${safariSteps}`
+        : `📲 Para instalar no Chrome (Android):\n${chromeSteps}`;
+      addIsisMessage(msg, 600);
+    } catch (_) {
+      addIsisMessage('Para instalar, use o menu do navegador e selecione "Adicionar à Tela Inicial".', 600);
+    }
   };
   
   // Inicia o fluxo de agendamento após identificação
@@ -1650,32 +1771,51 @@ const IsisBookingPageContent = () => {
     const vistos = new Set();
     const resultado = [];
 
-    // Garante que o participante principal (cliente logado) fique na frente
-    baseLista.forEach((p) => {
-      const key = canonicalKey(p.nome);
-      if (!key || vistos.has(key)) return;
-      vistos.add(key);
-      const isPrincipal = selfKey && key === selfKey;
-      resultado.push({
-        ...p,
-        principal: isPrincipal
+    const editing = Boolean(selections?.editing_agendamento);
+    if (editing) {
+      // Em edição: substituir toda a lista (exceto o principal) pelos importados
+      // 1) encontra principal atual ou self
+      let principal = baseLista.find(p => p.principal) || (selfName && cliente ? { nome: selfName, cliente_id: cliente.id, principal: true } : null);
+      // 2) constrói lista apenas com principal, se houver
+      if (principal) {
+        const key = canonicalKey(principal.nome);
+        vistos.add(key);
+        resultado.push({ ...principal, principal: true });
+      }
+      // 3) adiciona apenas os importados, únicos e sem o principal
+      nomes.forEach((n) => {
+        const nomeStr = String(n || '').trim();
+        if (!nomeStr) return;
+        const key = canonicalKey(nomeStr);
+        if (!key || vistos.has(key)) return;
+        if (selfKey && key === selfKey) return;
+        vistos.add(key);
+        resultado.push({ nome: nomeStr, cliente_id: null, principal: false });
       });
-    });
-
-    // Adiciona nomes importados, evitando duplicados e o próprio usuário
-    nomes.forEach((n) => {
-      const nomeStr = String(n || '').trim();
-      if (!nomeStr) return;
-      const key = canonicalKey(nomeStr);
-      if (!key || vistos.has(key)) return;
-      if (selfKey && key === selfKey) return;
-      vistos.add(key);
-      resultado.push({
-        nome: nomeStr,
-        cliente_id: null,
-        principal: false
+    } else {
+      // Fluxo normal: manter existentes e acrescentar importados, evitando duplicatas
+      // Garante que o participante principal (cliente logado) fique na frente
+      baseLista.forEach((p) => {
+        const key = canonicalKey(p.nome);
+        if (!key || vistos.has(key)) return;
+        vistos.add(key);
+        const isPrincipal = selfKey && key === selfKey;
+        resultado.push({
+          ...p,
+          principal: isPrincipal
+        });
       });
-    });
+      // Adiciona nomes importados, evitando duplicados e o próprio usuário
+      nomes.forEach((n) => {
+        const nomeStr = String(n || '').trim();
+        if (!nomeStr) return;
+        const key = canonicalKey(nomeStr);
+        if (!key || vistos.has(key)) return;
+        if (selfKey && key === selfKey) return;
+        vistos.add(key);
+        resultado.push({ nome: nomeStr, cliente_id: null, principal: false });
+      });
+    }
 
     if (resultado.length === 0 && selfName && cliente) {
       resultado.push({
@@ -1750,7 +1890,9 @@ const IsisBookingPageContent = () => {
     const quadraFinal = quadraAtualizada || selections.quadra;
     const dataFinal = dataAtualizada || selections.data;
     const participantesFinal = participantesAtualizados || selections.participantes || [];
-    const agendamentoFinal = agendamentoParaEdicao || agendamentoCriado;
+    // Considera edição apenas quando veio um agendamento para edição ou flag explícita de edição
+    const isEditing = Boolean(agendamentoParaEdicao || selections?.editing_agendamento);
+    const agendamentoFinal = agendamentoParaEdicao || null;
     
     console.log('[mostrarResumo] Selections atuais:', selections);
     console.log('[mostrarResumo] Horário usado:', horarioFinal);
@@ -1843,8 +1985,8 @@ const IsisBookingPageContent = () => {
     // Botões de confirmação e edição
     const confirmButtons = [
       { 
-        label: agendamentoFinal ? 'Salvar Alterações' : 'Confirmar Agendamento', 
-        value: agendamentoFinal ? 'confirm' : 'criar agendamento', 
+        label: isEditing ? 'Salvar Alterações' : 'Confirmar Agendamento', 
+        value: isEditing ? 'confirm' : 'criar agendamento', 
         icon: '✅'
       }
     ];
@@ -1882,8 +2024,11 @@ const IsisBookingPageContent = () => {
       icon: '👥'
     });
     
-    // Gerar Times (somente quando estiver editando um agendamento já existente ou em modo de edição inicial)
-    if (agendamentoFinal || modoEdicaoInicial) {
+    // Gerar Times:
+    // - Deve aparecer ao entrar na edição (modoEdicaoInicial)
+    // - Deve aparecer ao revisar um agendamento existente, desde que não esteja no resumo pós-edição
+    const allowGenerateInReview = modoEdicaoInicial || (isEditing && !Boolean(selections?.editing_agendamento));
+    if (allowGenerateInReview) {
       editButtons.push({
         label: 'Gerar Times',
         value: 'gerar_times',
@@ -1892,7 +2037,7 @@ const IsisBookingPageContent = () => {
     }
     
     // Cancelar Agendamento (só se estiver editando um agendamento existente)
-    if (agendamentoFinal) {
+    if (isEditing) {
       editButtons.push({
         label: 'Cancelar Agendamento',
         value: 'cancelar_agendamento',
@@ -1943,6 +2088,7 @@ const IsisBookingPageContent = () => {
     const valorPorMeiaHora = selections.quadra.valor || 0;
     const slots = duracaoMinutos / 30; // Slots de 30 minutos
     const valorTotal = Math.round(valorPorMeiaHora * slots * 100) / 100;
+    const valorDivididoFinal = participantes.length > 0 ? (valorTotal / participantes.length) : 0;
     
     // Resumo final (visual diferente - mais limpo e focado)
     // Endereço da empresa para o resumo final (opcional)
@@ -1969,6 +2115,7 @@ ${selections.esporte}
 ${listaNomes}
 
 💰 **Valor Total:** R$ **${valorTotal.toFixed(2).replace('.', ',')}**
+💵 **Valor Dividido:** R$ **${valorDivididoFinal.toFixed(2).replace('.', ',')}** por pessoa
 
 👤 **Responsável:** ${selections.cliente.nome}`;
     
@@ -2004,6 +2151,7 @@ ${listaNomes}
   
   // Gera times com base na modalidade e apresenta no chat (com opção de regenerar)
   const gerarTimesEApresentar = async () => {
+    try { setIsTyping(true); } catch {}
     try {
       const nomes = (selections.participantes || []).map(p => String(p?.nome || '').trim()).filter(Boolean);
       if (!nomes || nomes.length === 0) {
@@ -2071,18 +2219,38 @@ ${listaNomes}
       if (teamSize < 2) teamSize = 2;
       const fmt = (xs) => xs.map((n, i) => `${i + 1}) ${n}${getFixoLabel(n)}`).join('\n') || '—';
       const totalCount = nomes.length;
-      const teamCount = Math.floor(totalCount / teamSize);
+      let teamCount = Math.ceil(totalCount / teamSize);
       const titleModalidade = rawModalidade ? (rawModalidade[0].toUpperCase() + rawModalidade.slice(1)) : 'modalidade';
       let text = `🏆 **Times gerados (${titleModalidade})**`;
       const teamIcons = ['🟠', '🔵', '🟢', '🟣', '🟡', '🟤'];
+      // Identifica modalidade para priorizar papéis
+      const modalidadeLower = (rawModalidade || '').toLowerCase();
+      const isSoccerLike = /(fut|society|sal[aã]o)/.test(modalidadeLower);
+      const isVolleyLike = /(v[oô]lei|volei)/.test(modalidadeLower);
       if (teamCount >= 2) {
         // Cria recipientes vazios
         const teams = Array.from({ length: teamCount }, () => []);
-        // 1) Distribui fixos em round-robin (não ultrapassar tamanho do time). Como entram primeiro, ficam em primeiro no time.
-        if (fixos.length > 0) {
+        // 1) Distribui Goleiros primeiro: 1 por time, ciclano se houver menos goleiros que times
+        if (isSoccerLike && goleiros.length > 0) {
+          for (let t = 0; t < teamCount; t++) {
+            const g = goleiros[t % goleiros.length];
+            const hasGk = teams[t].some(name => goleiros.includes(name));
+            if (teams[t].length < teamSize && !hasGk && !teams[t].includes(g)) teams[t].push(g);
+          }
+        }
+        // 2) Distribui Levantadores: 1 por time, ciclano se houver menos que times
+        if (isVolleyLike && levantadores.length > 0) {
+          for (let t = 0; t < teamCount; t++) {
+            const l = levantadores[t % levantadores.length];
+            const hasSetter = teams[t].some(name => levantadores.includes(name));
+            if (teams[t].length < teamSize && !hasSetter && !teams[t].includes(l)) teams[t].push(l);
+          }
+        }
+        // 3) Distribui outros fixos (restantes) em round-robin
+        const outrosFixos = fixos.filter(n => !goleiros.includes(n) && !levantadores.includes(n));
+        if (outrosFixos.length > 0) {
           let ti = 0;
-          for (const f of fixos) {
-            // procura próximo time que ainda tenha vaga
+          for (const f of outrosFixos) {
             let tries = 0;
             while (tries < teamCount && teams[ti].length >= teamSize) {
               ti = (ti + 1) % teamCount;
@@ -2092,7 +2260,7 @@ ${listaNomes}
             ti = (ti + 1) % teamCount;
           }
         }
-        // 2) Preenche restantes com jogadores livres embaralhados
+        // 4) Preenche restantes com jogadores livres embaralhados
         for (const p of arrLivres) {
           // pega o time com menos jogadores no momento
           let bestIdx = 0;
@@ -2105,7 +2273,37 @@ ${listaNomes}
           }
           if (teams[bestIdx].length < teamSize) teams[bestIdx].push(p);
         }
-        // 3) Reservas: o que sobrar (se total > teamCount*teamSize)
+        // 4.1) Se ainda faltar preencher vagas, NÃO repetir o mesmo jogador no mesmo time.
+        // Mantém a regra de no máximo 1 goleiro/levantador por time. Se não houver jogador
+        // de papel obrigatório disponível sem duplicar, mantém o time incompleto.
+        for (let t = 0; t < teams.length; t++) {
+          while (teams[t].length < teamSize) {
+            if (isSoccerLike && goleiros.length > 0) {
+              // Adiciona no máximo 1 goleiro por time
+              const hasGk = teams[t].some(name => goleiros.includes(name));
+              if (hasGk) break;
+              const g = goleiros.find(name => !teams[t].includes(name));
+              if (g) {
+                teams[t].push(g);
+              } else {
+                break; // todos os goleiros já estão neste time
+              }
+            } else if (isVolleyLike && levantadores.length > 0) {
+              // Adiciona no máximo 1 levantador por time
+              const hasSetter = teams[t].some(name => levantadores.includes(name));
+              if (hasSetter) break;
+              const l = levantadores.find(name => !teams[t].includes(name));
+              if (l) {
+                teams[t].push(l);
+              } else {
+                break; // todos os levantadores já estão neste time
+              }
+            } else {
+              break;
+            }
+          }
+        }
+        // 5) Reservas: o que sobrar (se total > teamCount*teamSize)
         const usedCount = teamCount * teamSize;
         const reservas = totalCount > usedCount
           ? [...fixos, ...arrLivres].slice(usedCount)
@@ -2139,9 +2337,9 @@ ${listaNomes}
         }
       }
       const copyText = text.replace(/\*\*(.+?)\*\*/g, '*$1*');
-      addIsisMessage({ text, copyable: true, copyText }, 800);
-      // Se estiver editando um agendamento existente, não exibir 'Gerar novamente'
-      const allowRegen = !Boolean(selections?.editing_agendamento);
+      addIsisMessage({ text, copyable: true, copyText }, 600);
+      // Sempre permite "Gerar novamente" após gerar
+      const allowRegen = true;
       const again = [
         ...(allowRegen ? [{ label: 'Gerar novamente', value: 'gerar_times_again', icon: '🎲' }] : []),
         { label: 'Concluir', value: 'aceitar_times', icon: '✅' },
@@ -2179,11 +2377,73 @@ ${listaNomes}
     }
     
     switch (button.value) {
+      case 'instalar_app': {
+        addUserMessage('📲 Instalar App');
+        const globalPrompt = typeof window !== 'undefined' ? window.__installPrompt : null;
+        if (globalPrompt) {
+          try {
+            const dp = globalPrompt;
+            if (typeof window !== 'undefined') window.__installPrompt = null;
+            await dp.prompt();
+            const choice = await dp.userChoice;
+            if (choice && choice.outcome === 'accepted') {
+              addIsisMessage('Legal! Instalando o app… 📲', 400);
+            } else {
+              addIsisMessage('Tudo bem! Você pode instalar mais tarde pelo menu do navegador. 😉', 400);
+            }
+          } catch (_) {
+            // fallback para deferredPrompt local
+            if (deferredPrompt) {
+              try {
+                const dp2 = deferredPrompt;
+                setDeferredPrompt(null);
+                await dp2.prompt();
+                const choice2 = await dp2.userChoice;
+                if (choice2 && choice2.outcome === 'accepted') {
+                  addIsisMessage('Legal! Instalando o app… 📲', 400);
+                } else {
+                  addIsisMessage('Tudo bem! Você pode instalar mais tarde pelo menu do navegador. 😉', 400);
+                }
+              } catch {
+                mostrarTutorialInstalacao();
+              }
+            } else {
+              mostrarTutorialInstalacao();
+            }
+          }
+        } else if (deferredPrompt) {
+          try {
+            const dp = deferredPrompt;
+            setDeferredPrompt(null);
+            await dp.prompt();
+            const choice = await dp.userChoice;
+            if (choice && choice.outcome === 'accepted') {
+              addIsisMessage('Legal! Instalando o app… 📲', 400);
+            } else {
+              addIsisMessage('Tudo bem! Você pode instalar mais tarde pelo menu do navegador. 😉', 400);
+            }
+          } catch (_) {
+            mostrarTutorialInstalacao();
+          }
+        } else {
+          mostrarTutorialInstalacao();
+        }
+        break;
+      }
       case 'corrigir_telefone': {
         addUserMessage('☎️ Informei o telefone errado');
         updateSelection('cliente', null);
         updateSelection('identificacao_valor', null);
         setTipoIdentificacao('telefone');
+        setShowInput(true);
+        nextStep('identificacao');
+        break;
+      }
+      case 'corrigir_email': {
+        addUserMessage('✉️ Informei o e-mail errado');
+        updateSelection('cliente', null);
+        updateSelection('identificacao_valor', null);
+        setTipoIdentificacao('email');
         setShowInput(true);
         nextStep('identificacao');
         break;
@@ -2555,7 +2815,7 @@ ${listaNomes}
             label: `${dataDisplay} • ${horaInicio}-${horaFim}`,
             value: `editar_agendamento_${ag.id}`,
             icon: '🏟️',
-            subtitle: `${(ag.quadras?.nome || 'Quadra')} • ${(ag.modalidade || '—')} • ${duracaoTexto} • R$ ${valorFormatado}`,
+            subtitle: `${(ag.quadras?.nome || 'Quadra')} • ${(ag.modalidade || '—')} • ${duracaoTexto}`,
             agendamento: ag
           };
         });
@@ -3409,6 +3669,33 @@ ${listaNomes}
       case 'confirmation':
         handleConfirmacao(button);
         break;
+      case 'confirmar_cliente_existente': {
+        const v = (button?.value || '').toString();
+        if (v === 'confirm_cliente_existente') {
+          const sugerido = selections?.cliente_sugerido || null;
+          if (sugerido) {
+            updateSelection('cliente', sugerido);
+            updateSelection('cliente_sugerido', null);
+            const nomeCurto = getNomeCurto(sugerido.nome || '');
+            addIsisMessage(`Perfeito, **${nomeCurto}**! 👌`, 300);
+            setShowInput(false);
+            // segue para ações iniciais
+            setTimeout(() => {
+              try { perguntarAcaoInicial(); } catch {}
+            }, 700);
+          } else {
+            // fallback: volta ao início de identificação
+            setShowInput(true);
+            nextStep('identificacao');
+          }
+        } else if (v === 'corrigir_cadastro') {
+          // Volta para o formulário de cadastro para correção dos dados
+          addIsisMessage('Sem problemas! Vamos corrigir seus dados. ✏️', 300);
+          setShowInput(true);
+          nextStep('cadastro');
+        }
+        break;
+      }
       default:
         console.warn('[Isis] Nenhum handler para step:', currentStep);
     }
@@ -3497,6 +3784,14 @@ ${listaNomes}
             updateSelection('cliente', null);
             updateSelection('identificacao_valor', null);
             setTipoIdentificacao('telefone');
+            nextStep('identificacao');
+            setShowInput(true);
+          }}
+          onCorrigirEmail={() => {
+            try { addIsisMessage('Sem problemas! Informe seu e-mail novamente:', 400); } catch {}
+            updateSelection('cliente', null);
+            updateSelection('identificacao_valor', null);
+            setTipoIdentificacao('email');
             nextStep('identificacao');
             setShowInput(true);
           }}

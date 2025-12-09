@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
-import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Plus, Lock, Search, SlidersHorizontal, Clock, CheckCircle, XCircle, CalendarPlus, Users, DollarSign, Repeat, Trash2, GripVertical, Sparkles, Ban, AlertTriangle, ChevronDown, Play, PlayCircle, Flag, UserX, X, Settings, Maximize2, Minimize2 } from 'lucide-react';
+import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Plus, Lock, Search, SlidersHorizontal, Clock, CheckCircle, XCircle, CalendarPlus, Users, DollarSign, Repeat, Trash2, GripVertical, Sparkles, Ban, AlertTriangle, ChevronDown, Play, PlayCircle, Flag, UserX, X, Settings, Maximize2, Minimize2, Link as LinkIcon, Copy } from 'lucide-react';
 import { useToast } from "@/components/ui/use-toast";
 import { format, addDays, subDays, startOfDay, addHours, getHours, getMinutes, setHours, setMinutes, addMinutes, startOfWeek, isSameDay } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -219,6 +219,14 @@ function AgendaPage({ sidebarVisible = false }) {
   const dbg = useCallback((...args) => { if (debugOn) { try { console.log('[AgendaDbg]', ...args); } catch {} } }, [debugOn]);
   // Console filter: keep console clean and show only the status summary line
   useEffect(() => {
+    // Grace inicial ao entrar na Agenda: evita que a automação rode imediatamente e "suma" agendamentos
+    try {
+      const GRACE_MS = 2500;
+      returningFromHiddenUntilRef.current = Date.now() + GRACE_MS;
+      dbg('runAutomation:startup grace set', { until: returningFromHiddenUntilRef.current });
+      // Programa um schedule após a janela de graça
+      setTimeout(() => { try { scheduleNextAutomation(); } catch {} }, GRACE_MS + 200);
+    } catch {}
     // If you need debugging again, comment out this whole block or adjust allowlist
     const origLog = console.log;
     const origInfo = console.info;
@@ -309,6 +317,39 @@ function AgendaPage({ sidebarVisible = false }) {
   const [loadingDiasFuncionamento, setLoadingDiasFuncionamento] = useState(false);
   const [weekDiasFuncionamento, setWeekDiasFuncionamento] = useState({}); // Funcionamento para toda a semana
   
+  // Helpers: montar link público de agendamento da empresa e copiar
+  const companySlug = useMemo(() => {
+    const base = company?.nome_fantasia || company?.nome || company?.razao_social || company?.codigoEmpresa || '';
+    return String(base)
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9]+/g, '')
+      .trim();
+  }, [company?.nome_fantasia, company?.nome, company?.razao_social, company?.codigoEmpresa]);
+  const agendaPublicUrl = useMemo(() => companySlug ? `https://${companySlug}.f7arena.com` : '', [companySlug]);
+  const copyTextWithFallback = useCallback(async (text) => {
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.top = '0';
+        ta.style.left = '0';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }, []);
   
   // Listener de teclado: Escape fecha expandido • F10 alterna modo expandir
   useEffect(() => {
@@ -832,6 +873,7 @@ function AgendaPage({ sidebarVisible = false }) {
   const automationRunningRef = useRef(false);
   const nextAutoTimerRef = useRef(null);
   const runAutomationRef = useRef(null);
+  const initialDataReadyRef = useRef(false);
   const clearNextAutoTimer = useCallback(() => {
     try { if (nextAutoTimerRef.current) { clearTimeout(nextAutoTimerRef.current); nextAutoTimerRef.current = null; } } catch {}
   }, []);
@@ -842,7 +884,13 @@ function AgendaPage({ sidebarVisible = false }) {
     const now = Date.now();
     if (now < (returningFromHiddenUntilRef.current || 0)) {
       console.log('[AutoDiag] scheduleNextAutomation:deferred returning-from-hidden');
-      setTimeout(() => scheduleNextAutomation(), 600);
+      setTimeout(() => scheduleNextAutomation(), 1500);
+      return;
+    }
+    if (!initialDataReadyRef.current) {
+      dbg('scheduleNextAutomation:skipped (initial data not ready)');
+      // recheck shortly to start automation once data lands
+      setTimeout(() => scheduleNextAutomation(), 800);
       return;
     }
     if (modalOpenRef.current) { dbg('scheduleNextAutomation:skipped (modal open)'); return; }
@@ -956,10 +1004,32 @@ function AgendaPage({ sidebarVisible = false }) {
       return { booking: null };
     }
   }, [lastTimeSyncAtMs, supabase, userProfile, setBookings, scheduleNextAutomation, getNowMs, automation, isOverriddenRecently, updateBookingStatus]);
+
+  // Habilita automação somente após a primeira sincronização de bookings
+  useEffect(() => {
+    if (!authReady || !userProfile?.codigo_empresa) return;
+    if (lastTimeSyncAtMs && !initialDataReadyRef.current) {
+      initialDataReadyRef.current = true;
+      dbg('initial-data:ready', { at: lastTimeSyncAtMs });
+      try { scheduleNextAutomation(); } catch {}
+    }
+  }, [lastTimeSyncAtMs, authReady, userProfile, scheduleNextAutomation, dbg]);
   const runAutomation = useCallback(async () => {
     if (!authReady || !userProfile?.codigo_empresa) return;
     // Pausa automação enquanto o modal estiver aberto para reduzir "pulsos" na UI
     if (modalOpenRef.current) { dbg('runAutomation:skipped (modal open)'); return; }
+    // Grace ao abrir/retornar para não "sumir" agendamentos logo na entrada
+    if (Date.now() < (returningFromHiddenUntilRef.current || 0)) {
+      dbg('runAutomation:skipped (returning-from-hidden grace)');
+      try { scheduleNextAutomation(); } catch {}
+      return;
+    }
+    // Não roda automação antes da primeira sincronização de bookings
+    if (!initialDataReadyRef.current) {
+      dbg('runAutomation:skipped (initial data not ready)');
+      try { scheduleNextAutomation(); } catch {}
+      return;
+    }
     if (automationRunningRef.current) return;
     automationRunningRef.current = true;
     try {
@@ -6304,14 +6374,24 @@ function AgendaPage({ sidebarVisible = false }) {
     const filteredBookings = useMemo(() => {
       const dayStr = format(currentDate, 'yyyy-MM-dd');
       let dayBookings = bookings.filter(b => format(b.start, 'yyyy-MM-dd') === dayStr);
-      // Regras de cancelados:
-      // - Quando canceledOnly ativo: mostrar somente cancelados
-      // - Caso contrário: excluir cancelados da agenda
+      const dataReady = !!lastTimeSyncAtMs;
+      // Antes do primeiro sync: mostrar TODOS os agendamentos do dia, sem filtrar por status
+      if (!dataReady) {
+        if (searchQuery.trim()) {
+          const q = searchQuery.trim().toLowerCase();
+          dayBookings = dayBookings.filter(b =>
+            (b.customer || '').toLowerCase().includes(q)
+            || (b.court || '').toLowerCase().includes(q)
+            || (statusConfig[b.status]?.label || '').toLowerCase().includes(q)
+          );
+        }
+        return dayBookings;
+      }
+      // Após sync: aplicar filtros normalmente
       dayBookings = viewFilter.canceledOnly
         ? dayBookings.filter(b => b.status === 'canceled')
         : dayBookings.filter(b => b.status !== 'canceled');
-      
-      // Filtro de pagamentos pendentes
+
       if (viewFilter.pendingPayments) {
         dayBookings = dayBookings.filter(b => {
           const participants = participantsByAgendamento[b.id] || [];
@@ -6319,7 +6399,7 @@ function AgendaPage({ sidebarVisible = false }) {
           return hasPending && participants.length > 0;
         });
       }
-      
+
       if (searchQuery.trim()) {
         const q = searchQuery.trim().toLowerCase();
         dayBookings = dayBookings.filter(b =>
@@ -6329,7 +6409,7 @@ function AgendaPage({ sidebarVisible = false }) {
         );
       }
       return (viewFilter.scheduled || viewFilter.canceledOnly || viewFilter.pendingPayments) ? dayBookings : [];
-    }, [bookings, currentDate, viewFilter.scheduled, viewFilter.canceledOnly, viewFilter.pendingPayments, searchQuery, participantsByAgendamento]);
+    }, [bookings, currentDate, viewFilter.scheduled, viewFilter.canceledOnly, viewFilter.pendingPayments, searchQuery, participantsByAgendamento, lastTimeSyncAtMs]);
 
   // Calcular estatísticas do dia para o header (filtrado pela quadra ativa)
   const dayStats = useMemo(() => {
@@ -6364,12 +6444,24 @@ function AgendaPage({ sidebarVisible = false }) {
       const end = startOfDay(weekEnd);
       return bookingDate >= start && bookingDate <= end;
     });
-    
-    // Aplicar mesmos filtros que o dia
+    const dataReady = !!lastTimeSyncAtMs;
+    if (!dataReady) {
+      if (searchQuery.trim()) {
+        const q = searchQuery.trim().toLowerCase();
+        weekBookingsData = weekBookingsData.filter(b =>
+          (b.customer || '').toLowerCase().includes(q)
+          || (b.court || '').toLowerCase().includes(q)
+          || (statusConfig[b.status]?.label || '').toLowerCase().includes(q)
+        );
+      }
+      return weekBookingsData;
+    }
+
+    // Aplicar mesmos filtros que o dia após sync
     weekBookingsData = viewFilter.canceledOnly
       ? weekBookingsData.filter(b => b.status === 'canceled')
       : weekBookingsData.filter(b => b.status !== 'canceled');
-    
+
     if (viewFilter.pendingPayments) {
       weekBookingsData = weekBookingsData.filter(b => {
         const participants = participantsByAgendamento[b.id] || [];
@@ -6377,7 +6469,7 @@ function AgendaPage({ sidebarVisible = false }) {
         return hasPending && participants.length > 0;
       });
     }
-    
+
     if (searchQuery.trim()) {
       const q = searchQuery.trim().toLowerCase();
       weekBookingsData = weekBookingsData.filter(b =>
@@ -6386,9 +6478,9 @@ function AgendaPage({ sidebarVisible = false }) {
         || (statusConfig[b.status]?.label || '').toLowerCase().includes(q)
       );
     }
-    
+
     return (viewFilter.scheduled || viewFilter.canceledOnly || viewFilter.pendingPayments) ? weekBookingsData : [];
-  }, [bookings, currentDate, viewFilter.scheduled, viewFilter.canceledOnly, viewFilter.pendingPayments, searchQuery, participantsByAgendamento]);
+  }, [bookings, currentDate, viewFilter.scheduled, viewFilter.canceledOnly, viewFilter.pendingPayments, searchQuery, participantsByAgendamento, lastTimeSyncAtMs]);
 
   // Após computar os resultados, rola até o primeiro match quando houver busca
   useEffect(() => {
@@ -7256,7 +7348,7 @@ function AgendaPage({ sidebarVisible = false }) {
               <div className="h-14 border-b border-border sticky top-0 bg-surface z-10 flex items-center justify-center">
                 {/* Mostrar estatísticas apenas na primeira coluna de quadras */}
                 {courtIndex === 0 && (
-                  <div className="flex items-center gap-4">
+                  <div className="flex items-center justify-center gap-4 px-3">
                     {dayStats.totalBookings > 0 && (
                       <div className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-surface-2/50">
                         <span className="text-lg">📅</span>
@@ -7270,6 +7362,27 @@ function AgendaPage({ sidebarVisible = false }) {
                         <span className="font-bold text-text-primary">{dayStats.totalPendingPayments}</span>
                         <span className="font-semibold text-xs text-text-muted">pendente{dayStats.totalPendingPayments !== 1 ? 's' : ''}</span>
                       </div>
+                    )}
+                    {agendaPublicUrl && (
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const ok = await copyTextWithFallback(agendaPublicUrl);
+                          const displayUrl = agendaPublicUrl.replace(/^https?:\/\//, '');
+                          if (ok) {
+                            toast({ title: 'Link copiado', description: displayUrl });
+                          } else {
+                            toast({ title: 'Não foi possível copiar', description: displayUrl, variant: 'destructive' });
+                          }
+                        }}
+                        className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-xs border border-white/10 bg-surface/60 hover:bg-surface-2/70 hover:border-white/20 transition-colors"
+                        aria-label="Copiar link de agendamento"
+                        title="Copiar link de agendamento"
+                      >
+                        <LinkIcon className="w-4 h-4" />
+                        <span className="hidden sm:inline">link Agendamento</span>
+                        <span className="sm:hidden"><Copy className="w-4 h-4" /></span>
+                      </button>
                     )}
                   </div>
                 )}
