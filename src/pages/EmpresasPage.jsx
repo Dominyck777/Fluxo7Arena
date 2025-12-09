@@ -164,93 +164,6 @@ export default function EmpresasPage() {
           transmitenota_base_url_prod: empresa?.transmitenota_base_url_prod || '',
           transmitenota_apikey_prod: empresa?.transmitenota_apikey_prod || '',
         };
-
-  // Testar conexão Transmite Nota por ambiente
-  async function handleTestTN(env) {
-    const cnpjNum = onlyDigits(form.cnpj);
-    if (cnpjNum.length !== 14) {
-      toast({ title: 'CNPJ inválido', description: 'Informe 14 dígitos para testar.', variant: 'destructive' });
-      return;
-    }
-    const isProd = env === 'prod';
-    const baseUrl = isProd ? (form.transmitenota_base_url_prod || '') : (form.transmitenota_base_url_hml || '');
-    const apiKey = isProd ? (form.transmitenota_apikey_prod || '') : (form.transmitenota_apikey_hml || '');
-    if (!baseUrl || !apiKey) {
-      toast({ title: 'Configuração incompleta', description: 'Preencha Base URL e ApiKey do ambiente selecionado.', variant: 'destructive' });
-      return;
-    }
-    try {
-      setLoading(true);
-      const r = await testarConexaoTN({ baseUrl, apiKey, cnpj: cnpjNum });
-      if (!r.reachable) {
-        toast({ title: 'Sem conexão', description: r.error || `Endpoint inacessível (${r.status||'sem status'})`, variant: 'destructive' });
-        return;
-      }
-      if (r.authorized === false) {
-        toast({ title: 'Credenciais inválidas', description: `HTTP ${r.status}. Verifique ApiKey e CNPJ.`, variant: 'destructive' });
-        return;
-      }
-      const okMsg = r.status === 200 ? 'OK' : (r.status === 400 ? 'Conectado (dados mínimos ausentes, mas credenciais e URL válidas)' : `Conectado (HTTP ${r.status})`);
-      toast({ title: `Conexão ${isProd ? 'PROD' : 'HML'}: sucesso`, description: okMsg });
-    } catch (e) {
-      toast({ title: 'Falha no teste', description: e.message || 'Erro inesperado', variant: 'destructive' });
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  const normalize = (s) => String(s || '').normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase().trim();
-  const handleBuscarCNPJ = async () => {
-    const cnpjNum = onlyDigits(form.cnpj);
-    if (cnpjNum.length !== 14) { toast({ title: 'CNPJ inválido', description: 'Informe 14 dígitos para buscar.', variant: 'destructive' }); return; }
-    try {
-      setLoading(true);
-      const res = await fetch(`https://brasilapi.com.br/api/cnpj/v1/${cnpjNum}`);
-      if (!res.ok) throw new Error('Falha ao consultar CNPJ');
-      const data = await res.json();
-      const razao = data.razao_social || data.nome || '';
-      const fantasia = data.nome_fantasia || '';
-      const logradouro = data.logradouro || '';
-      const numero = (data.numero || '').toString();
-      const complemento = data.complemento || '';
-      const bairro = data.bairro || '';
-      const cidade = data.municipio || data.localidade || '';
-      const uf = data.uf || '';
-      const cep = onlyDigits(data.cep);
-      let codigoIBGE = '';
-      try {
-        if (cidade && uf) {
-          const r2 = await fetch(`https://brasilapi.com.br/api/ibge/municipios/v1/${uf}`);
-          if (r2.ok) {
-            const lista = await r2.json();
-            const alvo = normalize(cidade);
-            const found = (lista || []).find((m) => normalize(m.nome) === alvo);
-            if (found?.codigo_ibge || found?.codigo) codigoIBGE = String(found.codigo_ibge || found.codigo);
-          }
-        }
-      } catch {}
-      const enderecoFull = `${logradouro}${numero ? ', ' + numero : ''}${bairro ? ' - ' + bairro : ''}${(cidade||uf) ? ' - ' + cidade + '/' + uf : ''}`;
-      setForm((prev) => ({
-        ...prev,
-        razao_social: razao,
-        nome_fantasia: fantasia || razao,
-        logradouro,
-        numero,
-        complemento,
-        bairro,
-        cidade,
-        uf,
-        cep,
-        endereco: enderecoFull || prev.endereco,
-        codigo_municipio_ibge: codigoIBGE || '',
-      }));
-      toast({ title: 'CNPJ carregado', description: 'Dados preenchidos automaticamente.' });
-    } catch (e) {
-      toast({ title: 'Falha ao buscar CNPJ', description: e.message || 'Tente novamente.', variant: 'destructive' });
-    } finally {
-      setLoading(false);
-    }
-  }
         setForm(fresh);
         setLogoPreviewUrl(fresh.logo_url ? `${fresh.logo_url.split('?')[0]}?v=${Date.now()}` : '');
         try { localStorage.setItem(cacheKey, JSON.stringify(fresh)); } catch {}
@@ -459,6 +372,44 @@ export default function EmpresasPage() {
       setLoading(false);
     }
   };
+
+  // Testar conexão Transmite Nota por ambiente
+  async function handleTestTN(env) {
+    const cnpjNum = onlyDigits(form.cnpj);
+    if (cnpjNum.length !== 14) {
+      toast({ title: 'CNPJ inválido', description: 'Informe 14 dígitos para testar.', variant: 'destructive' });
+      return;
+    }
+    const isProd = env === 'prod';
+    const baseUrl = isProd ? (form.transmitenota_base_url_prod || '') : (form.transmitenota_base_url_hml || '');
+    const apiKey = isProd ? (form.transmitenota_apikey_prod || '') : (form.transmitenota_apikey_hml || '');
+    if (!baseUrl || !apiKey) {
+      toast({ title: 'Configuração incompleta', description: 'Preencha Base URL e ApiKey do ambiente selecionado.', variant: 'destructive' });
+      return;
+    }
+    try {
+      setLoading(true);
+      const r = await testarConexaoTN({ baseUrl, apiKey, cnpj: cnpjNum });
+      if (!r.reachable) {
+        toast({ title: 'Sem conexão', description: r.error || `Endpoint inacessível (${r.status||'sem status'})`, variant: 'destructive' });
+        return;
+      }
+      if (r.authorized === false) {
+        toast({ title: 'Credenciais inválidas', description: `HTTP ${r.status}. Verifique ApiKey e CNPJ.`, variant: 'destructive' });
+        return;
+      }
+      const okMsg = r.status === 200
+        ? 'OK'
+        : (r.status === 400
+          ? 'Conectado (dados mínimos ausentes, mas credenciais e URL válidas)'
+          : `Conectado (HTTP ${r.status})`);
+      toast({ title: `Conexão ${isProd ? 'PROD' : 'HML'}: sucesso`, description: okMsg });
+    } catch (e) {
+      toast({ title: 'Falha no teste', description: e.message || 'Erro inesperado', variant: 'destructive' });
+    } finally {
+      setLoading(false);
+    }
+  }
 
   return (
     <>
