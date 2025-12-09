@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { UserPlus, Check, X, Maximize2, Minimize2 } from 'lucide-react';
+import { UserPlus, Check, X, ChevronUp, ChevronDown } from 'lucide-react';
 import { IsisAvatar } from '@/components/isis/IsisAvatar';
 import { supabase } from '@/lib/supabase';
 import { createPortal } from 'react-dom';
@@ -400,12 +400,12 @@ export const IsisParticipantesInput = ({
           aria-label={expandedList ? 'Recolher lista' : 'Expandir lista'}
           aria-pressed={expandedList}
         >
-          {expandedList ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+          {expandedList ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
         </button>
       </div>
       {/* Lista de Participantes - Compacta no mobile */}
       {participantesAtuais.length > 0 && (
-        <div ref={listRef} className={`flex flex-col gap-1.5 ${expandedList ? 'max-h-[240px] md:max-h-[320px]' : 'max-h-[140px]'} overflow-y-auto px-1 transition-all`}>
+        <div ref={listRef} className={`flex flex-col gap-1.5 ${expandedList ? 'max-h-[360px] md:max-h-[400px]' : 'max-h-[140px]'} overflow-y-auto px-1 transition-all`}>
           {participantesAtuais.map((p, index) => (
             <motion.div
               key={index}

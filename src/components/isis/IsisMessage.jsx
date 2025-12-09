@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { format } from 'date-fns';
-import { Bot, User, Copy as CopyIcon, Check as CheckIcon } from 'lucide-react';
+import { Bot, Copy as CopyIcon, Check as CheckIcon, User as UserIcon } from 'lucide-react';
 import { IsisAvatar } from './IsisAvatar';
+import { useIsis } from '@/contexts/IsisContext';
 
 /**
  * Função para processar markdown de negrito **texto**
@@ -38,6 +39,16 @@ export const IsisMessage = ({ message }) => {
   const isIsis = message.from === 'isis';
   const isSuccess = isIsis && message?.color === 'green';
   const [copied, setCopied] = useState(false);
+  const { selections } = useIsis();
+
+  const { clientIdentified, userInitial } = useMemo(() => {
+    const displayName = (selections?.contato?.nome) || (selections?.cliente?.nome) || '';
+    const trimmed = String(displayName).trim();
+    const first = trimmed ? trimmed[0] : '';
+    const letter = first && /[A-Za-zÀ-ÖØ-öø-ÿ]/.test(first) ? first.toUpperCase() : 'U';
+    const identified = !!displayName;
+    return { clientIdentified: identified, userInitial: letter };
+  }, [selections?.contato?.nome, selections?.cliente?.nome]);
 
   const copyToClipboard = async (text) => {
     try {
@@ -73,9 +84,15 @@ export const IsisMessage = ({ message }) => {
         {isIsis ? (
           <IsisAvatar size="sm" variant="message" className="md:w-14 md:h-14" />
         ) : (
-          <div className="w-10 h-10 md:w-14 md:h-14 rounded-full flex items-center justify-center flex-shrink-0 border bg-surface border-border-color">
-            <User className="w-5 h-5 md:w-6 md:h-6 text-text-secondary" />
-          </div>
+          clientIdentified ? (
+            <div className="w-10 h-10 md:w-14 md:h-14 rounded-full flex items-center justify-center flex-shrink-0 bg-brand/10 text-brand ring-2 ring-brand/60">
+              <span className="font-extrabold text-base md:text-lg leading-none select-none">{userInitial}</span>
+            </div>
+          ) : (
+            <div className="w-10 h-10 md:w-14 md:h-14 rounded-full flex items-center justify-center flex-shrink-0 bg-surface border border-white/10 text-text-muted">
+              <UserIcon className="w-5 h-5 md:w-6 md:h-6" />
+            </div>
+          )
         )}
         
         {/* Mensagem */}
