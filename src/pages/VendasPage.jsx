@@ -1076,6 +1076,55 @@ function VendasPage() {
     }
   };
 
+  const selectedTableRef = useRef(null);
+  useEffect(() => { selectedTableRef.current = selectedTable; }, [selectedTable]);
+  const rtChanRef = useRef(null);
+  const rtDebounceRef = useRef(null);
+  const pollTimerRef = useRef(null);
+  useEffect(() => {
+    const codigoEmpresa = userProfile?.codigo_empresa;
+    if (!codigoEmpresa) return;
+    const ch = supabase.channel(`loja:${codigoEmpresa}`);
+    const handler = (payload) => {
+      const t = payload?.table || payload?.table_name || '';
+      const row = payload?.new || payload?.old || {};
+      const sameCompany = String(row?.codigo_empresa || '') === String(codigoEmpresa || '');
+      if (!sameCompany) return;
+      if (rtDebounceRef.current) { try { clearTimeout(rtDebounceRef.current); } catch {} }
+      rtDebounceRef.current = setTimeout(async () => {
+        try { await refreshTablesLight({ showToast: false }); } catch {}
+        const sel = selectedTableRef.current;
+        if (!sel) return;
+        const selComanda = sel.comandaId || null;
+        let affectedComanda = null;
+        if (t === 'comandas') affectedComanda = row?.id || row?.comanda_id || null;
+        if (t === 'comanda_itens' || t === 'comanda_clientes') affectedComanda = row?.comanda_id || null;
+        if (affectedComanda && selComanda && String(affectedComanda) === String(selComanda)) {
+          try { await refetchSelectedTableDetails(sel); } catch {}
+        }
+        if (t === 'mesas' && sel?.id && (row?.id === sel.id)) {
+          try { await refetchSelectedTableDetails(sel); } catch {}
+        }
+      }, 350);
+    };
+    ch
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'comandas', filter: `codigo_empresa=eq.${codigoEmpresa}` }, handler)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'comanda_itens', filter: `codigo_empresa=eq.${codigoEmpresa}` }, handler)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'comanda_clientes', filter: `codigo_empresa=eq.${codigoEmpresa}` }, handler)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'mesas', filter: `codigo_empresa=eq.${codigoEmpresa}` }, handler)
+      .subscribe();
+    rtChanRef.current = ch;
+    if (pollTimerRef.current) { try { clearInterval(pollTimerRef.current); } catch {} }
+    pollTimerRef.current = setInterval(async () => {
+      try { await refreshTablesLight({ showToast: false }); } catch {}
+    }, 60000);
+    return () => {
+      if (rtChanRef.current) { try { supabase.removeChannel(rtChanRef.current); } catch {} rtChanRef.current = null; }
+      if (rtDebounceRef.current) { try { clearTimeout(rtDebounceRef.current); } catch {} rtDebounceRef.current = null; }
+      if (pollTimerRef.current) { try { clearInterval(pollTimerRef.current); } catch {} pollTimerRef.current = null; }
+    };
+  }, [userProfile?.codigo_empresa]);
+
   const TableCard = ({ table, provided, isDragging }) => {
     const config = statusConfig[table.status];
     const Icon = config.icon;

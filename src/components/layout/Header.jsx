@@ -191,36 +191,36 @@ function Header({ onToggleSidebar, sidebarVisible, sidebarPinned }) {
     <motion.header
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
-      className="relative bg-surface/80 backdrop-blur-sm text-text-primary h-[72px] flex-shrink-0 flex items-center justify-between px-8 border-b border-border shadow-[0_1px_0_RGBA(255,255,255,0.04)]"
+      className="relative bg-surface/80 backdrop-blur-sm text-text-primary h-14 md:h-[72px] flex-shrink-0 flex items-center justify-between px-3 md:px-8 border-b border-border shadow-[0_1px_0_RGBA(255,255,255,0.04)]"
     >
-      <div className="flex items-center gap-4 min-w-0">
+      <div className="flex items-center gap-2 md:gap-4 min-w-0 flex-1">
         <Button
           variant="ghost"
           size="icon"
           onClick={onToggleSidebar}
           aria-label={sidebarVisible ? 'Ocultar barra lateral' : 'Mostrar barra lateral'}
-          className="h-12 w-12 hover:bg-surface-2/60 transition-colors"
+          className="h-10 w-10 md:h-12 md:w-12 hover:bg-surface-2/60 transition-colors"
         >
           {/* Menu (3 traços) em todas as versões - amarelo quando aberto */}
-          <Menu className={`w-7 h-7 transition-colors ${sidebarVisible ? 'text-brand' : 'text-text-primary'}`} />
+          <Menu className={`w-6 h-6 md:w-7 md:h-7 transition-colors ${sidebarVisible ? 'text-brand' : 'text-text-primary'}`} />
         </Button>
         <div
-          className="group pl-3 pr-5 py-1.5 border border-white/10 bg-gradient-to-b from-surface-2/60 to-surface/60 text-text-primary flex items-center gap-4 shadow-sm hover:border-white/20 transition-colors overflow-hidden max-w-[36vw] md:max-w-[30vw] lg:max-w-[24vw]"
+          className="group mx-auto md:mx-0 pl-2 pr-3 md:pl-3 md:pr-5 py-1 md:py-1.5 border border-white/10 bg-gradient-to-b from-surface-2/60 to-surface/60 text-text-primary flex items-center gap-2 md:gap-4 shadow-sm hover:border-white/20 transition-colors overflow-hidden max-w-[60vw] md:max-w-[30vw] lg:max-w-[24vw]"
           title={companyName}
         >
-          <div className="relative w-11 h-11 shrink-0 overflow-hidden border border-white/10 bg-surface-2/60 grid place-items-center shadow-[0_0_0_3px_RGBA(0,0,0,0.2)]">
+          <div className="relative w-9 h-9 md:w-11 md:h-11 shrink-0 overflow-hidden border border-white/10 bg-surface-2/60 grid place-items-center shadow-[0_0_0_3px_RGBA(0,0,0,0.2)]">
             {companyLogoSrc ? (
               <img src={companyLogoSrc} alt="Logo" className="w-full h-full object-cover" />
             ) : (
               <Building className="w-6 h-6 opacity-80" />
             )}
           </div>
-          <span className="tracking-tight truncate leading-[44px] text-base text-text-primary font-semibold flex-1 min-w-0">
+          <span className="tracking-tight truncate text-base leading-8 md:text-base md:leading-[44px] text-text-primary font-semibold flex-1 min-w-0 text-center md:text-left">
             {companyName}
           </span>
           {/* Botão de copiar link de agendamento foi movido para a aba Agenda (no grid) */}
           {isDevTarget && (
-            <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider bg-red-600 text-white shadow animate-pulse">
+            <span className="ml-2 hidden md:inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider bg-red-600 text-white shadow animate-pulse">
               Dev
             </span>
           )}
@@ -277,9 +277,9 @@ function Header({ onToggleSidebar, sidebarVisible, sidebarPinned }) {
         <Button variant="ghost" size="icon" onClick={handleLogout} className="text-text-secondary hover:text-brand hover:bg-brand/10 transition-colors duration-200 shrink-0">
           <LogOut className="h-5 w-5" />
         </Button>
-        <div className="w-px h-8 bg-border mx-1 md:mx-2"></div>
+        <div className="hidden md:block w-px h-8 bg-border mx-1 md:mx-2"></div>
         <div
-          className="group pl-2 pr-3 md:pl-4 md:pr-4 py-1.5 rounded-full border border-white/10 bg-gradient-to-b from-surface-2/60 to-surface/60 text-text-primary flex items-center gap-2 md:gap-3 shadow-sm hover:border-white/20 transition-colors"
+          className="hidden md:flex group pl-2 pr-3 md:pl-4 md:pr-4 py-1.5 rounded-full border border-white/10 bg-gradient-to-b from-surface-2/60 to-surface/60 text-text-primary items-center gap-2 md:gap-3 shadow-sm hover:border-white/20 transition-colors"
           title={`${userName} • ${userRole}`}
         >
           <span className="text-xs md:text-sm font-semibold truncate max-w-[120px] md:max-w-[180px]">{userName}</span>
