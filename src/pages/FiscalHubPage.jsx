@@ -21,6 +21,7 @@ import { gerarXMLNFe, gerarXMLNFeFromData } from '@/lib/nfe';
 import { listProducts } from '@/lib/products';
 import cfopList from '@/data/cfop.json';
 import { listSuppliers } from '@/lib/suppliers';
+import { FORCE_MAINTENANCE } from '@/lib/maintenanceConfig';
 
 function fmtMoney(v) { const n = Number(v||0); return n.toLocaleString('pt-BR',{minimumFractionDigits:2, maximumFractionDigits:2}); }
 function fmtDate(iso){ if(!iso) return '—'; try{ const d=new Date(iso); return d.toLocaleString('pt-BR'); }catch{return '—';} }
@@ -42,6 +43,7 @@ function DateInput({ label, value, onChange }){
     const top = Math.min(r.bottom + 6, window.innerHeight - 8 - 300); // ensure visible
     setPos({ top, left });
   }, []);
+
   React.useEffect(()=>{
     const onDoc = (e)=>{ if (open && wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false); };
     window.addEventListener('mousedown', onDoc);
@@ -109,6 +111,32 @@ export default function FiscalHubPage(){
   const [focusPendRej, setFocusPendRej] = useState(false);
   const [selectedId, setSelectedId] = useState(null);
   const [tab, setTab] = useState('nfce');
+
+  // Maintenance overlay (specific for Central Fiscal)
+  const [maintActive, setMaintActive] = useState(false);
+  const [maintBypass, setMaintBypass] = useState(false);
+  useEffect(() => {
+    try {
+      const env = String(import.meta.env.VITE_MAINTENANCE_MODE || '').toLowerCase() === 'true';
+      const isActiveLS = localStorage.getItem('maintenance:active') === 'true';
+      const end = localStorage.getItem('maintenance:end');
+      const expired = end ? (new Date() > new Date(end)) : false;
+      const activeNow = (Boolean(FORCE_MAINTENANCE) || env || isActiveLS) && !expired;
+      const bypass = (() => {
+        try {
+          const ls = localStorage.getItem('maintenance:bypass') === '1';
+          const ss = sessionStorage.getItem('maintenance:bypass') === '1';
+          const ck = document.cookie.split(';').some(c => c.trim() === 'fx_maint_bypass=1');
+          return ls || ss || ck;
+        } catch { return false; }
+      })();
+      setMaintActive(activeNow);
+      setMaintBypass(bypass);
+    } catch {
+      setMaintActive(Boolean(FORCE_MAINTENANCE));
+      setMaintBypass(false);
+    }
+  }, []);
 
   const [preOpen, setPreOpen] = useState(false);
   const [preLoading, setPreLoading] = useState(false);
@@ -802,8 +830,15 @@ export default function FiscalHubPage(){
   };
 
   return (
-    <div className="p-4">
+    <div className="relative p-4">
       <Helmet><title>Central Fiscal</title></Helmet>
+      {true && (
+        <div className="absolute inset-0 z-[1000] flex items-center justify-center bg-black">
+          <div className="max-w-2xl w-[min(92vw,720px)] text-center bg-surface border border-warning rounded-lg p-6 shadow-xl">
+            <div className="text-2xl font-bold text-warning">aba fiscal, em breve podera usar</div>
+          </div>
+        </div>
+      )}
       <div className="flex items-center justify-between mb-3">
         <h1 className="text-xl font-semibold">Central Fiscal</h1>
         <Button

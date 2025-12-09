@@ -91,6 +91,7 @@ table,public,agendamentos,null,table,postgres,null
 table,public,pagamentos,null,table,postgres,null
 table,public,produto_categorias,null,table,postgres,null
 table,public,clientes,null,table,postgres,null
+table,public,notas_fiscais,null,table,postgres,null
 table,public,agenda_settings,null,table,postgres,ConfiguraÃ§Ãµes de automaÃ§Ã£o da agenda por empresa (1:1 com empresas).
 table,public,v_agendamento_participantes,null,view,postgres,null
 column,auth,id,sso_providers_pkey,uuid default null,null,null
@@ -1053,6 +1054,11 @@ column,public,ambiente,empresas,character varying(20) default 'homologacao'::cha
 column,public,transmitenota_apikey,empresas,text default null,null,null
 column,public,transmitenota_cadastrado,empresas,boolean default false,null,null
 column,public,transmitenota_certificado_enviado,empresas,boolean default false,null,null
+column,public,transmitenota_base_url_hml,empresas,text default null,null,null
+column,public,transmitenota_apikey_hml,empresas,text default null,null,null
+column,public,transmitenota_base_url_prod,empresas,text default null,null,null
+column,public,transmitenota_apikey_prod,empresas,text default null,null,null
+column,public,transmitenota_base_url,empresas,text default null,null,null
 column,public,id,comanda_itens,uuid default gen_random_uuid(),null,null
 column,public,codigo_empresa,comanda_itens,text default get_my_company_code(),null,null
 column,public,comanda_id,comanda_itens,uuid default null,null,null
@@ -1478,6 +1484,21 @@ column,public,nome_mae,clientes,text default null,null,null
 column,public,nome_pai,clientes,text default null,null,null
 column,public,observacoes,clientes,text default null,null,null
 column,public,is_consumidor_final,clientes,boolean default false,null,"Identifica cliente padrÃ£o ""Consumidor Final"" que nÃ£o pode ser editado/excluÃ­do. Sempre recebe cÃ³digo 0."
+column,public,id,notas_fiscais,uuid default gen_random_uuid(),null,null
+column,public,codigo_empresa,notas_fiscais,text default null,null,null
+column,public,origem,notas_fiscais,text default null,null,null
+column,public,comanda_id,notas_fiscais,uuid default null,null,null
+column,public,modelo,notas_fiscais,text default '55'::text,null,null
+column,public,numero,notas_fiscais,integer default null,null,null
+column,public,serie,notas_fiscais,integer default null,null,null
+column,public,status,notas_fiscais,text default 'pendente'::text,null,null
+column,public,chave,notas_fiscais,text default null,null,null
+column,public,xml_url,notas_fiscais,text default null,null,null
+column,public,pdf_url,notas_fiscais,text default null,null,null
+column,public,valor_total,notas_fiscais,"numeric(12,2) default null",null,null
+column,public,destinatario,notas_fiscais,jsonb default null,null,null
+column,public,criado_em,notas_fiscais,timestamp with time zone default now(),null,null
+column,public,atualizado_em,notas_fiscais,timestamp with time zone default now(),null,null
 column,public,empresa_id,agenda_settings,uuid default null,null,null
 column,public,auto_confirm_enabled,agenda_settings,boolean default false,null,null
 column,public,auto_confirm_hours,agenda_settings,integer default null,null,null
@@ -1487,6 +1508,10 @@ column,public,auto_start_enabled,agenda_settings,boolean default true,null,null
 column,public,auto_finish_enabled,agenda_settings,boolean default true,null,null
 column,public,created_at,agenda_settings,timestamp with time zone default now(),null,null
 column,public,updated_at,agenda_settings,timestamp with time zone default now(),null,null
+column,public,id,notas_fiscais_pkey,uuid default null,null,null
+column,public,codigo_empresa,idx_notas_fiscais_empresa,text default null,null,null
+column,public,status,idx_notas_fiscais_status,text default null,null,null
+column,public,criado_em,idx_notas_fiscais_criado_em,timestamp with time zone default null,null,null
 column,public,id,compras_itens_pkey,uuid default null,null,null
 column,public,compra_id,idx_compras_itens_compra,uuid default null,null,null
 column,public,produto_id,idx_compras_itens_produto,uuid default null,null,null
@@ -1717,6 +1742,8 @@ constraint,public,pagamentos_valor_check,pagamentos,CHECK ((valor >= (0)::numeri
 constraint,public,produto_categorias_pkey,produto_categorias,PRIMARY KEY (id),null,null
 constraint,public,clientes_codigo_empresa_fkey,clientes,FOREIGN KEY (codigo_empresa) REFERENCES empresas(codigo_empresa) ON UPDATE CASCADE ON DELETE RESTRICT,null,null
 constraint,public,customers_pkey,clientes,PRIMARY KEY (id),null,null
+constraint,public,notas_fiscais_origem_check,notas_fiscais,"CHECK ((origem = ANY (ARRAY['comanda'::text, 'manual'::text])))",null,null
+constraint,public,notas_fiscais_pkey,notas_fiscais,PRIMARY KEY (id),null,null
 constraint,public,agenda_settings_auto_cancel_hours_check,agenda_settings,CHECK (((auto_cancel_hours IS NULL) OR ((auto_cancel_hours >= 0) AND (auto_cancel_hours <= 168)))),null,null
 constraint,public,agenda_settings_auto_confirm_hours_check,agenda_settings,CHECK (((auto_confirm_hours IS NULL) OR ((auto_confirm_hours >= 0) AND (auto_confirm_hours <= 168)))),null,null
 constraint,public,agenda_settings_empresa_id_fkey,agenda_settings,FOREIGN KEY (empresa_id) REFERENCES empresas(id) ON DELETE CASCADE,null,null
@@ -2013,6 +2040,10 @@ index,public,idx_clientes_empresa_telefone,clientes,"CREATE INDEX idx_clientes_e
 index,public,uq_clientes_empresa_codigo,clientes,"CREATE UNIQUE INDEX uq_clientes_empresa_codigo ON public.clientes USING btree (codigo_empresa, codigo)",null,null
 index,public,uq_clientes_empresa_cpf,clientes,"CREATE UNIQUE INDEX uq_clientes_empresa_cpf ON public.clientes USING btree (codigo_empresa, cpf) WHERE (cpf IS NOT NULL)",null,null
 index,public,uq_clientes_empresa_email_lower,clientes,"CREATE UNIQUE INDEX uq_clientes_empresa_email_lower ON public.clientes USING btree (codigo_empresa, lower((email)::text)) WHERE (email IS NOT NULL)",null,null
+index,public,notas_fiscais_pkey,notas_fiscais,CREATE UNIQUE INDEX notas_fiscais_pkey ON public.notas_fiscais USING btree (id),null,null
+index,public,idx_notas_fiscais_empresa,notas_fiscais,CREATE INDEX idx_notas_fiscais_empresa ON public.notas_fiscais USING btree (codigo_empresa),null,null
+index,public,idx_notas_fiscais_status,notas_fiscais,CREATE INDEX idx_notas_fiscais_status ON public.notas_fiscais USING btree (status),null,null
+index,public,idx_notas_fiscais_criado_em,notas_fiscais,CREATE INDEX idx_notas_fiscais_criado_em ON public.notas_fiscais USING btree (criado_em DESC),null,null
 index,public,agenda_settings_pkey,agenda_settings,CREATE UNIQUE INDEX agenda_settings_pkey ON public.agenda_settings USING btree (empresa_id),null,null
 trigger,public,trigger_registrar_historico_comanda,comandas,CREATE TRIGGER trigger_registrar_historico_comanda AFTER UPDATE ON public.comandas FOR EACH ROW EXECUTE FUNCTION registrar_historico_comanda(),null,null
 trigger,realtime,tr_check_filters,subscription,CREATE TRIGGER tr_check_filters BEFORE INSERT OR UPDATE ON realtime.subscription FOR EACH ROW EXECUTE FUNCTION realtime.subscription_check_filters(),null,null
@@ -2023,6 +2054,7 @@ trigger,storage,objects_insert_create_prefix,objects,CREATE TRIGGER objects_inse
 trigger,storage,objects_delete_delete_prefix,objects,CREATE TRIGGER objects_delete_delete_prefix AFTER DELETE ON storage.objects FOR EACH ROW EXECUTE FUNCTION storage.delete_prefix_hierarchy_trigger(),null,null
 trigger,storage,objects_update_create_prefix,objects,CREATE TRIGGER objects_update_create_prefix BEFORE UPDATE ON storage.objects FOR EACH ROW WHEN (((new.name <> old.name) OR (new.bucket_id <> old.bucket_id))) EXECUTE FUNCTION storage.objects_update_prefix_trigger(),null,null
 trigger,storage,prefixes_delete_hierarchy,prefixes,CREATE TRIGGER prefixes_delete_hierarchy AFTER DELETE ON storage.prefixes FOR EACH ROW EXECUTE FUNCTION storage.delete_prefix_hierarchy_trigger(),null,null
+trigger,public,trg_notas_fiscais_updated_at,notas_fiscais,CREATE TRIGGER trg_notas_fiscais_updated_at BEFORE UPDATE ON public.notas_fiscais FOR EACH ROW EXECUTE FUNCTION _set_updated_at(),null,null
 trigger,public,agendamentos_set_empresa_from_user,agendamentos,CREATE TRIGGER agendamentos_set_empresa_from_user BEFORE INSERT ON public.agendamentos FOR EACH ROW EXECUTE FUNCTION set_agendamento_empresa_from_user(),null,null
 trigger,public,clientes_set_empresa_from_user,clientes,CREATE TRIGGER clientes_set_empresa_from_user BEFORE INSERT ON public.clientes FOR EACH ROW EXECUTE FUNCTION set_empresa_from_user(),null,null
 trigger,public,clientes_set_timestamp,clientes,CREATE TRIGGER clientes_set_timestamp BEFORE UPDATE ON public.clientes FOR EACH ROW EXECUTE FUNCTION set_timestamp(),null,null
@@ -2267,6 +2299,7 @@ function,net,_http_collect_response,null,"(request_id bigint, async boolean) ret
 function,net,http_collect_response,null,"(request_id bigint, async boolean) returns net.http_response_result",supabase_admin,null
 function,public,registrar_historico_comanda,null,() returns trigger,postgres,null
 function,supabase_functions,http_request,null,() returns trigger,supabase_functions_admin,null
+function,public,_set_updated_at,null,() returns trigger,postgres,null
 function,extensions,sign,null,"(payload json, secret text, algorithm text) returns text",supabase_admin,null
 function,extensions,try_cast_double,null,(inp text) returns double precision,supabase_admin,null
 function,extensions,verify,null,"(token text, secret text, algorithm text) returns TABLE(header json, payload json, valid boolean)",supabase_admin,null
@@ -2384,6 +2417,7 @@ type,realtime,messages_2025_12_10,null,realtime.messages_2025_12_10,null,null
 type,realtime,messages_2025_12_07,null,realtime.messages_2025_12_07,null,null
 type,realtime,messages_2025_12_09,null,realtime.messages_2025_12_09,null,null
 type,realtime,messages_2025_12_11,null,realtime.messages_2025_12_11,null,null
+type,public,notas_fiscais,null,notas_fiscais,null,null
 extension,pg_catalog,plpgsql,null,1.0,null,PL/pgSQL procedural language
 extension,extensions,pg_stat_statements,null,1.11,null,track planning and execution statistics of all SQL statements executed
 extension,extensions,uuid-ossp,null,1.1,null,generate universally unique identifiers (UUIDs)
@@ -2775,7 +2809,12 @@ grant,public,customers_pkey,null,null,postgres,null
 grant,public,clientes_codigo_empresa_idx,null,null,postgres,null
 grant,public,produto_categorias,null,"postgres=arwdDxtm/postgres,authenticated=arwd/postgres",postgres,null
 grant,public,clientes,null,"postgres=arwdDxtm/postgres,authenticated=arwd/postgres",postgres,null
+grant,public,notas_fiscais,null,"postgres=arwdDxtm/postgres,anon=arwd/postgres,authenticated=arwd/postgres",postgres,null
 grant,public,agenda_settings,null,"postgres=arwdDxtm/postgres,authenticated=arwd/postgres",postgres,null
+grant,public,notas_fiscais_pkey,null,null,postgres,null
+grant,public,idx_notas_fiscais_empresa,null,null,postgres,null
+grant,public,idx_notas_fiscais_status,null,null,postgres,null
+grant,public,idx_notas_fiscais_criado_em,null,null,postgres,null
 grant,public,compras_itens_pkey,null,null,postgres,null
 grant,public,idx_compras_itens_compra,null,null,postgres,null
 grant,public,idx_compras_itens_produto,null,null,postgres,null

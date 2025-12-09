@@ -79,7 +79,7 @@ const originalClient = createClient(supabaseUrl, supabaseAnonKey, {
       'X-Client-Info': 'fluxo7arena-web',
       // Garantir apikey e Authorization nas chamadas iniciais (antes de sessão)
       'apikey': supabaseAnonKey,
-      'Authorization': `Bearer ${supabaseAnonKey}`,
+
     },
   },
 })

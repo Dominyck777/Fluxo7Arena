@@ -133,3 +133,45 @@ $$;
 - Usuário consegue criar NF-e por comanda e manual, baixar e salvar XML, e ver registros na tabela.
 - RLS garantindo isolamento por `codigo_empresa`.
 
+
+## Modo Manutenção e Changelog — Dez/2025
+
+### Modo Manutenção
+- Ativado globalmente via código: `src/lib/maintenanceConfig.js` → `FORCE_MAINTENANCE = true`.
+- Frontend já roteia tudo para `/maintenance` quando manutenção ativa, com bypass opcional:
+  - LocalStorage/SessionStorage: `maintenance:bypass = '1'`.
+  - Cookie: `fx_maint_bypass=1`.
+- Também respeita `VITE_MAINTENANCE_MODE=true` (env) e chave de tempo `maintenance:end` no localStorage.
+
+### Alterações recentes no modal NF-e (UI/UX)
+- Produtos/Itens
+  - Código antes da descrição e campo de **Cód. Barras** por item.
+  - Lookup por código e por EAN/GTIN (Enter/blur) para autopreencher item.
+  - **Máscaras monetárias** (BR) em preço, desconto, acréscimos e novos campos.
+  - Novos campos por item: **Frete (R$)**, **Seguro (R$)**.
+  - Cabeçalho do card mostra “Item N: CÓDIGO - Descrição” e **Total do item** (com desconto, acréscimos, frete e seguro).
+  - Tabela-resumo dos itens com colunas: Item, Produto, Descrição, UN, CST, Qtde, Vr. Unit, Vr. ICMS, Vr. ICMS-ST, Vr. FCP, Total.
+- Impostos (por item)
+  - ICMS básico + ST e **FCP/FCP-ST** (Base/Alíquota/Valor).
+  - **Desoneração** e **Diferimento** (valor, alíquota, motivo).
+  - **IPI** com “Tipo de Cálculo” (Alíquota | Vl Unit. | Nenhum) e campos condicionais.
+  - Campos avançados (antes chamados de “Impostos 2”), agora inline: 
+    - ICMS monofásico e retenções (BC/valores), % redução + motivo, cobrado anteriormente, próprio devido.
+    - Grupo combustível: UF, % origem UF, indicador de importação.
+    - **CIDE**: alíquota, base e valor.
+  - Resumo superior exibe: ICMS/PIS/COFINS/FCP/IPI + Total do item.
+- Cabeçalho NF-e
+  - `CFOP padrão` com pesquisa/descrição e opção “Aplicar automaticamente aos itens”.
+  - Indicadores: Consumidor Final, Baixar Estoque, Destacar Substituição Trib. (com o checkbox de auto-aplicar CFOP ao lado).
+
+### Impacto em Banco de Dados
+- Sem mudanças destrutivas. Não removemos colunas nem renomeamos existentes.
+- Tabela `public.notas_fiscais` já criada em migração anterior e presente nos dois ambientes (DEV/MAIN).
+  - Colunas presentes em ambos os ambientes: `id, codigo_empresa, origem, comanda_id, modelo, numero, serie, status, chave, xml_url, pdf_url, valor_total, destinatario, criado_em, atualizado_em`.
+- Itens de UI adicionados (frete/seguro por item, campos fiscais ampliados) são apenas de interface na etapa atual — nenhum ajuste de schema foi aplicado nessas tabelas.
+
+### Próximos passos (pós-manutenção)
+1. Consolidar tooltips/ajuda nos campos fiscais avançados e máscaras.
+2. Auto-preencher impostos por item a partir do catálogo de produto (ICMS/PIS/COFINS/IPI/FCP e, se aplicável, monofásico/CIDE).
+3. Listagem dedicada de `notas_fiscais` e integração TN (emitir/consultar/cancelar/PDF/XML).
+

@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
-import { supabase } from '@/lib/supabase';
+import { supabase, SUPABASE_URL_CURRENT, SUPABASE_ANON_KEY_CURRENT } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
 import { testarConexaoTN } from '@/lib/transmitenota';
 
@@ -289,10 +289,60 @@ export default function EmpresasPage() {
       const ext = file.name.split('.').pop()?.toLowerCase() || 'png';
       // Usar o codigo_empresa como pasta no bucket
       const path = `${userProfile.codigo_empresa}/logo.${ext}`;
-      const { error: upErr } = await supabase.storage
-        .from('logos')
-        .upload(path, file, { upsert: true, contentType: file.type || undefined });
-      if (upErr) throw upErr;
+      // Upload com token custom (DEV) quando existir; senão, usa SDK padrão
+      const customToken = (() => { try { return (localStorage.getItem('custom-auth-token') || '').trim(); } catch { return ''; } })();
+      if (customToken) {
+        const url = `${SUPABASE_URL_CURRENT}/storage/v1/object/logos/${path}`;
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${customToken}`,
+            'apikey': SUPABASE_ANON_KEY_CURRENT,
+            'x-upsert': 'true',
+            'Content-Type': file.type || 'application/octet-stream',
+          },
+          body: file,
+        });
+        if (!res.ok) {
+          const text = await res.text();
+          let j; try { j = text ? JSON.parse(text) : null; } catch {}
+          const msg = j?.message || j?.error || res.statusText || 'Falha no upload';
+          const err = new Error(msg);
+          err.status = res.status;
+          err.response = j || text;
+          throw err;
+        }
+      } else {
+        const { data: { session } } = await supabase.auth.getSession();
+        const sessionToken = session?.access_token || '';
+        if (sessionToken) {
+          const url = `${SUPABASE_URL_CURRENT}/storage/v1/object/logos/${path}`;
+          const res = await fetch(url, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${sessionToken}`,
+              'apikey': SUPABASE_ANON_KEY_CURRENT,
+              'x-upsert': 'true',
+              'Content-Type': file.type || 'application/octet-stream',
+            },
+            body: file,
+          });
+          if (!res.ok) {
+            const text = await res.text();
+            let j; try { j = text ? JSON.parse(text) : null; } catch {}
+            const msg = j?.message || j?.error || res.statusText || 'Falha no upload';
+            const err = new Error(msg);
+            err.status = res.status;
+            err.response = j || text;
+            throw err;
+          }
+        } else {
+          const { error: upErr } = await supabase.storage
+            .from('logos')
+            .upload(path, file, { upsert: true, contentType: file.type || undefined });
+          if (upErr) throw upErr;
+        }
+      }
       const { data: pub } = supabase.storage.from('logos').getPublicUrl(path);
       const baseUrl = pub?.publicUrl || '';
       // Mantém no form (DB) a URL base, e usa uma versão com cache-buster para o preview
