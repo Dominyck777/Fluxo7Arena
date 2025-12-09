@@ -121,6 +121,60 @@ export default function BalcaoPage() {
     mountedRef.current = true;
     return () => { mountedRef.current = false; };
   }, []);
+  const rtChanRef = useRef(null);
+  const rtDebounceRef = useRef(null);
+  const pollTimerRef = useRef(null);
+  const comandaIdRef = useRef(null);
+  useEffect(() => { comandaIdRef.current = comandaId; }, [comandaId]);
+
+  useEffect(() => {
+    const codigoEmpresa = userProfile?.codigo_empresa;
+    if (!codigoEmpresa) return;
+    const ch = supabase.channel(`loja:${codigoEmpresa}`);
+    const handler = () => {
+      if (rtDebounceRef.current) { try { clearTimeout(rtDebounceRef.current); } catch {} }
+      rtDebounceRef.current = setTimeout(async () => {
+        const cid = comandaIdRef.current;
+        if (cid) {
+          try { await refetchItemsAndCustomer(cid, 2); } catch {}
+        } else {
+          try {
+            const c = await listarComandaBalcaoAberta({ codigoEmpresa });
+            if (c?.id) {
+              setComandaId(c.id);
+              try { await refetchItemsAndCustomer(c.id, 2); } catch {}
+            }
+          } catch {}
+        }
+      }, 350);
+    };
+    ch
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'comandas', filter: `codigo_empresa=eq.${codigoEmpresa}` }, handler)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'comanda_itens', filter: `codigo_empresa=eq.${codigoEmpresa}` }, handler)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'comanda_clientes', filter: `codigo_empresa=eq.${codigoEmpresa}` }, handler)
+      .subscribe();
+    rtChanRef.current = ch;
+    if (pollTimerRef.current) { try { clearInterval(pollTimerRef.current); } catch {} }
+    pollTimerRef.current = setInterval(async () => {
+      const cid = comandaIdRef.current;
+      if (cid) {
+        try { await refetchItemsAndCustomer(cid, 1); } catch {}
+      } else {
+        try {
+          const c = await listarComandaBalcaoAberta({ codigoEmpresa });
+          if (c?.id) {
+            setComandaId(c.id);
+            try { await refetchItemsAndCustomer(c.id, 1); } catch {}
+          }
+        } catch {}
+      }
+    }, 60000);
+    return () => {
+      if (rtChanRef.current) { try { supabase.removeChannel(rtChanRef.current); } catch {} rtChanRef.current = null; }
+      if (rtDebounceRef.current) { try { clearTimeout(rtDebounceRef.current); } catch {} rtDebounceRef.current = null; }
+      if (pollTimerRef.current) { try { clearInterval(pollTimerRef.current); } catch {} pollTimerRef.current = null; }
+    };
+  }, [userProfile?.codigo_empresa]);
 
   // Marca quando já tivemos itens, para detectar quedas inesperadas para 0
   useEffect(() => {
