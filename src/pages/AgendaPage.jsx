@@ -316,6 +316,8 @@ function AgendaPage({ sidebarVisible = false }) {
   const [diasFuncionamento, setDiasFuncionamento] = useState({});
   const [loadingDiasFuncionamento, setLoadingDiasFuncionamento] = useState(false);
   const [weekDiasFuncionamento, setWeekDiasFuncionamento] = useState({}); // Funcionamento para toda a semana
+
+  // (moved bootstrap fetch below, after bookings state)
   
   // Helpers: montar link público de agendamento da empresa e copiar
   const companySlug = useMemo(() => {
@@ -423,6 +425,42 @@ function AgendaPage({ sidebarVisible = false }) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   // Estados para agendamento fixo/recorrente
   const [isRecorrente, setIsRecorrente] = useState(false);
+  // Bootstrap fetch rápido para o dia atual: preenche a grade imediatamente quando não há cache
+  const bootstrapFetchedRef = useRef(false);
+  useEffect(() => {
+    if (bootstrapFetchedRef.current) return;
+    if (!authReady || !userProfile?.codigo_empresa) return;
+    if (!currentDate) return;
+    bootstrapFetchedRef.current = true;
+    (async () => {
+      try {
+        const dayStart = startOfDay(currentDate);
+        const dayEnd = addDays(dayStart, 1);
+        const { data, error } = await supabase
+          .from('agendamentos')
+          .select('id, codigo, inicio, fim, status, modalidade, quadra_id, cliente_id, auto_disabled, clientes')
+          .eq('codigo_empresa', userProfile.codigo_empresa)
+          .gte('inicio', dayStart.toISOString())
+          .lt('inicio', dayEnd.toISOString())
+          .order('inicio', { ascending: true });
+        if (error) return;
+        const mapped = (data || []).map(row => ({
+          id: row.id,
+          code: row.codigo,
+          start: new Date(row.inicio),
+          end: new Date(row.fim),
+          status: row.status || 'scheduled',
+          modality: row.modalidade || '',
+          customer: Array.isArray(row.clientes) && row.clientes.length > 0 ? row.clientes[0] : '',
+          court: String(row.quadra_id || ''),
+          court_id: row.quadra_id,
+          auto_disabled: !!row.auto_disabled,
+        }));
+        // Injeta apenas se ainda estivermos vazios (evita sobrescrever dados mais completos)
+        setBookings(prev => (Array.isArray(prev) && prev.length > 0) ? prev : mapped);
+      } catch {}
+    })();
+  }, [authReady, userProfile?.codigo_empresa, currentDate, supabase]);
   const [quantidadeSemanas, setQuantidadeSemanas] = useState(4);
   const [showRecorrenteConfirm, setShowRecorrenteConfirm] = useState(false);
   const [showAllParticipants, setShowAllParticipants] = useState(false);
@@ -723,7 +761,7 @@ function AgendaPage({ sidebarVisible = false }) {
 
   // Proteção contra regressão por consistência eventual:
   // guarda mudanças locais recentes de status, para que um fetch logo em seguida não volte o status antigo
-  const recentStatusUpdatesRef = useRef(new Map()); // id -> { status, ts }
+  const recentStatusUpdatesRef = useRef(new Map()); // id -> { status, ts, src }
 
   // Salvar no banco (upsert)
   const handleSaveSettings = async () => {
@@ -835,7 +873,7 @@ function AgendaPage({ sidebarVisible = false }) {
         else if (reactivate) next.auto_disabled = false;
         return next;
       }));
-      try { recentStatusUpdatesRef.current.set(bookingId, { status: newStatus, ts: Date.now() }); } catch {}
+      try { recentStatusUpdatesRef.current.set(bookingId, { status: newStatus, ts: Date.now(), src: source }); } catch {}
       // Atualiza cache local (se existir)
       try {
         const cached = JSON.parse(localStorage.getItem(bookingsCacheKey) || '[]');
@@ -6375,8 +6413,10 @@ function AgendaPage({ sidebarVisible = false }) {
       const dayStr = format(currentDate, 'yyyy-MM-dd');
       let dayBookings = bookings.filter(b => format(b.start, 'yyyy-MM-dd') === dayStr);
       const dataReady = !!lastTimeSyncAtMs;
-      // Antes do primeiro sync: mostrar TODOS os agendamentos do dia, sem filtrar por status
+      // Antes do primeiro sync: mostrar TODOS os agendamentos do dia (ignorando filtro de quadra),
+      // mas já EXCLUINDO cancelados
       if (!dataReady) {
+        dayBookings = dayBookings.filter(b => b.status !== 'canceled');
         if (searchQuery.trim()) {
           const q = searchQuery.trim().toLowerCase();
           dayBookings = dayBookings.filter(b =>
@@ -6388,12 +6428,12 @@ function AgendaPage({ sidebarVisible = false }) {
         return dayBookings;
       }
       // Após sync: aplicar filtros normalmente
-      dayBookings = viewFilter.canceledOnly
+      let base = viewFilter.canceledOnly
         ? dayBookings.filter(b => b.status === 'canceled')
         : dayBookings.filter(b => b.status !== 'canceled');
 
       if (viewFilter.pendingPayments) {
-        dayBookings = dayBookings.filter(b => {
+        base = base.filter(b => {
           const participants = participantsByAgendamento[b.id] || [];
           const hasPending = participants.some(p => String(p.status_pagamento || '').toLowerCase() !== 'pago');
           return hasPending && participants.length > 0;
@@ -6402,13 +6442,29 @@ function AgendaPage({ sidebarVisible = false }) {
 
       if (searchQuery.trim()) {
         const q = searchQuery.trim().toLowerCase();
-        dayBookings = dayBookings.filter(b =>
+        base = base.filter(b =>
           (b.customer || '').toLowerCase().includes(q)
           || (b.court || '').toLowerCase().includes(q)
           || (statusConfig[b.status]?.label || '').toLowerCase().includes(q)
         );
       }
-      return (viewFilter.scheduled || viewFilter.canceledOnly || viewFilter.pendingPayments) ? dayBookings : [];
+      // Stickiness: manter visíveis agendamentos atualizados pela automação nos últimos 2s
+      try {
+        const now = Date.now();
+        const sticky = (bookings || [])
+          .filter(b => format(b.start, 'yyyy-MM-dd') === dayStr)
+          .filter(b => b.status !== 'canceled') // nunca incluir cancelados aqui
+          .filter(b => {
+            const rec = recentStatusUpdatesRef.current.get(b.id);
+            return rec && rec.src === 'automation' && (now - rec.ts) < 2000;
+          });
+        // Unir mantendo únicos por id
+        const byId = new Map(base.map(b => [b.id, b]));
+        for (const s of sticky) { if (!byId.has(s.id)) byId.set(s.id, s); }
+        base = Array.from(byId.values());
+      } catch {}
+      // Sempre retornar a lista computada; não esconder tudo quando nenhum toggle estiver ativo
+      return base;
     }, [bookings, currentDate, viewFilter.scheduled, viewFilter.canceledOnly, viewFilter.pendingPayments, searchQuery, participantsByAgendamento, lastTimeSyncAtMs]);
 
   // Calcular estatísticas do dia para o header (filtrado pela quadra ativa)
@@ -6446,6 +6502,8 @@ function AgendaPage({ sidebarVisible = false }) {
     });
     const dataReady = !!lastTimeSyncAtMs;
     if (!dataReady) {
+      // Pré-sync: ignorar filtro de quadra e já EXCLUIR cancelados
+      weekBookingsData = weekBookingsData.filter(b => b.status !== 'canceled');
       if (searchQuery.trim()) {
         const q = searchQuery.trim().toLowerCase();
         weekBookingsData = weekBookingsData.filter(b =>
@@ -6458,12 +6516,12 @@ function AgendaPage({ sidebarVisible = false }) {
     }
 
     // Aplicar mesmos filtros que o dia após sync
-    weekBookingsData = viewFilter.canceledOnly
+    let base = viewFilter.canceledOnly
       ? weekBookingsData.filter(b => b.status === 'canceled')
       : weekBookingsData.filter(b => b.status !== 'canceled');
 
     if (viewFilter.pendingPayments) {
-      weekBookingsData = weekBookingsData.filter(b => {
+      base = base.filter(b => {
         const participants = participantsByAgendamento[b.id] || [];
         const hasPending = participants.some(p => String(p.status_pagamento || '').toLowerCase() !== 'pago');
         return hasPending && participants.length > 0;
@@ -6472,14 +6530,33 @@ function AgendaPage({ sidebarVisible = false }) {
 
     if (searchQuery.trim()) {
       const q = searchQuery.trim().toLowerCase();
-      weekBookingsData = weekBookingsData.filter(b =>
+      base = base.filter(b =>
         (b.customer || '').toLowerCase().includes(q)
         || (b.court || '').toLowerCase().includes(q)
         || (statusConfig[b.status]?.label || '').toLowerCase().includes(q)
       );
     }
 
-    return (viewFilter.scheduled || viewFilter.canceledOnly || viewFilter.pendingPayments) ? weekBookingsData : [];
+    // Stickiness semanal: manter visíveis atualizados pela automação nos últimos 2s
+    try {
+      const now = Date.now();
+      const sticky = (bookings || [])
+        .filter(b => {
+          const d = startOfDay(b.start);
+          return d >= startOfDay(weekStart) && d <= startOfDay(weekEnd);
+        })
+        .filter(b => b.status !== 'canceled')
+        .filter(b => {
+          const rec = recentStatusUpdatesRef.current.get(b.id);
+          return rec && rec.src === 'automation' && (now - rec.ts) < 2000;
+        });
+      const byId = new Map(base.map(b => [b.id, b]));
+      for (const s of sticky) { if (!byId.has(s.id)) byId.set(s.id, s); }
+      base = Array.from(byId.values());
+    } catch {}
+
+    // Sempre retornar a lista computada; não esconder tudo quando nenhum toggle estiver ativo
+    return base;
   }, [bookings, currentDate, viewFilter.scheduled, viewFilter.canceledOnly, viewFilter.pendingPayments, searchQuery, participantsByAgendamento, lastTimeSyncAtMs]);
 
   // Após computar os resultados, rola até o primeiro match quando houver busca
