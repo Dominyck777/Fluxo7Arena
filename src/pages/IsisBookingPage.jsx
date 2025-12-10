@@ -56,7 +56,8 @@ const IsisBookingPageContent = () => {
     nextStep,
     setIsLoading,
     setIsTyping,
-    chatEndRef
+    chatEndRef,
+    sessionId
   } = useIsis();
   
   const [empresa, setEmpresa] = useState(null);
@@ -3543,7 +3544,9 @@ ${listaNomes}
             modalidade: selections.esporte,
             status: 'scheduled',
             valor_total: valorTotal,
-            meta_roles: metaRoles
+            meta_roles: metaRoles,
+            created_by_isis: true,
+            isis_session_id: sessionId || null
           })
           .select('id, codigo')
           .single();

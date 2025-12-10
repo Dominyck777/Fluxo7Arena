@@ -279,6 +279,7 @@ export const IsisProvider = ({ children }) => {
     currentStep,
     messages,
     selections,
+    sessionId,
     isLoading,
     isTyping,
     chatEndRef,
