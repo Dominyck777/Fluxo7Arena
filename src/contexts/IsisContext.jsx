@@ -42,13 +42,40 @@ export const IsisProvider = ({ children }) => {
   const chatEndRef = useRef(null);
 
   // JSONBin helpers
-  const JSONBIN_API_KEY = import.meta.env.VITE_JSONBIN_API_KEY;
-  const JSONBIN_BIN_ID = import.meta.env.VITE_JSONBIN_ISIS_BIN_ID || import.meta.env.VITE_JSONBIN_BIN_ID;
+  const JSONBIN_API_KEY =
+    import.meta.env.VITE_KEY_CHAT_ISIS ||
+    import.meta.env['VITE-KEY-CHAT-ISIS'] ||
+    import.meta.env.VITE_JSONBIN_API_KEY ||
+    import.meta.env.KEY_CHAT_ISIS ||
+    import.meta.env['KEY-CHAT-ISIS'];
+  const ENV_BIN_ID = import.meta.env.VITE_JSONBIN_ISIS_BIN_ID || import.meta.env.VITE_JSONBIN_BIN_ID || null;
   const JSONBIN_BASE = 'https://api.jsonbin.io/v3/b';
+  const [jsonbinId, setJsonbinId] = useState(ENV_BIN_ID || (typeof window !== 'undefined' ? window.localStorage.getItem('ISIS_JSONBIN_BIN_ID') : null));
+
+  const createBin = useCallback(async (initialContent) => {
+    if (!JSONBIN_API_KEY) return null;
+    const res = await fetch(`${JSONBIN_BASE}`, {
+      method: 'POST',
+      headers: {
+        'X-Master-Key': JSONBIN_API_KEY,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(initialContent || { projects: [{ name: 'F7 Arena' }], chat: { project: 'F7 Arena', conversation: [] } })
+    });
+    if (!res.ok) return null;
+    const data = await res.json().catch(() => null);
+    const newId = data?.metadata?.id || data?.id || null;
+    if (newId) {
+      setJsonbinId(newId);
+      try { window?.localStorage?.setItem('ISIS_JSONBIN_BIN_ID', newId); } catch {}
+    }
+    return newId;
+  }, [JSONBIN_API_KEY]);
 
   const loadBin = useCallback(async () => {
-    if (!JSONBIN_API_KEY || !JSONBIN_BIN_ID) return null;
-    const res = await fetch(`${JSONBIN_BASE}/${JSONBIN_BIN_ID}`, {
+    if (!JSONBIN_API_KEY) return null;
+    if (!jsonbinId) return null;
+    const res = await fetch(`${JSONBIN_BASE}/${jsonbinId}`, {
       method: 'GET',
       headers: {
         'X-Master-Key': JSONBIN_API_KEY,
@@ -56,13 +83,25 @@ export const IsisProvider = ({ children }) => {
         'Content-Type': 'application/json'
       }
     });
+    if (res.status === 401 || res.status === 404) {
+      // Sem acesso ou bin inexistente: cria um novo bin sob esta key
+      const newId = await createBin();
+      if (!newId) return null;
+      // retorna conteúdo inicial usado na criação
+      return { projects: [{ name: 'F7 Arena' }], chat: { project: 'F7 Arena', conversation: [] } };
+    }
     if (!res.ok) return null;
     try { return await res.json(); } catch { return null; }
-  }, [JSONBIN_API_KEY, JSONBIN_BIN_ID]);
+  }, [JSONBIN_API_KEY, jsonbinId, createBin]);
 
   const saveBin = useCallback(async (content) => {
-    if (!JSONBIN_API_KEY || !JSONBIN_BIN_ID) return false;
-    const res = await fetch(`${JSONBIN_BASE}/${JSONBIN_BIN_ID}`, {
+    if (!JSONBIN_API_KEY) return false;
+    if (!jsonbinId) {
+      const newId = await createBin(content);
+      if (!newId) return false;
+    }
+    const targetId = jsonbinId || (typeof window !== 'undefined' ? window.localStorage.getItem('ISIS_JSONBIN_BIN_ID') : null);
+    const res = await fetch(`${JSONBIN_BASE}/${targetId}`, {
       method: 'PUT',
       headers: {
         'X-Master-Key': JSONBIN_API_KEY,
@@ -70,8 +109,12 @@ export const IsisProvider = ({ children }) => {
       },
       body: JSON.stringify(content)
     });
+    if (res.status === 401 || res.status === 404) {
+      const newId = await createBin(content);
+      return !!newId;
+    }
     return res.ok;
-  }, [JSONBIN_API_KEY, JSONBIN_BIN_ID]);
+  }, [JSONBIN_API_KEY, jsonbinId, createBin]);
 
   // Garante inicialização do bin e retorna um pseudo sessionId
   const ensureSession = useCallback(async () => {
@@ -109,12 +152,13 @@ export const IsisProvider = ({ children }) => {
         await saveBin(content);
       }
       // Usa bin id como sessionId lógico
-      setSessionId(JSONBIN_BIN_ID);
-      return JSONBIN_BIN_ID;
+      const sid = jsonbinId || (typeof window !== 'undefined' ? window.localStorage.getItem('ISIS_JSONBIN_BIN_ID') : null);
+      setSessionId(sid);
+      return sid;
     } catch (_) {
       return null;
     }
-  }, [sessionId, selections?.empresa, selections?.cliente, loadBin, saveBin]);
+  }, [sessionId, selections?.empresa, selections?.cliente, loadBin, saveBin, jsonbinId]);
 
   // Atualiza sessão com cliente/empresa se ainda não setados (quando identificação acontece depois)
   const tryUpdateSessionMeta = useCallback(async (sid) => {
