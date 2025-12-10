@@ -159,6 +159,48 @@ const IsisBookingPageContent = () => {
     window.addEventListener('beforeinstallprompt', handler);
     return () => window.removeEventListener('beforeinstallprompt', handler);
   }, []);
+
+  // Auto-prompt quando chegamos com ?install=1 na URL (após redirecionar para o subdomínio)
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search || '');
+      const wantInstall = params.get('install') === '1';
+      if (!wantInstall) return;
+      // Tenta usar prompt global capturado no main.jsx
+      const promptEvt = window.__installPrompt || deferredPrompt;
+      const sendTutorialAndNext = () => {
+        const tutorial = [
+          '📲 Como instalar o app:',
+          '',
+          '• Chrome (Android/PC):',
+          '  1) Toque nos 3 pontinhos (⋮) do navegador',
+          '  2) Escolha "Instalar app" ou "Adicionar à tela inicial"',
+          '  3) Confirme em "Instalar"',
+          '',
+          '• Safari (iPhone/iPad):',
+          '  1) Toque no botão Compartilhar (quadrado com seta ↑)',
+          '  2) Selecione "Adicionar à Tela de Início"',
+          '  3) Toque em "Adicionar"',
+        ].join('\n');
+        addIsisMessage(tutorial, 400);
+        setTimeout(() => {
+          addIsisMessage('Beleza! O que você gostaria de fazer agora?', 600);
+          setTimeout(() => { try { perguntarAcaoInicial(); } catch {} }, 800);
+        }, 700);
+      };
+      (async () => {
+        try {
+          if (promptEvt?.prompt) {
+            if (promptEvt === deferredPrompt) setDeferredPrompt(null);
+            if (promptEvt === window.__installPrompt) window.__installPrompt = null;
+            await promptEvt.prompt();
+            await promptEvt.userChoice; // ignoramos o outcome — sempre mostramos tutorial em seguida
+          }
+        } catch {}
+        sendTutorialAndNext();
+      })();
+    } catch {}
+  }, [deferredPrompt]);
   
   // Inicia conversa com identificação do cliente
   useEffect(() => {
@@ -2379,6 +2421,20 @@ ${listaNomes}
     switch (button.value) {
       case 'instalar_app': {
         addUserMessage('📲 Instalar App');
+        // 1) Garantir host: <slug>.f7arena.com
+        const toSlug = (s) => String(s || '')
+          .normalize('NFD').replace(/\p{Diacritic}/gu, '')
+          .toLowerCase().replace(/[^a-z0-9]+/g, '');
+        const empresaNome = (nomeFantasiaEfetivo || empresa?.nome_fantasia || empresa?.nome || '').trim();
+        const slug = toSlug(empresaNome) || toSlug(window.location.hostname.split('.')[0] || 'app');
+        const desiredHost = `${slug}.f7arena.com`;
+        if (typeof window !== 'undefined' && window.location.hostname !== desiredHost) {
+          const path = window.location.pathname || '/';
+          const search = window.location.search || '';
+          const url = `https://${desiredHost}${path}${search ? `${search}&install=1` : '?install=1'}`;
+          window.location.href = url;
+          break;
+        }
         const sendTutorialAndNext = () => {
           const tutorial = [
             '📲 Como instalar o app:',
