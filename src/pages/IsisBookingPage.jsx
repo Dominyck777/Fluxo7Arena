@@ -2175,17 +2175,12 @@ ${listaNomes}
     const resumoFinalCopyText = resumoFinal.replace(/\*\*(.+?)\*\*/g, '*$1*');
     addIsisMessage({ text: resumoFinal, copyable: true, copyText: resumoFinalCopyText }, 1200);
     
-    // Botões finais
+    // Botões finais (garantir que "Finalizar Atendimento" seja o último)
     const finalButtons = [
       {
         label: 'Gerar Times',
         value: 'gerar_times',
         icon: '🎲'
-      },
-      {
-        label: 'Finalizar Atendimento',
-        value: 'finalizar',
-        icon: '✅'
       },
       {
         label: 'Editar Agendamento',
@@ -2196,6 +2191,11 @@ ${listaNomes}
         label: 'Cancelar Agendamento',
         value: 'cancelar_agendamento',
         icon: '❌'
+      },
+      {
+        label: 'Finalizar Atendimento',
+        value: 'finalizar',
+        icon: '✅'
       }
     ];
     

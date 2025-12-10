@@ -7451,8 +7451,16 @@ function AgendaPage({ sidebarVisible = false }) {
                         onClick={async () => {
                           const ok = await copyTextWithFallback(agendaPublicUrl);
                           const displayUrl = agendaPublicUrl.replace(/^https?:\/\//, '');
+                          // Feedback háptico quando disponível
+                          try { if (navigator.vibrate) navigator.vibrate(50); } catch {}
                           if (ok) {
-                            toast({ title: 'Link copiado', description: displayUrl });
+                            // Em mobile, o toast pode não ficar visível; usa alert como fallback imediato
+                            const isMobile = typeof window !== 'undefined' && window.innerWidth < 640;
+                            if (isMobile) {
+                              try { alert(`Link copiado: ${displayUrl}`); } catch {}
+                            } else {
+                              toast({ title: 'Link copiado', description: displayUrl });
+                            }
                           } else {
                             toast({ title: 'Não foi possível copiar', description: displayUrl, variant: 'destructive' });
                           }
