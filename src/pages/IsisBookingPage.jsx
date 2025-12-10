@@ -69,6 +69,8 @@ const IsisBookingPageContent = () => {
   const [agendamentoCriado, setAgendamentoCriado] = useState(null); // Armazena o agendamento criado para edições posteriores
   const [identificacaoIniciada, setIdentificacaoIniciada] = useState(false); // Flag para evitar múltiplas execuções
   const [deferredPrompt, setDeferredPrompt] = useState(null); // Guardar evento de instalação PWA
+  // Mostra opcionalmente uma correção de login (telefone/email) no próximo menu apenas uma vez após identificação
+  const [correctionOptionOnce, setCorrectionOptionOnce] = useState(null); // 'telefone' | 'email' | null
   
   // Logo da empresa com cache-buster (igual ao Header principal)
   const empresaLogoSrc = React.useMemo(() => {
@@ -577,26 +579,14 @@ const IsisBookingPageContent = () => {
       const randomIndex = Math.floor(Math.random() * saudacoes.length);
       addIsisMessage(saudacoes[randomIndex], 600);
       
-      // Oferece correção exclusiva do login informado (apenas aqui, logo após identificar)
-      setTimeout(() => {
-        try {
-          const tipo = selections?.identificacao_tipo || tipoIdentificacao;
-          if (tipo === 'email') {
-            addIsisMessageWithButtons('Caso tenha digitado o e-mail errado, posso corrigir agora:', [
-              { label: 'Informei o e-mail errado', value: 'corrigir_email', icon: '✉️' }
-            ], 0);
-          } else if (tipo === 'telefone') {
-            addIsisMessageWithButtons('Caso tenha digitado o telefone errado, posso corrigir agora:', [
-              { label: 'Informei o telefone errado', value: 'corrigir_telefone', icon: '☎️' }
-            ], 0);
-          }
-        } catch {}
-      }, 900);
-
-      // Em seguida, segue para o menu padrão
-      setTimeout(() => {
-        perguntarAcaoInicial();
-      }, 1400);
+      // Sinaliza para incluir a correção no próximo menu (apenas uma vez)
+      try {
+        const tipo = selections?.identificacao_tipo || tipoIdentificacao;
+        if (tipo === 'email') setCorrectionOptionOnce('email');
+        else setCorrectionOptionOnce('telefone');
+      } catch {}
+      // Mostra diretamente o menu padrão (com a correção embutida)
+      setTimeout(() => { perguntarAcaoInicial(); }, 1000);
     } else {
       // Cliente não encontrado, pedir cadastro completo
       // Salva o valor formatado (com máscara) que o usuário digitou
@@ -856,7 +846,7 @@ const IsisBookingPageContent = () => {
     
     const randomPergunta = perguntasVariadas[Math.floor(Math.random() * perguntasVariadas.length)];
     
-    const acaoButtons = [
+    let acaoButtons = [
       {
         label: 'Fazer Agendamento',
         value: 'novo_agendamento',
@@ -873,8 +863,28 @@ const IsisBookingPageContent = () => {
         icon: '👋'
       }
     ];
+    // Se há uma correção a oferecer (apenas uma vez após identificação), injeta antes de Finalizar
+    if (correctionOptionOnce === 'telefone') {
+      acaoButtons = [
+        acaoButtons[0],
+        acaoButtons[1],
+        { label: 'Informei o telefone errado', value: 'corrigir_telefone', icon: '☎️' },
+        acaoButtons[2]
+      ];
+    } else if (correctionOptionOnce === 'email') {
+      acaoButtons = [
+        acaoButtons[0],
+        acaoButtons[1],
+        { label: 'Informei o e-mail errado', value: 'corrigir_email', icon: '✉️' },
+        acaoButtons[2]
+      ];
+    }
     
     addIsisMessageWithButtons(randomPergunta, acaoButtons, 600);
+    // Limpa o uso único após exibir o menu
+    if (correctionOptionOnce) {
+      setTimeout(() => setCorrectionOptionOnce(null), 0);
+    }
   };
 
   // Mostra um tutorial rápido de instalação PWA (Chrome e Safari)
