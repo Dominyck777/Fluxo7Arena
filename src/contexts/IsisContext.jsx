@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useRef, useCallback } from 'react';
+import { supabase } from '@/lib/supabase';
 
 const IsisContext = createContext();
 
@@ -16,6 +17,8 @@ export const IsisProvider = ({ children }) => {
   
   // Histórico de mensagens do chat
   const [messages, setMessages] = useState([]);
+  // ID da sessão persistida (isis_chat_sessions.id)
+  const [sessionId, setSessionId] = useState(null);
   
   // Seleções do usuário
   const [selections, setSelections] = useState({
@@ -38,6 +41,67 @@ export const IsisProvider = ({ children }) => {
   
   // Referência para scroll automático
   const chatEndRef = useRef(null);
+
+  // Garante uma sessão persistida no banco (cria se não existir)
+  const ensureSession = useCallback(async () => {
+    if (sessionId) return sessionId;
+    try {
+      const empresaCodigo = (selections?.empresa?.codigo_empresa ?? selections?.empresa?.codigoEmpresa ?? null) || null;
+      const clienteId = selections?.cliente?.id ?? null;
+      const payload = {
+        empresa_codigo: empresaCodigo,
+        cliente_id: clienteId,
+        started_at: new Date().toISOString(),
+        source: 'isis',
+      };
+      const { data, error } = await supabase
+        .from('isis_chat_sessions')
+        .insert(payload)
+        .select('id')
+        .single();
+      if (error) throw error;
+      setSessionId(data.id);
+      return data.id;
+    } catch (_) {
+      return null; // segue sem persistir se não houver tabela/erro
+    }
+  }, [sessionId, selections?.empresa?.codigo_empresa, selections?.empresa?.codigoEmpresa, selections?.cliente?.id]);
+
+  // Atualiza sessão com cliente/empresa se ainda não setados (quando identificação acontece depois)
+  const tryUpdateSessionMeta = useCallback(async (sid) => {
+    if (!sid) return;
+    try {
+      const empresaCodigo = (selections?.empresa?.codigo_empresa ?? selections?.empresa?.codigoEmpresa ?? null) || null;
+      const clienteId = selections?.cliente?.id ?? null;
+      if (!empresaCodigo && !clienteId) return;
+      await supabase
+        .from('isis_chat_sessions')
+        .update({
+          empresa_codigo: empresaCodigo || undefined,
+          cliente_id: clienteId || undefined,
+        })
+        .eq('id', sid);
+    } catch {}
+  }, [selections?.empresa?.codigo_empresa, selections?.empresa?.codigoEmpresa, selections?.cliente?.id]);
+
+  // Persiste mensagem no banco
+  const persistMessage = useCallback(async (msg) => {
+    try {
+      const sid = await ensureSession();
+      if (!sid) return;
+      const record = {
+        session_id: sid,
+        from_role: msg.from === 'isis' ? 'assistant' : 'user',
+        type: msg.type || 'text',
+        text: String(msg.text ?? ''),
+        buttons: Array.isArray(msg.buttons) ? msg.buttons : null,
+        created_at: new Date().toISOString(),
+      };
+      await supabase.from('isis_chat_messages').insert(record);
+      // tentar enriquecer sessão após salvar a primeira mensagem (caso cliente/empresa tenham surgido agora)
+      tryUpdateSessionMeta(sid);
+    } catch {}
+  }, [ensureSession, tryUpdateSessionMeta]);
   
   // Adiciona mensagem ao chat
   const addMessage = useCallback((message) => {
@@ -51,6 +115,8 @@ export const IsisProvider = ({ children }) => {
     setTimeout(() => {
       chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, 100);
+    // Persistência assíncrona (best-effort)
+    try { persistMessage(message); } catch {}
   }, []);
   
   // Simula digitação da Isis
@@ -145,6 +211,10 @@ export const IsisProvider = ({ children }) => {
       ...prev,
       [key]: value
     }));
+    // Se cliente/empresa atualizados, tentar atualizar a sessão existente
+    if ((key === 'cliente' || key === 'empresa') && sessionId) {
+      try { tryUpdateSessionMeta(sessionId); } catch {}
+    }
   }, []);
   
   // Atualiza contato (nested)
@@ -201,6 +271,7 @@ export const IsisProvider = ({ children }) => {
     });
     setIsLoading(false);
     setIsTyping(false);
+    setSessionId(null);
   }, []);
   
   const value = {
