@@ -48,20 +48,14 @@ export const IsisProvider = ({ children }) => {
     try {
       const empresaCodigo = (selections?.empresa?.codigo_empresa ?? selections?.empresa?.codigoEmpresa ?? null) || null;
       const clienteId = selections?.cliente?.id ?? null;
-      const payload = {
-        empresa_codigo: empresaCodigo,
-        cliente_id: clienteId,
-        started_at: new Date().toISOString(),
-        source: 'isis',
-      };
-      const { data, error } = await supabase
-        .from('isis_chat_sessions')
-        .insert(payload)
-        .select('id')
-        .single();
-      if (error) throw error;
-      setSessionId(data.id);
-      return data.id;
+      const { data, error } = await supabase.rpc('create_isis_session', {
+        p_empresa_codigo: empresaCodigo,
+        p_cliente_id: clienteId,
+        p_source: 'isis'
+      });
+      if (error || !data) throw error || new Error('RPC create_isis_session failed');
+      setSessionId(data);
+      return data;
     } catch (_) {
       return null; // segue sem persistir se não houver tabela/erro
     }
