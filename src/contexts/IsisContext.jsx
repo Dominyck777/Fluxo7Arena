@@ -43,9 +43,9 @@ export const IsisProvider = ({ children }) => {
 
   // JSONBin helpers
   const JSONBIN_API_KEY =
+    import.meta.env.VITE_JSONBIN_API_KEY ||
     import.meta.env.VITE_KEY_CHAT_ISIS ||
     import.meta.env['VITE-KEY-CHAT-ISIS'] ||
-    import.meta.env.VITE_JSONBIN_API_KEY ||
     import.meta.env.KEY_CHAT_ISIS ||
     import.meta.env['KEY-CHAT-ISIS'];
   const ENV_BIN_ID = import.meta.env.VITE_JSONBIN_ISIS_BIN_ID || import.meta.env.VITE_JSONBIN_BIN_ID || null;
@@ -58,6 +58,7 @@ export const IsisProvider = ({ children }) => {
       method: 'POST',
       headers: {
         'X-Master-Key': JSONBIN_API_KEY,
+        'X-Access-Key': JSONBIN_API_KEY,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify(initialContent || { projects: [{ name: 'F7 Arena' }], chat: { project: 'F7 Arena', conversation: [] } })
@@ -79,6 +80,7 @@ export const IsisProvider = ({ children }) => {
       method: 'GET',
       headers: {
         'X-Master-Key': JSONBIN_API_KEY,
+        'X-Access-Key': JSONBIN_API_KEY,
         'X-Bin-Meta': 'false',
         'Content-Type': 'application/json'
       }
@@ -105,6 +107,7 @@ export const IsisProvider = ({ children }) => {
       method: 'PUT',
       headers: {
         'X-Master-Key': JSONBIN_API_KEY,
+        'X-Access-Key': JSONBIN_API_KEY,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify(content)
