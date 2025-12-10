@@ -855,12 +855,6 @@ const IsisBookingPageContent = () => {
         value: 'corrigir_telefone',
         icon: '☎️'
       },
-      // Inserimos o botão de instalar app antes de finalizar
-      {
-        label: 'Instalar App',
-        value: 'instalar_app',
-        icon: '📲'
-      },
       {
         label: 'Finalizar Atendimento',
         value: 'finalizar_atendimento',
@@ -2419,81 +2413,6 @@ ${listaNomes}
     }
     
     switch (button.value) {
-      case 'instalar_app': {
-        addUserMessage('📲 Instalar App');
-        // 1) Garantir host: <slug>.f7arena.com
-        const toSlug = (s) => String(s || '')
-          .normalize('NFD').replace(/\p{Diacritic}/gu, '')
-          .toLowerCase().replace(/[^a-z0-9]+/g, '');
-        const empresaNome = (nomeFantasiaEfetivo || empresa?.nome_fantasia || empresa?.nome || '').trim();
-        const slug = toSlug(empresaNome) || toSlug(window.location.hostname.split('.')[0] || 'app');
-        const desiredHost = `${slug}.f7arena.com`;
-        if (typeof window !== 'undefined' && window.location.hostname !== desiredHost) {
-          const path = window.location.pathname || '/';
-          const search = window.location.search || '';
-          const url = `https://${desiredHost}${path}${search ? `${search}&install=1` : '?install=1'}`;
-          window.location.href = url;
-          break;
-        }
-        const sendTutorialAndNext = () => {
-          const tutorial = [
-            '📲 Como instalar o app:',
-            '',
-            '• Chrome (Android/PC):',
-            '  1) Toque nos 3 pontinhos (⋮) do navegador',
-            '  2) Escolha "Instalar app" ou "Adicionar à tela inicial"',
-            '  3) Confirme em "Instalar"',
-            '',
-            '• Safari (iPhone/iPad):',
-            '  1) Toque no botão Compartilhar (quadrado com seta ↑)',
-            '  2) Selecione "Adicionar à Tela de Início"',
-            '  3) Toque em "Adicionar"',
-          ].join('\n');
-          addIsisMessage(tutorial, 400);
-          setTimeout(() => {
-            addIsisMessage('Beleza! O que você gostaria de fazer agora?', 600);
-            setTimeout(() => { try { perguntarAcaoInicial(); } catch {} }, 800);
-          }, 700);
-        };
-        const globalPrompt = typeof window !== 'undefined' ? window.__installPrompt : null;
-        if (globalPrompt) {
-          try {
-            const dp = globalPrompt;
-            if (typeof window !== 'undefined') window.__installPrompt = null;
-            await dp.prompt();
-            const choice = await dp.userChoice;
-            sendTutorialAndNext();
-          } catch (_) {
-            // fallback para deferredPrompt local
-            if (deferredPrompt) {
-              try {
-                const dp2 = deferredPrompt;
-                setDeferredPrompt(null);
-                await dp2.prompt();
-                const choice2 = await dp2.userChoice;
-                sendTutorialAndNext();
-              } catch {
-                sendTutorialAndNext();
-              }
-            } else {
-              sendTutorialAndNext();
-            }
-          }
-        } else if (deferredPrompt) {
-          try {
-            const dp = deferredPrompt;
-            setDeferredPrompt(null);
-            await dp.prompt();
-            const choice = await dp.userChoice;
-            sendTutorialAndNext();
-          } catch (_) {
-            sendTutorialAndNext();
-          }
-        } else {
-          sendTutorialAndNext();
-        }
-        break;
-      }
       case 'corrigir_telefone': {
         addUserMessage('☎️ Informei o telefone errado');
         updateSelection('cliente', null);
