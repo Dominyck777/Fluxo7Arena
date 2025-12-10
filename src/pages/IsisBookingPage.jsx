@@ -580,13 +580,15 @@ const IsisBookingPageContent = () => {
       addIsisMessage(saudacoes[randomIndex], 600);
       
       // Sinaliza para incluir a correção no próximo menu (apenas uma vez)
+      let tipo = 'telefone';
       try {
-        const tipo = selections?.identificacao_tipo || tipoIdentificacao;
+        tipo = selections?.identificacao_tipo || tipoIdentificacao || 'telefone';
         if (tipo === 'email') setCorrectionOptionOnce('email');
         else setCorrectionOptionOnce('telefone');
       } catch {}
-      // Mostra diretamente o menu padrão (com a correção embutida)
-      setTimeout(() => { perguntarAcaoInicial(); }, 1000);
+      // Mostra diretamente o menu padrão (com a correção embutida). Passa o tipo explicitamente como fallback.
+      const inject = (tipo === 'email') ? 'email' : 'telefone';
+      setTimeout(() => { perguntarAcaoInicial(inject); }, 600);
     } else {
       // Cliente não encontrado, pedir cadastro completo
       // Salva o valor formatado (com máscara) que o usuário digitou
@@ -833,7 +835,7 @@ const IsisBookingPageContent = () => {
   };
   
   // Pergunta se quer agendar ou editar agendamento
-  const perguntarAcaoInicial = () => {
+  const perguntarAcaoInicial = (injectCorrectionType = null) => {
     const perguntasVariadas = [
       'O que você gostaria de fazer hoje?',
       'Como posso te ajudar?',
@@ -864,14 +866,15 @@ const IsisBookingPageContent = () => {
       }
     ];
     // Se há uma correção a oferecer (apenas uma vez após identificação), injeta antes de Finalizar
-    if (correctionOptionOnce === 'telefone') {
+    const correction = injectCorrectionType || correctionOptionOnce;
+    if (correction === 'telefone') {
       acaoButtons = [
         acaoButtons[0],
         acaoButtons[1],
         { label: 'Informei o telefone errado', value: 'corrigir_telefone', icon: '☎️' },
         acaoButtons[2]
       ];
-    } else if (correctionOptionOnce === 'email') {
+    } else if (correction === 'email') {
       acaoButtons = [
         acaoButtons[0],
         acaoButtons[1],
