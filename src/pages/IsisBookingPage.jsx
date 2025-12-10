@@ -577,9 +577,26 @@ const IsisBookingPageContent = () => {
       const randomIndex = Math.floor(Math.random() * saudacoes.length);
       addIsisMessage(saudacoes[randomIndex], 600);
       
+      // Oferece correção exclusiva do login informado (apenas aqui, logo após identificar)
+      setTimeout(() => {
+        try {
+          const tipo = selections?.identificacao_tipo || tipoIdentificacao;
+          if (tipo === 'email') {
+            addIsisMessageWithButtons('Caso tenha digitado o e-mail errado, posso corrigir agora:', [
+              { label: 'Informei o e-mail errado', value: 'corrigir_email', icon: '✉️' }
+            ], 0);
+          } else if (tipo === 'telefone') {
+            addIsisMessageWithButtons('Caso tenha digitado o telefone errado, posso corrigir agora:', [
+              { label: 'Informei o telefone errado', value: 'corrigir_telefone', icon: '☎️' }
+            ], 0);
+          }
+        } catch {}
+      }, 900);
+
+      // Em seguida, segue para o menu padrão
       setTimeout(() => {
         perguntarAcaoInicial();
-      }, 1000);
+      }, 1400);
     } else {
       // Cliente não encontrado, pedir cadastro completo
       // Salva o valor formatado (com máscara) que o usuário digitou
@@ -851,24 +868,11 @@ const IsisBookingPageContent = () => {
         icon: '✏️'
       },
       {
-        label: 'Informei o telefone errado',
-        value: 'corrigir_telefone',
-        icon: '☎️'
-      },
-      {
         label: 'Finalizar Atendimento',
         value: 'finalizar_atendimento',
         icon: '👋'
       }
     ];
-    // Se o usuário tentou identificar por e-mail, oferece correção de e-mail também
-    if (tipoIdentificacao === 'email' || selections?.identificacao_tipo === 'email') {
-      acaoButtons.splice(3, 0, {
-        label: 'Informei o e-mail errado',
-        value: 'corrigir_email',
-        icon: '✉️'
-      });
-    }
     
     addIsisMessageWithButtons(randomPergunta, acaoButtons, 600);
   };
