@@ -2469,11 +2469,12 @@ ${listaNomes}
       }
       case 'confirm':
         // Marca botão como clicado (usuário vê)
-        const confirmText = agendamentoCriado ? '✅ Salvar Alterações' : '✅ Confirmar Agendamento';
+        const isEditFlow = Boolean(selections?.editing_agendamento) || Boolean(agendamentoCriado);
+        const confirmText = isEditFlow ? '✅ Salvar Alterações' : '✅ Confirmar Agendamento';
         addUserMessage(confirmText);
         
-        // Confirma agendamento (cria novo ou atualiza existente)
-        if (agendamentoCriado) {
+        // Confirma agendamento (atualiza no modo edição; cria no fluxo novo)
+        if (isEditFlow) {
           await atualizarAgendamento();
         } else {
           await criarAgendamento();
