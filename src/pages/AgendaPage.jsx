@@ -1277,11 +1277,7 @@ function AgendaPage({ sidebarVisible = false }) {
   // Carrega agendamentos do dia atual a partir do banco (extraído para useCallback para reuso)
   const fetchBookings = useCallback(async () => {
     if (!authReady || !userProfile?.codigo_empresa) return;
-    // Evita fetch durante janela crítica pós-retorno de aba ou com modal aberto
-    if (Date.now() < (returningFromHiddenUntilRef.current || 0)) {
-      // [GuardDiag] silenciado
-      return;
-    }
+    // Evita fetch apenas com modal aberto (não atrasar na volta da aba)
     if (isModalOpen) {
       // [GuardDiag] silenciado
       return;
@@ -1454,7 +1450,7 @@ function AgendaPage({ sidebarVisible = false }) {
       dbg('Realtime:onChange scheduling fetchBookings');
       pulseLog('rt:change', { id: row.id, event: payload.eventType });
       realtimeDebounceRef.current = setTimeout(() => {
-        try { dbg('Realtime:debounced fetchBookings fire'); pulseLog('rt:debounced:fire'); setUiBusy(1200); fetchBookings(); } catch {}
+        try { dbg('Realtime:debounced fetchBookings fire'); pulseLog('rt:debounced:fire'); setUiBusy(300); fetchBookings(); } catch {}
       }, 400);
     };
     // Mudanças em participantes de agendamento (qualquer operação em agendamento_participantes)
@@ -1474,7 +1470,7 @@ function AgendaPage({ sidebarVisible = false }) {
       dbg('Realtime:onParticipantsChange scheduling fetchBookings');
       pulseLog('rt:participants', { agendamento_id: row.agendamento_id, event: payload.eventType });
       realtimeDebounceRef.current = setTimeout(() => {
-        try { dbg('Realtime:participants debounced fetchBookings fire'); pulseLog('rt:participants:debounced:fire'); setUiBusy(1200); fetchBookings(); } catch {}
+        try { dbg('Realtime:participants debounced fetchBookings fire'); pulseLog('rt:participants:debounced:fire'); setUiBusy(300); fetchBookings(); } catch {}
       }, 400);
     };
     // ✅ REAL-TIME: escuta mudanças nos agendamentos da empresa atual
@@ -7229,7 +7225,16 @@ function AgendaPage({ sidebarVisible = false }) {
         {selectedCourts.length > 0 && viewMode === 'week' && (() => {
           // Filtrar agendamentos da semana pela quadra ativa
           const courtFilter = activeCourtFilter || selectedCourts[0];
-          const filteredWeekBookings = weekBookings.filter(b => b.court === courtFilter);
+          // Antes do primeiro sync: não filtrar por quadra para não ocultar cards
+          const filteredWeekBookings = !lastTimeSyncAtMs
+            ? weekBookings
+            : weekBookings.filter(b => {
+                const byName = b.court === courtFilter;
+                const cf = courtsMap?.[courtFilter] || {};
+                const cfId = String(cf.id || cf.codigo || '');
+                const byId = cfId && String(b.court_id || '') === cfId;
+                return byName || byId;
+              });
           
           return (
             <>
@@ -7539,8 +7544,16 @@ function AgendaPage({ sidebarVisible = false }) {
                   );
                 })()}
                 {/* Agendados ou Cancelados (filtrados) */}
-                {(viewFilter.scheduled || viewFilter.canceledOnly || viewFilter.pendingPayments) && filteredBookings
-                  .filter(b => b.court === court)
+                {filteredBookings
+                  .filter(b => {
+                    // Pré-sync: não filtrar por quadra para não ocultar
+                    if (!lastTimeSyncAtMs) return true;
+                    const byName = b.court === court;
+                    const cf = courtsMap?.[court] || {};
+                    const cfId = String(cf.id || cf.codigo || '');
+                    const byId = cfId && String(b.court_id || '') === cfId;
+                    return byName || byId;
+                  })
                   .map(b => <BookingCard key={b.id} booking={b} courtGridStart={gridHours.start * 60} courtGridEnd={gridHours.end * 60} />)
                 }
                 {/* Livres */}
