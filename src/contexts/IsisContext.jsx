@@ -1,5 +1,4 @@
 import { createContext, useContext, useState, useRef, useCallback } from 'react';
-import { supabase } from '@/lib/supabase';
 
 const IsisContext = createContext();
 
@@ -42,60 +41,120 @@ export const IsisProvider = ({ children }) => {
   // Referência para scroll automático
   const chatEndRef = useRef(null);
 
-  // Garante uma sessão persistida no banco (cria se não existir)
+  // JSONBin helpers
+  const JSONBIN_API_KEY = import.meta.env.VITE_JSONBIN_API_KEY;
+  const JSONBIN_BIN_ID = import.meta.env.VITE_JSONBIN_ISIS_BIN_ID || import.meta.env.VITE_JSONBIN_BIN_ID;
+  const JSONBIN_BASE = 'https://api.jsonbin.io/v3/b';
+
+  const loadBin = useCallback(async () => {
+    if (!JSONBIN_API_KEY || !JSONBIN_BIN_ID) return null;
+    const res = await fetch(`${JSONBIN_BASE}/${JSONBIN_BIN_ID}`, {
+      method: 'GET',
+      headers: {
+        'X-Master-Key': JSONBIN_API_KEY,
+        'X-Bin-Meta': 'false',
+        'Content-Type': 'application/json'
+      }
+    });
+    if (!res.ok) return null;
+    try { return await res.json(); } catch { return null; }
+  }, [JSONBIN_API_KEY, JSONBIN_BIN_ID]);
+
+  const saveBin = useCallback(async (content) => {
+    if (!JSONBIN_API_KEY || !JSONBIN_BIN_ID) return false;
+    const res = await fetch(`${JSONBIN_BASE}/${JSONBIN_BIN_ID}`, {
+      method: 'PUT',
+      headers: {
+        'X-Master-Key': JSONBIN_API_KEY,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(content)
+    });
+    return res.ok;
+  }, [JSONBIN_API_KEY, JSONBIN_BIN_ID]);
+
+  // Garante inicialização do bin e retorna um pseudo sessionId
   const ensureSession = useCallback(async () => {
     if (sessionId) return sessionId;
     try {
-      const empresaCodigo = (selections?.empresa?.codigo_empresa ?? selections?.empresa?.codigoEmpresa ?? null) || null;
-      const clienteId = selections?.cliente?.id ?? null;
-      const { data, error } = await supabase.rpc('create_isis_session', {
-        p_empresa_codigo: empresaCodigo,
-        p_cliente_id: clienteId,
-        p_source: 'isis'
-      });
-      if (error || !data) throw error || new Error('RPC create_isis_session failed');
-      setSessionId(data);
-      return data;
+      const empresa = selections?.empresa || null;
+      const company = empresa ? { code: empresa.codigo_empresa || empresa.codigoEmpresa, name: empresa.nome_fantasia || empresa.nome } : null;
+      const cliente = selections?.cliente || null;
+
+      // Tenta carregar conteúdo atual
+      let content = await loadBin();
+      if (!content || typeof content !== 'object') {
+        // Inicializa com estrutura simples
+        content = {
+          projects: [{ name: 'F7 Arena' }],
+          chat: {
+            client_code: cliente?.id ? String(cliente.id) : null,
+            client_name: cliente?.nome || cliente?.name || '',
+            company: company,
+            project: 'F7 Arena',
+            conversation: []
+          }
+        };
+        await saveBin(content);
+      } else {
+        // Garante que existam as chaves mínimas
+        if (!Array.isArray(content.projects)) content.projects = [{ name: 'F7 Arena' }];
+        if (!content.chat) content.chat = { client_code: null, client_name: '', company: company, project: 'F7 Arena', conversation: [] };
+        // Preenche metadados se disponíveis
+        if (cliente?.id && !content.chat.client_code) content.chat.client_code = String(cliente.id);
+        if (cliente?.nome && !content.chat.client_name) content.chat.client_name = cliente.nome;
+        if (company && !content.chat.company) content.chat.company = company;
+        if (!content.chat.project) content.chat.project = 'F7 Arena';
+        if (!Array.isArray(content.chat.conversation)) content.chat.conversation = [];
+        await saveBin(content);
+      }
+      // Usa bin id como sessionId lógico
+      setSessionId(JSONBIN_BIN_ID);
+      return JSONBIN_BIN_ID;
     } catch (_) {
-      return null; // segue sem persistir se não houver tabela/erro
+      return null;
     }
-  }, [sessionId, selections?.empresa?.codigo_empresa, selections?.empresa?.codigoEmpresa, selections?.cliente?.id]);
+  }, [sessionId, selections?.empresa, selections?.cliente, loadBin, saveBin]);
 
   // Atualiza sessão com cliente/empresa se ainda não setados (quando identificação acontece depois)
   const tryUpdateSessionMeta = useCallback(async (sid) => {
     if (!sid) return;
     try {
-      const empresaCodigo = (selections?.empresa?.codigo_empresa ?? selections?.empresa?.codigoEmpresa ?? null) || null;
-      const clienteId = selections?.cliente?.id ?? null;
-      if (!empresaCodigo && !clienteId) return;
-      await supabase
-        .from('isis_chat_sessions')
-        .update({
-          empresa_codigo: empresaCodigo || undefined,
-          cliente_id: clienteId || undefined,
-        })
-        .eq('id', sid);
+      const empresa = selections?.empresa || null;
+      const company = empresa ? { code: empresa.codigo_empresa || empresa.codigoEmpresa, name: empresa.nome_fantasia || empresa.nome } : null;
+      const cliente = selections?.cliente || null;
+      const content = await loadBin();
+      if (!content) return;
+      content.chat = content.chat || {};
+      if (cliente?.id) content.chat.client_code = String(cliente.id);
+      if (cliente?.nome) content.chat.client_name = cliente.nome;
+      if (company) content.chat.company = company;
+      if (!content.chat.project) content.chat.project = 'F7 Arena';
+      if (!Array.isArray(content.chat.conversation)) content.chat.conversation = [];
+      await saveBin(content);
     } catch {}
-  }, [selections?.empresa?.codigo_empresa, selections?.empresa?.codigoEmpresa, selections?.cliente?.id]);
+  }, [selections?.empresa, selections?.cliente, loadBin, saveBin]);
 
   // Persiste mensagem no banco
   const persistMessage = useCallback(async (msg) => {
     try {
       const sid = await ensureSession();
       if (!sid) return;
-      const record = {
-        session_id: sid,
-        from_role: msg.from === 'isis' ? 'assistant' : 'user',
-        type: msg.type || 'text',
-        text: String(msg.text ?? ''),
-        buttons: Array.isArray(msg.buttons) ? msg.buttons : null,
-        created_at: new Date().toISOString(),
+      const from = msg.from === 'isis' ? 'assistant' : 'user';
+      const entry = {
+        ts: new Date().toISOString(),
+        from,
+        text: String(msg.text ?? '')
       };
-      await supabase.from('isis_chat_messages').insert(record);
-      // tentar enriquecer sessão após salvar a primeira mensagem (caso cliente/empresa tenham surgido agora)
+      const content = await loadBin();
+      if (!content) return;
+      content.chat = content.chat || { project: 'F7 Arena', conversation: [] };
+      if (!Array.isArray(content.chat.conversation)) content.chat.conversation = [];
+      content.chat.conversation.push(entry);
+      await saveBin(content);
       tryUpdateSessionMeta(sid);
     } catch {}
-  }, [ensureSession, tryUpdateSessionMeta]);
+  }, [ensureSession, tryUpdateSessionMeta, loadBin, saveBin]);
   
   // Adiciona mensagem ao chat
   const addMessage = useCallback((message) => {
