@@ -81,21 +81,26 @@ export const IsisProvider = ({ children }) => {
 
   // Chamada via supabase.functions (sem precisar de .env no cliente)
   const postToEdge = useCallback(async (payload) => {
+    // Se não houver chave de JSONBin no cliente, evitamos chamadas de persistência para reduzir ruído
+    if (!JSONBIN_API_KEY) {
+      try { console.debug('[Isis][Edge] skipped (no JSONBIN key) mode=%s', payload?.mode); } catch {}
+      return { ok: false, data: null };
+    }
     try {
       const { data, error } = await supabase.functions.invoke('isis-chat', {
         body: payload,
       });
       if (error) {
-        try { console.error('[Isis][Edge] %s error=%o', payload?.mode, error); } catch {}
+        try { console.debug('[Isis][Edge] %s error=%o', payload?.mode, error); } catch {}
         return { ok: false, data: null };
       }
       try { console.debug('[Isis][Edge] %s ok resp=%o', payload?.mode, data); } catch {}
       return { ok: true, data };
     } catch (e) {
-      try { console.error('[Isis][Edge] invoke exception:', e); } catch {}
+      try { console.debug('[Isis][Edge] invoke exception:', e); } catch {}
       return { ok: false, data: null };
     }
-  }, []);
+  }, [JSONBIN_API_KEY]);
 
   const createBin = useCallback(async (initialContent) => {
     if (!JSONBIN_API_KEY) return null;

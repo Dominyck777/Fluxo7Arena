@@ -38,6 +38,7 @@ const processMarkdown = (text, isIsis, isSuccess) => {
 export const IsisMessage = ({ message }) => {
   const isIsis = message.from === 'isis';
   const isSuccess = isIsis && message?.color === 'green';
+  const isSystem = isIsis && message?.color === 'system';
   const [copied, setCopied] = useState(false);
   const { selections } = useIsis();
 
@@ -102,7 +103,9 @@ export const IsisMessage = ({ message }) => {
               isIsis
                 ? (isSuccess
                     ? 'bg-emerald-600/90 border border-emerald-400 text-white rounded-2xl rounded-bl-sm shadow-lg shadow-emerald-600/30'
-                    : 'bg-brand border border-brand text-[#0A0A0A] rounded-2xl rounded-bl-sm shadow-lg shadow-brand/20')
+                    : (isSystem
+                        ? 'bg-surface/70 border border-white/10 text-text-muted rounded-2xl rounded-bl-sm'
+                        : 'bg-brand border border-brand text-[#0A0A0A] rounded-2xl rounded-bl-sm shadow-lg shadow-brand/20'))
                 : 'bg-surface/70 border border-white/10 text-text-primary rounded-2xl rounded-br-sm'
             }`}
           >

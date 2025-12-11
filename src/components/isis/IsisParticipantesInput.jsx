@@ -405,7 +405,7 @@ export const IsisParticipantesInput = ({
       </div>
       {/* Lista de Participantes - Compacta no mobile */}
       {participantesAtuais.length > 0 && (
-        <div ref={listRef} className={`flex flex-col gap-1.5 ${expandedList ? 'max-h-[360px] md:max-h-[400px]' : 'max-h-[140px]'} overflow-y-auto px-1 transition-all`}>
+        <div ref={listRef} className={`flex flex-col gap-1.5 ${expandedList ? 'max-h-[360px] md:max-h-[320px]' : 'max-h-[140px]'} overflow-y-auto px-1 transition-all`}>
           {participantesAtuais.map((p, index) => (
             <motion.div
               key={index}

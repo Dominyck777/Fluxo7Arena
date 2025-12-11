@@ -2216,21 +2216,56 @@ ${listaNomes}
       }
       const rawModalidade = String(selections?.esporte || selections?.quadra?.tipo || '').toLowerCase();
       let teamSize = 0;
+      let teamSource = 'unknown';
+      try { console.log('[Teams] Start generation modalidade=%o', rawModalidade); } catch {}
       // Tenta inferir via Edge Function (OpenAI)
       try {
         const { data } = await supabase.functions.invoke('infer-team-size', {
-          body: { modalidade: rawModalidade, quadra: selections?.quadra || null },
+          body: { modalidade: rawModalidade, quadra: selections?.quadra || null, totalPlayers: (selections.participantes || []).length },
         });
-        if (data && Number(data.teamSize) > 0) teamSize = Number(data.teamSize);
+        try { console.log('[Teams] Edge infer-team-size response=%o', data); } catch {}
+        if (data && Number(data.teamSize) > 0) {
+          teamSize = Number(data.teamSize);
+          teamSource = 'edge';
+        }
       } catch {}
       // Heurística de fallback
       if (!teamSize) {
-        if (/areia/.test(rawModalidade)) teamSize = 2; // vôlei de praia
-        else if (/(v[ôo]lei)/.test(rawModalidade)) teamSize = 6; // vôlei indoor
-        else if (/(hand|handebol)/.test(rawModalidade)) teamSize = 7; // handebol
-        else if (/(futsal|society)/.test(rawModalidade)) teamSize = 5; // futsal / society
-        else if (/(futebol|campo)/.test(rawModalidade)) teamSize = 11; // futebol de campo
-        else teamSize = 5; // default
+        if (/(praia|areia)/i.test(rawModalidade)) {
+          teamSize = 5; // vôlei de praia
+          teamSource = 'fallback:beach';
+          try { console.log('[Teams] Fallback matched: praia/areia -> teamSize=5'); } catch {}
+        } else if (/(v[ôo]lei|voleibol)/i.test(rawModalidade)) {
+          teamSize = 6; // vôlei quadra
+          teamSource = 'fallback:volley';
+          try { console.log('[Teams] Fallback matched: volei/voleibol -> teamSize=6'); } catch {}
+        } else if (/(hand|handebol)/i.test(rawModalidade)) {
+          teamSize = 7; // handebol
+          teamSource = 'fallback:hand';
+          try { console.log('[Teams] Fallback matched: handebol -> teamSize=7'); } catch {}
+        } else if (/(futsal|society)/i.test(rawModalidade)) {
+          teamSize = 5; // futsal / society
+          teamSource = 'fallback:futsal';
+          try { console.log('[Teams] Fallback matched: futsal/society -> teamSize=5'); } catch {}
+        } else if (/(futebol|campo)/i.test(rawModalidade)) {
+          teamSize = 11; // futebol de campo
+          teamSource = 'fallback:campo';
+          try { console.log('[Teams] Fallback matched: futebol/campo -> teamSize=11'); } catch {}
+        } else {
+          teamSize = 5; // default
+          teamSource = 'fallback:default';
+          try { console.log('[Teams] Fallback matched: default -> teamSize=5'); } catch {}
+        }
+      }
+      // Normalização final no cliente: força regras de vôlei independentemente da resposta do servidor
+      {
+        const rawLower = String(rawModalidade || '').toLowerCase();
+        const isVolley = /(v[ôo]lei|voleibol)/.test(rawLower);
+        const isBeach = /(praia|areia)/.test(rawLower);
+        const before = teamSize;
+        if (isVolley) teamSize = isBeach ? 5 : 6;
+        if (isVolley) teamSource = isBeach ? 'forced:beach' : 'forced:volley';
+        try { console.log('[Teams] Normalization: isVolley=%s isBeach=%s before=%s after=%s source=%s', isVolley, isBeach, before, teamSize, teamSource); } catch {}
       }
       // Identifica fixos (levantador/goleiro) vindos de selections.fixos (nomes exatos)
       const norm = (s) => String(s || '').trim().toLowerCase();
@@ -2275,14 +2310,28 @@ ${listaNomes}
       if (teamSize < 2) teamSize = 2;
       const fmt = (xs) => xs.map((n, i) => `${i + 1}) ${n}${getFixoLabel(n)}`).join('\n') || '—';
       const totalCount = nomes.length;
-      let teamCount = Math.ceil(totalCount / teamSize);
+      // Regra bruta: se dá para fazer pelo menos 2 times completos no tamanho base, usar floor(total/base)
+      // Caso contrário, forçar tamanho 5 (exceto quando o base < 5) e usar ceil para distribuir
+      let teamCount = 0;
+      const canMakeTwoBase = totalCount >= (2 * teamSize);
+      if (canMakeTwoBase) {
+        teamCount = Math.max(2, Math.floor(totalCount / teamSize));
+        try { console.log('[Teams] Brute rule: canMakeTwoBase=true -> teamCount=%s teamSize=%s', teamCount, teamSize); } catch {}
+      } else {
+        const beforeSize = teamSize;
+        if (teamSize > 5) teamSize = 5; // força 5 para qualquer esporte quando não der 2 times no base
+        teamCount = Math.ceil(totalCount / teamSize);
+        try { console.log('[Teams] Brute rule: canMakeTwoBase=false -> forceSize %s->%s, teamCount=%s', beforeSize, teamSize, teamCount); } catch {}
+      }
       const titleModalidade = rawModalidade ? (rawModalidade[0].toUpperCase() + rawModalidade.slice(1)) : 'modalidade';
       let text = `🏆 **Times gerados (${titleModalidade})**`;
+      // Exibe informação de debug no título: por lado e origem de cálculo
       const teamIcons = ['🟠', '🔵', '🟢', '🟣', '🟡', '🟤'];
       // Identifica modalidade para priorizar papéis
       const modalidadeLower = (rawModalidade || '').toLowerCase();
       const isSoccerLike = /(fut|society|sal[aã]o)/.test(modalidadeLower);
-      const isVolleyLike = /(v[oô]lei|volei)/.test(modalidadeLower);
+      const isVolleyLike = /(v[oô]lei|volei|voleibol)/.test(modalidadeLower);
+      try { console.log('[Teams] teamSize=%s totalPlayers=%s teamCount=%s isVolleyLike=%s isSoccerLike=%s source=%s', teamSize, totalCount, teamCount, isVolleyLike, isSoccerLike, teamSource); } catch {}
       if (teamCount >= 2) {
         // Cria recipientes vazios
         const teams = Array.from({ length: teamCount }, () => []);
@@ -2364,6 +2413,18 @@ ${listaNomes}
         const reservas = totalCount > usedCount
           ? [...fixos, ...arrLivres].slice(usedCount)
           : [];
+        // Garante pelo menos 1 papel obrigatório nas reservas, mesmo que seja repetido
+        if (isSoccerLike && goleiros.length > 0) {
+          const reservasTemGk = reservas.some(n => goleiros.includes(n));
+          if (!reservasTemGk) reservas.unshift(goleiros[0]);
+        } else if (isVolleyLike && levantadores.length > 0) {
+          const reservasTemLev = reservas.some(n => levantadores.includes(n));
+          if (!reservasTemLev) reservas.unshift(levantadores[0]);
+        }
+        try {
+          const sizes = teams.map(t => t.length);
+          console.log('[Teams] Final distribution teamSize=%s teams=%o reservas=%o', teamSize, sizes, reservas);
+        } catch {}
         teams.forEach((t, idx) => {
           const icon = teamIcons[idx % teamIcons.length];
           text += `\n\n**${icon} Time ${idx + 1} (${t.length})**:\n${fmt(t)}`;
@@ -3303,7 +3364,7 @@ ${listaNomes}
       addIsisMessage(mensagemFinal, 600);
       // Mensagem final informativa ao término do atendimento
       setTimeout(() => {
-        addIsisMessage('_Atendimento finalizado._', 0, 'system');
+        addIsisMessage('Atendimento finalizado.', 0, 'system');
       }, 1200);
       
     } catch (error) {
@@ -3345,7 +3406,7 @@ ${listaNomes}
       addIsisMessage(mensagemErro, 600);
       // Mensagem final informativa também no caso de erro ao salvar avaliação
       setTimeout(() => {
-        addIsisMessage('_Atendimento finalizado._', 0, 'system');
+        addIsisMessage('Atendimento finalizado.', 0, 'system');
       }, 1200);
     }
   };
@@ -3976,7 +4037,7 @@ ${listaNomes}
             
             <div className="bg-surface/70 backdrop-blur-sm border border-white/10 rounded-2xl p-8 shadow-xl">
               <p className="text-xl text-text-primary mb-6 leading-relaxed">
-                Entre em contato com o dono da quadra e solicite o **link de agendamento**.
+                Entre em contato com o dono da quadra e solicite o <strong>link de agendamento</strong>.
               </p>
               
               <div className="bg-surface-2/50 border border-white/5 rounded-xl p-6 mb-6">
@@ -3984,10 +4045,11 @@ ${listaNomes}
                   <Bot className="w-5 h-5 text-brand" />
                   Formato do Link
                 </h3>
-                <div className="bg-background/60 border border-white/10 rounded-lg p-4 font-mono text-sm">
-                  <span className="text-text-muted">fluxo7arena.com/agendar/</span>
-                  <span className="text-brand font-bold">nome-da-empresa</span>
+                <div className="bg-background/60 border border-white/10 rounded-lg p-4 font-mono text-base md:text-lg">
+                  <span className="text-brand font-bold">nomedaempresa</span>
+                  <span className="text-text-muted">.f7arena.com</span>
                 </div>
+                <p className="mt-2 text-xs text-text-muted">(sem traços)</p>
                 
               </div>
 
@@ -4056,9 +4118,9 @@ ${listaNomes}
                     <path fillRule="evenodd" d="M7 2a1 1 0 012 0v1h2V2a1 1 0 112 0v1h2a2 2 0 012 2v2h1a1 1 0 110 2h-1v2h1a1 1 0 110 2h-1v2a2 2 0 01-2 2h-2v1a1 1 0 11-2 0v-1H9v1a1 1 0 11-2 0v-1H5a2 2 0 01-2-2v-2H2a1 1 0 110-2h1V9H2a1 1 0 010-2h1V5a2 2 0 012-2h2V2zM5 5h10v10H5V5z" clipRule="evenodd"/>
                   </svg>
                   
-                  {/* Texto AI */}
+                  {/* Texto chat */}
                   <span className="text-[9px] md:text-[10px] font-bold bg-gradient-to-r from-cyan-400 via-purple-400 to-pink-400 bg-clip-text text-transparent">
-                    AI
+                    chat
                   </span>
                   
                   {/* Dots pulsantes - hidden em mobile */}
