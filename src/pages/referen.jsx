@@ -14,6 +14,7 @@ import { IsisAvaliacaoInput } from '@/components/isis/IsisAvaliacaoInput';
 import { IsisPremiumLoading } from '@/components/isis/IsisPremiumLoading';
 import { getIsisMessage } from '@/lib/isisMessages';
 import { supabase } from '@/lib/supabase';
+import { adicionarFeedbackIsis } from '@/lib/jsonbinService';
 import { format, addDays, startOfDay, setHours, setMinutes, addMinutes } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { toast } from '@/components/ui/use-toast';
@@ -1943,11 +1944,8 @@ const IsisBookingPageContent = () => {
     const quadraFinal = quadraAtualizada || selections.quadra;
     const dataFinal = dataAtualizada || selections.data;
     const participantesFinal = participantesAtualizados || selections.participantes || [];
-    // Considera edição quando:
-    // - veio um agendamento para edição, ou
-    // - flag explícita de edição nas selections, ou
-    // - há um agendamentoCriado no estado (já carregado para edição)
-    const isEditing = Boolean(agendamentoParaEdicao || selections?.editing_agendamento || agendamentoCriado);
+    // Considera edição apenas quando veio um agendamento para edição ou flag explícita de edição
+    const isEditing = Boolean(agendamentoParaEdicao || selections?.editing_agendamento);
     const agendamentoFinal = agendamentoParaEdicao || null;
     
     console.log('[mostrarResumo] Selections atuais:', selections);
@@ -3191,20 +3189,16 @@ ${listaNomes}
       setShowInput(false);
       setIsLoading(true);
       
-      // Envia feedback para Edge Function (sem depender de .env no cliente)
-      await supabase.functions.invoke('isis-chat', {
-        body: {
-          mode: 'set_feedback',
-          estrelas: Number(avaliacaoData.rating),
-          comentario: avaliacaoData.comentario || null,
-          // Identidade para estruturar por cliente
-          cod_cliente: selections?.cliente?.id ? String(selections.cliente.id) : '',
-          nome_cliente: selections?.cliente?.nome || selections?.cliente?.name || '',
-          empresa: empresa?.nome_fantasia || empresa?.razao_social || '',
-          software: 'F7 Arena',
-          session_id: sessionId || undefined,
-        },
-      });
+      // Prepara dados do feedback conforme especificado
+      const feedbackData = {
+        rating: avaliacaoData.rating, // Será mapeado para 'estrelas' no JSONBin
+        comentario: avaliacaoData.comentario, // Input de texto opcional
+        cliente_nome: selections.cliente?.nome, // Nome do cliente
+        empresa_nome: empresa?.nome_fantasia || empresa?.razao_social || 'Arena' // Nome da empresa de quadras
+      };
+      
+      // Envia para JSONBin
+      await adicionarFeedbackIsis(feedbackData);
       
       setIsLoading(false);
       
@@ -3301,10 +3295,6 @@ ${listaNomes}
       }
       
       addIsisMessage(mensagemFinal, 600);
-      // Mensagem final informativa ao término do atendimento
-      setTimeout(() => {
-        addIsisMessage('_Atendimento finalizado._', 0, 'system');
-      }, 1200);
       
     } catch (error) {
       console.error('[Isis] Erro ao enviar avaliação:', error);
@@ -3343,10 +3333,6 @@ ${listaNomes}
       
       const mensagemErro = mensagensErro[Math.floor(Math.random() * mensagensErro.length)];
       addIsisMessage(mensagemErro, 600);
-      // Mensagem final informativa também no caso de erro ao salvar avaliação
-      setTimeout(() => {
-        addIsisMessage('_Atendimento finalizado._', 0, 'system');
-      }, 1200);
     }
   };
   
@@ -3523,8 +3509,6 @@ ${listaNomes}
         fixoRoles: (selections.fixoRoles && typeof selections.fixoRoles === 'object') ? selections.fixoRoles : {},
       };
 
-      // Conversas/feedback ficam no JSONBin; não persistimos sessão no banco.
-
       // Busca o maior código já usado para esta empresa
       const { data: ultimoAgendamento } = await supabase
         .from('agendamentos')
@@ -3561,7 +3545,8 @@ ${listaNomes}
             status: 'scheduled',
             valor_total: valorTotal,
             meta_roles: metaRoles,
-            created_by_isis: true
+            created_by_isis: true,
+            isis_session_id: sessionId || null
           })
           .select('id, codigo')
           .single();

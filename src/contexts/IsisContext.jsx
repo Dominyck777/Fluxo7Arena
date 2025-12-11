@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useRef, useCallback } from 'react';
+import { supabase } from '@/lib/supabase';
 
 const IsisContext = createContext();
 
@@ -16,8 +17,25 @@ export const IsisProvider = ({ children }) => {
   
   // Histórico de mensagens do chat
   const [messages, setMessages] = useState([]);
-  // ID da sessão persistida (isis_chat_sessions.id)
-  const [sessionId, setSessionId] = useState(null);
+  // Gera um UUID estável para esta sessão de chat (não usar ID do JSONBin)
+  const sessionUidRef = useRef((() => {
+    try {
+      if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
+      // Fallback: gera UUID v4-like
+      const hex = [...Array(36)].map(() => 'x');
+      hex[8] = hex[13] = hex[18] = hex[23] = '-';
+      hex[14] = '4';
+      return hex.map((c, i) => {
+        if (c !== 'x') return c;
+        const r = (Math.random() * 16) | 0;
+        const v = (i === 19) ? ((r & 0x3) | 0x8) : r;
+        return v.toString(16);
+      }).join('');
+    } catch {
+      return '00000000-0000-4000-8000-000000000000';
+    }
+  })());
+  const [sessionId, setSessionId] = useState(sessionUidRef.current);
   
   // Seleções do usuário
   const [selections, setSelections] = useState({
@@ -42,26 +60,55 @@ export const IsisProvider = ({ children }) => {
   const chatEndRef = useRef(null);
 
   // JSONBin helpers
-  const JSONBIN_API_KEY =
-    import.meta.env.VITE_JSONBIN_API_KEY ||
-    import.meta.env.VITE_KEY_CHAT_ISIS ||
-    import.meta.env['VITE-KEY-CHAT-ISIS'] ||
-    import.meta.env.KEY_CHAT_ISIS ||
-    import.meta.env['KEY-CHAT-ISIS'];
+  // IMPORTANT: Chat persistence MUST use the ISIS chat key only (no fallback to generic feedback key)
+  const keyCandidates = [
+    ['VITE_KEY_CHAT_ISIS', import.meta.env.VITE_KEY_CHAT_ISIS],
+    ['VITE-KEY-CHAT-ISIS', import.meta.env['VITE-KEY-CHAT-ISIS']],
+    ['KEY_CHAT_ISIS', import.meta.env.KEY_CHAT_ISIS],
+    ['KEY-CHAT-ISIS', import.meta.env['KEY-CHAT-ISIS']],
+  ];
+  const keyPick = keyCandidates.find(([name, val]) => !!val);
+  const JSONBIN_API_KEY = keyPick?.[1];
+  const JSONBIN_API_KEY_SOURCE = keyPick?.[0] || 'none';
+  const JSONBIN_COLLECTION_ID = import.meta.env.VITE_JSONBIN_COLLECTION_ID || null;
   const ENV_BIN_ID = import.meta.env.VITE_JSONBIN_ISIS_BIN_ID || import.meta.env.VITE_JSONBIN_BIN_ID || null;
   const JSONBIN_BASE = 'https://api.jsonbin.io/v3/b';
   const [jsonbinId, setJsonbinId] = useState(ENV_BIN_ID || (typeof window !== 'undefined' ? window.localStorage.getItem('ISIS_JSONBIN_BIN_ID') : null));
+  if (typeof window !== 'undefined') {
+    // Safe debug log (does not print key value)
+    try { console.info('[Isis][JSONBin] keySource=%s binId=%s', JSONBIN_API_KEY_SOURCE, ENV_BIN_ID || window.localStorage.getItem('ISIS_JSONBIN_BIN_ID') || 'none'); } catch {}
+  }
+
+  // Chamada via supabase.functions (sem precisar de .env no cliente)
+  const postToEdge = useCallback(async (payload) => {
+    try {
+      const { data, error } = await supabase.functions.invoke('isis-chat', {
+        body: payload,
+      });
+      if (error) {
+        try { console.error('[Isis][Edge] %s error=%o', payload?.mode, error); } catch {}
+        return { ok: false, data: null };
+      }
+      try { console.debug('[Isis][Edge] %s ok resp=%o', payload?.mode, data); } catch {}
+      return { ok: true, data };
+    } catch (e) {
+      try { console.error('[Isis][Edge] invoke exception:', e); } catch {}
+      return { ok: false, data: null };
+    }
+  }, []);
 
   const createBin = useCallback(async (initialContent) => {
     if (!JSONBIN_API_KEY) return null;
+    const headers = {
+      'X-Master-Key': JSONBIN_API_KEY,
+      'X-Access-Key': JSONBIN_API_KEY,
+      'Content-Type': 'application/json'
+    };
+    if (JSONBIN_COLLECTION_ID) headers['X-Collection-Id'] = JSONBIN_COLLECTION_ID;
     const res = await fetch(`${JSONBIN_BASE}`, {
       method: 'POST',
-      headers: {
-        'X-Master-Key': JSONBIN_API_KEY,
-        'X-Access-Key': JSONBIN_API_KEY,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(initialContent || { projects: [{ name: 'F7 Arena' }], chat: { project: 'F7 Arena', conversation: [] } })
+      headers,
+      body: JSON.stringify(initialContent || { projects: [{ name: 'F7 Arena' }], chat_sessions: [] })
     });
     if (!res.ok) return null;
     const data = await res.json().catch(() => null);
@@ -76,21 +123,26 @@ export const IsisProvider = ({ children }) => {
   const loadBin = useCallback(async () => {
     if (!JSONBIN_API_KEY) return null;
     if (!jsonbinId) return null;
+    try { console.debug('[Isis][JSONBin] loadBin: GET %s/%s', JSONBIN_BASE, jsonbinId); } catch {}
+    const headers = {
+      'X-Master-Key': JSONBIN_API_KEY,
+      'X-Access-Key': JSONBIN_API_KEY,
+      'X-Bin-Meta': 'false',
+      'Content-Type': 'application/json'
+    };
+    if (JSONBIN_COLLECTION_ID) headers['X-Collection-Id'] = JSONBIN_COLLECTION_ID;
     const res = await fetch(`${JSONBIN_BASE}/${jsonbinId}`, {
       method: 'GET',
-      headers: {
-        'X-Master-Key': JSONBIN_API_KEY,
-        'X-Access-Key': JSONBIN_API_KEY,
-        'X-Bin-Meta': 'false',
-        'Content-Type': 'application/json'
-      }
+      headers
     });
+    try { console.debug('[Isis][JSONBin] loadBin: status=%s', res?.status); } catch {}
     if (res.status === 401 || res.status === 404) {
+      try { console.error('[Isis][JSONBin] GET unauthorized or not found. keySource=%s binId=%s status=%s', JSONBIN_API_KEY_SOURCE, jsonbinId, res.status); } catch {}
       // Sem acesso ou bin inexistente: cria um novo bin sob esta key
       const newId = await createBin();
       if (!newId) return null;
       // retorna conteúdo inicial usado na criação
-      return { projects: [{ name: 'F7 Arena' }], chat: { project: 'F7 Arena', conversation: [] } };
+      return { projects: [{ name: 'F7 Arena' }], chat_sessions: [] };
     }
     if (!res.ok) return null;
     try { return await res.json(); } catch { return null; }
@@ -103,65 +155,86 @@ export const IsisProvider = ({ children }) => {
       if (!newId) return false;
     }
     const targetId = jsonbinId || (typeof window !== 'undefined' ? window.localStorage.getItem('ISIS_JSONBIN_BIN_ID') : null);
+    try { console.debug('[Isis][JSONBin] saveBin: PUT %s/%s', JSONBIN_BASE, targetId); } catch {}
+    const headers = {
+      'X-Master-Key': JSONBIN_API_KEY,
+      'X-Access-Key': JSONBIN_API_KEY,
+      'Content-Type': 'application/json'
+    };
+    if (JSONBIN_COLLECTION_ID) headers['X-Collection-Id'] = JSONBIN_COLLECTION_ID;
     const res = await fetch(`${JSONBIN_BASE}/${targetId}`, {
       method: 'PUT',
-      headers: {
-        'X-Master-Key': JSONBIN_API_KEY,
-        'X-Access-Key': JSONBIN_API_KEY,
-        'Content-Type': 'application/json'
-      },
+      headers,
       body: JSON.stringify(content)
     });
+    try { console.debug('[Isis][JSONBin] saveBin: status=%s', res?.status); } catch {}
     if (res.status === 401 || res.status === 404) {
+      try { console.error('[Isis][JSONBin] PUT unauthorized or not found. keySource=%s binId=%s status=%s', JSONBIN_API_KEY_SOURCE, targetId, res.status); } catch {}
       const newId = await createBin(content);
       return !!newId;
     }
     return res.ok;
   }, [JSONBIN_API_KEY, jsonbinId, createBin]);
 
+  // Local helpers for chat_sessions
+  const ensureChatSessionsKey = (content) => {
+    if (!content || typeof content !== 'object') return { projects: [{ name: 'F7 Arena' }], chat_sessions: [] };
+    if (!Array.isArray(content.chat_sessions)) content.chat_sessions = [];
+    return content;
+  };
+
+  const findSessionIndex = (content, criteria) => {
+    const list = Array.isArray(content?.chat_sessions) ? content.chat_sessions : [];
+    return list.findIndex((s) =>
+      (s?.project || '').toString() === (criteria.project || '').toString() &&
+      (s?.company?.code || '').toString() === (criteria.companyCode || '').toString() &&
+      (s?.client_code || '').toString() === (criteria.clientCode || '').toString()
+    );
+  };
+
   // Garante inicialização do bin e retorna um pseudo sessionId
   const ensureSession = useCallback(async () => {
     if (sessionId) return sessionId;
     try {
+      try { console.info('[Isis][Chat] ensureSession: start'); } catch {}
       const empresa = selections?.empresa || null;
       const company = empresa ? { code: empresa.codigo_empresa || empresa.codigoEmpresa, name: empresa.nome_fantasia || empresa.nome } : null;
       const cliente = selections?.cliente || null;
 
       // Tenta carregar conteúdo atual
       let content = await loadBin();
-      if (!content || typeof content !== 'object') {
-        // Inicializa com estrutura simples
-        content = {
-          projects: [{ name: 'F7 Arena' }],
-          chat: {
-            client_code: cliente?.id ? String(cliente.id) : null,
+      content = ensureChatSessionsKey(content);
+      if (!Array.isArray(content.projects)) content.projects = [{ name: 'F7 Arena' }];
+
+      // Opcionalmente, cria um registro base se já tivermos metadados e não existir
+      const criteria = {
+        project: 'F7 Arena',
+        companyCode: company?.code || null,
+        clientCode: cliente?.id ? String(cliente.id) : null,
+      };
+      try { console.debug('[Isis][Chat] ensureSession: criteria=%o', criteria); } catch {}
+      if (criteria.companyCode && criteria.clientCode) {
+        const idx = findSessionIndex(content, criteria);
+        try { console.debug('[Isis][Chat] ensureSession: existingIndex=%s', idx); } catch {}
+        if (idx === -1) {
+          content.chat_sessions.push({
+            client_code: criteria.clientCode,
             client_name: cliente?.nome || cliente?.name || '',
             company: company,
-            project: 'F7 Arena',
+            project: criteria.project,
             conversation: []
-          }
-        };
-        await saveBin(content);
-      } else {
-        // Garante que existam as chaves mínimas
-        if (!Array.isArray(content.projects)) content.projects = [{ name: 'F7 Arena' }];
-        if (!content.chat) content.chat = { client_code: null, client_name: '', company: company, project: 'F7 Arena', conversation: [] };
-        // Preenche metadados se disponíveis
-        if (cliente?.id && !content.chat.client_code) content.chat.client_code = String(cliente.id);
-        if (cliente?.nome && !content.chat.client_name) content.chat.client_name = cliente.nome;
-        if (company && !content.chat.company) content.chat.company = company;
-        if (!content.chat.project) content.chat.project = 'F7 Arena';
-        if (!Array.isArray(content.chat.conversation)) content.chat.conversation = [];
-        await saveBin(content);
+          });
+        }
       }
-      // Usa bin id como sessionId lógico
-      const sid = jsonbinId || (typeof window !== 'undefined' ? window.localStorage.getItem('ISIS_JSONBIN_BIN_ID') : null);
-      setSessionId(sid);
-      return sid;
+      await saveBin(content);
+      // Mantém sessionId como UUID local (não usa JSONBin ID)
+      try { console.info('[Isis][Chat] ensureSession: sessionId=%s', sessionId); } catch {}
+      return sessionId;
     } catch (_) {
+      try { console.error('[Isis][Chat] ensureSession: failed', _); } catch {}
       return null;
     }
-  }, [sessionId, selections?.empresa, selections?.cliente, loadBin, saveBin, jsonbinId]);
+  }, [sessionId, selections?.empresa, selections?.cliente, loadBin, saveBin]);
 
   // Atualiza sessão com cliente/empresa se ainda não setados (quando identificação acontece depois)
   const tryUpdateSessionMeta = useCallback(async (sid) => {
@@ -170,38 +243,109 @@ export const IsisProvider = ({ children }) => {
       const empresa = selections?.empresa || null;
       const company = empresa ? { code: empresa.codigo_empresa || empresa.codigoEmpresa, name: empresa.nome_fantasia || empresa.nome } : null;
       const cliente = selections?.cliente || null;
-      const content = await loadBin();
+      let content = await loadBin();
       if (!content) return;
-      content.chat = content.chat || {};
-      if (cliente?.id) content.chat.client_code = String(cliente.id);
-      if (cliente?.nome) content.chat.client_name = cliente.nome;
-      if (company) content.chat.company = company;
-      if (!content.chat.project) content.chat.project = 'F7 Arena';
-      if (!Array.isArray(content.chat.conversation)) content.chat.conversation = [];
+      content = ensureChatSessionsKey(content);
+      const criteria = {
+        project: 'F7 Arena',
+        companyCode: company?.code || null,
+        clientCode: cliente?.id ? String(cliente.id) : null,
+      };
+      try { console.debug('[Isis][Chat] tryUpdateSessionMeta: criteria=%o', criteria); } catch {}
+      if (!criteria.companyCode && !criteria.clientCode) return;
+      let idx = findSessionIndex(content, criteria);
+      if (idx === -1) {
+        content.chat_sessions.push({
+          client_code: criteria.clientCode,
+          client_name: cliente?.nome || cliente?.name || '',
+          company: company,
+          project: criteria.project,
+          conversation: []
+        });
+        idx = content.chat_sessions.length - 1;
+        try { console.debug('[Isis][Chat] tryUpdateSessionMeta: created index=%s', idx); } catch {}
+      } else {
+        // Atualiza metadados se ainda não setados
+        if (cliente?.id && !content.chat_sessions[idx].client_code) content.chat_sessions[idx].client_code = String(cliente.id);
+        if (cliente?.nome && !content.chat_sessions[idx].client_name) content.chat_sessions[idx].client_name = cliente.nome;
+        if (company && !content.chat_sessions[idx].company) content.chat_sessions[idx].company = company;
+        try { console.debug('[Isis][Chat] tryUpdateSessionMeta: updated index=%s', idx); } catch {}
+      }
       await saveBin(content);
+
+      // Também envia metadados para a Edge Function (bin único de chat)
+      // Apenas quando já temos cliente identificado (cod_cliente obrigatório no servidor)
+      if (company?.name && cliente?.id) {
+        await postToEdge({
+          mode: 'set_meta',
+          cod_cliente: cliente?.id ? String(cliente.id) : '',
+          nome_cliente: cliente?.nome || cliente?.name || '',
+          empresa: company.name,
+          software: 'F7 Arena'
+        });
+      }
     } catch {}
-  }, [selections?.empresa, selections?.cliente, loadBin, saveBin]);
+  }, [selections?.empresa, selections?.cliente, loadBin, saveBin, postToEdge]);
 
   // Persiste mensagem no banco
   const persistMessage = useCallback(async (msg) => {
     try {
-      const sid = await ensureSession();
-      if (!sid) return;
-      const from = msg.from === 'isis' ? 'assistant' : 'user';
-      const entry = {
-        ts: new Date().toISOString(),
-        from,
-        text: String(msg.text ?? '')
-      };
-      const content = await loadBin();
-      if (!content) return;
-      content.chat = content.chat || { project: 'F7 Arena', conversation: [] };
-      if (!Array.isArray(content.chat.conversation)) content.chat.conversation = [];
-      content.chat.conversation.push(entry);
-      await saveBin(content);
-      tryUpdateSessionMeta(sid);
+      try { console.info('[Isis][Chat] persistMessage: incoming=%o', { from: msg.from, text: msg.text }); } catch {}
+
+      // Identidade atual (empresa/cliente) para estruturar por cliente no bin
+      const empresaSel = selections?.empresa || null;
+      const company = empresaSel ? { code: empresaSel.codigo_empresa || empresaSel.codigoEmpresa, name: empresaSel.nome_fantasia || empresaSel.nome } : null;
+      const clienteSel = selections?.cliente || null;
+
+      // Envia para Edge Function (fonte de verdade) com metadados
+      await postToEdge({
+        mode: 'append_message',
+        cod_cliente: clienteSel?.id ? String(clienteSel.id) : '_unknown',
+        nome_cliente: clienteSel?.nome || clienteSel?.name || '',
+        empresa: company?.name || '',
+        software: 'F7 Arena',
+        session_id: sessionId,
+        message: {
+          from: msg.from === 'isis' ? 'assistant' : 'user',
+          text: String(msg.text ?? ''),
+        }
+      });
+
+      // Best-effort: mantém persistência local/legada também (opcional)
+      try {
+        const sid = await ensureSession();
+        if (!sid) return;
+        const from = msg.from === 'isis' ? 'assistant' : 'user';
+        const entry = { ts: new Date().toISOString(), from, text: String(msg.text ?? '') };
+        let content = await loadBin();
+        if (!content) return;
+        content = ensureChatSessionsKey(content);
+        const empresa = selections?.empresa || null;
+        const company = empresa ? { code: empresa.codigo_empresa || empresa.codigoEmpresa, name: empresa.nome_fantasia || empresa.nome } : null;
+        const cliente = selections?.cliente || null;
+        const criteria = {
+          project: 'F7 Arena',
+          companyCode: company?.code || null,
+          clientCode: cliente?.id ? String(cliente.id) : null,
+        };
+        let idx = findSessionIndex(content, criteria);
+        if (idx === -1) {
+          content.chat_sessions.push({
+            client_code: criteria.clientCode,
+            client_name: cliente?.nome || cliente?.name || '',
+            company: company,
+            project: criteria.project,
+            conversation: [entry]
+          });
+        } else {
+          if (!Array.isArray(content.chat_sessions[idx].conversation)) content.chat_sessions[idx].conversation = [];
+          content.chat_sessions[idx].conversation.push(entry);
+        }
+        await saveBin(content);
+        tryUpdateSessionMeta(sid);
+      } catch {}
     } catch {}
-  }, [ensureSession, tryUpdateSessionMeta, loadBin, saveBin]);
+  }, [ensureSession, tryUpdateSessionMeta, loadBin, saveBin, postToEdge, selections?.empresa, selections?.cliente, sessionId]);
   
   // Adiciona mensagem ao chat
   const addMessage = useCallback((message) => {
