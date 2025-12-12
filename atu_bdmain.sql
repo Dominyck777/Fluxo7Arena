@@ -504,6 +504,69 @@ on public.compras
 for select to authenticated
 using (codigo_empresa = public.fx_claim_int('codigo_empresa'));
 
+-- ========================================================================== 
+-- Loja: Realtime + RLS específicas para comandas / itens / clientes / mesas
+-- (aplicar na MAIN quando a Loja for liberar realtime como na DEV)
+-- ========================================================================== 
+
+-- 1) Publicação Realtime (idempotente)
+do $$
+begin
+  if not exists (select 1 from pg_publication where pubname = 'supabase_realtime') then
+    create publication supabase_realtime;
+  end if;
+end $$;
+
+alter publication supabase_realtime add table public.comandas;
+alter publication supabase_realtime add table public.comanda_itens;
+alter publication supabase_realtime add table public.comanda_clientes;
+alter publication supabase_realtime add table public.mesas;
+
+-- 2) Replica identity FULL para que eventos de DELETE tenham todas as colunas
+alter table public.comandas set replica identity full;
+alter table public.comanda_itens set replica identity full;
+alter table public.comanda_clientes set replica identity full;
+alter table public.mesas set replica identity full;
+
+-- 3) Policies específicas usadas pelo Realtime (SELECT por empresa)
+alter table public.comandas enable row level security;
+alter table public.comanda_itens enable row level security;
+alter table public.comanda_clientes enable row level security;
+alter table public.mesas enable row level security;
+
+drop policy if exists rt_select_comandas_company on public.comandas;
+create policy rt_select_comandas_company
+on public.comandas
+for select to authenticated
+using (codigo_empresa = public.fx_claim_text('codigo_empresa'));
+
+drop policy if exists rt_select_comanda_itens_company on public.comanda_itens;
+create policy rt_select_comanda_itens_company
+on public.comanda_itens
+for select to authenticated
+using (codigo_empresa = public.fx_claim_text('codigo_empresa'));
+
+drop policy if exists rt_select_comanda_clientes_company on public.comanda_clientes;
+create policy rt_select_comanda_clientes_company
+on public.comanda_clientes
+for select to authenticated
+using (codigo_empresa = public.fx_claim_text('codigo_empresa'));
+
+drop policy if exists rt_select_mesas_company on public.mesas;
+create policy rt_select_mesas_company
+on public.mesas
+for select to authenticated
+using (codigo_empresa = public.fx_claim_text('codigo_empresa'));
+
+-- 4) Índices auxiliares para performance dos filtros por empresa/comanda
+create index if not exists comandas_empresa_idx           on public.comandas (codigo_empresa);
+create index if not exists comandas_mesa_idx              on public.comandas (mesa_id);
+create index if not exists comanda_itens_empresa_idx      on public.comanda_itens (codigo_empresa);
+create index if not exists comanda_itens_comanda_idx      on public.comanda_itens (comanda_id);
+create index if not exists comanda_clientes_empresa_idx   on public.comanda_clientes (codigo_empresa);
+create index if not exists comanda_clientes_comanda_idx   on public.comanda_clientes (comanda_id);
+create index if not exists mesas_empresa_idx              on public.mesas (codigo_empresa);
+
 -- compras_itens (relaciona em compras)
 grant select on public.compras_itens to authenticated;
 alter table public.compras_itens enable row level security;
@@ -590,6 +653,111 @@ grant select on public.v_agendamento_participantes to authenticated;
 grant select on public.v_agendamentos_detalhado to authenticated;
 grant select on public.v_agendamentos_isis to authenticated;
 grant select on public.usuarios_safe to authenticated;
+
+commit;
+
+-- ============================================================================
+-- DEV: Loja Realtime Setup (Mesas, Balcão, Pagamentos e Produtos)
+-- Objetivo: Habilitar atualização em tempo real via Supabase Realtime
+-- Tabelas: comandas, comanda_itens, comanda_clientes, mesas, pagamentos, produtos
+-- Observações:
+--   - Este bloco é idempotente.
+--   - RLS de SELECT por empresa já está definida acima e é usada pelo Realtime.
+--   - REPLICA IDENTITY FULL garante payload completo (old/new) nos eventos.
+-- ============================================================================
+
+begin;
+
+-- Publicação Realtime (se não existir)
+do $$
+begin
+  if not exists (select 1 from pg_publication where pubname = 'supabase_realtime') then
+    execute 'create publication supabase_realtime';
+  end if;
+end $$;
+
+-- Adicionar tabelas na publicação (se ainda não adicionadas)
+do $$ begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'comandas'
+  ) then
+    execute 'alter publication supabase_realtime add table public.comandas';
+  end if;
+end $$;
+
+do $$ begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'comanda_itens'
+  ) then
+    execute 'alter publication supabase_realtime add table public.comanda_itens';
+  end if;
+end $$;
+
+do $$ begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'comanda_clientes'
+  ) then
+    execute 'alter publication supabase_realtime add table public.comanda_clientes';
+  end if;
+end $$;
+
+do $$ begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'mesas'
+  ) then
+    execute 'alter publication supabase_realtime add table public.mesas';
+  end if;
+end $$;
+
+do $$ begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'pagamentos'
+  ) then
+    execute 'alter publication supabase_realtime add table public.pagamentos';
+  end if;
+end $$;
+
+do $$ begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'produtos'
+  ) then
+    execute 'alter publication supabase_realtime add table public.produtos';
+  end if;
+end $$;
+
+-- REPLICA IDENTITY FULL nas tabelas acompanhadas
+alter table if exists public.comandas            replica identity full;
+alter table if exists public.comanda_itens       replica identity full;
+alter table if exists public.comanda_clientes    replica identity full;
+alter table if exists public.mesas               replica identity full;
+alter table if exists public.pagamentos          replica identity full;
+alter table if exists public.produtos            replica identity full;
+
+-- Garantir RLS habilitado (policies já definidas acima)
+alter table if exists public.comandas            enable row level security;
+alter table if exists public.comanda_itens       enable row level security;
+alter table if exists public.comanda_clientes    enable row level security;
+alter table if exists public.mesas               enable row level security;
+alter table if exists public.pagamentos          enable row level security;
+alter table if exists public.produtos            enable row level security;
+
+-- Índices de apoio (idempotentes)
+create index if not exists comandas_empresa_idx              on public.comandas (codigo_empresa);
+create index if not exists comandas_mesa_idx                 on public.comandas (mesa_id);
+create index if not exists comanda_itens_empresa_idx         on public.comanda_itens (codigo_empresa);
+create index if not exists comanda_itens_comanda_idx         on public.comanda_itens (comanda_id);
+create index if not exists comanda_clientes_empresa_idx      on public.comanda_clientes (codigo_empresa);
+create index if not exists comanda_clientes_comanda_idx      on public.comanda_clientes (comanda_id);
+create index if not exists mesas_empresa_idx                 on public.mesas (codigo_empresa);
+create index if not exists pagamentos_empresa_idx            on public.pagamentos (codigo_empresa);
+create index if not exists pagamentos_comanda_idx            on public.pagamentos (comanda_id);
+create index if not exists produtos_empresa_idx              on public.produtos (codigo_empresa);
 
 commit;
 

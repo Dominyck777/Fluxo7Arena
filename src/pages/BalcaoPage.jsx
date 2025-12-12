@@ -130,8 +130,110 @@ export default function BalcaoPage() {
   useEffect(() => {
     const codigoEmpresa = userProfile?.codigo_empresa;
     if (!codigoEmpresa) return;
+    // Garantir que o Realtime está autenticado antes de criar o canal (melhora mobile)
+    try {
+      const c = typeof window !== 'undefined' ? window.localStorage.getItem('custom-auth-token') : null;
+      if (c && c.trim()) {
+        supabase.realtime.setAuth(c.trim());
+      } else {
+        let ref = '';
+        try { const u = new URL(supabase.supabaseUrl || ''); const h = u.host || ''; ref = (h.split('.')[0] || '') } catch {}
+        const k = ref ? `sb-${ref}-auth-token` : 'sb-auth-token';
+        const raw = typeof window !== 'undefined' ? window.localStorage.getItem(k) : null;
+        if (raw) {
+          try {
+            const p = JSON.parse(raw);
+            const t = p?.access_token || p?.currentSession?.access_token;
+            if (t) supabase.realtime.setAuth(t);
+          } catch {}
+        }
+      }
+    } catch {}
     const ch = supabase.channel(`loja:${codigoEmpresa}`);
-    const handler = () => {
+    const handler = async (payload) => {
+      const t = payload?.table || payload?.table_name || '';
+      const row = payload?.new || payload?.old || {};
+      const evt = payload?.eventType || payload?.type || payload?.event || '';
+      const isBalcaoComanda = (cmd) => cmd && (cmd.mesa_id == null || typeof cmd.mesa_id === 'undefined');
+
+      // Atualizações específicas por tabela para reação imediata
+      try {
+        // Itens da comanda: atualizar instantaneamente a comanda atual do balcão
+        if (t === 'comanda_itens') {
+          const comId = payload?.new?.comanda_id || payload?.old?.comanda_id || row?.comanda_id || null;
+          if (comId) {
+            const cid = comandaIdRef.current;
+            if (cid && String(cid) === String(comId)) {
+              try { await refetchItemsAndCustomer(cid, 2); } catch {}
+              // Atualizar estoque reservado imediatamente
+              try {
+                const itensGlobal = await listarItensDeTodasComandasAbertas({ codigoEmpresa });
+                const reservedMap = new Map();
+                for (const item of itensGlobal || []) { reservedMap.set(item.produto_id, (reservedMap.get(item.produto_id) || 0) + Number(item.quantidade || 0)); }
+                setReservedStock(reservedMap);
+              } catch {}
+              return; // já tratou
+            }
+            // Se ainda não temos comandaId, verificar se é a comanda do balcão e sincronizar
+            try {
+              const c = await listarComandaBalcaoAberta({ codigoEmpresa });
+              if (c?.id && String(c.id) === String(comId)) {
+                setComandaId(c.id);
+                try { await refetchItemsAndCustomer(c.id, 2); } catch {}
+                // Atualizar estoque reservado imediatamente
+                try {
+                  const itensGlobal = await listarItensDeTodasComandasAbertas({ codigoEmpresa });
+                  const reservedMap = new Map();
+                  for (const item of itensGlobal || []) { reservedMap.set(item.produto_id, (reservedMap.get(item.produto_id) || 0) + Number(item.quantidade || 0)); }
+                  setReservedStock(reservedMap);
+                } catch {}
+                return;
+              }
+            } catch {}
+          }
+        }
+
+        // Vinculação de clientes também deve refletir
+        if (t === 'comanda_clientes') {
+          const comId = payload?.new?.comanda_id || payload?.old?.comanda_id || row?.comanda_id || null;
+          if (comId && comandaIdRef.current && String(comandaIdRef.current) === String(comId)) {
+            try { await refetchItemsAndCustomer(comId, 2); } catch {}
+            return;
+          }
+        }
+
+        // Fechamento/cancelamento da comanda do balcão em outro dispositivo
+        if (t === 'comandas') {
+          const mesaId = row?.mesa_id;
+          const comId = row?.id || payload?.old?.id || null;
+          const statusStr = String(row?.status || '').toLowerCase();
+          const isClosedEvt = (String(evt || '').toUpperCase() === 'DELETE') || statusStr.includes('fechad') || statusStr.includes('closed') || statusStr.includes('encerr');
+          const isInsertEvt = String(evt || '').toUpperCase() === 'INSERT';
+          if (isClosedEvt && (mesaId == null) && comandaIdRef.current && comId && String(comandaIdRef.current) === String(comId)) {
+            // Resetar estado do balcão
+            setItems([]);
+            setComandaId(null);
+            setSelectedClientIds([]);
+            setCustomerName('');
+            setClientChosen(false);
+            // Limpar cache relacionado
+            try {
+              localStorage.removeItem(LS_KEY.comandaId);
+              localStorage.removeItem(LS_KEY.items);
+              localStorage.removeItem(LS_KEY.customerName);
+              localStorage.removeItem(LS_KEY.pendingClientIds);
+              localStorage.removeItem(LS_KEY.clientChosen);
+            } catch {}
+          }
+          // Nova comanda do balcão criada em outro dispositivo: adotar imediatamente
+          if (isInsertEvt && (mesaId == null) && ['open','awaiting-payment','awaiting_payment'].includes(statusStr)) {
+            setComandaId(comId);
+            try { await refetchItemsAndCustomer(comId, 2); } catch {}
+          }
+        }
+      } catch {}
+
+      // Debounce genérico como fallback
       if (rtDebounceRef.current) { try { clearTimeout(rtDebounceRef.current); } catch {} }
       rtDebounceRef.current = setTimeout(async () => {
         const cid = comandaIdRef.current;
@@ -146,12 +248,13 @@ export default function BalcaoPage() {
             }
           } catch {}
         }
-      }, 350);
+      }, 250);
     };
     ch
       .on('postgres_changes', { event: '*', schema: 'public', table: 'comandas', filter: `codigo_empresa=eq.${codigoEmpresa}` }, handler)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'comanda_itens', filter: `codigo_empresa=eq.${codigoEmpresa}` }, handler)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'comanda_clientes', filter: `codigo_empresa=eq.${codigoEmpresa}` }, handler)
+      // comanda_itens/comanda_clientes podem não ter codigo_empresa; assinar sem filtro
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'comanda_itens' }, handler)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'comanda_clientes' }, handler)
       .subscribe();
     rtChanRef.current = ch;
     if (pollTimerRef.current) { try { clearInterval(pollTimerRef.current); } catch {} }
@@ -878,10 +981,22 @@ export default function BalcaoPage() {
         try {
           const vincs = await listarClientesDaComanda({ comandaId: targetComandaId, codigoEmpresa });
           if (reqId !== itemsReqIdRef.current) return;
+          // Nomes para exibição
           const nomes = (vincs || []).map(v => v?.nome).filter(Boolean);
           const nomeFinal = nomes.length ? nomes.join(', ') : '';
           setCustomerName(nomeFinal);
           setClientChosen(Boolean(nomeFinal));
+          // IDs para seleção no wizard/pagamento (sempre usar cliente_id)
+          const ids = Array.from(
+            new Set(
+              (vincs || [])
+                .map(v => v?.cliente_id)
+                .filter(Boolean)
+            )
+          );
+          if (ids.length > 0) {
+            setSelectedClientIds(ids);
+          }
         } catch {
           setCustomerName('');
           setClientChosen(false);
@@ -1252,8 +1367,9 @@ export default function BalcaoPage() {
         const sorted = (rows || []).slice().sort((a, b) => Number(a?.codigo || 0) - Number(b?.codigo || 0));
         setClients(sorted);
         
-        // Se não houver clientes selecionados e o modal acabou de abrir, selecionar cliente Consumidor (cod 0) automaticamente
-        if (isClientWizardOpen && (!selectedClientIds || selectedClientIds.length === 0)) {
+        // Antes de existir comanda aberta, se não houver clientes selecionados e o modal acabou de abrir,
+        // selecionar cliente Consumidor (cod 0) automaticamente como default inicial
+        if (!comandaId && !clientChosen && isClientWizardOpen && (!selectedClientIds || selectedClientIds.length === 0)) {
           const consumidor = sorted?.find(c => c?.codigo === 0);
           if (consumidor) {
             setSelectedClientIds([consumidor.id]);
@@ -1398,7 +1514,8 @@ export default function BalcaoPage() {
               comandaId: cid, 
               clienteIds: ids, 
               nomesLivres: [], 
-              codigoEmpresa 
+              codigoEmpresa,
+              replace: true,
             });
             // Atualizar cliente após associação
             await refetchItemsAndCustomer(cid);
@@ -2625,7 +2742,7 @@ export default function BalcaoPage() {
                       return;
                     }
                     const cid = c.id;
-                    await adicionarClientesAComanda({ comandaId: cid, clienteIds: ids, nomesLivres: [], codigoEmpresa });
+                    await adicionarClientesAComanda({ comandaId: cid, clienteIds: ids, nomesLivres: [], codigoEmpresa, replace: true });
                     setComandaId(cid);
                     // Nome do cliente na UI
                     const nomesEscolhidos = (clients || [])
@@ -2686,7 +2803,7 @@ export default function BalcaoPage() {
                   }
                   
                   try {
-                    await adicionarClientesAComanda({ comandaId, clienteIds: ids, nomesLivres: [], codigoEmpresa });
+                    await adicionarClientesAComanda({ comandaId, clienteIds: ids, nomesLivres: [], codigoEmpresa, replace: true });
                   } catch (error) {
                     // Se erro de foreign key, limpar cache
                     if (error?.message?.includes('violates foreign key')) {

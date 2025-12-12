@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 
 // framer-motion removido para evitar piscadas e erros de runtime
 import { DragDropContext, Droppable, Draggable } from 'react-beautiful-dnd';
@@ -8,7 +9,7 @@ import { Plus, GripVertical, Search, CheckCircle, Clock, FileText, ShoppingBag, 
 import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger, } from "@/components/ui/alert-dialog"
 import { Label } from '@/components/ui/label';
@@ -133,12 +134,28 @@ function VendasPage() {
   // Estados para Desconto
   const [selectedItemForDesconto, setSelectedItemForDesconto] = useState(null);
   const [isDescontoComandaDialogOpen, setIsDescontoComandaDialogOpen] = useState(false);
+
+  // Prefetch finalizadoras cedo para acelerar PayDialog
+  useEffect(() => {
+    const codigoEmpresa = userProfile?.codigo_empresa;
+    if (!codigoEmpresa) return;
+    (async () => {
+      try {
+        if (Array.isArray(payMethods) && payMethods.length > 0) return;
+        const fins = await listarFinalizadoras({ somenteAtivas: true, codigoEmpresa });
+        setPayMethods(Array.isArray(fins) ? fins : []);
+      } catch {}
+    })();
+  }, [userProfile?.codigo_empresa]);
   
   // Construir mapa de quantidades atuais na comanda
   const qtyByProductId = useMemo(() => {
     const map = new Map();
     const items = selectedTable?.order || [];
-    for (const it of items) map.set(it.productId, (map.get(it.productId) || 0) + Number(it.quantity || 0));
+    for (const it of items) {
+      const key = String(it.productId);
+      map.set(key, (map.get(key) || 0) + Number(it.quantity || 0));
+    }
     return map;
   }, [selectedTable?.order]);
 
@@ -157,35 +174,85 @@ function VendasPage() {
       if (!it) return; // nada para diminuir
       
       const newQty = Number(it.quantity || 0) - 1;
-      
-      // Persistir no backend PRIMEIRO
-      if (newQty > 0) {
-        await atualizarQuantidadeItem({ itemId: it.id, quantidade: newQty, codigoEmpresa: userProfile?.codigo_empresa });
-      } else {
-        await removerItem({ itemId: it.id, codigoEmpresa: userProfile?.codigo_empresa });
+      const isTmp = String(it.id || '').startsWith('tmp-');
+      // Se item ainda é temporário (não persistiu), fazer UI otimista e sincronizar depois
+      if (isTmp) {
+        const nextOrder = newQty > 0
+          ? items.map(o => (o.id === it.id ? { ...o, quantity: newQty } : o))
+          : items.filter(o => o.id !== it.id);
+        const newTotal = nextOrder.reduce((acc, o) => acc + Number(o.price || 0) * Number(o.quantity || 0), 0);
+        const updated = { ...selectedTable, order: nextOrder, totalHint: newTotal };
+        setSelectedTable(updated);
+        setTables(prev => prev.map(t => (t.id === updated.id ? { ...t, totalHint: newTotal } : t)));
+        // Sincronizar com backend após um pequeno atraso (dar tempo do insert concluir)
+        setTimeout(async () => {
+          try {
+            const itens = await listarItensDaComanda({ comandaId: selectedTable.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
+            const order = (itens || []).map((it2) => ({ id: it2.id, productId: it2.produto_id, name: it2.descricao || 'Item', price: Number(it2.preco_unitario || 0), quantity: Number(it2.quantidade || 1) }));
+            const syncedTotal = (order || []).reduce((acc, o) => acc + Number(o.price || 0) * Number(o.quantity || 0), 0);
+            const updated2 = { ...selectedTable, order, totalHint: syncedTotal };
+            setSelectedTable(updated2);
+            setTables(prev => prev.map(t => (t.id === updated2.id ? { ...t, totalHint: syncedTotal } : t)));
+          } catch {}
+        }, 300);
+        return;
       }
       
-      // Recarregar itens do backend para sincronizar
-      const itens = await listarItensDaComanda({ comandaId: selectedTable.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
-      const order = (itens || []).map((it) => ({ 
-        id: it.id, 
-        productId: it.produto_id, 
-        name: it.descricao || 'Item', 
-        price: Number(it.preco_unitario || 0), 
-        quantity: Number(it.quantidade || 1) 
-      }));
-      const syncedTotal = (order || []).reduce((acc, it) => acc + Number(it.price || 0) * Number(it.quantity || 0), 0);
-      
-      const updatedTable = { ...selectedTable, order, totalHint: syncedTotal };
-      setSelectedTable(updatedTable);
-      setTables((prevTables) => prevTables.map(t => (t.id === updatedTable.id ? updatedTable : t)));
+      // UI otimista: refletir imediatamente no painel e card
+      const prevSelected = selectedTable;
+      const prevTables = tables;
+      const nextOrder = newQty > 0
+        ? items.map(o => (o.id === it.id ? { ...o, quantity: newQty } : o))
+        : items.filter(o => o.id !== it.id);
+      const newTotal = nextOrder.reduce((acc, o) => acc + Number(o.price || 0) * Number(o.quantity || 0), 0);
+      const optimistic = { ...selectedTable, order: nextOrder, totalHint: newTotal };
+      setSelectedTable(optimistic);
+      setTables(prev => prev.map(t => (t.id === optimistic.id ? { ...t, totalHint: newTotal } : t)));
+
+      // Persistir no backend
+      try {
+        if (newQty > 0) {
+          await atualizarQuantidadeItem({ itemId: it.id, quantidade: newQty, codigoEmpresa: userProfile?.codigo_empresa });
+        } else {
+          await removerItem({ itemId: it.id, codigoEmpresa: userProfile?.codigo_empresa });
+        }
+      } catch (errPersist) {
+        // Reverter se backend falhar
+        setSelectedTable(prevSelected);
+        setTables(prevTables);
+        throw errPersist;
+      }
+
+      // Recarregar itens do backend para sincronizar (com tolerância a snapshot antigo)
+      const expectQty = Math.max(newQty, 0);
+      let applied = false;
+      for (let attempt = 0; attempt < 3 && !applied; attempt++) {
+        const itens = await listarItensDaComanda({ comandaId: selectedTable.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
+        const order = (itens || []).map((it) => ({ 
+          id: it.id, 
+          productId: it.produto_id, 
+          name: it.descricao || 'Item', 
+          price: Number(it.preco_unitario || 0), 
+          quantity: Number(it.quantidade || 1) 
+        }));
+        const qNow = order.find(o => String(o.productId) === String(prod.id))?.quantity || 0;
+        if (qNow === expectQty) {
+          const syncedTotal = order.reduce((acc, it) => acc + Number(it.price || 0) * Number(it.quantity || 0), 0);
+          const updatedTable = { ...selectedTable, order, totalHint: syncedTotal };
+          setSelectedTable(updatedTable);
+          setTables((prevTables) => prevTables.map(t => (t.id === updatedTable.id ? updatedTable : t)));
+          applied = true;
+          break;
+        }
+        await new Promise(r => setTimeout(r, 180 * (attempt + 1)));
+      }
       
       // Atualizar estoque reservado global após remover/diminuir item
       try {
         const itensGlobal = await listarItensDeTodasComandasAbertas({ codigoEmpresa: userProfile?.codigo_empresa });
         const reservedMap = new Map();
         for (const item of itensGlobal || []) {
-          const pid = item.produto_id;
+          const pid = String(item.produto_id);
           const qty = Number(item.quantidade || 0);
           reservedMap.set(pid, (reservedMap.get(pid) || 0) + qty);
         }
@@ -221,10 +288,23 @@ function VendasPage() {
     } catch { return 1; }
   }, []);
   const [loadingItems, setLoadingItems] = useState(false);
+  const isPayOpenRef = useRef(false);
+  useEffect(() => { isPayOpenRef.current = isPayOpen; }, [isPayOpen]);
+  const lastPaymentsWriteAtRef = useRef(0);
+  const draftSaveTimerRef = useRef(null);
+  const payDialogSetLinesRef = useRef(null);
+  const payDialogSetNextIdRef = useRef(null);
+  const payDialogComandaRef = useRef(null);
+  const payDialogLinesRef = useRef([]);
+  const payDialogSyncTimerRef = useRef(null);
+  // Refs para sincronizar ManageClientsDialog via Realtime (semelhante ao PayDialog)
+  const manageClientsOpenRef = useRef(false);
+  const manageClientsComandaRef = useRef(null);
+  const manageClientsSetLinkedRef = useRef(null);
   const location = useLocation();
   const firstAvailableId = useMemo(() => (tables || []).find(t => t.status === 'available')?.id || null, [tables]);
   // Evita movimentação do layout quando diálogos estão abertos (bloqueia scroll do fundo)
-  const anyDialogOpen = isCreateTableDialog || isOpenTableDialog || isOrderDetailsOpen || isCashierDetailsOpen || isPayOpen || openCashDialogOpen || isCounterModeOpen || isProductDetailsOpen || isMobileModalOpen || false;
+  const anyDialogOpen = isCreateTableDialog || isOpenTableDialog || isOrderDetailsOpen || isCashierDetailsOpen || isPayOpen || openCashDialogOpen || isCounterModeOpen || isProductDetailsOpen || isMobileModalOpen || isManageClientsOpen || isProductsModalOpen || false;
 
   // Selecionar/abrir mesa (usado por clique e pelo Enter)
   const handleSelectTable = async (table) => {
@@ -427,6 +507,7 @@ function VendasPage() {
           // Prioridade 2: mesa selecionada -> abrir modal de produtos
           if (selectedTable) {
             setIsProductsModalOpen(true);
+            try { setIsMobileModalOpen(false); } catch {}
             return;
           }
           // Prioridade 3: sem mesa e balcão fechado -> abrir Modo Balcão e focar a busca
@@ -614,7 +695,7 @@ function VendasPage() {
         if (mountedRef.current && loadReqIdRef.current === myReq) {
           const reservedMap = new Map();
           for (const item of itensReservados || []) {
-            const pid = item.produto_id;
+            const pid = String(item.produto_id);
             const qty = Number(item.quantidade || 0);
             reservedMap.set(pid, (reservedMap.get(pid) || 0) + qty);
           }
@@ -1045,12 +1126,23 @@ function VendasPage() {
       const uiTables = uiTablesBase.map(t => {
         // Se a mesa selecionada foi cancelada (não tem mais comandaId), não preservar order
         if (selectedTable && t.id === selectedTable.id) {
+          // Se localmente a mesa está marcada como 'available' (otimista), não reverter para in-use
+          if (selectedTable.status === 'available') {
+            return { ...t, status: 'available', comandaId: null, order: [], customer: null, totalHint: 0 };
+          }
           if (!t.comandaId) {
             // Mesa foi liberada/cancelada - limpar tudo
             return { ...t, order: [], customer: null };
           }
           return { ...t, order: selectedTable.order || [], customer: selectedTable.customer || t.customer };
         }
+        // Se mesa foi marcada como liberada recentemente, manter 'available' por uma janela de tempo
+        try {
+          const ts = freedTablesRef.current.get(t.id);
+          if (ts && (Date.now() - ts) < 30000) {
+            return { ...t, status: 'available', comandaId: null, order: [], customer: null, totalHint: 0 };
+          }
+        } catch {}
         return t;
       });
       
@@ -1081,41 +1173,256 @@ function VendasPage() {
   const rtChanRef = useRef(null);
   const rtDebounceRef = useRef(null);
   const pollTimerRef = useRef(null);
+  // Mesas liberadas recentemente (para impedir regressão breve por snapshot antigo)
+  const freedTablesRef = useRef(new Map()); // mesaId -> timestamp(ms)
   useEffect(() => {
     const codigoEmpresa = userProfile?.codigo_empresa;
     if (!codigoEmpresa) return;
+    // Garantir que o Realtime está autenticado antes de criar o canal (melhora mobile)
+    try {
+      const c = typeof window !== 'undefined' ? window.localStorage.getItem('custom-auth-token') : null;
+      if (c && c.trim()) {
+        supabase.realtime.setAuth(c.trim());
+      } else {
+        let ref = '';
+        try { const u = new URL(supabase.supabaseUrl || ''); const h = u.host || ''; ref = (h.split('.')[0] || '') } catch {}
+        const k = ref ? `sb-${ref}-auth-token` : 'sb-auth-token';
+        const raw = typeof window !== 'undefined' ? window.localStorage.getItem(k) : null;
+        if (raw) {
+          try {
+            const p = JSON.parse(raw);
+            const t = p?.access_token || p?.currentSession?.access_token;
+            if (t) supabase.realtime.setAuth(t);
+          } catch {}
+        }
+      }
+    } catch {}
     const ch = supabase.channel(`loja:${codigoEmpresa}`);
     const handler = (payload) => {
       const t = payload?.table || payload?.table_name || '';
       const row = payload?.new || payload?.old || {};
-      const sameCompany = String(row?.codigo_empresa || '') === String(codigoEmpresa || '');
-      if (!sameCompany) return;
+      const evt = payload?.eventType || payload?.type || payload?.event || '';
+      // Alguns schemas (comanda_itens, comanda_clientes) podem não ter codigo_empresa na linha.
+      // Para essas tabelas, confiamos nas RLS do Supabase e NÃO bloqueamos pelo filtro de empresa aqui,
+      // para garantir que eventos de DELETE sem comanda_id ainda cheguem no fallback.
+      let allowed = true;
+      if (t !== 'comanda_itens' && t !== 'comanda_clientes') {
+        const sameCompany = String(row?.codigo_empresa || '') === String(codigoEmpresa || '');
+        allowed = sameCompany;
+      }
+      if (!allowed) return;
+      // Atualização instantânea de totais de mesa ao alterar itens da comanda (cross-device e mobile)
+      try {
+        if (t === 'comanda_itens') {
+          const comId = payload?.new?.comanda_id || payload?.old?.comanda_id || row?.comanda_id || null;
+          if (comId) {
+            (async () => {
+              try {
+                const itens = await listarItensDaComanda({ comandaId: comId, codigoEmpresa });
+                const order = (itens || []).map((it) => ({
+                  id: it.id,
+                  productId: it.produto_id,
+                  name: it.descricao || 'Item',
+                  price: Number(it.preco_unitario || 0),
+                  quantity: Number(it.quantidade || 1),
+                }));
+                const total = (order || []).reduce((acc, it) => acc + Number(it.price || 0) * Number(it.quantity || 0), 0);
+                setTables((prev) => prev.map((tb) => (String(tb.comandaId || '') === String(comId) ? { ...tb, totalHint: total } : tb)));
+                // Atualiza também a comanda aberta no mobile/desktop para remover o último item imediatamente
+                setSelectedTable((prev) => (prev && String(prev.comandaId || '') === String(comId) ? { ...prev, order, totalHint: total } : prev));
+                // Balcão: se for a comanda do balcão atual, sincronizar itens imediatamente
+                if (counterComandaIdRef.current && String(counterComandaIdRef.current) === String(comId)) {
+                  setCounterItems(order);
+                }
+              } catch {}
+            })();
+          } else if (String(evt || '').toUpperCase() === 'DELETE') {
+            // Fallback: alguns eventos de DELETE chegam sem comanda_id mesmo com REPLICA IDENTITY FULL.
+            // Neste caso, faz um refresh leve global + detalhes da mesa selecionada para sincronizar cross-device.
+            (async () => {
+              try {
+                try { await refreshTablesLight({ showToast: false }); } catch {}
+                const sel = selectedTableRef.current;
+                if (sel) {
+                  try { await refetchSelectedTableDetails(sel); } catch {}
+                }
+              } catch {}
+            })();
+          }
+        }
+        if (t === 'comanda_clientes') {
+          const comId = payload?.new?.comanda_id || payload?.old?.comanda_id || row?.comanda_id || null;
+          if (comId) {
+            (async () => {
+              try {
+                const vincs = await listarClientesDaComanda({ comandaId: comId, codigoEmpresa });
+                // Atualizar cliente selecionado no modo balcão, se for a mesma comanda
+                if (counterComandaIdRef.current && String(counterComandaIdRef.current) === String(comId)) {
+                  const ids = (vincs || []).map(v => v?.cliente_id || v?.clientes?.id || null).filter(Boolean).map(id => String(id));
+                  setCounterLinkedClientIds(ids);
+                  const first = Array.isArray(vincs) && vincs.length > 0 ? (vincs[0]?.cliente_id || vincs[0]?.clientes?.id || null) : null;
+                  setCounterSelectedClientId(first || null);
+                }
+                // Atualizar nomes dos clientes nos cards de mesas e na mesa selecionada
+                const names = (vincs || []).map(v => v?.nome).filter(Boolean);
+                const customerStr = names.length ? names.join(', ') : null;
+                setTables(prev => prev.map(tb => (
+                  String(tb.comandaId || '') === String(comId)
+                    ? { ...tb, customer: customerStr }
+                    : tb
+                )));
+                setSelectedTable(prev => {
+                  if (!prev || String(prev.comandaId || '') !== String(comId)) return prev;
+                  return { ...prev, customer: customerStr };
+                });
+                // Sincronizar lista interna do ManageClientsDialog em outros dispositivos
+                if (manageClientsOpenRef.current && manageClientsComandaRef.current && String(manageClientsComandaRef.current) === String(comId) && manageClientsSetLinkedRef.current) {
+                  const linked = (vincs || []).map(v => ({
+                    id: v.id,
+                    cliente_id: v.cliente_id,
+                    nome: v.nome || '',
+                    tipo: v.tipo || (v.cliente_id ? 'cadastrado' : 'livre')
+                  }));
+                  try {
+                    manageClientsSetLinkedRef.current(linked);
+                  } catch (err) {
+                    console.error('[Realtime][ManageClientsDialog] Erro ao aplicar linked remoto:', err);
+                  }
+                }
+              } catch {}
+            })();
+          } else if (String(evt || '').toUpperCase() === 'DELETE') {
+            // Fallback para eventos de DELETE em comanda_clientes sem comanda_id
+            (async () => {
+              try {
+                try { await refreshTablesLight({ showToast: false }); } catch {}
+                const sel = selectedTableRef.current;
+                if (sel) {
+                  try { await refetchSelectedTableDetails(sel); } catch {}
+                }
+              } catch {}
+            })();
+          }
+        }
+      } catch {}
+      // Otimista: se comanda fechou ou mesa ficou livre, atualizar UI imediatamente
+      try {
+        if (t === 'comandas') {
+          const mesaId = row?.mesa_id || row?.mesa || null;
+          const statusStr = String(row?.status || row?.situacao || '').toLowerCase();
+          const isClosedEvt = (evt === 'DELETE') || statusStr.includes('fechad') || statusStr.includes('closed') || statusStr.includes('encerr');
+          const isInsertEvt = String(evt || '').toUpperCase() === 'INSERT';
+          if (mesaId && isClosedEvt) {
+            freedTablesRef.current.set(mesaId, Date.now());
+            setTables((prev) => prev.map((tb) => (tb.id === mesaId ? { ...tb, status: 'available', comandaId: null, order: [], customer: null, totalHint: 0 } : tb)));
+            setSelectedTable((prev) => (prev && prev.id === mesaId) ? { ...prev, status: 'available', comandaId: null, order: [], customer: null, totalHint: 0 } : prev);
+          }
+          // Mesa abriu em outro dispositivo: adotar imediatamente a nova comanda
+          if (mesaId && isInsertEvt) {
+            const newComandaId = row?.id || null;
+            if (newComandaId) {
+              setTables((prev) => prev.map((tb) => (tb.id === mesaId ? { ...tb, status: 'in-use', comandaId: newComandaId } : tb)));
+              setSelectedTable((prev) => (prev && prev.id === mesaId) ? { ...prev, status: 'in-use', comandaId: newComandaId } : prev);
+            }
+          }
+          // Balcão: fechar/cancelar em outro dispositivo deve limpar imediatamente
+          const isBalcao = !mesaId; // mesa_id null -> balcão
+          if (isBalcao && isClosedEvt && counterComandaIdRef.current && (String(counterComandaIdRef.current) === String(row?.id || row?.comanda_id))) {
+            setCounterItems([]);
+            setCounterComandaId(null);
+            setCounterSelectedClientId(null);
+          }
+          // Balcão: adoção de nova comanda criada em outro dispositivo
+          if (isBalcao && isInsertEvt && ['open','awaiting-payment','awaiting_payment'].includes(statusStr)) {
+            const newId = row?.id || null;
+            if (newId) {
+              setCounterComandaId(newId);
+              (async () => {
+                try {
+                  const itens = await listarItensDaComanda({ comandaId: newId, codigoEmpresa });
+                  const order = (itens || []).map((it) => ({ id: it.id, productId: it.produto_id, name: it.descricao || 'Item', price: Number(it.preco_unitario || 0), quantity: Number(it.quantidade || 1) }));
+                  setCounterItems(order);
+                } catch {}
+              })();
+            }
+          }
+        }
+        if (t === 'mesas') {
+          const mesaId = row?.id || null;
+          const statusStr = String(row?.status || row?.situacao || '').toLowerCase();
+          const becameFree = statusStr.includes('livre') || statusStr.includes('available');
+          if (mesaId && becameFree) {
+            freedTablesRef.current.set(mesaId, Date.now());
+            setTables((prev) => prev.map((tb) => (tb.id === mesaId ? { ...tb, status: 'available', comandaId: null, order: [], customer: null, totalHint: 0 } : tb)));
+            setSelectedTable((prev) => (prev && prev.id === mesaId) ? { ...prev, status: 'available', comandaId: null, order: [], customer: null, totalHint: 0 } : prev);
+          }
+          const becameInUse = statusStr.includes('ocup') || statusStr.includes('in-use') || statusStr.includes('atend');
+          if (mesaId && becameInUse) {
+            setTables((prev) => prev.map((tb) => (tb.id === mesaId ? { ...tb, status: 'in-use' } : tb)));
+            setSelectedTable((prev) => (prev && prev.id === mesaId) ? { ...prev, status: 'in-use' } : prev);
+          }
+        }
+      } catch {}
       if (rtDebounceRef.current) { try { clearTimeout(rtDebounceRef.current); } catch {} }
       rtDebounceRef.current = setTimeout(async () => {
-        try { await refreshTablesLight({ showToast: false }); } catch {}
+        // Se for evento local de pagamentos recém gravado, ignorar para evitar loop/piscada
+        const isRecentLocalPayWrite = (t === 'pagamentos') && ((Date.now() - lastPaymentsWriteAtRef.current) < 1200);
+        if (t !== 'pagamentos' && !isRecentLocalPayWrite) {
+          try { await refreshTablesLight({ showToast: false }); } catch {}
+        }
         const sel = selectedTableRef.current;
         if (!sel) return;
         const selComanda = sel.comandaId || null;
         let affectedComanda = null;
         if (t === 'comandas') affectedComanda = row?.id || row?.comanda_id || null;
-        if (t === 'comanda_itens' || t === 'comanda_clientes') affectedComanda = row?.comanda_id || null;
+        if (t === 'comanda_itens' || t === 'comanda_clientes' || t === 'pagamentos') affectedComanda = row?.comanda_id || null;
+        // Sincronização instantânea do PayDialog via Realtime (cross-device)
+        if (t === 'pagamentos' && affectedComanda && isPayOpenRef.current && payDialogComandaRef.current && String(payDialogComandaRef.current) === String(affectedComanda) && payDialogSetLinesRef.current) {
+          const isLocal = (Date.now() - lastPaymentsWriteAtRef.current) < 800;
+          if (!isLocal) {
+            try {
+              const pend = await listarPagamentosPorComandaEStatus({ comandaId: affectedComanda, status: 'Pendente', codigoEmpresa });
+              const mapped = (pend || []).map((pg, idx) => {
+                const base = Number(pg.valor || 0);
+                const methodId = pg.finalizadora_id ? String(pg.finalizadora_id) : null;
+                const fin = (payMethods || []).find(m => String(m.id) === String(methodId));
+                const tPct = (fin && fin.taxa_percentual != null) ? Math.max(0, Number(fin.taxa_percentual) || 0) / 100 : 0;
+                const chargeFee = true;
+                const shown = chargeFee ? (base * (1 + tPct)) : base;
+                const valueStr = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(shown);
+                return { id: idx + 1, clientId: pg.cliente_id || null, methodId, chargeFee, baseValue: base, value: valueStr };
+              });
+              payDialogSetLinesRef.current(mapped);
+              if (payDialogSetNextIdRef.current) payDialogSetNextIdRef.current(mapped.length + 1);
+            } catch {}
+          }
+        }
         if (affectedComanda && selComanda && String(affectedComanda) === String(selComanda)) {
-          try { await refetchSelectedTableDetails(sel); } catch {}
+          // Evitar interferir no PayDialog enquanto o usuário edita pagamentos
+          if (t === 'pagamentos' && isPayOpenRef.current) {
+            // não refaz detalhes da mesa por evento de pagamentos durante edição
+          } else {
+            try { await refetchSelectedTableDetails(sel); } catch {}
+          }
         }
         if (t === 'mesas' && sel?.id && (row?.id === sel.id)) {
           try { await refetchSelectedTableDetails(sel); } catch {}
         }
-      }, 350);
+      }, 250);
     };
     ch
       .on('postgres_changes', { event: '*', schema: 'public', table: 'comandas', filter: `codigo_empresa=eq.${codigoEmpresa}` }, handler)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'comanda_itens', filter: `codigo_empresa=eq.${codigoEmpresa}` }, handler)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'comanda_clientes', filter: `codigo_empresa=eq.${codigoEmpresa}` }, handler)
+      // comanda_itens/comanda_clientes podem não ter codigo_empresa: assinar sem filtro e filtrar no handler
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'comanda_itens' }, handler)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'comanda_clientes' }, handler)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'pagamentos', filter: `codigo_empresa=eq.${codigoEmpresa}` }, handler)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'mesas', filter: `codigo_empresa=eq.${codigoEmpresa}` }, handler)
       .subscribe();
     rtChanRef.current = ch;
     if (pollTimerRef.current) { try { clearInterval(pollTimerRef.current); } catch {} }
     pollTimerRef.current = setInterval(async () => {
+      // Evitar piscadas no mobile enquanto PayDialog está aberto
+      if (isPayOpenRef.current) return;
       try { await refreshTablesLight({ showToast: false }); } catch {}
     }, 60000);
     return () => {
@@ -1299,6 +1606,7 @@ function VendasPage() {
     const [payClients, setPayClients] = useState([]); // {id, nome}
     const valueRefs = useRef(new Map());
     const isMobile = typeof window !== 'undefined' && window.innerWidth <= 640;
+    const payDirtyRef = useRef(false);
 
     const parseBRL = (s) => { const d = String(s || '').replace(/\D/g, ''); return d ? Number(d) / 100 : 0; };
     const formatBRL = (n) => new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Math.max(0, Number(n) || 0));
@@ -1308,6 +1616,20 @@ function VendasPage() {
       return Number.isFinite(raw) ? (raw / 100) : 0;
     };
     const sumPayments = () => (paymentLines || []).reduce((acc, ln) => acc + parseBRL(ln.value), 0);
+    // Expor setters para sincronização via Realtime
+    useEffect(() => {
+      payDialogSetLinesRef.current = setPaymentLines;
+      payDialogSetNextIdRef.current = setNextPayLineId;
+      payDialogComandaRef.current = selectedTable?.comandaId || null;
+      return () => {
+        payDialogSetLinesRef.current = null;
+        payDialogSetNextIdRef.current = null;
+        payDialogComandaRef.current = null;
+      };
+    }, [selectedTable?.comandaId]);
+    useEffect(() => {
+      payDialogLinesRef.current = paymentLines || [];
+    }, [paymentLines]);
 
     const focusNextValue = (currentEl, currentId) => {
       try {
@@ -1333,6 +1655,7 @@ function VendasPage() {
           }
         }
         // Se não existe próxima linha, cria uma e foca nela
+        payDirtyRef.current = true;
         setPaymentLines(prev => {
           // PERMITIR selecionar o mesmo cliente múltiplas vezes
           // Não filtrar clientes já usados
@@ -1360,55 +1683,43 @@ function VendasPage() {
         try {
           if (!isPayOpen || !selectedTable?.comandaId) return;
 
-          // 1) Carregar rascunhos de pagamentos (status Pendente) do banco
+          // 1) Carregar rascunho e clientes em paralelo
           let draftLines = [];
-          try {
-            const pendentes = await listarPagamentosPorComandaEStatus({ comandaId: selectedTable.comandaId, status: 'Pendente', codigoEmpresa: userProfile?.codigo_empresa });
-            draftLines = Array.isArray(pendentes) ? pendentes : [];
-          } catch {
-            draftLines = [];
-          }
-
-          // 2) Carregar clientes vinculados para resolver nomes
           let normalized = [];
           try {
-            const vinc = await listarClientesDaComanda({ comandaId: selectedTable.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
-            const arr = Array.isArray(vinc) ? vinc : [];
+            const [pendentesRes, vincRes] = await Promise.all([
+              listarPagamentosPorComandaEStatus({ comandaId: selectedTable.comandaId, status: 'Pendente', codigoEmpresa: userProfile?.codigo_empresa }).catch(() => []),
+              listarClientesDaComanda({ comandaId: selectedTable.comandaId, codigoEmpresa: userProfile?.codigo_empresa }).catch(() => [])
+            ]);
+            draftLines = Array.isArray(pendentesRes) ? pendentesRes : [];
+            const arr = Array.isArray(vincRes) ? vincRes : [];
             normalized = arr.map(r => {
               const id = r?.cliente_id ?? r?.clientes?.id ?? r?.id ?? null;
               const nome = r?.clientes?.nome ?? r?.nome ?? r?.nome_livre ?? '';
-              // Incluir consumidores (nome_livre) mesmo sem cliente_id
               if (!id && nome) {
                 return { id: `livre-${r?.id || Math.random()}`, nome };
               }
               return id ? { id, nome } : null;
             }).filter(Boolean);
-          } catch { normalized = []; }
+          } catch {}
           if (!active) return;
           setPayClients(normalized);
 
           // 3) Se houver rascunhos, reconstruir linhas a partir deles
           if (Array.isArray(draftLines) && draftLines.length > 0) {
             const mapped = draftLines.map((pg, idx) => {
-              const totalRecebido = Number(pg.valor || 0); // valor armazenado = total com taxa (se aplicada)
+              const valorBase = Number(pg.valor || 0); // persistido sempre como base (sem taxa)
               const lineId = idx + 1;
-              const lnTmp = {
-                id: lineId,
-                clientId: pg.cliente_id || null,
-                methodId: pg.finalizadora_id || null,
-                chargeFee: true,
-              };
+              // chargeFee ATIVA por padrão para aplicar a taxa na exibição
+              const lnTmp = { id: lineId, clientId: pg.cliente_id || null, methodId: pg.finalizadora_id || null, chargeFee: true };
               const t = taxaForLine(lnTmp);
-              const base = t > 0 ? (totalRecebido / (1 + t)) : totalRecebido;
-              const shown = base * (1 + t);
-              return {
-                ...lnTmp,
-                baseValue: base,
-                value: formatBRL(shown),
-              };
+              const base = valorBase;
+              const shown = (lnTmp.chargeFee !== false) ? (base * (1 + t)) : base;
+              return { ...lnTmp, baseValue: base, value: formatBRL(shown) };
             });
             setPaymentLines(mapped);
             setNextPayLineId(mapped.length + 1);
+            payDirtyRef.current = false;
             return;
           }
 
@@ -1431,6 +1742,7 @@ function VendasPage() {
           const shown = ln0.chargeFee ? (base * (1 + t0)) : base;
           setPaymentLines([{ ...ln0, value: formatBRL(shown) }]);
           setNextPayLineId(2);
+          payDirtyRef.current = false;
         } catch (e) {
           console.error(e);
         }
@@ -1438,18 +1750,21 @@ function VendasPage() {
       boot();
       return () => { active = false; };
       // inclui payMethods para rehidratar linha base quando finalizadoras carregarem
-    }, [isPayOpen, selectedTable?.comandaId, payMethods]);
+    }, [isPayOpen, selectedTable?.comandaId]);
 
     // Persistir rascunho de pagamento no banco enquanto o modal estiver aberto
     useEffect(() => {
       if (!isPayOpen) return;
       if (!selectedTable?.comandaId) return;
       if (!Array.isArray(paymentLines) || paymentLines.length === 0) return;
+      if (!payDirtyRef.current) return; // só salvar rascunho após interação do usuário
 
+      if (draftSaveTimerRef.current) { clearTimeout(draftSaveTimerRef.current); }
       const handle = setTimeout(async () => {
+        if (!payDirtyRef.current) return; // se já salvamos imediatamente, não repetir
         try {
           const linhas = (paymentLines || []).map((ln) => {
-            const v = parseBRL(ln.value);
+            const v = Number(ln.baseValue || 0); // salvar SEMPRE a base no banco
             const fin = (payMethods || []).find(m => String(m.id) === String(ln.methodId));
             const metodoNome = fin?.tipo || fin?.nome || 'outros';
             return {
@@ -1459,14 +1774,17 @@ function VendasPage() {
               valor: v,
             };
           });
+          lastPaymentsWriteAtRef.current = Date.now();
           await salvarRascunhoPagamentosComanda({ comandaId: selectedTable.comandaId, linhas, codigoEmpresa: userProfile?.codigo_empresa });
         } catch (e) {
           console.warn('[PayDialog] Falha ao salvar rascunho de pagamentos (debounced):', e);
         }
       }, 400);
 
+      draftSaveTimerRef.current = handle;
       return () => {
         clearTimeout(handle);
+        if (draftSaveTimerRef.current === handle) draftSaveTimerRef.current = null;
       };
     }, [isPayOpen, selectedTable?.comandaId, paymentLines, payMethods, userProfile?.codigo_empresa]);
 
@@ -1535,10 +1853,16 @@ function VendasPage() {
         // Diferença assinada: >0 cobrando a mais, <0 cobrando a menos
         const diffSigned = totalSum - expected;
         const diffAbs = Math.abs(diffSigned);
+        const currentComandaId = selectedTable.comandaId;
+        const currentTableId = selectedTable.id;
+        // UI otimista: fechar modal e liberar mesa imediatamente
+        setTables((prev) => prev.map((t) => (t.id === currentTableId ? { ...t, status: 'available', order: [], comandaId: null, customer: null, totalHint: 0 } : t)));
+        setSelectedTable((prev) => (prev && prev.id === currentTableId) ? { ...prev, status: 'available', order: [], comandaId: null, customer: null, totalHint: 0 } : prev);
+        setIsPayOpen(false);
         let refreshTotal = total;
         if (refreshTotal <= 0) {
           try {
-            const itens = await listarItensDaComanda({ comandaId: selectedTable.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
+            const itens = await listarItensDaComanda({ comandaId: currentComandaId, codigoEmpresa: userProfile?.codigo_empresa });
             const t = (itens || []).reduce((acc, it) => acc + Number(it.quantidade||0) * Number(it.preco_unitario||0), 0);
             refreshTotal = t;
           } catch {}
@@ -1548,7 +1872,7 @@ function VendasPage() {
         // Garante que o rascunho atual esteja salvo antes de promover para Pago
         try {
           const linhas = (paymentLines || []).map((ln) => {
-            const v = parseBRL(ln.value);
+            const v = Number(ln.baseValue || 0); // salvar SEMPRE a base no banco
             const fin = (payMethods || []).find(m => String(m.id) === String(ln.methodId));
             const metodoNome = fin?.tipo || fin?.nome || 'outros';
             return {
@@ -1558,14 +1882,12 @@ function VendasPage() {
               valor: v,
             };
           });
-          await salvarRascunhoPagamentosComanda({ comandaId: selectedTable.comandaId, linhas, codigoEmpresa });
+          await salvarRascunhoPagamentosComanda({ comandaId: currentComandaId, linhas, codigoEmpresa });
         } catch (e) {
           console.warn('[PayDialog] Falha ao salvar rascunho antes de promover:', e);
         }
-        await promoverPagamentosRascunhoParaPago({ comandaId: selectedTable.comandaId, codigoEmpresa });
-        await fecharComandaEMesa({ comandaId: selectedTable.comandaId, codigoEmpresa: userProfile?.codigo_empresa, diferencaPagamento: diffSigned });
-        setTables((prev) => prev.map((t) => (t.id === selectedTable.id ? { ...t, status: 'available', order: [], comandaId: null, customer: null, totalHint: 0 } : t)));
-        setSelectedTable((prev) => prev ? { ...prev, status: 'available', order: [], comandaId: null, customer: null, totalHint: 0 } : prev);
+        await promoverPagamentosRascunhoParaPago({ comandaId: currentComandaId, codigoEmpresa });
+        await fecharComandaEMesa({ comandaId: currentComandaId, codigoEmpresa: userProfile?.codigo_empresa, diferencaPagamento: diffSigned });
         try { if (userProfile?.codigo_empresa) localStorage.removeItem(`vendas:tables:${userProfile.codigo_empresa}`); } catch {}
         try {
           const mesas = await listMesas(userProfile?.codigo_empresa);
@@ -1589,7 +1911,6 @@ function VendasPage() {
           : ` | Diferença cobrada a menos: R$ ${diffAbs.toFixed(2)}`)
           : '';
         toast({ title: 'Pagamento registrado', description: `Total itens R$ ${refreshTotal.toFixed(2)} | Pagamentos R$ ${totalSum.toFixed(2)}${diffMsg}`, variant: 'success' });
-        setIsPayOpen(false);
       } catch (e) {
         toast({ title: 'Falha ao registrar pagamento', description: e?.message || 'Tente novamente', variant: 'destructive' });
       } finally {
@@ -1613,7 +1934,7 @@ function VendasPage() {
 
     return (
       <Dialog open={isPayOpen} onOpenChange={setIsPayOpen}>
-        <DialogContent className="sm:max-w-xl w-[92vw] max-h-[85vh] animate-none flex flex-col overflow-hidden" onKeyDown={(e) => e.stopPropagation()} onKeyDownCapture={(e) => e.stopPropagation()} onPointerDownOutside={(e) => e.stopPropagation()} onInteractOutside={(e) => e.stopPropagation()}>
+        <DialogContent className="sm:max-w-xl w-[92vw] h-[85vh] animate-none flex flex-col overflow-hidden" onKeyDown={(e) => e.stopPropagation()} onKeyDownCapture={(e) => e.stopPropagation()} onPointerDownOutside={(e) => e.stopPropagation()} onInteractOutside={(e) => e.stopPropagation()}>
           <DialogHeader>
             <DialogTitle className="text-2xl font-bold">Fechar Conta</DialogTitle>
             <DialogDescription>Divida o pagamento entre clientes e várias finalizadoras, se necessário.</DialogDescription>
@@ -1684,7 +2005,7 @@ function VendasPage() {
                 </span>
               </div>
             </div>
-            <div className="flex-1 space-y-2 overflow-y-auto thin-scroll pr-1 max-h-[60vh]">
+            <div className="flex-1 space-y-2 overflow-y-auto thin-scroll pr-1">
               <Label className="block">Pagamentos</Label>
               {(paymentLines || []).map((ln, idx) => {
                 const resolveClientName = (cid) => {
@@ -1702,6 +2023,7 @@ function VendasPage() {
                     <div className="sm:col-span-1 flex sm:justify-start">
                       {paymentLines.length > 1 && idx > 0 && (
                         <Button type="button" variant="outline" size="sm" className="h-8 w-8" onClick={() => {
+                          payDirtyRef.current = true;
                           setPaymentLines(prev => {
                             const newLines = prev.filter(x => x.id !== ln.id);
                             if (newLines.length === 0) return [];
@@ -1743,19 +2065,53 @@ function VendasPage() {
                       </div>
                     )}
                     <div className="sm:col-span-4">
-                      <Select value={ln.methodId || ''} onValueChange={(v) => {
-                        setPaymentLines(prev => prev.map(x => {
+                      <Select value={String(ln.methodId || '')} onValueChange={(v) => {
+                        payDirtyRef.current = true;
+                        // Construir novo estado local imediatamente
+                        const next = (paymentLines || []).map(x => {
                           if (x.id !== ln.id) return x;
-                          const newId = v;
+                          const newId = String(v);
                           const lnNew = { ...x, methodId: newId };
                           const t = taxaForLine(lnNew);
                           const shown = (lnNew.chargeFee !== false) ? (Number(lnNew.baseValue || 0) * (1 + t)) : Number(lnNew.baseValue || 0);
                           return { ...lnNew, value: formatBRL(shown) };
-                        }));
+                        });
+                        setPaymentLines(next);
+                        // Persistir imediatamente no banco (status Pendente) salvando a BASE
+                        try {
+                          const comandaId = selectedTable?.comandaId;
+                          const codigoEmpresa = userProfile?.codigo_empresa;
+                          if (comandaId && codigoEmpresa) {
+                            const linhas = next.map((ln2) => {
+                              const v2 = Number(ln2.baseValue || 0);
+                              const fin2 = (payMethods || []).find(m => String(m.id) === String(ln2.methodId));
+                              const metodoNome2 = fin2?.tipo || fin2?.nome || 'outros';
+                              return {
+                                clienteId: ln2.clientId || null,
+                                finalizadoraId: ln2.methodId || null,
+                                metodo: metodoNome2,
+                                valor: v2,
+                              };
+                            });
+                            lastPaymentsWriteAtRef.current = Date.now();
+                            // salvar em background para não travar UI
+                            salvarRascunhoPagamentosComanda({ comandaId, linhas, codigoEmpresa })
+                              .then(() => { /* ok */ })
+                              .catch((e) => {
+                                console.warn('[PayDialog] Falha ao salvar rascunho após troca de finalizadora (bg):', e);
+                                // reabilita autosave como fallback
+                                payDirtyRef.current = true;
+                              });
+                            // Evitar um autosave duplicado logo após salvar imediatamente
+                            payDirtyRef.current = false;
+                          }
+                        } catch (e) {
+                          console.warn('[PayDialog] Falha ao salvar rascunho após troca de finalizadora:', e);
+                        }
                       }}>
                         <SelectTrigger className="w-full truncate"><SelectValue placeholder="Forma de pagamento" /></SelectTrigger>
                         <SelectContent>
-                          {(payMethods || []).map(m => (<SelectItem key={m.id} value={m.id}>{m.nome}</SelectItem>))}
+                          {(payMethods || []).map(m => (<SelectItem key={String(m.id)} value={String(m.id)}>{m.nome}</SelectItem>))}
                         </SelectContent>
                       </Select>
                     </div>
@@ -1766,6 +2122,7 @@ function VendasPage() {
                           if (el) valueRefs.current.set(ln.id, el); else valueRefs.current.delete(ln.id);
                         }}
                         onChange={(e) => {
+                          payDirtyRef.current = true;
                           const digits = (e.target.value || '').replace(/\D/g, '');
                           const entered = digits ? Number(digits) / 100 : 0;
                           setPaymentLines(prev => prev.map(x => {
@@ -1805,16 +2162,37 @@ function VendasPage() {
                         return (
                           <button
                             type="button"
-                            onClick={() => {
-                              setPaymentLines(prev => prev.map(x => {
+                            onClick={async () => {
+                              payDirtyRef.current = true;
+                              // Construir próximo estado local
+                              const next = (paymentLines || []).map(x => {
                                 if (x.id !== ln.id) return x;
                                 const t = taxaForLine(x);
                                 const wasActive = x.chargeFee !== false;
-                                // Usa baseValue para derivar o exibido
                                 const base = x.baseValue != null ? Number(x.baseValue) : parseBRL(x.value);
                                 const shown = (!wasActive ? (base * (1 + t)) : base);
                                 return { ...x, chargeFee: !wasActive, baseValue: base, value: formatBRL(shown) };
-                              }));
+                              });
+                              setPaymentLines(next);
+                              // Persistir imediatamente salvando a BASE
+                              try {
+                                const comandaId = selectedTable?.comandaId;
+                                const codigoEmpresa = userProfile?.codigo_empresa;
+                                if (comandaId && codigoEmpresa) {
+                                  const linhas = next.map((ln2) => ({
+                                    clienteId: ln2.clientId || null,
+                                    finalizadoraId: ln2.methodId || null,
+                                    metodo: ((payMethods || []).find(m => String(m.id) === String(ln2.methodId))?.tipo) || ((payMethods || []).find(m => String(m.id) === String(ln2.methodId))?.nome) || 'outros',
+                                    valor: Number(ln2.baseValue || 0),
+                                  }));
+                                  lastPaymentsWriteAtRef.current = Date.now();
+                                  await salvarRascunhoPagamentosComanda({ comandaId, linhas, codigoEmpresa });
+                                  // Evitar loop de autosave logo após a gravação imediata
+                                  payDirtyRef.current = false;
+                                }
+                              } catch (e) {
+                                console.warn('[PayDialog] Falha ao salvar rascunho após alternar taxa:', e);
+                              }
                             }}
                             className={[
                               "inline-flex items-center gap-2 px-3 py-1 rounded-sm text-xs font-medium border transition-colors",
@@ -1835,6 +2213,7 @@ function VendasPage() {
               <div>
                 <Button type="button" variant="secondary" size="sm" className="pointer-events-auto"
                   onPointerUp={(e) => { e.preventDefault(); e.stopPropagation();
+                  payDirtyRef.current = true;
                   setPaymentLines(prev => {
                     // PERMITIR selecionar o mesmo cliente múltiplas vezes
                     const pick = (payClients[0]?.id) || '';
@@ -1877,7 +2256,7 @@ function VendasPage() {
               })()}
             </div>
           </div>
-          <DialogFooter>
+          <DialogFooter className="sticky bottom-0 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/75">
             <Button type="button" variant="outline" onClick={() => setIsPayOpen(false)} disabled={payLoading}>Cancelar</Button>
             <Button type="button" onClick={confirmPay} disabled={!((paymentLines && paymentLines.length > 0) && !payLoading)}>
               {payLoading ? 'Processando...' : 'Confirmar Pagamento'}
@@ -2054,6 +2433,7 @@ function VendasPage() {
       if (!itemToRemove) return;
       try {
         await removerItem({ itemId: itemToRemove.id, codigoEmpresa: userProfile?.codigo_empresa });
+        try { await refetchSelectedTableDetails(selectedTable); } catch {}
         toast({ title: 'Item removido', description: itemToRemove.name, variant: 'warning' });
       } catch (e) {
         toast({ title: 'Falha ao remover item', description: e?.message || 'Tente novamente', variant: 'destructive' });
@@ -2419,7 +2799,14 @@ function VendasPage() {
                   <Button
                     size="sm"
                     className="h-8 px-3 rounded-full text-[12px] font-medium leading-none whitespace-nowrap bg-black/60 text-white border border-white/10 shadow-sm hover:bg-black/80 hover:shadow transition-all flex items-center"
-                    onClick={() => setIsManageClientsOpen(true)}
+                    onClick={() => {
+                      setIsManageClientsOpen(true);
+                      try { setIsProductsModalOpen(false); } catch {}
+                      try { setIsProductDetailsOpen(false); } catch {}
+                      try { setIsPayOpen(false); } catch {}
+                      try { setIsMobileModalOpen(false); } catch {}
+                      try { setIsOrderDetailsOpen(false); } catch {}
+                    }}
                   >
                     <Users size={12} className="text-white/80 mr-1.5" />
                     Clientes
@@ -2655,9 +3042,9 @@ function VendasPage() {
       
       // Validar estoque GLOBAL ANTES de adicionar
       const currentStock = Number(prod.stock ?? prod.currentStock ?? 0);
-      const reserved = reservedStock.get(prod.id) || 0;
+      const reserved = reservedStock.get(String(prod.id)) || 0;
       const available = Math.max(0, currentStock - reserved);
-      const currentQtyInOrder = (selectedTable?.order || []).find(it => it.productId === prod.id)?.quantity || 0;
+      const currentQtyInOrder = (selectedTable?.order || []).find(it => String(it.productId) === String(prod.id))?.quantity || 0;
       const newQty = currentQtyInOrder + 1;
       
       if (newQty > available) {
@@ -2671,12 +3058,14 @@ function VendasPage() {
       
       const price = Number(prod.salePrice ?? prod.price ?? 0);
       
-      // Persistir no backend PRIMEIRO
-      const existing = (selectedTable?.order || []).find(it => it.productId === prod.id);
+      // Persistir no backend PRIMEIRO (sempre com base no estado ATUAL do backend para evitar stale)
+      const itensNow = await listarItensDaComanda({ comandaId: selectedTable.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
+      const existing = (itensNow || []).find(it => String(it.produto_id) === String(prod.id));
       let itemResult;
       if (existing) {
-        await atualizarQuantidadeItem({ itemId: existing.id, quantidade: Number(existing.quantity || 1) + 1, codigoEmpresa: userProfile?.codigo_empresa });
-        itemResult = { ...existing, quantity: Number(existing.quantity || 1) + 1 };
+        const currentQty = Number(existing.quantidade || 0);
+        await atualizarQuantidadeItem({ itemId: existing.id, quantidade: currentQty + 1, codigoEmpresa: userProfile?.codigo_empresa });
+        itemResult = { id: existing.id, productId: existing.produto_id, name: existing.descricao || prod.name, price, quantity: currentQty + 1 };
       } else {
         itemResult = await adicionarItem({ comandaId: selectedTable.comandaId, produtoId: prod.id, descricao: prod.name, quantidade: 1, precoUnitario: price, codigoEmpresa: userProfile?.codigo_empresa });
       }
@@ -2701,7 +3090,7 @@ function VendasPage() {
         const itensGlobal = await listarItensDeTodasComandasAbertas({ codigoEmpresa: userProfile?.codigo_empresa });
         const reservedMap = new Map();
         for (const item of itensGlobal || []) {
-          const pid = item.produto_id;
+          const pid = String(item.produto_id);
           const qty = Number(item.quantidade || 0);
           reservedMap.set(pid, (reservedMap.get(pid) || 0) + qty);
         }
@@ -2747,7 +3136,7 @@ function VendasPage() {
       if (statusFilter === 'all') return matchesSearch;
       
       const stock = Number(p.stock ?? p.currentStock ?? 0);
-      const reserved = reservedStock.get(p.id) || 0;
+      const reserved = reservedStock.get(String(p.id)) || 0;
       const remaining = Math.max(0, stock - reserved);
       
       if (statusFilter === 'available') return matchesSearch && remaining > 0;
@@ -2785,9 +3174,11 @@ function VendasPage() {
         setIsProductsModalOpen(open);
         // Manter o contexto em 'panel' enquanto o modal estiver aberto
         setFocusContext(open ? 'panel' : 'tables');
+        if (open) { try { setIsMobileModalOpen(false); } catch {} }
       }}>
         <DialogContent 
-          className="w-[95vw] sm:max-w-4xl max-h-[80vh] sm:max-h-[85vh] flex flex-col p-0 gap-0 focus:outline-none focus-visible:outline-none !overflow-visible"
+          overlayClassName="z-[88]"
+          className="w-[95vw] sm:max-w-4xl max-h-[80vh] sm:max-h-[85vh] flex flex-col p-0 gap-0 focus:outline-none focus-visible:outline-none !overflow-visible z-[89]"
           style={{ scrollBehavior: 'auto' }}
           onOpenAutoFocus={(e) => {
             // Prevenir foco automático que causa scroll subir
@@ -2992,11 +3383,14 @@ function VendasPage() {
                   </Button>
                 </div>
               ) : (
-                <div className="flex flex-col gap-1.5">
+                <div
+                  className="flex flex-col gap-1.5"
+                  key={(selectedTable?.order || []).map(it => `${String(it.productId)}:${Number(it.quantity||0)}`).join('|')}
+                >
                   {filtered.map((prod, idx) => {
-                    const q = qtyByProductId.get(prod.id) || 0;
+                    const q = (selectedTable?.order || []).reduce((acc, it) => acc + (String(it.productId) === String(prod.id) ? Number(it.quantity || 0) : 0), 0);
                     const stock = Number(prod.stock ?? prod.currentStock ?? 0);
-                    const reserved = reservedStock.get(prod.id) || 0;
+                    const reserved = reservedStock.get(String(prod.id)) || 0;
                     const remaining = Math.max(0, stock - reserved);
                     const isFocused = idx === productFocusIndex;
                     const isJustAdded = prod.id === lastAddedProductId;
@@ -3005,9 +3399,7 @@ function VendasPage() {
                       <div
                         key={prod.id}
                         ref={(el) => { 
-                          console.log('[Card ref] Atribuindo ref para idx:', idx, 'prod:', prod.name, 'el:', !!el);
                           productItemRefs.current[idx] = el;
-                          console.log('[Card ref] productItemRefs.current:', productItemRefs.current.length, 'elementos');
                         }}
                         data-product-card
                         className={cn(
@@ -3267,27 +3659,17 @@ function VendasPage() {
            productsListRef.current = el;
            if (el && !el._hasClickHandler) {
              el._hasClickHandler = true;
-             // Capturar TODOS os cliques dentro da área de produtos
+             // Capturar cliques dentro da área de produtos apenas para impedir propagação geral,
+             // sem logar no console em produção.
              el.addEventListener('click', (e) => {
-               console.log('[PRODUCTS CONTAINER] Click captured:', e.target);
-               // NÃO bloquear cliques em botões
                if (e.target.closest('button')) {
-                 console.log('[PRODUCTS CONTAINER] Click is on button, allowing it through');
                  return;
                }
-               // NÃO bloquear cliques no input de busca
                if (e.target.closest('input')) {
-                 console.log('[PRODUCTS CONTAINER] Click is on input, allowing it through');
                  return;
                }
                e.stopPropagation();
-               setFocusContext('panel');
-               // Auto-selecionar primeiro produto se nenhum estiver selecionado
-               if (productFocusIndex === null || productFocusIndex === undefined) {
-                 setProductFocusIndex(0);
-               }
-               // NÃO focar em nada - deixar foco no input naturalmente
-             }, true);
+             });
            }
          }}
          onFocus={(e) => {
@@ -3346,16 +3728,19 @@ function VendasPage() {
        }
      }}
    >
-          <ul className="space-y-2">
+          <ul
+            className="space-y-2"
+            key={(selectedTable?.order || []).map(it => `${String(it.productId)}:${Number(it.quantity||0)}`).join('|')}
+          >
               {filtered.length === 0 ? (
                 <li className="text-center text-text-muted py-8">
                   <div className="mb-3">Nenhum produto encontrado.</div>
                   <Button size="sm" onClick={() => navigate('/produtos')}>Cadastrar Produtos</Button>
                 </li>
               ) : filtered.map((prod, idx) => {
-                  const q = qtyByProductId.get(prod.id) || 0;
+                  const q = (selectedTable?.order || []).reduce((acc, it) => acc + (String(it.productId) === String(prod.id) ? Number(it.quantity || 0) : 0), 0);
                   const stock = Number(prod.stock ?? prod.currentStock ?? 0);
-                  const reserved = reservedStock.get(prod.id) || 0;
+                  const reserved = reservedStock.get(String(prod.id)) || 0;
                   const remaining = Math.max(0, stock - reserved);
                   const handleOpenDetails = () => { setSelectedProduct(prod); setIsProductDetailsOpen(true); setMobileTableTab('products'); };
                   return (
@@ -3388,15 +3773,11 @@ function VendasPage() {
                         size="icon" 
                         className="flex-shrink-0 bg-amber-500 hover:bg-amber-400 text-black border border-amber-500/60"
                         onClick={(e) => { 
-                          console.log('[BUTTON +] Clicked on product:', prod.name);
                           e.preventDefault(); 
                           e.stopPropagation(); 
-                          console.log('[BUTTON +] Calling addProductToComanda...');
                           addProductToComanda(prod);
-                          console.log('[BUTTON +] addProductToComanda called');
                         }}
                         onTouchEnd={(e) => { 
-                          console.log('[BUTTON + TOUCH] Touched on product:', prod.name);
                           e.preventDefault(); 
                           e.stopPropagation(); 
                           addProductToComanda(prod);
@@ -3423,8 +3804,12 @@ function VendasPage() {
   const [counterClients, setCounterClients] = useState([]);
   const [counterClientsLoading, setCounterClientsLoading] = useState(false);
   const [counterSelectedClientId, setCounterSelectedClientId] = useState(null);
+  const [counterLinkedClientIds, setCounterLinkedClientIds] = useState([]);
   const [isCounterProductDetailsOpen, setIsCounterProductDetailsOpen] = useState(false);
   const [selectedCounterProduct, setSelectedCounterProduct] = useState(null);
+  // Ref espelhando counterComandaId para uso em handlers Realtime
+  const counterComandaIdRef = useRef(null);
+  useEffect(() => { counterComandaIdRef.current = counterComandaId; }, [counterComandaId]);
 
   const counterQtyByProductId = useMemo(() => {
     const map = new Map();
@@ -3480,6 +3865,11 @@ function VendasPage() {
     try {
       await adicionarClientesAComanda({ comandaId: counterComandaId, clienteIds: [clientId], nomesLivres: [], codigoEmpresa: userProfile?.codigo_empresa });
       setCounterSelectedClientId(clientId);
+      setCounterLinkedClientIds((prev) => {
+        const set = new Set((prev || []).map(id => String(id)));
+        set.add(String(clientId));
+        return Array.from(set);
+      });
       setCounterSearch('');
       setCounterClients([]);
       toast({ title: 'Cliente associado', variant: 'success' });
@@ -3541,9 +3931,11 @@ function VendasPage() {
           if (cmd?.id) {
             setCounterComandaId(cmd.id);
             await counterReloadItems(cmd.id);
-            // Carregar clientes associados para sincronizar com a visão do Balcão principal
+            // Carregar todos os clientes associados para sincronizar com a visão do Balcão principal
             try {
               const vincs = await listarClientesDaComanda({ comandaId: cmd.id, codigoEmpresa });
+              const ids = (vincs || []).map(v => v?.cliente_id).filter(Boolean).map(id => String(id));
+              setCounterLinkedClientIds(ids);
               const first = Array.isArray(vincs) && vincs.length > 0 ? vincs[0] : null;
               if (first?.cliente_id) {
                 setCounterSelectedClientId(first.cliente_id);
@@ -3624,9 +4016,9 @@ function VendasPage() {
                     }
                     return codeA.localeCompare(codeB);
                   }).map((prod) => {
-            const qty = (counterItems || []).reduce((acc, it) => acc + (it.productId === prod.id ? Number(it.quantity || 0) : 0), 0);
+            const qty = (counterItems || []).reduce((acc, it) => acc + (String(it.productId) === String(prod.id) ? Number(it.quantity || 0) : 0), 0);
             const stock = Number(prod.stock ?? prod.currentStock ?? 0);
-            const reserved = reservedStock.get(prod.id) || 0;
+            const reserved = reservedStock.get(String(prod.id)) || 0;
             const remaining = Math.max(0, stock - reserved);
             return (
               <li key={prod.id} className="flex items-center p-2 rounded-md hover:bg-surface-2 transition-colors" onClick={() => { setSelectedCounterProduct(prod); setIsCounterProductDetailsOpen(true); }}>
@@ -3767,14 +4159,21 @@ function VendasPage() {
                     <div className="p-3 text-sm text-text-muted">Carregando clientes...</div>
                   ) : (counterClients.length > 0 ? (
                     <ul>
-                      {counterClients.map(c => (
-                        <li key={c.id} className={cn('p-2 flex items-center justify-between cursor-pointer hover:bg-surface-2', counterSelectedClientId === c.id && 'bg-surface-2')} onClick={() => addClientToCounter(c.id)}>
-                          <div>
-                            <div className="font-medium">{(c.codigo != null ? String(c.codigo) + ' - ' : '')}{c.nome}</div>
-                          </div>
-                          {counterSelectedClientId === c.id && <CheckCircle size={16} className="text-success" />}
-                        </li>
-                      ))}
+                      {counterClients.map(c => {
+                        const isLinked = Array.isArray(counterLinkedClientIds) && counterLinkedClientIds.includes(String(c.id));
+                        return (
+                          <li
+                            key={c.id}
+                            className={cn('p-2 flex items-center justify-between cursor-pointer hover:bg-surface-2', isLinked && 'bg-surface-2')}
+                            onClick={() => addClientToCounter(c.id)}
+                          >
+                            <div>
+                              <div className="font-medium">{(c.codigo != null ? String(c.codigo) + ' - ' : '')}{c.nome}</div>
+                            </div>
+                            {isLinked && <CheckCircle size={16} className="text-success" />}
+                          </li>
+                        );
+                      })}
                     </ul>
                   ) : (
                     <div className="p-3 text-sm text-text-muted">Nenhum cliente encontrado.</div>
@@ -3795,7 +4194,8 @@ function VendasPage() {
     const fmt = (v) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(v || 0));
     return (
       <Dialog open={isCounterProductDetailsOpen} onOpenChange={(open) => { setIsCounterProductDetailsOpen(open); if (!open) setSelectedCounterProduct(null); }}>
-        <DialogContent overlayClassName="z-[60]" className="sm:max-w-[420px] w-[92vw] max-h-[85vh] flex flex-col animate-none z-[61]" onKeyDown={(e) => e.stopPropagation()} onPointerDownOutside={(e) => e.stopPropagation()} onInteractOutside={(e) => e.stopPropagation()} onEscapeKeyDown={(e) => { e.preventDefault(); e.stopPropagation(); }}>
+        <DialogContent
+          className="sm:max-w-[420px] w-[92vw] max-h-[85vh] flex flex-col animate-none z-[61]" onKeyDown={(e) => e.stopPropagation()} onPointerDownOutside={(e) => e.stopPropagation()} onInteractOutside={(e) => e.stopPropagation()} onEscapeKeyDown={(e) => { e.preventDefault(); e.stopPropagation(); }}>
           <DialogHeader>
             <DialogTitle className="text-xl font-bold break-words" title={prod?.name || ''}>{prod?.name || 'Produto'}</DialogTitle>
             <DialogDescription>Detalhes do produto (Balcão).</DialogDescription>
@@ -3957,8 +4357,6 @@ function VendasPage() {
           nomesLivres.push('Consumidor');
         }
         
-        console.log('[confirmOpen] Chamando adicionarClientesAComanda com:', { comandaId: comanda.id, clienteIds, nomesLivres });
-        
         // SEMPRE limpar clientes antigos da comanda, mesmo se não adicionar novos
         await adicionarClientesAComanda({ 
           comandaId: comanda.id, 
@@ -3976,7 +4374,7 @@ function VendasPage() {
           const nomes = vinculosArray.map(v => v?.nome).filter(Boolean);
           displayName = nomes.length ? nomes.join(', ') : null;
         } catch (err) {
-          console.warn('[confirmOpen] Erro ao buscar vínculos:', err);
+          console.error('[confirmOpen] Erro ao buscar vínculos:', err);
         }
         if (!displayName) {
           const clientIdsArray = Array.isArray(clienteIds) ? clienteIds : [];
@@ -3985,7 +4383,6 @@ function VendasPage() {
             ? clientIdsArray.map(cid => clientsArray.find(c => c.id === cid)?.nome).filter(Boolean).join(', ')
             : (nomesLivres.length > 0 ? nomesLivres.join(', ') : '');
         }
-        console.log('[confirmOpen] displayName calculado:', { displayName, nomesLivres, clienteIds });
         const enriched = { ...pendingTable, comandaId: comanda.id, status: 'in-use', customer: displayName || null, order: [] };
         setSelectedTable(enriched);
         setTables(prev => prev.map(t => t.id === enriched.id ? enriched : t));
@@ -4009,7 +4406,6 @@ function VendasPage() {
               const nomesArray = Array.isArray(vincs) ? vincs : [];
               const nomes = nomesArray.map(v => v?.nome).filter(Boolean);
               namesByComanda[c.id] = nomes.length ? nomes.join(', ') : null;
-              console.log('[confirmOpen] Clientes da comanda', c.id, ':', { vincs, nomes, resultado: namesByComanda[c.id] });
               
               // Calcular total da comanda
               const itens = await listarItensDaComanda({ comandaId: c.id, codigoEmpresa: userProfile?.codigo_empresa });
@@ -4021,7 +4417,7 @@ function VendasPage() {
               totalsByComanda[c.id] = total;
               
             } catch (err) { 
-              console.warn('[confirmOpen] Erro ao buscar dados da comanda:', err);
+              console.error('[confirmOpen] Erro ao buscar dados da comanda:', err);
               namesByComanda[c.id] = null;
               totalsByComanda[c.id] = 0;
             }
@@ -4057,15 +4453,7 @@ function VendasPage() {
         setShowConsumidorControls(false);
         toast({ title: 'Mesa aberta', description: displayName ? `Comanda criada para: ${displayName}` : 'Comanda criada.', variant: 'success' });
       } catch (e) {
-        try {
-          console.error('[confirmOpen] Falha ao abrir mesa:', e?.message || e, e?.stack);
-          console.log('[confirmOpen] Contexto debug:', {
-            pendingTable,
-            consumidorCount,
-            selectedClientIds,
-            clienteIdsType: Array.isArray(selectedClientIds),
-          });
-        } catch {}
+        console.error('[confirmOpen] Falha ao abrir mesa:', e?.message || e, e?.stack);
         toast({ title: 'Falha ao abrir mesa', description: e?.message || 'Tente novamente', variant: 'destructive' });
       }
     };
@@ -4693,7 +5081,6 @@ function VendasPage() {
     const [pendingChanges, setPendingChanges] = useState(new Set());
     const initialLinkedRef = useRef([]);
     const loadedRef = useRef(false);
-    const isDirtyRef = useRef(false);
     const [localFocusIndex, setLocalFocusIndex] = useState(0);
     const itemRefs = useRef([]);
     const listboxRef = useRef(null);
@@ -4704,82 +5091,104 @@ function VendasPage() {
     const [editingConsumidorName, setEditingConsumidorName] = useState('');
 
     useEffect(() => {
-    let active = true;
-    const load = async () => {
-      if (!isManageClientsOpen || !selectedTable?.comandaId) return;
-      
-      // Evitar recarregar se já carregou (exceto se mudou a busca)
-      if (loadedRef.current && localSearch === '') return;
-      
-      try {
-        setLocalLoading(true);
-          // Carregar clientes vinculados à comanda (retorna {id, tipo, nome, cliente_id})
+      let active = true;
+      const load = async () => {
+        if (!isManageClientsOpen || !selectedTable?.comandaId) return;
+
+        if (loadedRef.current && localSearch === '') return;
+
+        try {
+          setLocalLoading(true);
           const vincs = await listarClientesDaComanda({ comandaId: selectedTable.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
           if (!active) return;
-          console.log('[ManageClientsDialog] Clientes da comanda:', vincs);
-          // Mapear para formato interno: {id, cliente_id, nome, tipo}
           const linked = (vincs || []).map(v => ({
-            id: v.id, // ID do registro em comanda_clientes
+            id: v.id,
             cliente_id: v.cliente_id,
             nome: v.nome || '',
             tipo: v.tipo || (v.cliente_id ? 'cadastrado' : 'livre')
           }));
-          console.log('[ManageClientsDialog] Linked mapeado:', linked);
-          // Só reseta o estado local se não houver rascunho/alterações pendentes
-          if (!isDirtyRef.current) {
-            setLocalLinked(linked);
-            initialLinkedRef.current = JSON.parse(JSON.stringify(linked));
-            setPendingChanges(new Set());
-          }
-          // Carregar lista de clientes disponíveis
-          const rows = await listarClientes({ searchTerm: localSearch, limit: 50 });
-        if (!active) return;
-        const sorted = (rows || []).slice().sort((a, b) => Number(a?.codigo || 0) - Number(b?.codigo || 0));
-        setLocalClients(sorted);
-        // definir foco inicial no primeiro item para navegação por setas
-        setLocalFocusIndex(0);
-        loadedRef.current = true;
+          setLocalLinked(linked);
+          initialLinkedRef.current = JSON.parse(JSON.stringify(linked));
+          setPendingChanges(new Set());
+          const rows = await listarClientes({ searchTerm: localSearch, limit: 50, codigoEmpresa: userProfile?.codigo_empresa });
+          if (!active) return;
+          const sorted = (rows || []).slice().sort((a, b) => Number(a?.codigo || 0) - Number(b?.codigo || 0));
+          setLocalClients(sorted);
+          setLocalFocusIndex(0);
+          loadedRef.current = true;
         } catch (e) {
           console.error('Erro ao carregar clientes:', e);
         } finally {
           if (active) setLocalLoading(false);
         }
       };
-      
-      // Carregar apenas quando o modal abre pela primeira vez
+
       if (!isManageClientsOpen) {
         loadedRef.current = false;
         setLocalSearch('');
         return () => { active = false; };
       }
-      
+
       load();
       return () => { active = false; };
     }, [isManageClientsOpen, selectedTable?.comandaId]);
 
-    // Mantém um espelho se o diálogo está "sujo" (com alterações pendentes)
     useEffect(() => {
-      isDirtyRef.current = pendingChanges.size > 0;
-    }, [pendingChanges]);
+      if (isManageClientsOpen && Array.isArray(localClients) && localClients.length > 0) {
+        setLocalFocusIndex(0);
+        setTimeout(() => {
+          try {
+            const dialogContent = document.querySelector('[role="dialog"]');
+            if (dialogContent) {
+              const scrollableDiv = dialogContent.querySelector('.overflow-y-auto');
+              if (scrollableDiv) scrollableDiv.scrollTop = 0;
+            }
+          } catch {}
+        }, 0);
+      }
+    }, [isManageClientsOpen, localClients.length]);
 
-  // Foco inicial quando o modal abre e há clientes carregados
-  useEffect(() => {
-    if (isManageClientsOpen && Array.isArray(localClients) && localClients.length > 0) {
-      setLocalFocusIndex(0);
-      // Scroll para o topo do modal ao abrir
-      setTimeout(() => { 
-        try { 
-          const dialogContent = document.querySelector('[role="dialog"]');
-          if (dialogContent) {
-            const scrollableDiv = dialogContent.querySelector('.overflow-y-auto');
-            if (scrollableDiv) scrollableDiv.scrollTop = 0;
-          }
-        } catch {} 
-      }, 0);
-    }
-  }, [isManageClientsOpen, localClients.length]);
+    // Registrar refs globais para sincronização via Realtime (multi-device)
+    useEffect(() => {
+      if (isManageClientsOpen && selectedTable?.comandaId) {
+        manageClientsOpenRef.current = true;
+        manageClientsComandaRef.current = selectedTable.comandaId;
+        // Setter que também mantém os nomes sincronizados nos cards/mesa selecionada
+        manageClientsSetLinkedRef.current = (next) => {
+          setLocalLinked(next || []);
+          syncCustomerNames(next || []);
+        };
+      } else if (!isManageClientsOpen) {
+        // Ao fechar o modal, limpar refs se ainda apontarem para esta comanda
+        if (manageClientsOpenRef.current && manageClientsComandaRef.current === selectedTable?.comandaId) {
+          manageClientsOpenRef.current = false;
+          manageClientsComandaRef.current = null;
+          manageClientsSetLinkedRef.current = null;
+        }
+      }
+      return () => {
+        if (!isManageClientsOpen) {
+          manageClientsOpenRef.current = false;
+          manageClientsComandaRef.current = null;
+          manageClientsSetLinkedRef.current = null;
+        }
+      };
+    }, [isManageClientsOpen, selectedTable?.comandaId]);
+
+    const syncCustomerNames = (nextLinked) => {
+      try {
+        if (!selectedTable?.id) return;
+        const names = (nextLinked || []).map(l => l?.nome).filter(Boolean);
+        const customerStr = names.length ? names.join(', ') : null;
+        setSelectedTable(prev => (prev && prev.id === selectedTable.id) ? { ...prev, customer: customerStr } : prev);
+        setTables(prev => prev.map(t => (t.id === selectedTable.id ? { ...t, customer: customerStr } : t)));
+      } catch (e) {
+        console.error('[ManageClientsDialog] Erro ao sincronizar nomes na mesa:', e);
+      }
+    };
 
     const addConsumidor = () => {
+      try { console.log('[ManageClientsDialog] addConsumidor clicado'); } catch {}
       if (!selectedTable?.comandaId) return;
       (async () => {
         try {
@@ -4793,26 +5202,23 @@ function VendasPage() {
             })
             .select('id, cliente_id, nome_livre')
             .single();
-          if (error) {
-            throw error;
-          }
+          if (error) throw error;
           const newEntry = {
-            id: data.id, // ID real do vínculo em comanda_clientes
+            id: data.id,
             cliente_id: data.cliente_id,
             nome: data.nome_livre || 'Consumidor',
             tipo: 'livre'
           };
-          setLocalLinked(prev => [...prev, newEntry]);
-          // Abrir edição imediatamente
+          setLocalLinked(prev => {
+            const next = [...prev, newEntry];
+            syncCustomerNames(next);
+            return next;
+          });
           setEditingConsumidorId(newEntry.id);
           setEditingConsumidorName(newEntry.nome || 'Consumidor');
         } catch (e) {
           console.error('[ManageClientsDialog] Erro ao adicionar consumidor:', e);
-          toast({
-            title: 'Falha ao adicionar consumidor',
-            description: e?.message || 'Tente novamente',
-            variant: 'destructive',
-          });
+          toast({ title: 'Falha ao adicionar consumidor', description: e?.message || 'Tente novamente', variant: 'destructive' });
         } finally {
           setLocalLoading(false);
         }
@@ -4820,6 +5226,7 @@ function VendasPage() {
     };
 
     const addClientFromModal = (clientId) => {
+      try { console.log('[ManageClientsDialog] addClientFromModal clicado:', clientId); } catch {}
       if (!selectedTable?.comandaId) return;
       const client = localClients.find(c => c.id === clientId);
       if (!client) return;
@@ -4835,24 +5242,22 @@ function VendasPage() {
             })
             .select('id, cliente_id')
             .single();
-          if (error) {
-            throw error;
-          }
+          if (error) throw error;
           const newEntry = {
             id: data.id,
             cliente_id: data.cliente_id,
             nome: client.nome,
             tipo: 'cadastrado'
           };
-          setLocalLinked(prev => [...prev, newEntry]);
+          setLocalLinked(prev => {
+            const next = [...prev, newEntry];
+            syncCustomerNames(next);
+            return next;
+          });
           setIsAddClientModalOpen(false);
         } catch (e) {
           console.error('[ManageClientsDialog] Erro ao adicionar cliente:', e);
-          toast({
-            title: 'Falha ao adicionar cliente',
-            description: e?.message || 'Tente novamente',
-            variant: 'destructive',
-          });
+          toast({ title: 'Falha ao adicionar cliente', description: e?.message || 'Tente novamente', variant: 'destructive' });
         } finally {
           setLocalLoading(false);
         }
@@ -4860,36 +5265,50 @@ function VendasPage() {
     };
 
     const replaceClient = (linkedId, newClientId) => {
-      if (!selectedTable?.comandaId) return;
       const client = localClients.find(c => c.id === newClientId);
       if (!client) return;
-      const existing = localLinked.find(l => l.id === linkedId);
-      if (!existing) return;
+      const oldLink = localLinked.find(l => l.id === linkedId);
+      if (!oldLink) return;
       (async () => {
         try {
           setLocalLoading(true);
-          const { error } = await supabase
-            .from('comanda_clientes')
-            .update({ cliente_id: newClientId })
-            .eq('id', linkedId)
-            .eq('codigo_empresa', userProfile?.codigo_empresa);
-          if (error) {
-            throw error;
+          if (String(linkedId).startsWith('temp-')) {
+            const { data, error } = await supabase
+              .from('comanda_clientes')
+              .insert({
+                comanda_id: selectedTable.comandaId,
+                cliente_id: newClientId,
+                codigo_empresa: userProfile?.codigo_empresa,
+              })
+              .select('id, cliente_id')
+              .single();
+            if (error) throw error;
+            const newEntry = { id: data.id, cliente_id: data.cliente_id, nome: client.nome, tipo: 'cadastrado' };
+            setLocalLinked(prev => {
+              const next = [...prev.filter(l => l.id !== linkedId), newEntry];
+              syncCustomerNames(next);
+              return next;
+            });
+          } else {
+            const { error } = await supabase
+              .from('comanda_clientes')
+              .update({ cliente_id: newClientId, nome_livre: null })
+              .eq('id', linkedId)
+              .eq('codigo_empresa', userProfile?.codigo_empresa);
+            if (error) throw error;
+            setLocalLinked(prev => {
+              const next = prev.map(l => (
+                l.id === linkedId ? { ...l, cliente_id: newClientId, nome: client.nome, tipo: 'cadastrado' } : l
+              ));
+              syncCustomerNames(next);
+              return next;
+            });
           }
-          setLocalLinked(prev => prev.map(l =>
-            l.id === linkedId
-              ? { ...l, cliente_id: newClientId, nome: client.nome, tipo: 'cadastrado' }
-              : l
-          ));
           setEditingClientId(null);
           setIsAddClientModalOpen(false);
         } catch (e) {
           console.error('[ManageClientsDialog] Erro ao trocar cliente:', e);
-          toast({
-            title: 'Falha ao trocar cliente',
-            description: e?.message || 'Tente novamente',
-            variant: 'destructive',
-          });
+          toast({ title: 'Falha ao trocar cliente', description: e?.message || 'Tente novamente', variant: 'destructive' });
         } finally {
           setLocalLoading(false);
         }
@@ -4897,22 +5316,40 @@ function VendasPage() {
     };
 
     const toggleClient = (clientId) => {
-      // Mantido apenas para compatibilidade futura; atualmente não é usado na UI.
       if (!selectedTable?.comandaId) return;
+
       const existing = localLinked.find(l => l.cliente_id === clientId && l.tipo === 'cadastrado');
+
       if (existing) {
-        removeLinked(existing.id);
+        setLocalLinked(prev => prev.filter(l => l.id !== existing.id));
       } else {
-        addClientFromModal(clientId);
+        const client = localClients.find(c => c.id === clientId);
+        if (!client) return;
+        const newEntry = {
+          id: `temp-${Date.now()}`,
+          cliente_id: clientId,
+          nome: client.nome,
+          tipo: 'cadastrado'
+        };
+        setLocalLinked(prev => [...prev, newEntry]);
       }
+
+      setPendingChanges(prev => new Set([...prev, clientId]));
     };
 
     const removeLinked = (linkedId) => {
       const entry = localLinked.find(l => l.id === linkedId);
       if (!entry) return;
-      // Atualiza UI imediatamente
-      setLocalLinked(prev => prev.filter(l => l.id !== linkedId));
-      if (!selectedTable?.comandaId || String(linkedId).startsWith('temp-')) return;
+      // IDs temporários só existem no estado local: remover imediatamente
+      if (String(linkedId).startsWith('temp-') || !selectedTable?.comandaId) {
+        setLocalLinked(prev => {
+          const next = prev.filter(l => l.id !== linkedId);
+          syncCustomerNames(next);
+          return next;
+        });
+        return;
+      }
+
       (async () => {
         try {
           setLocalLoading(true);
@@ -4921,18 +5358,16 @@ function VendasPage() {
             .delete()
             .eq('id', linkedId)
             .eq('codigo_empresa', userProfile?.codigo_empresa);
-          if (error) {
-            throw error;
-          }
+          if (error) throw error;
+          // Só depois do delete bem-sucedido removemos localmente
+          setLocalLinked(prev => {
+            const next = prev.filter(l => l.id !== linkedId);
+            syncCustomerNames(next);
+            return next;
+          });
         } catch (e) {
           console.error('[ManageClientsDialog] Erro ao remover cliente:', e);
-          toast({
-            title: 'Falha ao remover cliente',
-            description: e?.message || 'Tente novamente',
-            variant: 'destructive',
-          });
-          // Tentar restaurar entrada removida em caso de erro
-          setLocalLinked(prev => [...prev, entry]);
+          toast({ title: 'Falha ao remover cliente', description: e?.message || 'Tente novamente', variant: 'destructive' });
         } finally {
           setLocalLoading(false);
         }
@@ -4940,6 +5375,7 @@ function VendasPage() {
     };
 
     const startEditConsumidor = (linkedId) => {
+      try { console.log('[ManageClientsDialog] startEditConsumidor clicado:', linkedId); } catch {}
       const entry = localLinked.find(l => l.id === linkedId);
       if (entry) {
         setEditingConsumidorId(linkedId);
@@ -4953,130 +5389,42 @@ function VendasPage() {
       (async () => {
         try {
           setLocalLoading(true);
-          const { error } = await supabase
-            .from('comanda_clientes')
-            .update({ nome_livre: nome })
-            .eq('id', editingConsumidorId)
-            .eq('codigo_empresa', userProfile?.codigo_empresa);
-          if (error) {
-            throw error;
+          if (!String(editingConsumidorId).startsWith('temp-')) {
+            const { error } = await supabase
+              .from('comanda_clientes')
+              .update({ nome_livre: nome })
+              .eq('id', editingConsumidorId)
+              .eq('codigo_empresa', userProfile?.codigo_empresa);
+            if (error) throw error;
           }
-          setLocalLinked(prev =>
-            prev.map(l => (l.id === editingConsumidorId ? { ...l, nome } : l))
-          );
+          setLocalLinked(prev => {
+            const next = prev.map(l => (
+              l.id === editingConsumidorId ? { ...l, nome } : l
+            ));
+            syncCustomerNames(next);
+            return next;
+          });
         } catch (e) {
           console.error('[ManageClientsDialog] Erro ao salvar consumidor:', e);
-          toast({
-            title: 'Falha ao salvar cliente',
-            description: e?.message || 'Tente novamente',
-            variant: 'destructive',
-          });
+          toast({ title: 'Falha ao salvar cliente', description: e?.message || 'Tente novamente', variant: 'destructive' });
         } finally {
+          setLocalLoading(false);
           setEditingConsumidorId(null);
           setEditingConsumidorName('');
-          setLocalLoading(false);
         }
       })();
     };
 
     const confirmChanges = async () => {
-      if (!selectedTable?.comandaId) {
-        setIsManageClientsOpen(false);
-        return;
-      }
-
-      // Se não houver mudanças, apenas fechar
-      if (pendingChanges.size === 0) {
-        setIsManageClientsOpen(false);
-        return;
-      }
-
-      setLocalLoading(true);
-      try {
-        
-        // Comparar estado atual com inicial
-        const initialIds = initialLinkedRef.current.map(l => l.id);
-        const currentIds = localLinked.map(l => l.id);
-        
-        // Remover clientes que não estão mais na lista
-        const toRemove = initialLinkedRef.current.filter(l => !currentIds.includes(l.id));
-        for (const entry of toRemove) {
-          // Se tem ID real (não temporário), deletar do banco
-          if (!String(entry.id).startsWith('temp-')) {
-            const { error } = await supabase
-              .from('comanda_clientes')
-              .delete()
-              .eq('id', entry.id)
-              .eq('codigo_empresa', userProfile?.codigo_empresa);
-            
-            if (error) {
-              console.error('[confirmChanges] Erro ao remover:', error);
-              throw error;
-            }
-          }
-        }
-        
-        // Adicionar/atualizar clientes
-        const toAdd = localLinked.filter(l => String(l.id).startsWith('temp-'));
-        const toUpdate = localLinked.filter(l => {
-          if (String(l.id).startsWith('temp-')) return false;
-          if (l.tipo !== 'livre') return false; // só atualiza nome_livre para consumidores
-          const initial = initialLinkedRef.current.find(i => i.id === l.id);
-          return initial && initial.nome !== l.nome;
-        });
-        
-        // Inserir novos
-        if (toAdd.length > 0) {
-          const clienteIds = toAdd.filter(l => l.tipo === 'cadastrado').map(l => l.cliente_id);
-          const nomesLivres = toAdd.filter(l => l.tipo === 'livre').map(l => l.nome);
-          
-          console.log('[confirmChanges] Adicionando:', { clienteIds, nomesLivres });
-          
-          await adicionarClientesAComanda({
-            comandaId: selectedTable.comandaId,
-            clienteIds,
-            nomesLivres,
-            codigoEmpresa: userProfile?.codigo_empresa
-          });
-        }
-        
-        // Atualizar nomes editados
-        for (const entry of toUpdate) {
-          const { error } = await supabase
-            .from('comanda_clientes')
-            .update({ nome_livre: entry.nome })
-            .eq('id', entry.id)
-            .eq('codigo_empresa', userProfile?.codigo_empresa);
-          
-          if (error) {
-            console.error('[confirmChanges] Erro ao atualizar:', error);
-            throw error;
-          }
-        }
-        
-        console.log('[confirmChanges] Operações concluídas, atualizando mesa');
-        
-        // Atualizar mesa e aguardar
-        await refetchSelectedTableDetails(selectedTable);
-        
-        // Atualizar também a lista de mesas
-        await refreshTablesLight({ showToast: false });
-        
-        toast({ title: 'Clientes atualizados', variant: 'success' });
-      } catch (err) {
-        console.error('[confirmChanges] Erro:', err);
-        toast({ title: 'Falha ao atualizar clientes', description: err?.message || 'Tente novamente', variant: 'destructive' });
-      } finally {
-        setLocalLoading(false);
-      }
+      setIsManageClientsOpen(false);
     };
 
     return (
       <Dialog open={isManageClientsOpen} onOpenChange={setIsManageClientsOpen}>
-        <DialogContent 
-          className="sm:max-w-[480px] w-[92vw] max-h-[85vh] h-[85vh] animate-none flex flex-col overflow-hidden" 
+        <DialogContent
+          className="sm:max-w-[480px] w-[92vw] max-h-[85vh] h-[85vh] animate-none flex flex-col overflow-hidden"
           onOpenAutoFocus={(e) => e.preventDefault()}
-          onPointerDownOutside={(e) => { e.preventDefault(); e.stopPropagation(); }} 
+          onPointerDownOutside={(e) => { e.preventDefault(); e.stopPropagation(); }}
           onInteractOutside={(e) => { e.preventDefault(); e.stopPropagation(); }}
           onEscapeKeyDown={(e) => e.preventDefault()}
         >
@@ -5085,14 +5433,9 @@ function VendasPage() {
             <DialogDescription>Gerencie os clientes vinculados a esta mesa.</DialogDescription>
           </DialogHeader>
           <div className="flex-1 overflow-y-auto min-h-0 space-y-4 thin-scroll">
-            {/* Clientes vinculados */}
             <div className="space-y-2">
               <div className="text-sm font-medium text-text-primary">Clientes vinculados ({localLinked.length}):</div>
-              {localLoading && localLinked.length === 0 ? (
-                <div className="p-4 text-center text-sm text-text-muted border border-dashed rounded-md">
-                  Carregando clientes da mesa...
-                </div>
-              ) : localLinked.length === 0 ? (
+              {localLinked.length === 0 ? (
                 <div className="p-4 text-center text-sm text-text-muted border border-dashed rounded-md">
                   Nenhum cliente vinculado ainda
                 </div>
@@ -5103,8 +5446,8 @@ function VendasPage() {
                     const isEditing = editingConsumidorId === entry.id;
                     return (
                       <div key={entry.id} className={cn(
-                        "flex items-center gap-2 p-2 rounded-md border",
-                        isConsumidor ? "bg-amber-500/10 border-amber-500/30" : "bg-surface-2 border-border"
+                        'flex items-center gap-2 p-2 rounded-md border',
+                        isConsumidor ? 'bg-amber-500/10 border-amber-500/30' : 'bg-surface-2 border-border'
                       )}>
                         {isEditing ? (
                           <>
@@ -5126,10 +5469,10 @@ function VendasPage() {
                         ) : (
                           <>
                             <div 
-                              className={cn("flex-1 text-sm truncate p-1 rounded",
-                                isConsumidor ? "cursor-pointer hover:bg-amber-500/10" : "cursor-default")}
+                              className={cn('flex-1 text-sm truncate p-1 rounded',
+                                isConsumidor ? 'cursor-pointer hover:bg-amber-500/10' : 'cursor-default')}
                               onClick={() => isConsumidor && startEditConsumidor(entry.id)}
-                              title={isConsumidor ? "Clique para editar" : ""}
+                              title={isConsumidor ? 'Clique para editar' : ''}
                             >
                               <span>{entry.nome}</span>
                               {isConsumidor && (
@@ -5160,8 +5503,6 @@ function VendasPage() {
                 </div>
               )}
             </div>
-            
-            {/* Botão de ação */}
             <Button 
               onClick={() => { setEditingClientId(null); setIsAddClientModalOpen(true); }} 
               className="w-full"
@@ -5174,12 +5515,17 @@ function VendasPage() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsManageClientsOpen(false)} disabled={localLoading}>Cancelar</Button>
             <Button onClick={confirmChanges} disabled={localLoading}>
-              {localLoading ? 'Salvando...' : `Confirmar ${pendingChanges.size > 0 ? `(${pendingChanges.size} alterações)` : ''}`}
+              {localLoading
+                ? 'Salvando...'
+                : `Confirmar ${
+                    pendingChanges.size > 0
+                      ? `(${pendingChanges.size} alterações)`
+                      : ''
+                  }`}
             </Button>
           </DialogFooter>
         </DialogContent>
-        
-        {/* Modal aninhado para seleção de cliente */}
+
         <Dialog open={isAddClientModalOpen} onOpenChange={setIsAddClientModalOpen}>
           <DialogContent className="sm:max-w-[500px] max-h-[80vh] flex flex-col">
             <DialogHeader>
@@ -5196,12 +5542,13 @@ function VendasPage() {
                   onChange={(e) => setLocalSearch(e.target.value)}
                 />
               </div>
-              <div className="flex-1 border rounded-md overflow-y-auto thin-scroll"
-              role="listbox"
-              aria-label="Clientes disponíveis"
-              ref={listboxRef}
-              tabIndex={0}
->
+              <div
+                className="flex-1 border rounded-md overflow-y-auto thin-scroll"
+                role="listbox"
+                aria-label="Clientes disponíveis"
+                ref={listboxRef}
+                tabIndex={0}
+              >
                 {localLoading ? (
                   <div className="p-4 text-center text-text-muted">Carregando...</div>
                 ) : localClients.length === 0 ? (
@@ -5215,12 +5562,11 @@ function VendasPage() {
                         <li
                           key={client.id}
                           className={cn(
-                            "p-3 cursor-pointer transition-colors flex items-center justify-between",
-                            isConsumidor ? "bg-amber-500/5 hover:bg-amber-500/10" : "hover:bg-surface-2"
+                            'p-3 cursor-pointer transition-colors flex items-center justify-between',
+                            isConsumidor ? 'bg-amber-500/5 hover:bg-amber-500/10' : 'hover:bg-surface-2'
                           )}
                           onClick={() => {
                             if (isConsumidor) {
-                              // Adicionar consumidor
                               if (editingClientId) {
                                 setEditingClientId(null);
                                 setIsAddClientModalOpen(false);
@@ -5229,7 +5575,6 @@ function VendasPage() {
                                 setIsAddClientModalOpen(false);
                               }
                             } else {
-                              // Cliente cadastrado
                               if (editingClientId) {
                                 replaceClient(editingClientId, client.id);
                               } else {
@@ -5263,7 +5608,9 @@ function VendasPage() {
               </div>
             </div>
             <DialogFooter>
-              <Button variant="outline" onClick={() => setIsAddClientModalOpen(false)}>Cancelar</Button>
+              <Button variant="outline" onClick={() => setIsAddClientModalOpen(false)}>
+                Cancelar
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -5428,6 +5775,7 @@ function VendasPage() {
             setSelectedItemForDesconto(null);
             if (val === 'products' && selectedTable) {
               setIsProductsModalOpen(true);
+              try { setIsMobileModalOpen(false); } catch {}
               setMobileTableTab('order'); // Voltar para comanda
             }
           }} className="flex flex-col flex-1 min-h-0">
@@ -5437,6 +5785,7 @@ function VendasPage() {
               <TabsTrigger value="products" className="text-sm flex items-center justify-center gap-2" onClick={() => {
                 if (selectedTable) {
                   setIsProductsModalOpen(true);
+                  try { setIsMobileModalOpen(false); } catch {}
                 }
               }}>
                 Produtos
@@ -5721,7 +6070,7 @@ function VendasPage() {
       <CashierDetailsDialog open={isCashierDetailsOpen} onOpenChange={setIsCashierDetailsOpen} cashSummary={cashSummary} />
       <MemoizedOrderDetailsDialog />
       <RemoveItemConfirmDialog />
-      <ManageClientsDialog />
+      {isManageClientsOpen ? <ManageClientsDialog /> : null}
       <OpenTableDialog />
       <CreateMesaDialog />
       {/* Warning banner (always-on overlay, mobile-focused) */}
@@ -5767,7 +6116,14 @@ function VendasPage() {
         />
       )}
       
-      {useMemo(() => <ProductsModal />, [isProductsModalOpen, selectedTable?.id])}
+      {useMemo(
+        () => (
+          <ProductsModal
+            key={(selectedTable?.order || []).map(it => `${String(it.productId)}:${Number(it.quantity||0)}`).join('|')}
+          />
+        ),
+        [isProductsModalOpen, selectedTable?.id, selectedTable?.order]
+      )}
     </>
   );
 }

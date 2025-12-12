@@ -135,3 +135,32 @@ if (typeof window !== 'undefined') {
   try { window.__SUPABASE_URL = supabaseUrl } catch {}
   try { window.__SUPABASE_KEY = supabaseAnonKey } catch {}
 }
+
+try {
+  if (typeof window !== 'undefined') {
+    const applyRealtimeAuth = () => {
+      try {
+        const c = localStorage.getItem('custom-auth-token')
+        if (c && c.trim()) { supabase.realtime.setAuth(c.trim()); return }
+        let ref = ''
+        try { const u = new URL(supabaseUrl); const h = u.host || ''; ref = (h.split('.')[0] || '') } catch {}
+        const k = ref ? `sb-${ref}-auth-token` : 'sb-auth-token'
+        const raw = localStorage.getItem(k)
+        if (raw) {
+          const p = JSON.parse(raw)
+          const t = p?.access_token || p?.currentSession?.access_token
+          if (t) { supabase.realtime.setAuth(t) }
+        }
+      } catch {}
+    }
+    applyRealtimeAuth()
+    try {
+      window.addEventListener('storage', (e) => {
+        try {
+          const key = e?.key || ''
+          if (key === 'custom-auth-token' || key.startsWith('sb-')) { applyRealtimeAuth() }
+        } catch {}
+      })
+    } catch {}
+  }
+} catch {}

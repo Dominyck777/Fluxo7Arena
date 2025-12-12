@@ -39,14 +39,15 @@ function getAuthStorageKey() {
 
 // Obtém o access_token do usuário autenticado com timeout
 async function getAccessToken() {
-  // 0) Custom JWT from localStorage (DEV custom auth)
+  // 0) Token custom (DEV)
   try {
     const custom = localStorage.getItem('custom-auth-token')
     if (custom && custom.trim()) {
       return custom.trim()
     }
   } catch {}
-  // 1) Tenta via auth.getSession() com timeout de 1s
+
+  // 1) Via auth.getSession() com timeout de 1s
   try {
     // eslint-disable-next-line no-undef
     if (typeof supabaseWrapper !== 'undefined' && supabaseWrapper?.auth?.getSession) {
@@ -65,7 +66,7 @@ async function getAccessToken() {
     console.debug('[Supabase Wrapper] getSession falhou ou timeout:', e.message)
   }
 
-  // 2) Fallback: lê do localStorage usando a chave baseada no ref do projeto
+  // 2) Fallback: lê do localStorage (sb-*) usando a chave baseada no ref do projeto
   try {
     const key = getAuthStorageKey()
     const raw = localStorage.getItem(key)
@@ -114,7 +115,6 @@ const supabaseFetch = async (endpoint, options = {}) => {
   
   const headers = {
     'apikey': anonKey,
-    'Authorization': `Bearer ${anonKey}`,
     'Content-Type': 'application/json',
     'Prefer': 'return=representation',
     ...customHeaders,
