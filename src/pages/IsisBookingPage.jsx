@@ -1821,7 +1821,6 @@ const IsisBookingPageContent = () => {
           }]
         : [];
 
-    const vistos = new Set();
     const resultado = [];
 
     const editing = Boolean(selections?.editing_agendamento);
@@ -1831,41 +1830,33 @@ const IsisBookingPageContent = () => {
       let principal = baseLista.find(p => p.principal) || (selfName && cliente ? { nome: selfName, cliente_id: cliente.id, principal: true } : null);
       // 2) constrói lista apenas com principal, se houver
       if (principal) {
-        const key = canonicalKey(principal.nome);
-        vistos.add(key);
         resultado.push({ ...principal, principal: true });
       }
-      // 3) adiciona apenas os importados, únicos e sem o principal
+      // 3) adiciona todos os importados (mantém duplicados), exceto o próprio usuário
       nomes.forEach((n) => {
         const nomeStr = String(n || '').trim();
         if (!nomeStr) return;
-        const key = canonicalKey(nomeStr);
-        if (!key || vistos.has(key)) return;
-        if (selfKey && key === selfKey) return;
-        vistos.add(key);
+        const k = canonicalKey(nomeStr);
+        if (selfKey && k === selfKey) return; // não duplica o próprio
         resultado.push({ nome: nomeStr, cliente_id: null, principal: false });
       });
     } else {
       // Fluxo normal: manter existentes e acrescentar importados, evitando duplicatas
       // Garante que o participante principal (cliente logado) fique na frente
       baseLista.forEach((p) => {
-        const key = canonicalKey(p.nome);
-        if (!key || vistos.has(key)) return;
-        vistos.add(key);
-        const isPrincipal = selfKey && key === selfKey;
+        const keyK = canonicalKey(p.nome);
+        const isPrincipal = selfKey && keyK === selfKey;
         resultado.push({
           ...p,
           principal: isPrincipal
         });
       });
-      // Adiciona nomes importados, evitando duplicados e o próprio usuário
+      // Adiciona todos os nomes importados (mantém duplicados), exceto o próprio usuário
       nomes.forEach((n) => {
         const nomeStr = String(n || '').trim();
         if (!nomeStr) return;
-        const key = canonicalKey(nomeStr);
-        if (!key || vistos.has(key)) return;
-        if (selfKey && key === selfKey) return;
-        vistos.add(key);
+        const k = canonicalKey(nomeStr);
+        if (selfKey && k === selfKey) return; // não duplica o próprio
         resultado.push({ nome: nomeStr, cliente_id: null, principal: false });
       });
     }
@@ -2425,7 +2416,13 @@ ${listaNomes}
           const sizes = teams.map(t => t.length);
           console.log('[Teams] Final distribution teamSize=%s teams=%o reservas=%o', teamSize, sizes, reservas);
         } catch {}
-        teams.forEach((t, idx) => {
+        // 6) Se as reservas completam novos times, promovê-las a times adicionais
+        const extraTeams = [];
+        while (reservas.length >= teamSize) {
+          extraTeams.push(reservas.splice(0, teamSize));
+        }
+        const allTeams = teams.concat(extraTeams);
+        allTeams.forEach((t, idx) => {
           const icon = teamIcons[idx % teamIcons.length];
           text += `\n\n**${icon} Time ${idx + 1} (${t.length})**:\n${fmt(t)}`;
         });

@@ -50,6 +50,10 @@ export const IsisParticipantesInput = ({
     if (showImport) {
       const prev = document.body.style.overflow;
       document.body.style.overflow = 'hidden';
+      // hard reset de estado do import para evitar vazamento entre sessões
+      setSuggested([]);
+      setInvalid([]);
+      setSelectedMap({});
       setHasProcessed(false);
       setSelfDetected(false);
       setSelfMatchedKey(null);
@@ -70,6 +74,76 @@ export const IsisParticipantesInput = ({
 
   const removeDiacritics = (str) => str.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
   const canonicalKey = (str) => removeDiacritics(String(str || '').trim().toLowerCase()).replace(/\s+/g, ' ');
+
+  // ---- Local fallback parser (robusto) quando Edge retornar pouco) ----
+  const stripDecor = (s) => String(s||'')
+    .replace(/^\s*[*•°-]+/g, '')
+    .replace(/^\s*\d+\s*[\-\)\.]\s*/g, '')
+    .replace(/^[\W_]+|[\W_]+$/g, '')
+    .replace(/🧤/g, '')
+    // remove @handles
+    .replace(/@[\S]+/g, '')
+    // remove (M)/(F) markers, including malformed/unclosed variants
+    .replace(/\(\s*[mf]\s*\)/gi, '')     // (M) or (F)
+    .replace(/\(\s*[mf][^)]*\)?/gi, '')   // (m, (m), (m qualquer)
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+  const isWaitHeader = (line) => /^(espera|lista\s+de\s+espera)\b/i.test(removeDiacritics(String(line||'').trim().toLowerCase()));
+  const isMainHeader = (line) => /^(jogador|jogadores|goleiro|goleiros|convocado|convocados|jogadore?s)\b/i.test(removeDiacritics(String(line||'').trim().toLowerCase()));
+  const isHeaderOrSkipTitle = (s) => {
+    const l = removeDiacritics(String(s||'')).trim().toLowerCase();
+    return /^(jogador|jogadores|goleiro|goleiros|convocado|convocados|levantador|levantadores)\b/.test(l)
+      || /^(lista\s+de\s+espera|convidad\w*)\b/.test(l);
+  };
+  const localExtractMain = (text) => {
+    const lines = String(text||'').split(/\r?\n/);
+    let inWait = false;
+    let inMain = false;
+    const out = [];
+    for (const raw of lines) {
+      const line = String(raw||'').trim();
+      if (!line) continue;
+      if (isWaitHeader(line)) { inWait = true; continue; }
+      if (inWait) continue;
+      if (isMainHeader(line)) { inMain = true; continue; }
+      if (!inMain) continue;
+      const cleaned = stripDecor(line);
+      const hasLetters = /[A-Za-zÀ-ÖØ-öø-ÿ]/.test(cleaned);
+      const plausible = cleaned && cleaned.length >= 2 && cleaned.length <= 60 && hasLetters && !/[0-9@]/.test(cleaned);
+      if (!plausible) continue;
+      out.push(cleaned.split(/\s+/).map(w => w ? w[0].toUpperCase()+w.slice(1).toLowerCase() : w).join(' '));
+    }
+    // dedup por chave canônica
+    const seen = new Set();
+    const uniq = [];
+    for (const n of out) { const k = canonicalKey(n); if (!k || seen.has(k)) continue; seen.add(k); uniq.push(n); }
+    return uniq;
+  };
+
+  const isReservasHeader = (line) => /^(reservas?)\b/i.test(removeDiacritics(String(line||'').trim().toLowerCase()));
+  // Extrai nomes em ORDEM, mantendo duplicados, para seções principais e também Reservas
+  const extractAllAllowedInOrder = (text) => {
+    const lines = String(text||'').split(/\r?\n/);
+    const out = [];
+    let inSkip = false;
+    let inAllowed = false; // dentro de Goleiros/Jogadores/Convocados/Levantadores ou Reservas
+    for (const raw of lines) {
+      const line = String(raw||'').trim();
+      if (!line) continue;
+      if (isWaitHeader(line)) { inSkip = true; inAllowed = false; continue; }
+      if (isMainHeader(line) || isReservasHeader(line)) { inSkip = false; inAllowed = true; continue; }
+      if (inSkip) continue;
+      if (!inAllowed) continue;
+      const cleaned = stripDecor(line);
+      const hasLetters = /[A-Za-zÀ-ÖØ-öø-ÿ]/.test(cleaned);
+      const plausible = cleaned && cleaned.length >= 2 && cleaned.length <= 60 && hasLetters && !/[0-9@]/.test(cleaned);
+      if (!plausible) continue;
+      const titled = cleaned.split(/\s+/).map(w => w ? w[0].toUpperCase()+w.slice(1).toLowerCase() : w).join(' ');
+      if (isHeaderOrSkipTitle(titled)) continue;
+      out.push(titled);
+    }
+    return out;
+  };
   const presentKeys = new Set((participantesAtuais || []).map(p => canonicalKey(p.nome)));
   const selfName = selfNameProp
     ? String(selfNameProp).trim()
@@ -105,7 +179,7 @@ export const IsisParticipantesInput = ({
     for (let raw of lines) {
       const normalized = removeDiacritics(String(raw || '')).toLowerCase().trim();
       if (!inWaitlist) {
-        if (/^\s*[*\-•°]?\s*(lista\s+de\s+(espera|reserva)|convidad\w*)\b[\s:]*$/i.test(normalized)) {
+        if (/^\s*[*\-•°]?\s*((lista\s+de\s+)?espera|convidad\w*)\b[\s:]*$/i.test(normalized)) {
           inWaitlist = true;
         }
         continue;
@@ -204,6 +278,10 @@ export const IsisParticipantesInput = ({
     setInvalid([]);
     setSelectedMap({});
     try {
+      try {
+        console.group('[Isis Import] start');
+        console.debug('[Isis Import] input.length=%s preview=%o', importText.length, importText.slice(0, 180));
+      } catch {}
       const { data, error } = await supabase.functions.invoke('parse-participants', {
         body: { text: importText, locale: 'pt-BR' },
       });
@@ -211,24 +289,77 @@ export const IsisParticipantesInput = ({
       // Log simples para confirmar a fonte (openai vs fallback)
       if (data && typeof data.source === 'string') {
         console.log('[Isis Import] source=', data.source);
+        try { console.debug('[Isis Import] edge.meta keys=%o', Object.keys(data||{})); } catch {}
       }
       const waitlistKeys = extractWaitlistKeys(importText);
-      const fixedRoles = extractFixedRoles(importText);
+      try { console.debug('[Isis Import] waitlist.count=%s sample=%o', waitlistKeys.size, Array.from(waitlistKeys).slice(0, 8)); } catch {}
+      // Preferir papéis vindos da Edge (quando disponíveis); fallback: extração local
+      const aiLev = Array.isArray(data?.roles?.levantadores) ? data.roles.levantadores : [];
+      const aiGol = Array.isArray(data?.roles?.goleiros) ? data.roles.goleiros : [];
+      const fixedRoles = (aiLev.length || aiGol.length)
+        ? { levantadores: aiLev, goleiros: aiGol }
+        : extractFixedRoles(importText);
+      try { console.debug('[Isis Import] roles.edge lev=%s gol=%s', aiLev.length, aiGol.length); } catch {}
+      try { if (!(aiLev.length||aiGol.length)) console.debug('[Isis Import] roles.local lev=%s gol=%s', fixedRoles.levantadores.length, fixedRoles.goleiros.length); } catch {}
       const extractedRaw = Array.isArray(data?.extracted) ? data.extracted : [];
-      const extracted = extractedRaw.filter(n => !waitlistKeys.has(canonicalKey(n)));
+      let extracted = extractedRaw.filter(n => !waitlistKeys.has(canonicalKey(n)));
+      // Remove títulos de seção e cabeçalhos que possam vir do modelo
+      extracted = extracted.filter(n => !isHeaderOrSkipTitle(n));
+      try { console.debug('[Isis Import] extracted.raw=%s filtered=%s sample=%o', extractedRaw.length, extracted.length, extracted.slice(0, 10)); } catch {}
+      // Fallback local: se vier muito pouco, tenta extrair das seções principais
+      try {
+        const needBoost = extracted.length < 6 && /(goleir|jogador)/i.test(removeDiacritics(importText));
+        if (needBoost) {
+          const local = localExtractMain(importText);
+          try { console.debug('[Isis Import] local.mainOnly=%s sample=%o', local.length, local.slice(0, 10)); } catch {}
+          const boosted = [...extracted];
+          const seen = new Set(boosted.map(canonicalKey));
+          for (const n of local) {
+            const k = canonicalKey(n);
+            if (!k || seen.has(k) || waitlistKeys.has(k)) continue;
+            seen.add(k);
+            boosted.push(n);
+          }
+          extracted = boosted.filter(n => !isHeaderOrSkipTitle(n));
+          try { console.debug('[Isis Import] boosted.count=%s', extracted.length); } catch {}
+        }
+      } catch {}
       // detecta se o próprio usuário apareceu no texto processado (antes dos filtros)
       const detectedSelf = extracted.some(n => isSelfMatch(n));
       const invalidItems = Array.isArray(data?.invalid) ? data.invalid : [];
       const uniques = [];
       const seen = new Set();
-      for (const n of extracted) {
-        const key = canonicalKey(n);
+      for (const rawName of extracted) {
+        const cleaned = stripDecor(rawName);
+        if (!cleaned) continue;
+        const key = canonicalKey(cleaned);
         if (!key || seen.has(key)) continue;
         seen.add(key);
-        uniques.push(n);
+        // Title-case final
+        const titled = cleaned.split(/\s+/).map(w => w ? w[0].toUpperCase()+w.slice(1).toLowerCase() : w).join(' ');
+        uniques.push(titled);
       }
+      try { console.debug('[Isis Import] uniques.count=%s sample=%o', uniques.length, uniques.slice(0, 12)); } catch {}
+      try { console.debug('[Isis Import] invalid.count=%s sample=%o', invalidItems.length, invalidItems.slice(0, 6)); } catch {}
+      try { console.debug('[Isis Import] detectedSelf=%s self=%o', detectedSelf, selfName); } catch {}
+      // Ordena conforme a ordem da lista importada (seções principais), preservando estabilidade
+      const sourceOrder = localExtractMain(importText);
+      const orderIndex = new Map(sourceOrder.map((n, i) => [canonicalKey(n), i]));
+      const allowedInOrder = extractAllAllowedInOrder(importText);
+      // Se existir lista ordenada completa pelo texto (com duplicados), preferi-la.
+      let ordered = (allowedInOrder && allowedInOrder.length)
+        ? allowedInOrder.slice(0, 200)
+        : (() => {
+            const withIdx = uniques.map((n, i) => ({ n, i }));
+            withIdx.sort((a, b) => {
+              const ia = orderIndex.has(canonicalKey(a.n)) ? orderIndex.get(canonicalKey(a.n)) : Number.MAX_SAFE_INTEGER;
+              const ib = orderIndex.has(canonicalKey(b.n)) ? orderIndex.get(canonicalKey(b.n)) : Number.MAX_SAFE_INTEGER;
+              if (ia !== ib) return ia - ib;
+              return a.i - b.i; // estável
+            });
+            return withIdx.map(x => x.n).slice(0, 50);
+          })();
       // move o próprio usuário (se detectado) para o topo
-      let ordered = uniques.slice(0, 50);
       let matchIdx = ordered.findIndex(n => isSelfMatch(n));
       if (matchIdx >= 0) {
         const matched = ordered[matchIdx];
@@ -254,7 +385,10 @@ export const IsisParticipantesInput = ({
         if (typeof onFixedRolesDetected === 'function') onFixedRolesDetected(fixedRoles);
         else window.dispatchEvent(new CustomEvent('isis:fixed-roles', { detail: fixedRoles }));
       } catch {}
+      try { console.debug('[Isis Import] final.suggested.count=%s sample=%o', ordered.length, ordered.slice(0, 12)); } catch {}
+      try { console.groupEnd?.(); } catch {}
     } catch (err) {
+      try { console.error('[Isis Import] error=%o', err); } catch {}
       const waitlistKeys = extractWaitlistKeys(importText);
       const fixedRoles = extractFixedRoles(importText);
       const local = importText.split(/[\n,;]+/).map(s => s.trim()).filter(Boolean);
@@ -590,16 +724,33 @@ export const IsisParticipantesInput = ({
                     </div>
                     <div className="min-h-[320px] max-h-[320px] overflow-y-auto border border-white/10 rounded-xl bg-surface">
                       {isProcessing ? (
-                        <div className="p-3 animate-pulse">
-                          <div className="h-4 w-28 bg-white/10 rounded mb-3" />
+                        <div className="p-4">
+                          <div className="flex items-center justify-between mb-3">
+                            <div className="flex items-center gap-2">
+                              <div className="relative w-5 h-5">
+                                <div className="absolute inset-0 rounded-full bg-gradient-to-tr from-brand to-emerald-500 opacity-30" />
+                                <div className="absolute inset-0 rounded-full border-2 border-transparent [border-image:linear-gradient(to_right,var(--tw-gradient-from),var(--tw-gradient-to))_1] animate-spin" />
+                              </div>
+                              <span className="text-xs font-semibold text-text-primary">Processando com IA…</span>
+                            </div>
+                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/10 text-text-muted">Premium</span>
+                          </div>
                           <div className="space-y-2">
-                            {Array.from({ length: 8 }).map((_, i) => (
-                              <div key={i} className="flex items-center justify-between px-3 py-2">
-                                <div className="h-3 w-40 bg-white/10 rounded" />
-                                <div className="h-4 w-4 bg-white/10 rounded" />
+                            {Array.from({ length: 10 }).map((_, i) => (
+                              <div key={i} className="flex items-center justify-between px-3 py-2 rounded-lg bg-white/[0.03] overflow-hidden">
+                                <div className="flex items-center gap-2 min-w-0 w-full">
+                                  <span className="w-7 shrink-0">
+                                    <span className="inline-flex items-center justify-center px-2 py-0.5 rounded-md text-[11px] font-extrabold bg-white/10 text-text-muted">{i + 1}</span>
+                                  </span>
+                                  <div className="relative h-3 w-full max-w-[220px] rounded bg-white/10 overflow-hidden">
+                                    <div className="absolute inset-0 -translate-x-full animate-[shimmer_1.2s_infinite] bg-gradient-to-r from-transparent via-white/20 to-transparent" />
+                                  </div>
+                                </div>
+                                <div className="h-4 w-4 rounded bg-white/10" />
                               </div>
                             ))}
                           </div>
+                          <style>{`@keyframes shimmer{100%{transform:translateX(100%);}}`}</style>
                         </div>
                       ) : (
                         <ul className="divide-y divide-white/5">
@@ -607,7 +758,7 @@ export const IsisParticipantesInput = ({
                             const key = canonicalKey(n);
                             const isSelf = hasProcessed && selfDetected && selfMatchedKey && key === selfMatchedKey;
                             return (
-                              <li key={key} className={`flex items-center justify-between px-3 py-2 ${isSelf ? 'bg-white/5' : ''}`}>
+                              <li key={`${key}-${idx}`} className={`flex items-center justify-between px-3 py-2 ${isSelf ? 'bg-white/5' : ''}`}>
                                 <div className="flex items-center gap-2 min-w-0">
                                   <span className="w-7 shrink-0">
                                     <span className={`inline-flex items-center justify-center px-2 py-0.5 rounded-md text-[11px] font-extrabold ${isSelf ? 'bg-emerald-600/25 text-emerald-400' : 'bg-white/10 text-text-primary'}`}>
