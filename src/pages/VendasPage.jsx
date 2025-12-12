@@ -5690,12 +5690,6 @@ function VendasPage() {
                           <kbd className="hidden md:inline px-2 py-1 text-xs font-bold font-mono text-gray-400 bg-transparent border border-gray-300/50 rounded flex-shrink-0">F1</kbd>
                         )}
                       </div>
-                      <span className={cn(
-                        "text-xs px-2 py-0.5 rounded-full border font-medium flex-shrink-0",
-                        getStatusColor(table.status)
-                      )}>
-                        {getStatusLabel(table.status)}
-                      </span>
                     </div>
                     {(table.status === 'in-use' || table.status === 'awaiting-payment') ? (
                       <div className="space-y-0.5">
@@ -5712,7 +5706,22 @@ function VendasPage() {
                       <div className="text-xs text-text-muted">Mesa disponível</div>
                     )}
                   </div>
-                  <ChevronRight className="w-5 h-5 text-text-muted flex-shrink-0 ml-2" />
+                  <div className="w-12 flex items-center justify-center ml-1 mr-1">
+                    {table.status === 'available' ? (
+                      <img
+                        src="/mesalivre.png"
+                        alt="Mesa livre"
+                        className="w-10 h-10 object-contain opacity-80"
+                      />
+                    ) : (
+                      <img
+                        src="/mesaocupada.png"
+                        alt="Mesa ocupada"
+                        className="w-10 h-10 object-contain opacity-80"
+                      />
+                    )}
+                  </div>
+                  <ChevronRight className="w-5 h-5 text-text-muted flex-shrink-0 ml-1" />
                 </div>
               </div>
             );
