@@ -58,22 +58,18 @@ table,public,estoque_reservado,null,table,postgres,Controle de estoque reservado
 table,public,finalizadoras,null,table,postgres,null
 table,supabase_functions,migrations,null,table,supabase_functions_admin,null
 table,supabase_functions,hooks,null,table,supabase_functions_admin,Supabase Functions Hooks: Audit trail for triggered hooks.
-table,realtime,messages_2025_12_06,null,table,supabase_admin,null
 table,public,colaboradores,null,table,postgres,null
 table,realtime,messages_2025_12_08,null,table,supabase_admin,null
 table,public,empresa_counters,null,table,postgres,null
 table,realtime,messages_2025_12_07,null,table,supabase_admin,null
 table,realtime,messages_2025_12_09,null,table,supabase_admin,null
-table,public,mesas,null,table,postgres,null
 table,realtime,messages_2025_12_11,null,table,supabase_admin,null
+table,public,mesas,null,table,postgres,null
 table,realtime,messages_2025_12_10,null,table,supabase_admin,null
 table,public,empresas,null,table,postgres,null
-table,public,comanda_itens,null,table,postgres,null
-table,public,comanda_clientes,null,table,postgres,null
 table,public,caixa_sessoes,null,table,postgres,null
 table,public,caixa_movimentacoes,null,table,postgres,null
 table,public,movimentos_saldo,null,table,postgres,null
-table,public,comandas,null,table,postgres,null
 table,public,contas_pagar,null,table,postgres,null
 table,public,contas_pagar_baixas,null,table,postgres,null
 table,public,contas_receber,null,table,postgres,null
@@ -82,18 +78,23 @@ table,public,compras,null,table,postgres,Registro de compras (NF-es de entrada) 
 table,public,compras_itens,null,table,postgres,Itens individuais de cada compra (NF-e)
 table,public,quadras_dias_funcionamento,null,table,postgres,ConfiguraÃ§Ã£o de dias de funcionamento das quadras por dia da semana e fechamentos especÃ­ficos
 table,public,estoque_baixa_log,null,table,postgres,null
+table,public,comandas,null,table,postgres,null
+table,public,comanda_itens,null,table,postgres,null
+table,public,comanda_clientes,null,table,postgres,null
 table,public,comanda_historico,null,table,postgres,Auditoria de alteraÃ§Ãµes em comandas para rastreabilidade
 table,public,produtos,null,table,postgres,null
 table,public,quadras,null,table,postgres,null
 table,public,user_ui_settings,null,table,postgres,null
 table,public,agendamento_participantes,null,table,postgres,Cotas de valor por participante do agendamento
+table,realtime,messages_2025_12_13,null,table,supabase_admin,null
 table,public,agendamentos,null,table,postgres,null
-table,public,pagamentos,null,table,postgres,null
 table,public,produto_categorias,null,table,postgres,null
 table,public,clientes,null,table,postgres,null
 table,public,notas_fiscais,null,table,postgres,null
 table,public,agenda_settings,null,table,postgres,ConfiguraÃ§Ãµes de automaÃ§Ã£o da agenda por empresa (1:1 com empresas).
+table,public,pagamentos,null,table,postgres,null
 table,public,v_agendamento_participantes,null,view,postgres,null
+table,realtime,messages_2025_12_12,null,table,supabase_admin,null
 column,auth,id,sso_providers_pkey,uuid default null,null,null
 column,auth,lower,sso_providers_resource_id_idx,text default null,null,null
 column,public,agendamento_id,v_agendamentos_detalhado,uuid default null,null,null
@@ -919,22 +920,10 @@ column,realtime,private,messages,boolean default false,null,null
 column,realtime,updated_at,messages,timestamp without time zone default now(),null,null
 column,realtime,inserted_at,messages,timestamp without time zone default now(),null,null
 column,realtime,id,messages,uuid default gen_random_uuid(),null,null
-column,realtime,id,messages_2025_12_06_pkey,uuid default null,null,null
-column,realtime,inserted_at,messages_2025_12_06_pkey,timestamp without time zone default null,null,null
 column,realtime,id,messages_pkey,uuid default null,null,null
 column,realtime,inserted_at,messages_pkey,timestamp without time zone default null,null,null
-column,realtime,inserted_at,messages_2025_12_06_inserted_at_topic_idx,timestamp without time zone default null,null,null
-column,realtime,topic,messages_2025_12_06_inserted_at_topic_idx,text default null,null,null
 column,realtime,inserted_at,messages_inserted_at_topic_index,timestamp without time zone default null,null,null
 column,realtime,topic,messages_inserted_at_topic_index,text default null,null,null
-column,realtime,topic,messages_2025_12_06,text default null,null,null
-column,realtime,extension,messages_2025_12_06,text default null,null,null
-column,realtime,payload,messages_2025_12_06,jsonb default null,null,null
-column,realtime,event,messages_2025_12_06,text default null,null,null
-column,realtime,private,messages_2025_12_06,boolean default false,null,null
-column,realtime,updated_at,messages_2025_12_06,timestamp without time zone default now(),null,null
-column,realtime,inserted_at,messages_2025_12_06,timestamp without time zone default now(),null,null
-column,realtime,id,messages_2025_12_06,uuid default gen_random_uuid(),null,null
 column,public,id,colaboradores,uuid default gen_random_uuid(),null,null
 column,public,nome,colaboradores,character varying(255) default null,null,null
 column,public,cargo,colaboradores,character varying(50) default 'user'::character varying,null,null
@@ -994,13 +983,6 @@ column,realtime,private,messages_2025_12_09,boolean default false,null,null
 column,realtime,updated_at,messages_2025_12_09,timestamp without time zone default now(),null,null
 column,realtime,inserted_at,messages_2025_12_09,timestamp without time zone default now(),null,null
 column,realtime,id,messages_2025_12_09,uuid default gen_random_uuid(),null,null
-column,public,id,mesas,uuid default gen_random_uuid(),null,null
-column,public,codigo_empresa,mesas,text default get_my_company_code(),null,null
-column,public,numero,mesas,integer default null,null,null
-column,public,nome,mesas,text default null,null,Nome amigÃ¡vel da mesa (ex.: PÃ¡tio 1)
-column,public,status,mesas,mesa_status default 'available'::mesa_status,null,null
-column,public,created_at,mesas,timestamp with time zone default now(),null,null
-column,public,updated_at,mesas,timestamp with time zone default now(),null,null
 column,realtime,topic,messages_2025_12_11,text default null,null,null
 column,realtime,extension,messages_2025_12_11,text default null,null,null
 column,realtime,payload,messages_2025_12_11,jsonb default null,null,null
@@ -1009,6 +991,18 @@ column,realtime,private,messages_2025_12_11,boolean default false,null,null
 column,realtime,updated_at,messages_2025_12_11,timestamp without time zone default now(),null,null
 column,realtime,inserted_at,messages_2025_12_11,timestamp without time zone default now(),null,null
 column,realtime,id,messages_2025_12_11,uuid default gen_random_uuid(),null,null
+column,public,codigo_empresa,comandas_empresa_idx,text default null,null,null
+column,public,mesa_id,comandas_mesa_idx,uuid default null,null,null
+column,public,codigo_empresa,comanda_itens_empresa_idx,text default null,null,null
+column,public,comanda_id,comanda_itens_comanda_idx,uuid default null,null,null
+column,public,codigo_empresa,mesas_empresa_idx,text default null,null,null
+column,public,id,mesas,uuid default gen_random_uuid(),null,null
+column,public,codigo_empresa,mesas,text default get_my_company_code(),null,null
+column,public,numero,mesas,integer default null,null,null
+column,public,nome,mesas,text default null,null,Nome amigÃ¡vel da mesa (ex.: PÃ¡tio 1)
+column,public,status,mesas,mesa_status default 'available'::mesa_status,null,null
+column,public,created_at,mesas,timestamp with time zone default now(),null,null
+column,public,updated_at,mesas,timestamp with time zone default now(),null,null
 column,realtime,id,messages_2025_12_10_pkey,uuid default null,null,null
 column,realtime,inserted_at,messages_2025_12_10_pkey,timestamp without time zone default null,null,null
 column,realtime,inserted_at,messages_2025_12_10_inserted_at_topic_idx,timestamp without time zone default null,null,null
@@ -1059,27 +1053,7 @@ column,public,transmitenota_apikey_hml,empresas,text default null,null,null
 column,public,transmitenota_base_url_prod,empresas,text default null,null,null
 column,public,transmitenota_apikey_prod,empresas,text default null,null,null
 column,public,transmitenota_base_url,empresas,text default null,null,null
-column,public,id,comanda_itens,uuid default gen_random_uuid(),null,null
-column,public,codigo_empresa,comanda_itens,text default get_my_company_code(),null,null
-column,public,comanda_id,comanda_itens,uuid default null,null,null
-column,public,produto_id,comanda_itens,uuid default null,null,null
-column,public,descricao,comanda_itens,text default null,null,null
-column,public,quantidade,comanda_itens,"numeric(12,3) default null",null,null
-column,public,preco_unitario,comanda_itens,"numeric(12,2) default null",null,null
-column,public,desconto,comanda_itens,"numeric(12,2) default 0",null,null
-column,public,total,comanda_itens,"numeric(12,2) default ((quantidade * preco_unitario) - desconto)",null,null
-column,public,created_at,comanda_itens,timestamp with time zone default now(),null,null
-column,public,updated_at,comanda_itens,timestamp with time zone default now(),null,null
-column,public,desconto_tipo,comanda_itens,character varying(20) default NULL::character varying,null,null
-column,public,desconto_valor,comanda_itens,"numeric(10,2) default 0",null,null
-column,public,desconto_motivo,comanda_itens,character varying(255) default NULL::character varying,null,null
-column,public,preco_com_desconto,comanda_itens,"numeric(10,2) default NULL::numeric",null,null
-column,public,id,comanda_clientes,uuid default gen_random_uuid(),null,null
-column,public,comanda_id,comanda_clientes,uuid default null,null,null
-column,public,cliente_id,comanda_clientes,uuid default null,null,null
-column,public,nome_livre,comanda_clientes,text default null,null,null
-column,public,codigo_empresa,comanda_clientes,text default null,null,null
-column,public,created_at,comanda_clientes,timestamp with time zone default now(),null,null
+column,public,codigo_empresa,produtos_empresa_idx,character varying(10) default null,null,null
 column,public,id,caixa_sessoes,uuid default gen_random_uuid(),null,null
 column,public,codigo_empresa,caixa_sessoes,text default get_my_company_code(),null,null
 column,public,usuario_id,caixa_sessoes,uuid default null,null,null
@@ -1106,48 +1080,6 @@ column,public,tipo,movimentos_saldo,text default null,null,null
 column,public,valor,movimentos_saldo,"numeric(12,2) default null",null,null
 column,public,motivo,movimentos_saldo,text default null,null,null
 column,public,created_at,movimentos_saldo,timestamp with time zone default now(),null,null
-column,public,id,comandas,uuid default gen_random_uuid(),null,null
-column,public,codigo_empresa,comandas,text default get_my_company_code(),null,null
-column,public,mesa_id,comandas,uuid default null,null,null
-column,public,cliente_id,comandas,uuid default null,null,null
-column,public,aberto_em,comandas,timestamp with time zone default now(),null,null
-column,public,fechado_em,comandas,timestamp with time zone default null,null,null
-column,public,observacao,comandas,text default null,null,null
-column,public,created_at,comandas,timestamp with time zone default now(),null,null
-column,public,updated_at,comandas,timestamp with time zone default now(),null,null
-column,public,is_balcao,comandas,boolean default (mesa_id IS NULL),null,True quando a comanda nÃ£o possui mesa (BalcÃ£o).
-column,public,tipo,comandas,"text default 
-CASE
-    WHEN (mesa_id IS NULL) THEN 'balcao'::text
-    ELSE 'comanda'::text
-END",null,Tipo da comanda: balcao | comanda
-column,public,status,comandas,text default 'open'::text,null,null
-column,public,origem,comandas,text default 'manual'::text,null,null
-column,public,xml_chave,comandas,text default null,null,null
-column,public,diferenca_pagamento,comandas,"numeric(12,2) default 0",null,null
-column,public,desconto_tipo,comandas,character varying(20) default NULL::character varying,null,Tipo de desconto: percentual ou fixo
-column,public,desconto_valor,comandas,"numeric(10,2) default 0",null,Valor do desconto (% ou R$)
-column,public,desconto_motivo,comandas,character varying(255) default NULL::character varying,null,null
-column,public,total_com_desconto,comandas,"numeric(10,2) default NULL::numeric",null,null
-column,public,observacoes,comandas,text default null,null,"Notas/observaÃ§Ãµes da comanda (ex: sem cebola, urgente)"
-column,public,observacoes_atualizadas_em,comandas,timestamp with time zone default null,null,null
-column,public,vendedor_id,comandas,uuid default null,null,UsuÃ¡rio que realizou a venda (para comissÃ£o)
-column,public,comissao_percentual,comandas,"numeric(5,2) default NULL::numeric",null,null
-column,public,comissao_valor,comandas,"numeric(10,2) default NULL::numeric",null,null
-column,public,agendamento_id,comandas,uuid default null,null,Agendamento vinculado (se venda relacionada a agendamento)
-column,public,versao_sincronizacao,comandas,integer default 1,null,VersÃ£o para sincronizaÃ§Ã£o realtime
-column,public,ultima_atualizacao,comandas,timestamp with time zone default now(),null,null
-column,public,nf_modelo,comandas,smallint default null,null,null
-column,public,nf_serie,comandas,smallint default null,null,null
-column,public,nf_numero,comandas,integer default null,null,null
-column,public,nf_status,comandas,character varying(20) default null,null,null
-column,public,nf_protocolo,comandas,text default null,null,null
-column,public,nf_xml,comandas,text default null,null,null
-column,public,nf_xml_url,comandas,text default null,null,null
-column,public,nf_pdf_url,comandas,text default null,null,null
-column,public,nf_autorizado_em,comandas,timestamp with time zone default null,null,null
-column,public,nf_cancelado_em,comandas,timestamp with time zone default null,null,null
-column,public,nf_motivo_cancelamento,comandas,text default null,null,null
 column,public,id,contas_pagar,uuid default gen_random_uuid(),null,null
 column,public,codigo_empresa,contas_pagar,text default null,null,null
 column,public,fornecedor_id,contas_pagar,uuid default null,null,null
@@ -1267,6 +1199,69 @@ column,public,created_at,quadras_dias_funcionamento,timestamp with time zone def
 column,public,updated_at,quadras_dias_funcionamento,timestamp with time zone default now(),null,null
 column,public,comanda_id,estoque_baixa_log,uuid default null,null,null
 column,public,baixado_em,estoque_baixa_log,timestamp with time zone default now(),null,null
+column,public,id,comandas,uuid default gen_random_uuid(),null,null
+column,public,codigo_empresa,comandas,text default get_my_company_code(),null,null
+column,public,mesa_id,comandas,uuid default null,null,null
+column,public,cliente_id,comandas,uuid default null,null,null
+column,public,aberto_em,comandas,timestamp with time zone default now(),null,null
+column,public,fechado_em,comandas,timestamp with time zone default null,null,null
+column,public,observacao,comandas,text default null,null,null
+column,public,created_at,comandas,timestamp with time zone default now(),null,null
+column,public,updated_at,comandas,timestamp with time zone default now(),null,null
+column,public,is_balcao,comandas,boolean default (mesa_id IS NULL),null,True quando a comanda nÃ£o possui mesa (BalcÃ£o).
+column,public,tipo,comandas,"text default 
+CASE
+    WHEN (mesa_id IS NULL) THEN 'balcao'::text
+    ELSE 'comanda'::text
+END",null,Tipo da comanda: balcao | comanda
+column,public,status,comandas,text default 'open'::text,null,null
+column,public,origem,comandas,text default 'manual'::text,null,null
+column,public,xml_chave,comandas,text default null,null,null
+column,public,diferenca_pagamento,comandas,"numeric(12,2) default 0",null,null
+column,public,desconto_tipo,comandas,character varying(20) default NULL::character varying,null,Tipo de desconto: percentual ou fixo
+column,public,desconto_valor,comandas,"numeric(10,2) default 0",null,Valor do desconto (% ou R$)
+column,public,desconto_motivo,comandas,character varying(255) default NULL::character varying,null,null
+column,public,total_com_desconto,comandas,"numeric(10,2) default NULL::numeric",null,null
+column,public,observacoes,comandas,text default null,null,"Notas/observaÃ§Ãµes da comanda (ex: sem cebola, urgente)"
+column,public,observacoes_atualizadas_em,comandas,timestamp with time zone default null,null,null
+column,public,vendedor_id,comandas,uuid default null,null,UsuÃ¡rio que realizou a venda (para comissÃ£o)
+column,public,comissao_percentual,comandas,"numeric(5,2) default NULL::numeric",null,null
+column,public,comissao_valor,comandas,"numeric(10,2) default NULL::numeric",null,null
+column,public,agendamento_id,comandas,uuid default null,null,Agendamento vinculado (se venda relacionada a agendamento)
+column,public,versao_sincronizacao,comandas,integer default 1,null,VersÃ£o para sincronizaÃ§Ã£o realtime
+column,public,ultima_atualizacao,comandas,timestamp with time zone default now(),null,null
+column,public,nf_modelo,comandas,smallint default null,null,null
+column,public,nf_serie,comandas,smallint default null,null,null
+column,public,nf_numero,comandas,integer default null,null,null
+column,public,nf_status,comandas,character varying(20) default null,null,null
+column,public,nf_protocolo,comandas,text default null,null,null
+column,public,nf_xml,comandas,text default null,null,null
+column,public,nf_xml_url,comandas,text default null,null,null
+column,public,nf_pdf_url,comandas,text default null,null,null
+column,public,nf_autorizado_em,comandas,timestamp with time zone default null,null,null
+column,public,nf_cancelado_em,comandas,timestamp with time zone default null,null,null
+column,public,nf_motivo_cancelamento,comandas,text default null,null,null
+column,public,id,comanda_itens,uuid default gen_random_uuid(),null,null
+column,public,codigo_empresa,comanda_itens,text default get_my_company_code(),null,null
+column,public,comanda_id,comanda_itens,uuid default null,null,null
+column,public,produto_id,comanda_itens,uuid default null,null,null
+column,public,descricao,comanda_itens,text default null,null,null
+column,public,quantidade,comanda_itens,"numeric(12,3) default null",null,null
+column,public,preco_unitario,comanda_itens,"numeric(12,2) default null",null,null
+column,public,desconto,comanda_itens,"numeric(12,2) default 0",null,null
+column,public,total,comanda_itens,"numeric(12,2) default ((quantidade * preco_unitario) - desconto)",null,null
+column,public,created_at,comanda_itens,timestamp with time zone default now(),null,null
+column,public,updated_at,comanda_itens,timestamp with time zone default now(),null,null
+column,public,desconto_tipo,comanda_itens,character varying(20) default NULL::character varying,null,null
+column,public,desconto_valor,comanda_itens,"numeric(10,2) default 0",null,null
+column,public,desconto_motivo,comanda_itens,character varying(255) default NULL::character varying,null,null
+column,public,preco_com_desconto,comanda_itens,"numeric(10,2) default NULL::numeric",null,null
+column,public,id,comanda_clientes,uuid default gen_random_uuid(),null,null
+column,public,comanda_id,comanda_clientes,uuid default null,null,null
+column,public,cliente_id,comanda_clientes,uuid default null,null,null
+column,public,nome_livre,comanda_clientes,text default null,null,null
+column,public,codigo_empresa,comanda_clientes,text default null,null,null
+column,public,created_at,comanda_clientes,timestamp with time zone default now(),null,null
 column,public,id,comanda_historico,uuid default gen_random_uuid(),null,null
 column,public,codigo_empresa,comanda_historico,integer default null,null,null
 column,public,comanda_id,comanda_historico,uuid default null,null,null
@@ -1363,6 +1358,8 @@ column,public,settings,user_ui_settings,jsonb default '{}'::jsonb,null,null
 column,public,created_at,user_ui_settings,timestamp with time zone default now(),null,null
 column,public,updated_at,user_ui_settings,timestamp with time zone default now(),null,null
 column,public,nf_status,idx_comandas_nf_status,character varying(20) default null,null,null
+column,public,codigo_empresa,pagamentos_empresa_idx,text default null,null,null
+column,public,comanda_id,pagamentos_comanda_idx,uuid default null,null,null
 column,public,id,agendamento_participantes,uuid default gen_random_uuid(),null,null
 column,public,agendamento_id,agendamento_participantes,uuid default null,null,null
 column,public,cliente_id,agendamento_participantes,uuid default null,null,null
@@ -1377,6 +1374,18 @@ column,public,updated_at,agendamento_participantes,timestamp with time zone defa
 column,public,finalizadora_id,agendamento_participantes,uuid default null,null,null
 column,public,aplicar_taxa,agendamento_participantes,boolean default false,null,null
 column,public,ordem,agendamento_participantes,integer default 1,null,Ordem do participante no agendamento (1=representante/primeiro)
+column,realtime,id,messages_2025_12_13_pkey,uuid default null,null,null
+column,realtime,inserted_at,messages_2025_12_13_pkey,timestamp without time zone default null,null,null
+column,realtime,inserted_at,messages_2025_12_13_inserted_at_topic_idx,timestamp without time zone default null,null,null
+column,realtime,topic,messages_2025_12_13_inserted_at_topic_idx,text default null,null,null
+column,realtime,topic,messages_2025_12_13,text default null,null,null
+column,realtime,extension,messages_2025_12_13,text default null,null,null
+column,realtime,payload,messages_2025_12_13,jsonb default null,null,null
+column,realtime,event,messages_2025_12_13,text default null,null,null
+column,realtime,private,messages_2025_12_13,boolean default false,null,null
+column,realtime,updated_at,messages_2025_12_13,timestamp without time zone default now(),null,null
+column,realtime,inserted_at,messages_2025_12_13,timestamp without time zone default now(),null,null
+column,realtime,id,messages_2025_12_13,uuid default gen_random_uuid(),null,null
 column,public,id,agendamentos,uuid default gen_random_uuid(),null,null
 column,public,quadra_id,agendamentos,uuid default null,null,null
 column,public,cliente_id,agendamentos,uuid default null,null,null
@@ -1390,20 +1399,6 @@ column,public,criado_em,agendamentos,timestamp with time zone default now(),null
 column,public,codigo_empresa,agendamentos,text default null,null,null
 column,public,auto_disabled,agendamentos,boolean default false,null,"Quando true, desativa QUALQUER automaÃ§Ã£o (auto-confirmar, auto-iniciar, auto-finalizar) para este agendamento."
 column,public,codigo,agendamentos,bigint default null,null,null
-column,public,id,pagamentos,uuid default gen_random_uuid(),null,null
-column,public,codigo_empresa,pagamentos,text default get_my_company_code(),null,null
-column,public,comanda_id,pagamentos,uuid default null,null,null
-column,public,caixa_id,pagamentos,uuid default null,null,null
-column,public,metodo,pagamentos,text default null,null,null
-column,public,valor,pagamentos,"numeric(12,2) default null",null,null
-column,public,status,pagamentos,text default 'Pago'::text,null,null
-column,public,recebido_em,pagamentos,timestamp with time zone default now(),null,null
-column,public,created_at,pagamentos,timestamp with time zone default now(),null,null
-column,public,updated_at,pagamentos,timestamp with time zone default now(),null,null
-column,public,finalizadora_id,pagamentos,uuid default null,null,null
-column,public,origem,pagamentos,text default 'manual'::text,null,null
-column,public,xml_chave,pagamentos,text default null,null,null
-column,public,cliente_id,pagamentos,uuid default null,null,null
 column,public,codigo_empresa,ux_agendamentos_empresa_codigo,text default null,null,null
 column,public,codigo,ux_agendamentos_empresa_codigo,bigint default null,null,null
 column,public,codigo_empresa,quadras_codigo_empresa_idx,text default null,null,null
@@ -1512,6 +1507,20 @@ column,public,id,notas_fiscais_pkey,uuid default null,null,null
 column,public,codigo_empresa,idx_notas_fiscais_empresa,text default null,null,null
 column,public,status,idx_notas_fiscais_status,text default null,null,null
 column,public,criado_em,idx_notas_fiscais_criado_em,timestamp with time zone default null,null,null
+column,public,id,pagamentos,uuid default gen_random_uuid(),null,null
+column,public,codigo_empresa,pagamentos,text default get_my_company_code(),null,null
+column,public,comanda_id,pagamentos,uuid default null,null,null
+column,public,caixa_id,pagamentos,uuid default null,null,null
+column,public,metodo,pagamentos,text default null,null,null
+column,public,valor,pagamentos,"numeric(12,2) default null",null,null
+column,public,status,pagamentos,text default 'Pago'::text,null,null
+column,public,recebido_em,pagamentos,timestamp with time zone default now(),null,null
+column,public,created_at,pagamentos,timestamp with time zone default now(),null,null
+column,public,updated_at,pagamentos,timestamp with time zone default now(),null,null
+column,public,finalizadora_id,pagamentos,uuid default null,null,null
+column,public,origem,pagamentos,text default 'manual'::text,null,null
+column,public,xml_chave,pagamentos,text default null,null,null
+column,public,cliente_id,pagamentos,uuid default null,null,null
 column,public,id,compras_itens_pkey,uuid default null,null,null
 column,public,compra_id,idx_compras_itens_compra,uuid default null,null,null
 column,public,produto_id,idx_compras_itens_produto,uuid default null,null,null
@@ -1524,6 +1533,18 @@ column,public,nome,v_agendamento_participantes,character varying(255) default nu
 column,public,valor_cota,v_agendamento_participantes,"numeric(10,2) default null",null,null
 column,public,status_pagamento_text,v_agendamento_participantes,text default null,null,null
 column,public,status_pagamento,v_agendamento_participantes,payment_status default null,null,null
+column,realtime,id,messages_2025_12_12_pkey,uuid default null,null,null
+column,realtime,inserted_at,messages_2025_12_12_pkey,timestamp without time zone default null,null,null
+column,realtime,inserted_at,messages_2025_12_12_inserted_at_topic_idx,timestamp without time zone default null,null,null
+column,realtime,topic,messages_2025_12_12_inserted_at_topic_idx,text default null,null,null
+column,realtime,topic,messages_2025_12_12,text default null,null,null
+column,realtime,extension,messages_2025_12_12,text default null,null,null
+column,realtime,payload,messages_2025_12_12,jsonb default null,null,null
+column,realtime,event,messages_2025_12_12,text default null,null,null
+column,realtime,private,messages_2025_12_12,boolean default false,null,null
+column,realtime,updated_at,messages_2025_12_12,timestamp without time zone default now(),null,null
+column,realtime,inserted_at,messages_2025_12_12,timestamp without time zone default now(),null,null
+column,realtime,id,messages_2025_12_12,uuid default gen_random_uuid(),null,null
 constraint,auth,domain not empty,sso_domains,CHECK ((char_length(domain) > 0)),null,null
 constraint,auth,sso_domains_pkey,sso_domains,PRIMARY KEY (id),null,null
 constraint,auth,sso_domains_sso_provider_id_fkey,sso_domains,FOREIGN KEY (sso_provider_id) REFERENCES auth.sso_providers(id) ON DELETE CASCADE,null,null
@@ -1633,33 +1654,19 @@ constraint,public,finalizadoras_tipo_check,finalizadoras,"CHECK ((tipo = ANY (AR
 constraint,supabase_functions,migrations_pkey,migrations,PRIMARY KEY (version),null,null
 constraint,supabase_functions,hooks_pkey,hooks,PRIMARY KEY (id),null,null
 constraint,realtime,messages_pkey,messages,"PRIMARY KEY (id, inserted_at)",null,null
-constraint,realtime,messages_2025_12_06_pkey,messages_2025_12_06,"PRIMARY KEY (id, inserted_at)",null,null
 constraint,public,colaboradores_codigo_empresa_fkey,colaboradores,FOREIGN KEY (codigo_empresa) REFERENCES empresas(codigo_empresa) ON DELETE RESTRICT,null,null
 constraint,public,user_profiles_pkey,colaboradores,PRIMARY KEY (id),null,null
 constraint,realtime,messages_2025_12_08_pkey,messages_2025_12_08,"PRIMARY KEY (id, inserted_at)",null,null
 constraint,public,empresa_counters_pkey,empresa_counters,PRIMARY KEY (empresa_id),null,null
 constraint,realtime,messages_2025_12_07_pkey,messages_2025_12_07,"PRIMARY KEY (id, inserted_at)",null,null
 constraint,realtime,messages_2025_12_09_pkey,messages_2025_12_09,"PRIMARY KEY (id, inserted_at)",null,null
+constraint,realtime,messages_2025_12_11_pkey,messages_2025_12_11,"PRIMARY KEY (id, inserted_at)",null,null
 constraint,public,mesas_codigo_empresa_numero_key,mesas,"UNIQUE (codigo_empresa, numero)",null,null
 constraint,public,mesas_pkey,mesas,PRIMARY KEY (id),null,null
-constraint,realtime,messages_2025_12_11_pkey,messages_2025_12_11,"PRIMARY KEY (id, inserted_at)",null,null
 constraint,realtime,messages_2025_12_10_pkey,messages_2025_12_10,"PRIMARY KEY (id, inserted_at)",null,null
 constraint,public,companies_company_code_key,empresas,UNIQUE (codigo_empresa),null,null
 constraint,public,companies_pkey,empresas,PRIMARY KEY (id),null,null
 constraint,public,empresas_codigo_empresa_unique,empresas,UNIQUE (codigo_empresa),null,null
-constraint,public,comanda_itens_comanda_id_fkey,comanda_itens,FOREIGN KEY (comanda_id) REFERENCES comandas(id) ON DELETE CASCADE,null,null
-constraint,public,comanda_itens_desconto_check,comanda_itens,CHECK ((desconto >= (0)::numeric)),null,null
-constraint,public,comanda_itens_pkey,comanda_itens,PRIMARY KEY (id),null,null
-constraint,public,comanda_itens_preco_unitario_check,comanda_itens,CHECK ((preco_unitario >= (0)::numeric)),null,null
-constraint,public,comanda_itens_produto_id_fkey,comanda_itens,FOREIGN KEY (produto_id) REFERENCES produtos(id) ON DELETE RESTRICT,null,null
-constraint,public,comanda_itens_quantidade_check,comanda_itens,CHECK ((quantidade > (0)::numeric)),null,null
-constraint,public,fk_comanda_itens_comanda,comanda_itens,FOREIGN KEY (comanda_id) REFERENCES comandas(id) ON DELETE CASCADE,null,null
-constraint,public,fk_comanda_itens_produto,comanda_itens,FOREIGN KEY (produto_id) REFERENCES produtos(id) ON DELETE SET NULL,null,null
-constraint,public,comanda_clientes_ck_nome,comanda_clientes,CHECK (((cliente_id IS NOT NULL) OR ((nome_livre IS NOT NULL) AND (length(TRIM(BOTH FROM nome_livre)) > 0)))),null,null
-constraint,public,comanda_clientes_cliente_id_fkey,comanda_clientes,FOREIGN KEY (cliente_id) REFERENCES clientes(id) ON DELETE SET NULL,null,null
-constraint,public,comanda_clientes_comanda_id_fkey,comanda_clientes,FOREIGN KEY (comanda_id) REFERENCES comandas(id) ON DELETE CASCADE,null,null
-constraint,public,comanda_clientes_pkey,comanda_clientes,PRIMARY KEY (id),null,null
-constraint,public,fk_comanda_clientes_cliente,comanda_clientes,FOREIGN KEY (cliente_id) REFERENCES clientes(id) ON DELETE SET NULL,null,null
 constraint,public,caixa_sessoes_pkey,caixa_sessoes,PRIMARY KEY (id),null,null
 constraint,public,caixa_sessoes_status_check,caixa_sessoes,"CHECK ((status = ANY (ARRAY['open'::text, 'closed'::text])))",null,null
 constraint,public,caixa_movimentacoes_caixa_sessao_id_fkey,caixa_movimentacoes,FOREIGN KEY (caixa_sessao_id) REFERENCES caixa_sessoes(id) ON DELETE CASCADE,null,null
@@ -1670,11 +1677,6 @@ constraint,public,fk_mov_saldo_cliente,movimentos_saldo,FOREIGN KEY (cliente_id)
 constraint,public,movimentos_saldo_pkey,movimentos_saldo,PRIMARY KEY (id),null,null
 constraint,public,movimentos_saldo_tipo_check,movimentos_saldo,"CHECK ((tipo = ANY (ARRAY['credito'::text, 'debito'::text])))",null,null
 constraint,public,movimentos_saldo_valor_check,movimentos_saldo,CHECK ((valor > (0)::numeric)),null,null
-constraint,public,chk_comandas_status_valid,comandas,"CHECK ((status = ANY (ARRAY['open'::text, 'closed'::text, 'cancelled'::text])))",null,null
-constraint,public,comandas_mesa_id_fkey,comandas,FOREIGN KEY (mesa_id) REFERENCES mesas(id) ON DELETE SET NULL,null,null
-constraint,public,comandas_origem_check,comandas,"CHECK (((origem = ANY (ARRAY['manual'::text, 'xml'::text, 'api'::text])) OR (origem IS NULL)))",null,null
-constraint,public,comandas_pkey,comandas,PRIMARY KEY (id),null,null
-constraint,public,fk_comandas_mesa,comandas,FOREIGN KEY (mesa_id) REFERENCES mesas(id) ON DELETE SET NULL,null,null
 constraint,public,contas_pagar_fornecedor_id_fkey,contas_pagar,FOREIGN KEY (fornecedor_id) REFERENCES clientes(id),null,null
 constraint,public,contas_pagar_pkey,contas_pagar,PRIMARY KEY (id),null,null
 constraint,public,contas_pagar_baixas_caixa_movimentacao_id_fkey,contas_pagar_baixas,FOREIGN KEY (caixa_movimentacao_id) REFERENCES caixa_movimentacoes(id),null,null
@@ -1704,6 +1706,24 @@ constraint,public,quadras_dias_funcionamento_pkey,quadras_dias_funcionamento,PRI
 constraint,public,quadras_dias_funcionamento_quadra_id_fkey,quadras_dias_funcionamento,FOREIGN KEY (quadra_id) REFERENCES quadras(id) ON DELETE CASCADE,null,null
 constraint,public,quadras_dias_funcionamento_tipo_check,quadras_dias_funcionamento,"CHECK (((tipo)::text = ANY (ARRAY[('dia_semana'::character varying)::text, ('data_fechamento'::character varying)::text])))",null,null
 constraint,public,estoque_baixa_log_pkey,estoque_baixa_log,PRIMARY KEY (comanda_id),null,null
+constraint,public,chk_comandas_status_valid,comandas,"CHECK ((status = ANY (ARRAY['open'::text, 'closed'::text, 'cancelled'::text])))",null,null
+constraint,public,comandas_mesa_id_fkey,comandas,FOREIGN KEY (mesa_id) REFERENCES mesas(id) ON DELETE SET NULL,null,null
+constraint,public,comandas_origem_check,comandas,"CHECK (((origem = ANY (ARRAY['manual'::text, 'xml'::text, 'api'::text])) OR (origem IS NULL)))",null,null
+constraint,public,comandas_pkey,comandas,PRIMARY KEY (id),null,null
+constraint,public,fk_comandas_mesa,comandas,FOREIGN KEY (mesa_id) REFERENCES mesas(id) ON DELETE SET NULL,null,null
+constraint,public,comanda_itens_comanda_id_fkey,comanda_itens,FOREIGN KEY (comanda_id) REFERENCES comandas(id) ON DELETE CASCADE,null,null
+constraint,public,comanda_itens_desconto_check,comanda_itens,CHECK ((desconto >= (0)::numeric)),null,null
+constraint,public,comanda_itens_pkey,comanda_itens,PRIMARY KEY (id),null,null
+constraint,public,comanda_itens_preco_unitario_check,comanda_itens,CHECK ((preco_unitario >= (0)::numeric)),null,null
+constraint,public,comanda_itens_produto_id_fkey,comanda_itens,FOREIGN KEY (produto_id) REFERENCES produtos(id) ON DELETE RESTRICT,null,null
+constraint,public,comanda_itens_quantidade_check,comanda_itens,CHECK ((quantidade > (0)::numeric)),null,null
+constraint,public,fk_comanda_itens_comanda,comanda_itens,FOREIGN KEY (comanda_id) REFERENCES comandas(id) ON DELETE CASCADE,null,null
+constraint,public,fk_comanda_itens_produto,comanda_itens,FOREIGN KEY (produto_id) REFERENCES produtos(id) ON DELETE SET NULL,null,null
+constraint,public,comanda_clientes_ck_nome,comanda_clientes,CHECK (((cliente_id IS NOT NULL) OR ((nome_livre IS NOT NULL) AND (length(TRIM(BOTH FROM nome_livre)) > 0)))),null,null
+constraint,public,comanda_clientes_cliente_id_fkey,comanda_clientes,FOREIGN KEY (cliente_id) REFERENCES clientes(id) ON DELETE SET NULL,null,null
+constraint,public,comanda_clientes_comanda_id_fkey,comanda_clientes,FOREIGN KEY (comanda_id) REFERENCES comandas(id) ON DELETE CASCADE,null,null
+constraint,public,comanda_clientes_pkey,comanda_clientes,PRIMARY KEY (id),null,null
+constraint,public,fk_comanda_clientes_cliente,comanda_clientes,FOREIGN KEY (cliente_id) REFERENCES clientes(id) ON DELETE SET NULL,null,null
 constraint,public,comanda_historico_comanda_id_fkey,comanda_historico,FOREIGN KEY (comanda_id) REFERENCES comandas(id) ON DELETE CASCADE,null,null
 constraint,public,comanda_historico_pkey,comanda_historico,PRIMARY KEY (id),null,null
 constraint,public,products_pkey,produtos,PRIMARY KEY (id),null,null
@@ -1726,19 +1746,12 @@ constraint,public,agendamento_participantes_valor_cota_check,agendamento_partici
 constraint,public,agp_codigo_empresa_fkey,agendamento_participantes,FOREIGN KEY (codigo_empresa) REFERENCES empresas(codigo_empresa) ON UPDATE CASCADE ON DELETE RESTRICT,null,null
 constraint,public,agp_finalizadora_id_fkey,agendamento_participantes,FOREIGN KEY (finalizadora_id) REFERENCES finalizadoras(id) ON UPDATE CASCADE ON DELETE SET NULL,null,null
 constraint,public,fk_agp_cliente,agendamento_participantes,FOREIGN KEY (cliente_id) REFERENCES clientes(id) ON UPDATE CASCADE ON DELETE RESTRICT,null,null
+constraint,realtime,messages_2025_12_13_pkey,messages_2025_12_13,"PRIMARY KEY (id, inserted_at)",null,null
 constraint,public,agendamentos_codigo_empresa_fkey,agendamentos,FOREIGN KEY (codigo_empresa) REFERENCES empresas(codigo_empresa) ON UPDATE CASCADE ON DELETE RESTRICT,null,null
 constraint,public,agendamentos_valor_nonneg,agendamentos,CHECK (((valor_total IS NULL) OR (valor_total >= (0)::numeric))),null,null
 constraint,public,bookings_court_id_fkey,agendamentos,FOREIGN KEY (quadra_id) REFERENCES quadras(id),null,null
 constraint,public,bookings_customer_id_fkey,agendamentos,FOREIGN KEY (cliente_id) REFERENCES clientes(id),null,null
 constraint,public,bookings_pkey,agendamentos,PRIMARY KEY (id),null,null
-constraint,public,fk_pagamentos_caixa,pagamentos,FOREIGN KEY (caixa_id) REFERENCES caixa_sessoes(id) ON DELETE SET NULL,null,null
-constraint,public,fk_pagamentos_finalizadora,pagamentos,FOREIGN KEY (finalizadora_id) REFERENCES finalizadoras(id) ON DELETE SET NULL,null,null
-constraint,public,pagamentos_caixa_id_fkey,pagamentos,FOREIGN KEY (caixa_id) REFERENCES caixa_sessoes(id) ON DELETE SET NULL,null,null
-constraint,public,pagamentos_comanda_id_fkey,pagamentos,FOREIGN KEY (comanda_id) REFERENCES comandas(id) ON DELETE CASCADE,null,null
-constraint,public,pagamentos_finalizadora_id_fkey,pagamentos,FOREIGN KEY (finalizadora_id) REFERENCES finalizadoras(id) ON UPDATE CASCADE ON DELETE SET NULL,null,null
-constraint,public,pagamentos_origem_check,pagamentos,"CHECK (((origem = ANY (ARRAY['manual'::text, 'xml'::text, 'api'::text])) OR (origem IS NULL)))",null,null
-constraint,public,pagamentos_pkey,pagamentos,PRIMARY KEY (id),null,null
-constraint,public,pagamentos_valor_check,pagamentos,CHECK ((valor >= (0)::numeric)),null,null
 constraint,public,produto_categorias_pkey,produto_categorias,PRIMARY KEY (id),null,null
 constraint,public,clientes_codigo_empresa_fkey,clientes,FOREIGN KEY (codigo_empresa) REFERENCES empresas(codigo_empresa) ON UPDATE CASCADE ON DELETE RESTRICT,null,null
 constraint,public,customers_pkey,clientes,PRIMARY KEY (id),null,null
@@ -1748,6 +1761,15 @@ constraint,public,agenda_settings_auto_cancel_hours_check,agenda_settings,CHECK 
 constraint,public,agenda_settings_auto_confirm_hours_check,agenda_settings,CHECK (((auto_confirm_hours IS NULL) OR ((auto_confirm_hours >= 0) AND (auto_confirm_hours <= 168)))),null,null
 constraint,public,agenda_settings_empresa_id_fkey,agenda_settings,FOREIGN KEY (empresa_id) REFERENCES empresas(id) ON DELETE CASCADE,null,null
 constraint,public,agenda_settings_pkey,agenda_settings,PRIMARY KEY (empresa_id),null,null
+constraint,public,fk_pagamentos_caixa,pagamentos,FOREIGN KEY (caixa_id) REFERENCES caixa_sessoes(id) ON DELETE SET NULL,null,null
+constraint,public,fk_pagamentos_finalizadora,pagamentos,FOREIGN KEY (finalizadora_id) REFERENCES finalizadoras(id) ON DELETE SET NULL,null,null
+constraint,public,pagamentos_caixa_id_fkey,pagamentos,FOREIGN KEY (caixa_id) REFERENCES caixa_sessoes(id) ON DELETE SET NULL,null,null
+constraint,public,pagamentos_comanda_id_fkey,pagamentos,FOREIGN KEY (comanda_id) REFERENCES comandas(id) ON DELETE CASCADE,null,null
+constraint,public,pagamentos_finalizadora_id_fkey,pagamentos,FOREIGN KEY (finalizadora_id) REFERENCES finalizadoras(id) ON UPDATE CASCADE ON DELETE SET NULL,null,null
+constraint,public,pagamentos_origem_check,pagamentos,"CHECK (((origem = ANY (ARRAY['manual'::text, 'xml'::text, 'api'::text])) OR (origem IS NULL)))",null,null
+constraint,public,pagamentos_pkey,pagamentos,PRIMARY KEY (id),null,null
+constraint,public,pagamentos_valor_check,pagamentos,CHECK ((valor >= (0)::numeric)),null,null
+constraint,realtime,messages_2025_12_12_pkey,messages_2025_12_12,"PRIMARY KEY (id, inserted_at)",null,null
 index,auth,sso_domains_pkey,sso_domains,CREATE UNIQUE INDEX sso_domains_pkey ON auth.sso_domains USING btree (id),null,null
 index,auth,sso_domains_sso_provider_id_idx,sso_domains,CREATE INDEX sso_domains_sso_provider_id_idx ON auth.sso_domains USING btree (sso_provider_id),null,null
 index,auth,sso_domains_domain_idx,sso_domains,CREATE UNIQUE INDEX sso_domains_domain_idx ON auth.sso_domains USING btree (lower(domain)),null,null
@@ -1881,8 +1903,6 @@ index,supabase_functions,supabase_functions_hooks_request_id_idx,hooks,CREATE IN
 index,supabase_functions,supabase_functions_hooks_h_table_id_h_name_idx,hooks,"CREATE INDEX supabase_functions_hooks_h_table_id_h_name_idx ON supabase_functions.hooks USING btree (hook_table_id, hook_name)",null,null
 index,realtime,messages_pkey,messages,"CREATE UNIQUE INDEX messages_pkey ON ONLY realtime.messages USING btree (id, inserted_at)",null,null
 index,realtime,messages_inserted_at_topic_index,messages,"CREATE INDEX messages_inserted_at_topic_index ON ONLY realtime.messages USING btree (inserted_at DESC, topic) WHERE ((extension = 'broadcast'::text) AND (private IS TRUE))",null,null
-index,realtime,messages_2025_12_06_pkey,messages_2025_12_06,"CREATE UNIQUE INDEX messages_2025_12_06_pkey ON realtime.messages_2025_12_06 USING btree (id, inserted_at)",null,null
-index,realtime,messages_2025_12_06_inserted_at_topic_idx,messages_2025_12_06,"CREATE INDEX messages_2025_12_06_inserted_at_topic_idx ON realtime.messages_2025_12_06 USING btree (inserted_at DESC, topic) WHERE ((extension = 'broadcast'::text) AND (private IS TRUE))",null,null
 index,public,user_profiles_pkey,colaboradores,CREATE UNIQUE INDEX user_profiles_pkey ON public.colaboradores USING btree (id),null,null
 index,public,colaboradores_codigo_empresa_idx,colaboradores,CREATE INDEX colaboradores_codigo_empresa_idx ON public.colaboradores USING btree (codigo_empresa),null,null
 index,public,idx_colaboradores_ativo,colaboradores,CREATE INDEX idx_colaboradores_ativo ON public.colaboradores USING btree (ativo),null,null
@@ -1894,34 +1914,21 @@ index,realtime,messages_2025_12_07_pkey,messages_2025_12_07,"CREATE UNIQUE INDEX
 index,realtime,messages_2025_12_07_inserted_at_topic_idx,messages_2025_12_07,"CREATE INDEX messages_2025_12_07_inserted_at_topic_idx ON realtime.messages_2025_12_07 USING btree (inserted_at DESC, topic) WHERE ((extension = 'broadcast'::text) AND (private IS TRUE))",null,null
 index,realtime,messages_2025_12_09_pkey,messages_2025_12_09,"CREATE UNIQUE INDEX messages_2025_12_09_pkey ON realtime.messages_2025_12_09 USING btree (id, inserted_at)",null,null
 index,realtime,messages_2025_12_09_inserted_at_topic_idx,messages_2025_12_09,"CREATE INDEX messages_2025_12_09_inserted_at_topic_idx ON realtime.messages_2025_12_09 USING btree (inserted_at DESC, topic) WHERE ((extension = 'broadcast'::text) AND (private IS TRUE))",null,null
+index,realtime,messages_2025_12_11_pkey,messages_2025_12_11,"CREATE UNIQUE INDEX messages_2025_12_11_pkey ON realtime.messages_2025_12_11 USING btree (id, inserted_at)",null,null
+index,realtime,messages_2025_12_11_inserted_at_topic_idx,messages_2025_12_11,"CREATE INDEX messages_2025_12_11_inserted_at_topic_idx ON realtime.messages_2025_12_11 USING btree (inserted_at DESC, topic) WHERE ((extension = 'broadcast'::text) AND (private IS TRUE))",null,null
+index,public,mesas_empresa_idx,mesas,CREATE INDEX mesas_empresa_idx ON public.mesas USING btree (codigo_empresa),null,null
 index,public,mesas_codigo_empresa_numero_key,mesas,"CREATE UNIQUE INDEX mesas_codigo_empresa_numero_key ON public.mesas USING btree (codigo_empresa, numero)",null,null
 index,public,mesas_pkey,mesas,CREATE UNIQUE INDEX mesas_pkey ON public.mesas USING btree (id),null,null
 index,public,idx_mesas_codigo_empresa,mesas,CREATE INDEX idx_mesas_codigo_empresa ON public.mesas USING btree (codigo_empresa),null,null
 index,public,idx_mesas_empresa,mesas,CREATE INDEX idx_mesas_empresa ON public.mesas USING btree (codigo_empresa),null,null
 index,public,idx_mesas_nome,mesas,"CREATE INDEX idx_mesas_nome ON public.mesas USING gin (to_tsvector('simple'::regconfig, COALESCE(nome, ''::text)))",null,null
 index,public,uq_mesas_empresa_numero,mesas,"CREATE UNIQUE INDEX uq_mesas_empresa_numero ON public.mesas USING btree (codigo_empresa, numero)",null,null
-index,realtime,messages_2025_12_11_pkey,messages_2025_12_11,"CREATE UNIQUE INDEX messages_2025_12_11_pkey ON realtime.messages_2025_12_11 USING btree (id, inserted_at)",null,null
-index,realtime,messages_2025_12_11_inserted_at_topic_idx,messages_2025_12_11,"CREATE INDEX messages_2025_12_11_inserted_at_topic_idx ON realtime.messages_2025_12_11 USING btree (inserted_at DESC, topic) WHERE ((extension = 'broadcast'::text) AND (private IS TRUE))",null,null
 index,realtime,messages_2025_12_10_pkey,messages_2025_12_10,"CREATE UNIQUE INDEX messages_2025_12_10_pkey ON realtime.messages_2025_12_10 USING btree (id, inserted_at)",null,null
 index,realtime,messages_2025_12_10_inserted_at_topic_idx,messages_2025_12_10,"CREATE INDEX messages_2025_12_10_inserted_at_topic_idx ON realtime.messages_2025_12_10 USING btree (inserted_at DESC, topic) WHERE ((extension = 'broadcast'::text) AND (private IS TRUE))",null,null
 index,public,companies_company_code_key,empresas,CREATE UNIQUE INDEX companies_company_code_key ON public.empresas USING btree (codigo_empresa),null,null
 index,public,companies_pkey,empresas,CREATE UNIQUE INDEX companies_pkey ON public.empresas USING btree (id),null,null
 index,public,empresas_codigo_empresa_unique,empresas,CREATE UNIQUE INDEX empresas_codigo_empresa_unique ON public.empresas USING btree (codigo_empresa),null,null
 index,public,companies_code_idx,empresas,CREATE INDEX companies_code_idx ON public.empresas USING btree (codigo_empresa),null,null
-index,public,comanda_itens_pkey,comanda_itens,CREATE UNIQUE INDEX comanda_itens_pkey ON public.comanda_itens USING btree (id),null,null
-index,public,idx_comanda_itens_codigo_empresa,comanda_itens,CREATE INDEX idx_comanda_itens_codigo_empresa ON public.comanda_itens USING btree (codigo_empresa),null,null
-index,public,idx_comanda_itens_comanda,comanda_itens,CREATE INDEX idx_comanda_itens_comanda ON public.comanda_itens USING btree (comanda_id),null,null
-index,public,idx_comanda_itens_comanda_id,comanda_itens,CREATE INDEX idx_comanda_itens_comanda_id ON public.comanda_itens USING btree (comanda_id),null,null
-index,public,idx_comanda_itens_desconto_tipo,comanda_itens,CREATE INDEX idx_comanda_itens_desconto_tipo ON public.comanda_itens USING btree (desconto_tipo) WHERE (desconto_tipo IS NOT NULL),null,null
-index,public,idx_comanda_itens_empresa,comanda_itens,CREATE INDEX idx_comanda_itens_empresa ON public.comanda_itens USING btree (codigo_empresa),null,null
-index,public,idx_comanda_itens_produto,comanda_itens,CREATE INDEX idx_comanda_itens_produto ON public.comanda_itens USING btree (produto_id),null,null
-index,public,comanda_clientes_pkey,comanda_clientes,CREATE UNIQUE INDEX comanda_clientes_pkey ON public.comanda_clientes USING btree (id),null,null
-index,public,comanda_clientes_cliente_idx,comanda_clientes,CREATE INDEX comanda_clientes_cliente_idx ON public.comanda_clientes USING btree (cliente_id),null,null
-index,public,comanda_clientes_comanda_idx,comanda_clientes,CREATE INDEX comanda_clientes_comanda_idx ON public.comanda_clientes USING btree (comanda_id),null,null
-index,public,comanda_clientes_empresa_idx,comanda_clientes,CREATE INDEX comanda_clientes_empresa_idx ON public.comanda_clientes USING btree (codigo_empresa),null,null
-index,public,idx_comanda_clientes_cliente,comanda_clientes,CREATE INDEX idx_comanda_clientes_cliente ON public.comanda_clientes USING btree (cliente_id),null,null
-index,public,idx_comanda_clientes_comanda,comanda_clientes,CREATE INDEX idx_comanda_clientes_comanda ON public.comanda_clientes USING btree (comanda_id),null,null
-index,public,idx_comanda_clientes_empresa,comanda_clientes,CREATE INDEX idx_comanda_clientes_empresa ON public.comanda_clientes USING btree (codigo_empresa),null,null
 index,public,caixa_sessoes_pkey,caixa_sessoes,CREATE UNIQUE INDEX caixa_sessoes_pkey ON public.caixa_sessoes USING btree (id),null,null
 index,public,idx_caixa_empresa,caixa_sessoes,CREATE INDEX idx_caixa_empresa ON public.caixa_sessoes USING btree (codigo_empresa),null,null
 index,public,idx_caixa_sessoes_empresa,caixa_sessoes,CREATE INDEX idx_caixa_sessoes_empresa ON public.caixa_sessoes USING btree (codigo_empresa),null,null
@@ -1934,21 +1941,6 @@ index,public,movimentos_saldo_pkey,movimentos_saldo,CREATE UNIQUE INDEX moviment
 index,public,idx_mov_saldo_agendamento,movimentos_saldo,CREATE INDEX idx_mov_saldo_agendamento ON public.movimentos_saldo USING btree (agendamento_id),null,null
 index,public,idx_mov_saldo_cliente,movimentos_saldo,CREATE INDEX idx_mov_saldo_cliente ON public.movimentos_saldo USING btree (cliente_id),null,null
 index,public,idx_mov_saldo_empresa,movimentos_saldo,CREATE INDEX idx_mov_saldo_empresa ON public.movimentos_saldo USING btree (codigo_empresa),null,null
-index,public,idx_comandas_nf_status,comandas,CREATE INDEX idx_comandas_nf_status ON public.comandas USING btree (nf_status),null,null
-index,public,comandas_pkey,comandas,CREATE UNIQUE INDEX comandas_pkey ON public.comandas USING btree (id),null,null
-index,public,idx_comandas_aberto_em,comandas,CREATE INDEX idx_comandas_aberto_em ON public.comandas USING btree (aberto_em DESC),null,null
-index,public,idx_comandas_agendamento_id,comandas,CREATE INDEX idx_comandas_agendamento_id ON public.comandas USING btree (agendamento_id),null,null
-index,public,idx_comandas_codigo_empresa,comandas,CREATE INDEX idx_comandas_codigo_empresa ON public.comandas USING btree (codigo_empresa),null,null
-index,public,idx_comandas_desconto_tipo,comandas,CREATE INDEX idx_comandas_desconto_tipo ON public.comandas USING btree (desconto_tipo) WHERE (desconto_tipo IS NOT NULL),null,null
-index,public,idx_comandas_empresa_fechado,comandas,"CREATE INDEX idx_comandas_empresa_fechado ON public.comandas USING btree (codigo_empresa, fechado_em)",null,null
-index,public,idx_comandas_empresa_status,comandas,"CREATE INDEX idx_comandas_empresa_status ON public.comandas USING btree (codigo_empresa, status)",null,null
-index,public,idx_comandas_fechado_em,comandas,CREATE INDEX idx_comandas_fechado_em ON public.comandas USING btree (fechado_em DESC) WHERE (fechado_em IS NOT NULL),null,null
-index,public,idx_comandas_mesa,comandas,CREATE INDEX idx_comandas_mesa ON public.comandas USING btree (mesa_id),null,null
-index,public,idx_comandas_mesa_status,comandas,"CREATE INDEX idx_comandas_mesa_status ON public.comandas USING btree (mesa_id, status) WHERE (fechado_em IS NULL)",null,null
-index,public,idx_comandas_origem,comandas,CREATE INDEX idx_comandas_origem ON public.comandas USING btree (origem),null,null
-index,public,idx_comandas_ultima_atualizacao,comandas,CREATE INDEX idx_comandas_ultima_atualizacao ON public.comandas USING btree (ultima_atualizacao),null,null
-index,public,idx_comandas_vendedor_id,comandas,CREATE INDEX idx_comandas_vendedor_id ON public.comandas USING btree (vendedor_id),null,null
-index,public,idx_comandas_xml_chave,comandas,CREATE INDEX idx_comandas_xml_chave ON public.comandas USING btree (xml_chave),null,null
 index,public,contas_pagar_pkey,contas_pagar,CREATE UNIQUE INDEX contas_pagar_pkey ON public.contas_pagar USING btree (id),null,null
 index,public,idx_contas_pagar_empresa_fornecedor,contas_pagar,"CREATE INDEX idx_contas_pagar_empresa_fornecedor ON public.contas_pagar USING btree (codigo_empresa, fornecedor_id)",null,null
 index,public,idx_contas_pagar_empresa_status,contas_pagar,"CREATE INDEX idx_contas_pagar_empresa_status ON public.contas_pagar USING btree (codigo_empresa, status)",null,null
@@ -1984,10 +1976,44 @@ index,public,idx_quadras_dias_funcionamento_quadra,quadras_dias_funcionamento,CR
 index,public,idx_quadras_dias_funcionamento_quadra_data_fechamento,quadras_dias_funcionamento,"CREATE UNIQUE INDEX idx_quadras_dias_funcionamento_quadra_data_fechamento ON public.quadras_dias_funcionamento USING btree (quadra_id, data_fechamento) WHERE ((tipo)::text = 'data_fechamento'::text)",null,null
 index,public,idx_quadras_dias_funcionamento_quadra_dia_semana,quadras_dias_funcionamento,"CREATE UNIQUE INDEX idx_quadras_dias_funcionamento_quadra_dia_semana ON public.quadras_dias_funcionamento USING btree (quadra_id, dia_semana) WHERE ((tipo)::text = 'dia_semana'::text)",null,null
 index,public,estoque_baixa_log_pkey,estoque_baixa_log,CREATE UNIQUE INDEX estoque_baixa_log_pkey ON public.estoque_baixa_log USING btree (comanda_id),null,null
+index,public,comandas_empresa_idx,comandas,CREATE INDEX comandas_empresa_idx ON public.comandas USING btree (codigo_empresa),null,null
+index,public,comandas_mesa_idx,comandas,CREATE INDEX comandas_mesa_idx ON public.comandas USING btree (mesa_id),null,null
+index,public,idx_comandas_nf_status,comandas,CREATE INDEX idx_comandas_nf_status ON public.comandas USING btree (nf_status),null,null
+index,public,comandas_pkey,comandas,CREATE UNIQUE INDEX comandas_pkey ON public.comandas USING btree (id),null,null
+index,public,idx_comandas_aberto_em,comandas,CREATE INDEX idx_comandas_aberto_em ON public.comandas USING btree (aberto_em DESC),null,null
+index,public,idx_comandas_agendamento_id,comandas,CREATE INDEX idx_comandas_agendamento_id ON public.comandas USING btree (agendamento_id),null,null
+index,public,idx_comandas_codigo_empresa,comandas,CREATE INDEX idx_comandas_codigo_empresa ON public.comandas USING btree (codigo_empresa),null,null
+index,public,idx_comandas_desconto_tipo,comandas,CREATE INDEX idx_comandas_desconto_tipo ON public.comandas USING btree (desconto_tipo) WHERE (desconto_tipo IS NOT NULL),null,null
+index,public,idx_comandas_empresa_fechado,comandas,"CREATE INDEX idx_comandas_empresa_fechado ON public.comandas USING btree (codigo_empresa, fechado_em)",null,null
+index,public,idx_comandas_empresa_status,comandas,"CREATE INDEX idx_comandas_empresa_status ON public.comandas USING btree (codigo_empresa, status)",null,null
+index,public,idx_comandas_fechado_em,comandas,CREATE INDEX idx_comandas_fechado_em ON public.comandas USING btree (fechado_em DESC) WHERE (fechado_em IS NOT NULL),null,null
+index,public,idx_comandas_mesa,comandas,CREATE INDEX idx_comandas_mesa ON public.comandas USING btree (mesa_id),null,null
+index,public,idx_comandas_mesa_status,comandas,"CREATE INDEX idx_comandas_mesa_status ON public.comandas USING btree (mesa_id, status) WHERE (fechado_em IS NULL)",null,null
+index,public,idx_comandas_origem,comandas,CREATE INDEX idx_comandas_origem ON public.comandas USING btree (origem),null,null
+index,public,idx_comandas_ultima_atualizacao,comandas,CREATE INDEX idx_comandas_ultima_atualizacao ON public.comandas USING btree (ultima_atualizacao),null,null
+index,public,idx_comandas_vendedor_id,comandas,CREATE INDEX idx_comandas_vendedor_id ON public.comandas USING btree (vendedor_id),null,null
+index,public,idx_comandas_xml_chave,comandas,CREATE INDEX idx_comandas_xml_chave ON public.comandas USING btree (xml_chave),null,null
+index,public,comanda_itens_empresa_idx,comanda_itens,CREATE INDEX comanda_itens_empresa_idx ON public.comanda_itens USING btree (codigo_empresa),null,null
+index,public,comanda_itens_comanda_idx,comanda_itens,CREATE INDEX comanda_itens_comanda_idx ON public.comanda_itens USING btree (comanda_id),null,null
+index,public,comanda_itens_pkey,comanda_itens,CREATE UNIQUE INDEX comanda_itens_pkey ON public.comanda_itens USING btree (id),null,null
+index,public,idx_comanda_itens_codigo_empresa,comanda_itens,CREATE INDEX idx_comanda_itens_codigo_empresa ON public.comanda_itens USING btree (codigo_empresa),null,null
+index,public,idx_comanda_itens_comanda,comanda_itens,CREATE INDEX idx_comanda_itens_comanda ON public.comanda_itens USING btree (comanda_id),null,null
+index,public,idx_comanda_itens_comanda_id,comanda_itens,CREATE INDEX idx_comanda_itens_comanda_id ON public.comanda_itens USING btree (comanda_id),null,null
+index,public,idx_comanda_itens_desconto_tipo,comanda_itens,CREATE INDEX idx_comanda_itens_desconto_tipo ON public.comanda_itens USING btree (desconto_tipo) WHERE (desconto_tipo IS NOT NULL),null,null
+index,public,idx_comanda_itens_empresa,comanda_itens,CREATE INDEX idx_comanda_itens_empresa ON public.comanda_itens USING btree (codigo_empresa),null,null
+index,public,idx_comanda_itens_produto,comanda_itens,CREATE INDEX idx_comanda_itens_produto ON public.comanda_itens USING btree (produto_id),null,null
+index,public,comanda_clientes_pkey,comanda_clientes,CREATE UNIQUE INDEX comanda_clientes_pkey ON public.comanda_clientes USING btree (id),null,null
+index,public,comanda_clientes_cliente_idx,comanda_clientes,CREATE INDEX comanda_clientes_cliente_idx ON public.comanda_clientes USING btree (cliente_id),null,null
+index,public,comanda_clientes_comanda_idx,comanda_clientes,CREATE INDEX comanda_clientes_comanda_idx ON public.comanda_clientes USING btree (comanda_id),null,null
+index,public,comanda_clientes_empresa_idx,comanda_clientes,CREATE INDEX comanda_clientes_empresa_idx ON public.comanda_clientes USING btree (codigo_empresa),null,null
+index,public,idx_comanda_clientes_cliente,comanda_clientes,CREATE INDEX idx_comanda_clientes_cliente ON public.comanda_clientes USING btree (cliente_id),null,null
+index,public,idx_comanda_clientes_comanda,comanda_clientes,CREATE INDEX idx_comanda_clientes_comanda ON public.comanda_clientes USING btree (comanda_id),null,null
+index,public,idx_comanda_clientes_empresa,comanda_clientes,CREATE INDEX idx_comanda_clientes_empresa ON public.comanda_clientes USING btree (codigo_empresa),null,null
 index,public,comanda_historico_pkey,comanda_historico,CREATE UNIQUE INDEX comanda_historico_pkey ON public.comanda_historico USING btree (id),null,null
 index,public,idx_comanda_historico_codigo_empresa,comanda_historico,CREATE INDEX idx_comanda_historico_codigo_empresa ON public.comanda_historico USING btree (codigo_empresa),null,null
 index,public,idx_comanda_historico_comanda_id,comanda_historico,CREATE INDEX idx_comanda_historico_comanda_id ON public.comanda_historico USING btree (comanda_id),null,null
 index,public,idx_comanda_historico_tipo,comanda_historico,CREATE INDEX idx_comanda_historico_tipo ON public.comanda_historico USING btree (tipo_alteracao),null,null
+index,public,produtos_empresa_idx,produtos,CREATE INDEX produtos_empresa_idx ON public.produtos USING btree (codigo_empresa),null,null
 index,public,products_pkey,produtos,CREATE UNIQUE INDEX products_pkey ON public.produtos USING btree (id),null,null
 index,public,idx_produtos_categoria,produtos,CREATE INDEX idx_produtos_categoria ON public.produtos USING btree (lower((categoria)::text)),null,null
 index,public,idx_produtos_codigo_barras,produtos,CREATE INDEX idx_produtos_codigo_barras ON public.produtos USING btree (codigo_barras),null,null
@@ -2012,20 +2038,12 @@ index,public,idx_agendamento_participantes_ordem,agendamento_participantes,"CREA
 index,public,idx_agp_agendamento,agendamento_participantes,CREATE INDEX idx_agp_agendamento ON public.agendamento_participantes USING btree (agendamento_id),null,null
 index,public,idx_agp_codigo_empresa,agendamento_participantes,CREATE INDEX idx_agp_codigo_empresa ON public.agendamento_participantes USING btree (codigo_empresa),null,null
 index,public,idx_agp_finalizadora,agendamento_participantes,CREATE INDEX idx_agp_finalizadora ON public.agendamento_participantes USING btree (finalizadora_id),null,null
+index,realtime,messages_2025_12_13_pkey,messages_2025_12_13,"CREATE UNIQUE INDEX messages_2025_12_13_pkey ON realtime.messages_2025_12_13 USING btree (id, inserted_at)",null,null
+index,realtime,messages_2025_12_13_inserted_at_topic_idx,messages_2025_12_13,"CREATE INDEX messages_2025_12_13_inserted_at_topic_idx ON realtime.messages_2025_12_13 USING btree (inserted_at DESC, topic) WHERE ((extension = 'broadcast'::text) AND (private IS TRUE))",null,null
 index,public,bookings_pkey,agendamentos,CREATE UNIQUE INDEX bookings_pkey ON public.agendamentos USING btree (id),null,null
 index,public,agendamentos_codigo_empresa_idx,agendamentos,CREATE INDEX agendamentos_codigo_empresa_idx ON public.agendamentos USING btree (codigo_empresa),null,null
 index,public,agendamentos_inicio_idx,agendamentos,CREATE INDEX agendamentos_inicio_idx ON public.agendamentos USING btree (inicio),null,null
 index,public,ux_agendamentos_empresa_codigo,agendamentos,"CREATE UNIQUE INDEX ux_agendamentos_empresa_codigo ON public.agendamentos USING btree (codigo_empresa, codigo)",null,null
-index,public,pagamentos_pkey,pagamentos,CREATE UNIQUE INDEX pagamentos_pkey ON public.pagamentos USING btree (id),null,null
-index,public,idx_pagamentos_caixa,pagamentos,CREATE INDEX idx_pagamentos_caixa ON public.pagamentos USING btree (caixa_id),null,null
-index,public,idx_pagamentos_codigo_empresa,pagamentos,CREATE INDEX idx_pagamentos_codigo_empresa ON public.pagamentos USING btree (codigo_empresa),null,null
-index,public,idx_pagamentos_comanda,pagamentos,CREATE INDEX idx_pagamentos_comanda ON public.pagamentos USING btree (comanda_id),null,null
-index,public,idx_pagamentos_comanda_id,pagamentos,CREATE INDEX idx_pagamentos_comanda_id ON public.pagamentos USING btree (comanda_id),null,null
-index,public,idx_pagamentos_empresa,pagamentos,CREATE INDEX idx_pagamentos_empresa ON public.pagamentos USING btree (codigo_empresa),null,null
-index,public,idx_pagamentos_finalizadora,pagamentos,CREATE INDEX idx_pagamentos_finalizadora ON public.pagamentos USING btree (finalizadora_id),null,null
-index,public,idx_pagamentos_origem,pagamentos,CREATE INDEX idx_pagamentos_origem ON public.pagamentos USING btree (origem),null,null
-index,public,idx_pagamentos_recebido_em,pagamentos,CREATE INDEX idx_pagamentos_recebido_em ON public.pagamentos USING btree (recebido_em),null,null
-index,public,idx_pagamentos_xml_chave,pagamentos,CREATE INDEX idx_pagamentos_xml_chave ON public.pagamentos USING btree (xml_chave),null,null
 index,public,produto_categorias_pkey,produto_categorias,CREATE UNIQUE INDEX produto_categorias_pkey ON public.produto_categorias USING btree (id),null,null
 index,public,ux_produto_categorias_empresa_nome,produto_categorias,"CREATE UNIQUE INDEX ux_produto_categorias_empresa_nome ON public.produto_categorias USING btree (codigo_empresa, lower(nome))",null,null
 index,public,customers_pkey,clientes,CREATE UNIQUE INDEX customers_pkey ON public.clientes USING btree (id),null,null
@@ -2045,6 +2063,20 @@ index,public,idx_notas_fiscais_empresa,notas_fiscais,CREATE INDEX idx_notas_fisc
 index,public,idx_notas_fiscais_status,notas_fiscais,CREATE INDEX idx_notas_fiscais_status ON public.notas_fiscais USING btree (status),null,null
 index,public,idx_notas_fiscais_criado_em,notas_fiscais,CREATE INDEX idx_notas_fiscais_criado_em ON public.notas_fiscais USING btree (criado_em DESC),null,null
 index,public,agenda_settings_pkey,agenda_settings,CREATE UNIQUE INDEX agenda_settings_pkey ON public.agenda_settings USING btree (empresa_id),null,null
+index,public,pagamentos_empresa_idx,pagamentos,CREATE INDEX pagamentos_empresa_idx ON public.pagamentos USING btree (codigo_empresa),null,null
+index,public,pagamentos_comanda_idx,pagamentos,CREATE INDEX pagamentos_comanda_idx ON public.pagamentos USING btree (comanda_id),null,null
+index,public,pagamentos_pkey,pagamentos,CREATE UNIQUE INDEX pagamentos_pkey ON public.pagamentos USING btree (id),null,null
+index,public,idx_pagamentos_caixa,pagamentos,CREATE INDEX idx_pagamentos_caixa ON public.pagamentos USING btree (caixa_id),null,null
+index,public,idx_pagamentos_codigo_empresa,pagamentos,CREATE INDEX idx_pagamentos_codigo_empresa ON public.pagamentos USING btree (codigo_empresa),null,null
+index,public,idx_pagamentos_comanda,pagamentos,CREATE INDEX idx_pagamentos_comanda ON public.pagamentos USING btree (comanda_id),null,null
+index,public,idx_pagamentos_comanda_id,pagamentos,CREATE INDEX idx_pagamentos_comanda_id ON public.pagamentos USING btree (comanda_id),null,null
+index,public,idx_pagamentos_empresa,pagamentos,CREATE INDEX idx_pagamentos_empresa ON public.pagamentos USING btree (codigo_empresa),null,null
+index,public,idx_pagamentos_finalizadora,pagamentos,CREATE INDEX idx_pagamentos_finalizadora ON public.pagamentos USING btree (finalizadora_id),null,null
+index,public,idx_pagamentos_origem,pagamentos,CREATE INDEX idx_pagamentos_origem ON public.pagamentos USING btree (origem),null,null
+index,public,idx_pagamentos_recebido_em,pagamentos,CREATE INDEX idx_pagamentos_recebido_em ON public.pagamentos USING btree (recebido_em),null,null
+index,public,idx_pagamentos_xml_chave,pagamentos,CREATE INDEX idx_pagamentos_xml_chave ON public.pagamentos USING btree (xml_chave),null,null
+index,realtime,messages_2025_12_12_pkey,messages_2025_12_12,"CREATE UNIQUE INDEX messages_2025_12_12_pkey ON realtime.messages_2025_12_12 USING btree (id, inserted_at)",null,null
+index,realtime,messages_2025_12_12_inserted_at_topic_idx,messages_2025_12_12,"CREATE INDEX messages_2025_12_12_inserted_at_topic_idx ON realtime.messages_2025_12_12 USING btree (inserted_at DESC, topic) WHERE ((extension = 'broadcast'::text) AND (private IS TRUE))",null,null
 trigger,public,trigger_registrar_historico_comanda,comandas,CREATE TRIGGER trigger_registrar_historico_comanda AFTER UPDATE ON public.comandas FOR EACH ROW EXECUTE FUNCTION registrar_historico_comanda(),null,null
 trigger,realtime,tr_check_filters,subscription,CREATE TRIGGER tr_check_filters BEFORE INSERT OR UPDATE ON realtime.subscription FOR EACH ROW EXECUTE FUNCTION realtime.subscription_check_filters(),null,null
 trigger,storage,update_objects_updated_at,objects,CREATE TRIGGER update_objects_updated_at BEFORE UPDATE ON storage.objects FOR EACH ROW EXECUTE FUNCTION storage.update_updated_at_column(),null,null
@@ -2300,6 +2332,8 @@ function,net,http_collect_response,null,"(request_id bigint, async boolean) retu
 function,public,registrar_historico_comanda,null,() returns trigger,postgres,null
 function,supabase_functions,http_request,null,() returns trigger,supabase_functions_admin,null
 function,public,_set_updated_at,null,() returns trigger,postgres,null
+function,public,get_jwt_secret,null,() returns text,postgres,null
+function,public,auth_login_dev,null,"(p_email text, p_password text) returns jsonb",postgres,null
 function,extensions,sign,null,"(payload json, secret text, algorithm text) returns text",supabase_admin,null
 function,extensions,try_cast_double,null,(inp text) returns double precision,supabase_admin,null
 function,extensions,verify,null,"(token text, secret text, algorithm text) returns TABLE(header json, payload json, valid boolean)",supabase_admin,null
@@ -2411,13 +2445,14 @@ type,public,vendas,null,vendas,null,null
 type,public,v_agendamento_participantes,null,v_agendamento_participantes,null,null
 type,public,v_agendamentos_detalhado,null,v_agendamentos_detalhado,null,null
 type,public,v_agendamentos_isis,null,v_agendamentos_isis,null,null
-type,realtime,messages_2025_12_06,null,realtime.messages_2025_12_06,null,null
+type,realtime,messages_2025_12_13,null,realtime.messages_2025_12_13,null,null
 type,realtime,messages_2025_12_08,null,realtime.messages_2025_12_08,null,null
 type,realtime,messages_2025_12_10,null,realtime.messages_2025_12_10,null,null
 type,realtime,messages_2025_12_07,null,realtime.messages_2025_12_07,null,null
 type,realtime,messages_2025_12_09,null,realtime.messages_2025_12_09,null,null
 type,realtime,messages_2025_12_11,null,realtime.messages_2025_12_11,null,null
 type,public,notas_fiscais,null,notas_fiscais,null,null
+type,realtime,messages_2025_12_12,null,realtime.messages_2025_12_12,null,null
 extension,pg_catalog,plpgsql,null,1.0,null,PL/pgSQL procedural language
 extension,extensions,pg_stat_statements,null,1.11,null,track planning and execution statistics of all SQL statements executed
 extension,extensions,uuid-ossp,null,1.1,null,generate universally unique identifiers (UUIDs)
@@ -2739,11 +2774,8 @@ grant,supabase_functions,supabase_functions_hooks_request_id_idx,null,null,supab
 grant,supabase_functions,supabase_functions_hooks_h_table_id_h_name_idx,null,null,supabase_functions_admin,null
 grant,supabase_functions,hooks_id_seq,null,"supabase_functions_admin=rwU/supabase_functions_admin,postgres=rwU/supabase_functions_admin,anon=rwU/supabase_functions_admin,authenticated=rwU/supabase_functions_admin,service_role=rwU/supabase_functions_admin",supabase_functions_admin,null
 grant,realtime,messages,null,"supabase_realtime_admin=arwdDxtm/supabase_realtime_admin,postgres=arwdDxtm/supabase_realtime_admin,dashboard_user=arwdDxtm/supabase_realtime_admin,anon=arw/supabase_realtime_admin,authenticated=arw/supabase_realtime_admin,service_role=arw/supabase_realtime_admin",supabase_realtime_admin,null
-grant,realtime,messages_2025_12_06_pkey,null,null,supabase_admin,null
 grant,realtime,messages_pkey,null,null,supabase_realtime_admin,null
-grant,realtime,messages_2025_12_06_inserted_at_topic_idx,null,null,supabase_admin,null
 grant,realtime,messages_inserted_at_topic_index,null,null,supabase_realtime_admin,null
-grant,realtime,messages_2025_12_06,null,"supabase_admin=arwdDxtm/supabase_admin,postgres=arwdDxtm/supabase_admin,dashboard_user=arwdDxtm/supabase_admin",supabase_admin,null
 grant,public,colaboradores,null,"postgres=arwdDxtm/postgres,authenticated=arwd/postgres",postgres,null
 grant,realtime,messages_2025_12_08_pkey,null,null,supabase_admin,null
 grant,realtime,messages_2025_12_08_inserted_at_topic_idx,null,null,supabase_admin,null
@@ -2759,20 +2791,23 @@ grant,realtime,messages_2025_12_07,null,"supabase_admin=arwdDxtm/supabase_admin,
 grant,realtime,messages_2025_12_09_pkey,null,null,supabase_admin,null
 grant,realtime,messages_2025_12_09_inserted_at_topic_idx,null,null,supabase_admin,null
 grant,realtime,messages_2025_12_09,null,"supabase_admin=arwdDxtm/supabase_admin,postgres=arwdDxtm/supabase_admin,dashboard_user=arwdDxtm/supabase_admin",supabase_admin,null
-grant,public,mesas,null,"postgres=arwdDxtm/postgres,authenticated=arwd/postgres",postgres,null
 grant,realtime,messages_2025_12_11,null,"supabase_admin=arwdDxtm/supabase_admin,postgres=arwdDxtm/supabase_admin,dashboard_user=arwdDxtm/supabase_admin",supabase_admin,null
+grant,public,comandas_empresa_idx,null,null,postgres,null
+grant,public,comandas_mesa_idx,null,null,postgres,null
+grant,public,comanda_itens_empresa_idx,null,null,postgres,null
+grant,public,comanda_itens_comanda_idx,null,null,postgres,null
+grant,public,mesas_empresa_idx,null,null,postgres,null
+grant,public,mesas,null,"postgres=arwdDxtm/postgres,authenticated=arwd/postgres",postgres,null
 grant,realtime,messages_2025_12_10_pkey,null,null,supabase_admin,null
 grant,realtime,messages_2025_12_10_inserted_at_topic_idx,null,null,supabase_admin,null
 grant,realtime,messages_2025_12_10,null,"supabase_admin=arwdDxtm/supabase_admin,postgres=arwdDxtm/supabase_admin,dashboard_user=arwdDxtm/supabase_admin",supabase_admin,null
 grant,public,empresa_counters_pkey,null,null,postgres,null
 grant,public,bookings_pkey,null,null,postgres,null
 grant,public,empresas,null,"postgres=arwdDxtm/postgres,authenticated=arwd/postgres",postgres,null
-grant,public,comanda_itens,null,"postgres=arwdDxtm/postgres,authenticated=arwd/postgres",postgres,null
-grant,public,comanda_clientes,null,"postgres=arwdDxtm/postgres,authenticated=arwd/postgres",postgres,null
+grant,public,produtos_empresa_idx,null,null,postgres,null
 grant,public,caixa_sessoes,null,"postgres=arwdDxtm/postgres,authenticated=arwd/postgres",postgres,null
 grant,public,caixa_movimentacoes,null,"postgres=arwdDxtm/postgres,authenticated=arwd/postgres",postgres,null
 grant,public,movimentos_saldo,null,"postgres=arwdDxtm/postgres,authenticated=r/postgres",postgres,null
-grant,public,comandas,null,"postgres=arwdDxtm/postgres,authenticated=arwd/postgres",postgres,null
 grant,public,contas_pagar,null,"postgres=arwdDxtm/postgres,authenticated=r/postgres",postgres,null
 grant,public,contas_pagar_baixas,null,"postgres=arwdDxtm/postgres,authenticated=r/postgres",postgres,null
 grant,public,contas_receber,null,"postgres=arwdDxtm/postgres,authenticated=r/postgres",postgres,null
@@ -2781,14 +2816,21 @@ grant,public,compras,null,"postgres=arwdDxtm/postgres,authenticated=arwd/postgre
 grant,public,compras_itens,null,"postgres=arwdDxtm/postgres,authenticated=arwd/postgres",postgres,null
 grant,public,quadras_dias_funcionamento,null,"postgres=arwdDxtm/postgres,authenticated=arwd/postgres",postgres,null
 grant,public,estoque_baixa_log,null,"postgres=arwdDxtm/postgres,authenticated=r/postgres",postgres,null
+grant,public,comandas,null,"postgres=arwdDxtm/postgres,authenticated=arwd/postgres",postgres,null
+grant,public,comanda_itens,null,"postgres=arwdDxtm/postgres,authenticated=arwd/postgres",postgres,null
+grant,public,comanda_clientes,null,"postgres=arwdDxtm/postgres,authenticated=arwd/postgres",postgres,null
 grant,public,comanda_historico,null,"postgres=arwdDxtm/postgres,authenticated=arwd/postgres",postgres,null
 grant,public,produtos,null,"postgres=arwdDxtm/postgres,authenticated=arwd/postgres",postgres,null
 grant,public,quadras,null,"postgres=arwdDxtm/postgres,authenticated=arwd/postgres",postgres,null
 grant,public,user_ui_settings,null,"postgres=arwdDxtm/postgres,authenticated=arw/postgres",postgres,null
 grant,public,idx_comandas_nf_status,null,null,postgres,null
+grant,public,pagamentos_empresa_idx,null,null,postgres,null
+grant,public,pagamentos_comanda_idx,null,null,postgres,null
 grant,public,agendamento_participantes,null,"postgres=arwdDxtm/postgres,authenticated=r/postgres",postgres,null
+grant,realtime,messages_2025_12_13_pkey,null,null,supabase_admin,null
+grant,realtime,messages_2025_12_13_inserted_at_topic_idx,null,null,supabase_admin,null
+grant,realtime,messages_2025_12_13,null,"supabase_admin=arwdDxtm/supabase_admin,postgres=arwdDxtm/supabase_admin,dashboard_user=arwdDxtm/supabase_admin",supabase_admin,null
 grant,public,agendamentos,null,"postgres=arwdDxtm/postgres,authenticated=arwd/postgres",postgres,null
-grant,public,pagamentos,null,"postgres=arwdDxtm/postgres,authenticated=arwd/postgres",postgres,null
 grant,public,ux_agendamentos_empresa_codigo,null,null,postgres,null
 grant,public,quadras_codigo_empresa_idx,null,null,postgres,null
 grant,public,ux_produto_categorias_empresa_nome,null,null,postgres,null
@@ -2815,8 +2857,12 @@ grant,public,notas_fiscais_pkey,null,null,postgres,null
 grant,public,idx_notas_fiscais_empresa,null,null,postgres,null
 grant,public,idx_notas_fiscais_status,null,null,postgres,null
 grant,public,idx_notas_fiscais_criado_em,null,null,postgres,null
+grant,public,pagamentos,null,"postgres=arwdDxtm/postgres,authenticated=arwd/postgres",postgres,null
 grant,public,compras_itens_pkey,null,null,postgres,null
 grant,public,idx_compras_itens_compra,null,null,postgres,null
 grant,public,idx_compras_itens_produto,null,null,postgres,null
 grant,public,idx_compras_itens_selecionado,null,null,postgres,null
 grant,public,v_agendamento_participantes,null,"postgres=arwdDxtm/postgres,authenticated=r/postgres",postgres,null
+grant,realtime,messages_2025_12_12_pkey,null,null,supabase_admin,null
+grant,realtime,messages_2025_12_12_inserted_at_topic_idx,null,null,supabase_admin,null
+grant,realtime,messages_2025_12_12,null,"supabase_admin=arwdDxtm/supabase_admin,postgres=arwdDxtm/supabase_admin,dashboard_user=arwdDxtm/supabase_admin",supabase_admin,null
