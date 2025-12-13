@@ -16,7 +16,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { generateNfcePayloadPreview } from '@/lib/fiscal-mapper';
 import { listarTotaisPorComanda, listMesas, listarClientesPorComandas, listarFinalizadorasPorComandas, listarItensDaComanda, listarClientes, listarFinalizadoras } from '@/lib/store';
 import { enviarNfce, consultarEmissaoNfce, cancelarNfce, getTransmiteNotaConfigFromEmpresa } from '@/lib/transmitenota';
-import { Settings, Search, Trash2, X } from 'lucide-react';
+import { Settings, Search, Trash2, X, FileText } from 'lucide-react';
 import { gerarXMLNFe, gerarXMLNFeFromData } from '@/lib/nfe';
 import { listProducts } from '@/lib/products';
 import cfopList from '@/data/cfop.json';
@@ -833,9 +833,43 @@ export default function FiscalHubPage(){
     <div className="relative p-4">
       <Helmet><title>Central Fiscal</title></Helmet>
       {true && (
-        <div className="absolute inset-0 z-[1000] flex items-center justify-center bg-black">
-          <div className="max-w-2xl w-[min(92vw,720px)] text-center bg-surface border border-warning rounded-lg p-6 shadow-xl">
-            <div className="text-2xl font-bold text-warning">aba fiscal, em breve podera usar</div>
+        <div className="absolute inset-0 z-[10] flex justify-center items-start pt-10 pb-8 pointer-events-auto">
+          {/* Fundo escurecido e borrado, semelhante ao overlay da Ísis */}
+          <div className="absolute inset-0 bg-black/85 backdrop-blur-md" />
+
+          {/* Card central */}
+          <div className="relative max-w-xl w-[min(92vw,640px)] rounded-2xl border border-warning/50 bg-gradient-to-br from-surface via-surface-2 to-surface shadow-2xl px-6 py-7 text-center flex flex-col items-center gap-4">
+            <div className="inline-flex items-center gap-3 px-3 py-1 rounded-full bg-warning/10 border border-warning/40 text-warning text-xs font-semibold uppercase tracking-wide">
+              <span className="w-5 h-5 rounded-full bg-warning text-black flex items-center justify-center text-[11px] font-black">NF</span>
+              <span>Central Fiscal em desenvolvimento</span>
+            </div>
+
+            <div className="flex items-center justify-center w-14 h-14 rounded-2xl bg-warning/15 border border-warning/50 text-warning shadow-lg">
+              <FileText className="w-7 h-7" />
+            </div>
+
+            <div className="space-y-2">
+              <h2 className="text-2xl font-bold text-text-primary">
+                Em breve: painel fiscal completo diretamente no F7 Arena
+              </h2>
+              <p className="text-sm text-text-secondary leading-relaxed">
+                Estamos construindo a nova Central Fiscal para acompanhar emissões de NFC-e e NF-e, revisar pendências
+                e acessar detalhes das notas em um só lugar.
+              </p>
+            </div>
+
+            <div className="w-full text-left text-xs md:text-sm text-text-secondary bg-surface/70 border border-white/5 rounded-xl p-4 space-y-2">
+              <p className="font-semibold text-text-primary mb-1">Enquanto isso, você pode:</p>
+              <ul className="list-disc list-inside space-y-1">
+                <li>Ajustar as configurações fiscais da empresa na aba <strong>Configuração Fiscal</strong>;</li>
+                <li>Validar CNPJ, inscrição estadual e parâmetros da NFC-e/NF-e;</li>
+                <li>Integrar ou revisar os dados da API de emissão fiscal.</li>
+              </ul>
+            </div>
+
+            <p className="text-[11px] text-text-muted">
+              Esta aba está em modo de desenvolvimento e ainda não deve ser utilizada em produção.
+            </p>
           </div>
         </div>
       )}

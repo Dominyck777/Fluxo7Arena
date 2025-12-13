@@ -81,7 +81,6 @@ table,public,caixa_movimentacoes,null,table,postgres,null
 table,public,clientes,null,table,postgres,null
 table,public,estoque_reservado,null,table,postgres,Controle de estoque reservado para evitar overselling
 table,public,comanda_historico,null,table,postgres,Auditoria de alterações em comandas para rastreabilidade
-table,realtime,messages_2025_12_07,null,table,supabase_admin,null
 table,public,contas_pagar,null,table,postgres,null
 table,public,contas_pagar_baixas,null,table,postgres,null
 table,realtime,messages_2025_12_11,null,table,supabase_admin,null
@@ -89,7 +88,6 @@ table,public,comandas,null,table,postgres,null
 table,public,comanda_itens,null,table,postgres,null
 table,net,http_request_queue,null,table,supabase_admin,null
 table,net,_http_response,null,table,supabase_admin,null
-table,realtime,messages_2025_12_08,null,table,supabase_admin,null
 table,supabase_functions,migrations,null,table,supabase_functions_admin,null
 table,supabase_functions,hooks,null,table,supabase_functions_admin,Supabase Functions Hooks: Audit trail for triggered hooks.
 table,realtime,messages_2025_12_10,null,table,supabase_admin,null
@@ -99,6 +97,11 @@ table,public,isis_conversas,null,table,postgres,Histórico de conversas da Ísis
 table,realtime,messages_2025_12_12,null,table,supabase_admin,null
 table,realtime,messages_2025_12_13,null,table,supabase_admin,null
 table,public,notas_fiscais,null,table,postgres,null
+table,public,isis_chat_sessions,null,table,postgres,null
+table,public,isis_chat_messages,null,table,postgres,null
+table,realtime,messages_2025_12_14,null,table,supabase_admin,null
+table,realtime,messages_2025_12_15,null,table,supabase_admin,null
+table,auth,oauth_client_states,null,table,supabase_auth_admin,Stores OAuth states for third-party provider authentication flows where Supabase acts as the OAuth client.
 column,public,lower,idx_produtos_categoria,text default null,null,null
 column,auth,id,sso_providers_pkey,uuid default null,null,null
 column,auth,lower,sso_providers_resource_id_idx,text default null,null,null
@@ -652,6 +655,8 @@ column,public,codigo_empresa,agendamentos,text default null,null,null
 column,public,auto_disabled,agendamentos,boolean default false,null,"Quando true, desativa QUALQUER automação (auto-confirmar, auto-iniciar, auto-finalizar) para este agendamento."
 column,public,codigo,agendamentos,bigint default null,null,null
 column,public,meta_roles,agendamentos,jsonb default null,null,"Metadados de papéis fixos da geração de times: { levantadores: string[], goleiros: string[], fixos: string[], fixoRoles: { [nomeLower]: ""Levantador"" | ""Goleiro"" } }"
+column,public,created_by_isis,agendamentos,boolean default false,null,null
+column,public,isis_session_id,agendamentos,uuid default null,null,null
 column,public,codigo_empresa,empresas_codigo_empresa_unique,character varying(10) default null,null,null
 column,public,ativo,idx_colaboradores_ativo,boolean default null,null,null
 column,public,empresa_id,empresa_counters_pkey,uuid default null,null,null
@@ -1191,11 +1196,7 @@ column,public,log_cnt,caixa_movimentacoes_id_seq,bigint default null,null,null
 column,public,is_called,caixa_movimentacoes_id_seq,boolean default null,null,null
 column,public,tipo,idx_caixa_mov_tipo,text default null,null,null
 column,public,xml_chave,idx_pagamentos_xml_chave,text default null,null,null
-column,realtime,id,messages_2025_12_07_pkey,uuid default null,null,null
-column,realtime,inserted_at,messages_2025_12_07_pkey,timestamp without time zone default null,null,null
 column,public,id,comandas_pkey,uuid default null,null,null
-column,realtime,inserted_at,messages_2025_12_07_inserted_at_topic_idx,timestamp without time zone default null,null,null
-column,realtime,topic,messages_2025_12_07_inserted_at_topic_idx,text default null,null,null
 column,public,mesa_id,idx_comandas_mesa,uuid default null,null,null
 column,public,id,clientes,uuid default gen_random_uuid(),null,null
 column,public,nome,clientes,character varying(255) default null,null,null
@@ -1259,14 +1260,6 @@ column,public,criado_em,comanda_historico,timestamp with time zone default now()
 column,public,to_tsvector,idx_mesas_nome,text default null,null,null
 column,public,origem,idx_comandas_origem,text default null,null,null
 column,public,xml_chave,idx_comandas_xml_chave,text default null,null,null
-column,realtime,topic,messages_2025_12_07,text default null,null,null
-column,realtime,extension,messages_2025_12_07,text default null,null,null
-column,realtime,payload,messages_2025_12_07,jsonb default null,null,null
-column,realtime,event,messages_2025_12_07,text default null,null,null
-column,realtime,private,messages_2025_12_07,boolean default false,null,null
-column,realtime,updated_at,messages_2025_12_07,timestamp without time zone default now(),null,null
-column,realtime,inserted_at,messages_2025_12_07,timestamp without time zone default now(),null,null
-column,realtime,id,messages_2025_12_07,uuid default gen_random_uuid(),null,null
 column,realtime,inserted_at,messages_2025_12_11_inserted_at_topic_idx,timestamp without time zone default null,null,null
 column,realtime,topic,messages_2025_12_11_inserted_at_topic_idx,text default null,null,null
 column,realtime,id,messages_2025_12_09_pkey,uuid default null,null,null
@@ -1331,10 +1324,6 @@ column,public,conta_id,idx_cp_baixas_empresa_conta,uuid default null,null,null
 column,public,codigo_empresa,idx_cp_baixas_empresa_data,text default null,null,null
 column,public,data_baixa,idx_cp_baixas_empresa_data,date default null,null,null
 column,public,agendamento_id,idx_comandas_agendamento_id,uuid default null,null,null
-column,realtime,id,messages_2025_12_08_pkey,uuid default null,null,null
-column,realtime,inserted_at,messages_2025_12_08_pkey,timestamp without time zone default null,null,null
-column,realtime,inserted_at,messages_2025_12_08_inserted_at_topic_idx,timestamp without time zone default null,null,null
-column,realtime,topic,messages_2025_12_08_inserted_at_topic_idx,text default null,null,null
 column,public,id,comandas,uuid default gen_random_uuid(),null,null
 column,public,codigo_empresa,comandas,text default get_my_company_code(),null,null
 column,public,mesa_id,comandas,uuid default null,null,null
@@ -1418,14 +1407,6 @@ column,net,timed_out,_http_response,boolean default null,null,null
 column,net,error_msg,_http_response,text default null,null,null
 column,net,created,_http_response,timestamp with time zone default now(),null,null
 column,supabase_functions,version,migrations_pkey,text default null,null,null
-column,realtime,topic,messages_2025_12_08,text default null,null,null
-column,realtime,extension,messages_2025_12_08,text default null,null,null
-column,realtime,payload,messages_2025_12_08,jsonb default null,null,null
-column,realtime,event,messages_2025_12_08,text default null,null,null
-column,realtime,private,messages_2025_12_08,boolean default false,null,null
-column,realtime,updated_at,messages_2025_12_08,timestamp without time zone default now(),null,null
-column,realtime,inserted_at,messages_2025_12_08,timestamp without time zone default now(),null,null
-column,realtime,id,messages_2025_12_08,uuid default gen_random_uuid(),null,null
 column,supabase_functions,version,migrations,text default null,null,null
 column,supabase_functions,inserted_at,migrations,timestamp with time zone default now(),null,null
 column,supabase_functions,id,hooks,bigint default nextval('supabase_functions.hooks_id_seq'::regclass),null,null
@@ -1544,236 +1525,295 @@ column,public,valor_total,notas_fiscais,"numeric(12,2) default null",null,null
 column,public,destinatario,notas_fiscais,jsonb default null,null,null
 column,public,criado_em,notas_fiscais,timestamp with time zone default now(),null,null
 column,public,atualizado_em,notas_fiscais,timestamp with time zone default now(),null,null
+column,public,id,isis_chat_sessions,uuid default gen_random_uuid(),null,null
+column,public,empresa_codigo,isis_chat_sessions,text default null,null,null
+column,public,empresa_id,isis_chat_sessions,uuid default null,null,null
+column,public,cliente_id,isis_chat_sessions,bigint default null,null,null
+column,public,source,isis_chat_sessions,text default 'isis'::text,null,null
+column,public,started_at,isis_chat_sessions,timestamp with time zone default now(),null,null
+column,public,ended_at,isis_chat_sessions,timestamp with time zone default null,null,null
+column,public,meta,isis_chat_sessions,jsonb default null,null,null
+column,public,id,isis_chat_sessions_pkey,uuid default null,null,null
+column,public,id,isis_chat_messages_pkey,uuid default null,null,null
+column,public,session_id,idx_isis_chat_messages_session_created,uuid default null,null,null
+column,public,created_at,idx_isis_chat_messages_session_created,timestamp with time zone default null,null,null
+column,public,started_at,idx_isis_chat_sessions_started,timestamp with time zone default null,null,null
+column,public,created_by_isis,idx_agendamentos_created_by_isis,boolean default null,null,null
+column,public,isis_session_id,idx_agendamentos_isis_session_id,uuid default null,null,null
+column,public,id,isis_chat_messages,uuid default gen_random_uuid(),null,null
+column,public,session_id,isis_chat_messages,uuid default null,null,null
+column,public,from_role,isis_chat_messages,text default null,null,null
+column,public,type,isis_chat_messages,text default 'text'::text,null,null
+column,public,text,isis_chat_messages,text default ''::text,null,null
+column,public,buttons,isis_chat_messages,jsonb default null,null,null
+column,public,created_at,isis_chat_messages,timestamp with time zone default now(),null,null
+column,public,meta,isis_chat_messages,jsonb default null,null,null
+column,auth,id,oauth_client_states_pkey,uuid default null,null,null
+column,auth,created_at,idx_oauth_client_states_created_at,timestamp with time zone default null,null,null
+column,realtime,id,messages_2025_12_15_pkey,uuid default null,null,null
+column,realtime,inserted_at,messages_2025_12_15_pkey,timestamp without time zone default null,null,null
+column,realtime,id,messages_2025_12_14_pkey,uuid default null,null,null
+column,realtime,inserted_at,messages_2025_12_14_pkey,timestamp without time zone default null,null,null
+column,realtime,inserted_at,messages_2025_12_14_inserted_at_topic_idx,timestamp without time zone default null,null,null
+column,realtime,topic,messages_2025_12_14_inserted_at_topic_idx,text default null,null,null
+column,realtime,topic,messages_2025_12_14,text default null,null,null
+column,realtime,extension,messages_2025_12_14,text default null,null,null
+column,realtime,payload,messages_2025_12_14,jsonb default null,null,null
+column,realtime,event,messages_2025_12_14,text default null,null,null
+column,realtime,private,messages_2025_12_14,boolean default false,null,null
+column,realtime,updated_at,messages_2025_12_14,timestamp without time zone default now(),null,null
+column,realtime,inserted_at,messages_2025_12_14,timestamp without time zone default now(),null,null
+column,realtime,id,messages_2025_12_14,uuid default gen_random_uuid(),null,null
+column,realtime,inserted_at,messages_2025_12_15_inserted_at_topic_idx,timestamp without time zone default null,null,null
+column,realtime,topic,messages_2025_12_15_inserted_at_topic_idx,text default null,null,null
+column,realtime,topic,messages_2025_12_15,text default null,null,null
+column,realtime,extension,messages_2025_12_15,text default null,null,null
+column,realtime,payload,messages_2025_12_15,jsonb default null,null,null
+column,realtime,event,messages_2025_12_15,text default null,null,null
+column,realtime,private,messages_2025_12_15,boolean default false,null,null
+column,realtime,updated_at,messages_2025_12_15,timestamp without time zone default now(),null,null
+column,realtime,inserted_at,messages_2025_12_15,timestamp without time zone default now(),null,null
+column,realtime,id,messages_2025_12_15,uuid default gen_random_uuid(),null,null
+column,auth,id,oauth_client_states,uuid default null,null,null
+column,auth,provider_type,oauth_client_states,text default null,null,null
+column,auth,code_verifier,oauth_client_states,text default null,null,null
+column,auth,created_at,oauth_client_states,timestamp with time zone default null,null,null
+constraint,auth,users_pkey,users,PRIMARY KEY (id),null,null
+constraint,auth,refresh_tokens_pkey,refresh_tokens,PRIMARY KEY (id),null,null
+constraint,auth,instances_pkey,instances,PRIMARY KEY (id),null,null
+constraint,auth,audit_log_entries_pkey,audit_log_entries,PRIMARY KEY (id),null,null
+constraint,auth,schema_migrations_pkey,schema_migrations,PRIMARY KEY (version),null,null
+constraint,storage,buckets_pkey,buckets,PRIMARY KEY (id),null,null
+constraint,storage,objects_pkey,objects,PRIMARY KEY (id),null,null
+constraint,storage,objects_bucketId_fkey,objects,FOREIGN KEY (bucket_id) REFERENCES storage.buckets(id),null,null
+constraint,storage,migrations_pkey,migrations,PRIMARY KEY (id),null,null
+constraint,storage,migrations_name_key,migrations,UNIQUE (name),null,null
+constraint,vault,secrets_pkey,secrets,PRIMARY KEY (id),null,null
+constraint,auth,users_email_change_confirm_status_check,users,CHECK (((email_change_confirm_status >= 0) AND (email_change_confirm_status <= 2))),null,null
+constraint,auth,identities_user_id_fkey,identities,FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE,null,null
+constraint,auth,refresh_tokens_token_unique,refresh_tokens,UNIQUE (token),null,null
+constraint,realtime,schema_migrations_pkey,schema_migrations,PRIMARY KEY (version),null,null
+constraint,storage,s3_multipart_uploads_pkey,s3_multipart_uploads,PRIMARY KEY (id),null,null
+constraint,storage,s3_multipart_uploads_bucket_id_fkey,s3_multipart_uploads,FOREIGN KEY (bucket_id) REFERENCES storage.buckets(id),null,null
+constraint,storage,s3_multipart_uploads_parts_pkey,s3_multipart_uploads_parts,PRIMARY KEY (id),null,null
+constraint,realtime,pk_subscription,subscription,PRIMARY KEY (id),null,null
+constraint,public,contas_receber_cliente_id_fkey,contas_receber,FOREIGN KEY (cliente_id) REFERENCES clientes(id),null,null
+constraint,auth,sessions_pkey,sessions,PRIMARY KEY (id),null,null
+constraint,auth,sessions_user_id_fkey,sessions,FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE,null,null
+constraint,auth,refresh_tokens_session_id_fkey,refresh_tokens,FOREIGN KEY (session_id) REFERENCES auth.sessions(id) ON DELETE CASCADE,null,null
+constraint,auth,mfa_factors_pkey,mfa_factors,PRIMARY KEY (id),null,null
+constraint,auth,mfa_factors_user_id_fkey,mfa_factors,FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE,null,null
+constraint,auth,mfa_challenges_pkey,mfa_challenges,PRIMARY KEY (id),null,null
+constraint,auth,mfa_challenges_auth_factor_id_fkey,mfa_challenges,FOREIGN KEY (factor_id) REFERENCES auth.mfa_factors(id) ON DELETE CASCADE,null,null
+constraint,auth,mfa_amr_claims_session_id_authentication_method_pkey,mfa_amr_claims,"UNIQUE (session_id, authentication_method)",null,null
+constraint,auth,mfa_amr_claims_session_id_fkey,mfa_amr_claims,FOREIGN KEY (session_id) REFERENCES auth.sessions(id) ON DELETE CASCADE,null,null
+constraint,auth,amr_id_pk,mfa_amr_claims,PRIMARY KEY (id),null,null
+constraint,auth,resource_id not empty,sso_providers,CHECK (((resource_id = NULL::text) OR (char_length(resource_id) > 0))),null,null
+constraint,auth,sso_providers_pkey,sso_providers,PRIMARY KEY (id),null,null
 constraint,auth,domain not empty,sso_domains,CHECK ((char_length(domain) > 0)),null,null
 constraint,auth,sso_domains_pkey,sso_domains,PRIMARY KEY (id),null,null
 constraint,auth,sso_domains_sso_provider_id_fkey,sso_domains,FOREIGN KEY (sso_provider_id) REFERENCES auth.sso_providers(id) ON DELETE CASCADE,null,null
-constraint,auth,entity_id not empty,saml_providers,CHECK ((char_length(entity_id) > 0)),null,null
-constraint,auth,metadata_url not empty,saml_providers,CHECK (((metadata_url = NULL::text) OR (char_length(metadata_url) > 0))),null,null
 constraint,auth,metadata_xml not empty,saml_providers,CHECK ((char_length(metadata_xml) > 0)),null,null
-constraint,auth,saml_providers_entity_id_key,saml_providers,UNIQUE (entity_id),null,null
+constraint,auth,metadata_url not empty,saml_providers,CHECK (((metadata_url = NULL::text) OR (char_length(metadata_url) > 0))),null,null
+constraint,auth,entity_id not empty,saml_providers,CHECK ((char_length(entity_id) > 0)),null,null
 constraint,auth,saml_providers_pkey,saml_providers,PRIMARY KEY (id),null,null
+constraint,auth,saml_providers_entity_id_key,saml_providers,UNIQUE (entity_id),null,null
 constraint,auth,saml_providers_sso_provider_id_fkey,saml_providers,FOREIGN KEY (sso_provider_id) REFERENCES auth.sso_providers(id) ON DELETE CASCADE,null,null
-constraint,auth,resource_id not empty,sso_providers,CHECK (((resource_id = NULL::text) OR (char_length(resource_id) > 0))),null,null
-constraint,auth,sso_providers_pkey,sso_providers,PRIMARY KEY (id),null,null
-constraint,supabase_migrations,schema_migrations_pkey,schema_migrations,PRIMARY KEY (version),null,null
-constraint,supabase_migrations,seed_files_pkey,seed_files,PRIMARY KEY (path),null,null
-constraint,auth,schema_migrations_pkey,schema_migrations,PRIMARY KEY (version),null,null
-constraint,auth,instances_pkey,instances,PRIMARY KEY (id),null,null
-constraint,auth,users_email_change_confirm_status_check,users,CHECK (((email_change_confirm_status >= 0) AND (email_change_confirm_status <= 2))),null,null
-constraint,auth,users_phone_key,users,UNIQUE (phone),null,null
-constraint,auth,users_pkey,users,PRIMARY KEY (id),null,null
-constraint,auth,audit_log_entries_pkey,audit_log_entries,PRIMARY KEY (id),null,null
-constraint,public,produto_categorias_pkey,produto_categorias,PRIMARY KEY (id),null,null
-constraint,storage,buckets_pkey,buckets,PRIMARY KEY (id),null,null
-constraint,public,users_id_fkey,usuarios,FOREIGN KEY (id) REFERENCES auth.users(id),null,null
-constraint,public,users_pkey,usuarios,PRIMARY KEY (id),null,null
-constraint,public,usuarios_codigo_empresa_fkey,usuarios,FOREIGN KEY (codigo_empresa) REFERENCES empresas(codigo_empresa) ON UPDATE CASCADE ON DELETE RESTRICT,null,null
-constraint,storage,migrations_name_key,migrations,UNIQUE (name),null,null
-constraint,storage,migrations_pkey,migrations,PRIMARY KEY (id),null,null
-constraint,auth,refresh_tokens_pkey,refresh_tokens,PRIMARY KEY (id),null,null
-constraint,auth,refresh_tokens_session_id_fkey,refresh_tokens,FOREIGN KEY (session_id) REFERENCES auth.sessions(id) ON DELETE CASCADE,null,null
-constraint,auth,refresh_tokens_token_unique,refresh_tokens,UNIQUE (token),null,null
-constraint,vault,secrets_pkey,secrets,PRIMARY KEY (id),null,null
 constraint,auth,request_id not empty,saml_relay_states,CHECK ((char_length(request_id) > 0)),null,null
-constraint,auth,saml_relay_states_flow_state_id_fkey,saml_relay_states,FOREIGN KEY (flow_state_id) REFERENCES auth.flow_state(id) ON DELETE CASCADE,null,null
 constraint,auth,saml_relay_states_pkey,saml_relay_states,PRIMARY KEY (id),null,null
 constraint,auth,saml_relay_states_sso_provider_id_fkey,saml_relay_states,FOREIGN KEY (sso_provider_id) REFERENCES auth.sso_providers(id) ON DELETE CASCADE,null,null
+constraint,public,quadras_horario_valido,quadras,CHECK (((hora_fim > hora_inicio) OR ((hora_fim = '00:00:00'::time without time zone) AND (hora_inicio <> '00:00:00'::time without time zone)))),null,null
+constraint,public,contas_receber_baixas_pkey,contas_receber_baixas,PRIMARY KEY (id),null,null
+constraint,public,contas_receber_baixas_conta_id_fkey,contas_receber_baixas,FOREIGN KEY (conta_id) REFERENCES contas_receber(id) ON DELETE CASCADE,null,null
+constraint,auth,users_phone_key,users,UNIQUE (phone),null,null
 constraint,auth,flow_state_pkey,flow_state,PRIMARY KEY (id),null,null
+constraint,auth,saml_relay_states_flow_state_id_fkey,saml_relay_states,FOREIGN KEY (flow_state_id) REFERENCES auth.flow_state(id) ON DELETE CASCADE,null,null
 constraint,auth,identities_pkey,identities,PRIMARY KEY (id),null,null
 constraint,auth,identities_provider_id_provider_unique,identities,"UNIQUE (provider_id, provider)",null,null
-constraint,auth,identities_user_id_fkey,identities,FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE,null,null
-constraint,auth,amr_id_pk,mfa_amr_claims,PRIMARY KEY (id),null,null
-constraint,auth,mfa_amr_claims_session_id_authentication_method_pkey,mfa_amr_claims,"UNIQUE (session_id, authentication_method)",null,null
-constraint,auth,mfa_amr_claims_session_id_fkey,mfa_amr_claims,FOREIGN KEY (session_id) REFERENCES auth.sessions(id) ON DELETE CASCADE,null,null
-constraint,auth,one_time_tokens_pkey,one_time_tokens,PRIMARY KEY (id),null,null
 constraint,auth,one_time_tokens_token_hash_check,one_time_tokens,CHECK ((char_length(token_hash) > 0)),null,null
+constraint,auth,one_time_tokens_pkey,one_time_tokens,PRIMARY KEY (id),null,null
 constraint,auth,one_time_tokens_user_id_fkey,one_time_tokens,FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE,null,null
-constraint,public,sales_customer_id_fkey,vendas,FOREIGN KEY (cliente_id) REFERENCES clientes(id),null,null
-constraint,public,sales_pkey,vendas,PRIMARY KEY (id),null,null
-constraint,public,vendas_company_code_fkey,vendas,FOREIGN KEY (codigo_empresa) REFERENCES empresas(codigo_empresa) ON UPDATE CASCADE ON DELETE RESTRICT,null,null
-constraint,auth,mfa_challenges_auth_factor_id_fkey,mfa_challenges,FOREIGN KEY (factor_id) REFERENCES auth.mfa_factors(id) ON DELETE CASCADE,null,null
-constraint,auth,mfa_challenges_pkey,mfa_challenges,PRIMARY KEY (id),null,null
-constraint,public,sale_items_pkey,itens_venda,PRIMARY KEY (id),null,null
-constraint,public,sale_items_product_id_fkey,itens_venda,FOREIGN KEY (produto_id) REFERENCES produtos(id),null,null
-constraint,public,sale_items_sale_id_fkey,itens_venda,FOREIGN KEY (venda_id) REFERENCES vendas(id),null,null
-constraint,auth,sessions_oauth_client_id_fkey,sessions,FOREIGN KEY (oauth_client_id) REFERENCES auth.oauth_clients(id) ON DELETE CASCADE,null,null
-constraint,auth,sessions_pkey,sessions,PRIMARY KEY (id),null,null
-constraint,auth,sessions_scopes_length,sessions,CHECK ((char_length(scopes) <= 4096)),null,null
-constraint,auth,sessions_user_id_fkey,sessions,FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE,null,null
-constraint,realtime,schema_migrations_pkey,schema_migrations,PRIMARY KEY (version),null,null
-constraint,realtime,pk_subscription,subscription,PRIMARY KEY (id),null,null
-constraint,storage,s3_multipart_uploads_parts_bucket_id_fkey,s3_multipart_uploads_parts,FOREIGN KEY (bucket_id) REFERENCES storage.buckets(id),null,null
-constraint,storage,s3_multipart_uploads_parts_pkey,s3_multipart_uploads_parts,PRIMARY KEY (id),null,null
-constraint,storage,s3_multipart_uploads_parts_upload_id_fkey,s3_multipart_uploads_parts,FOREIGN KEY (upload_id) REFERENCES storage.s3_multipart_uploads(id) ON DELETE CASCADE,null,null
-constraint,storage,s3_multipart_uploads_bucket_id_fkey,s3_multipart_uploads,FOREIGN KEY (bucket_id) REFERENCES storage.buckets(id),null,null
-constraint,storage,s3_multipart_uploads_pkey,s3_multipart_uploads,PRIMARY KEY (id),null,null
-constraint,public,courts_pkey,quadras,PRIMARY KEY (id),null,null
-constraint,public,quadras_codigo_empresa_fkey,quadras,FOREIGN KEY (codigo_empresa) REFERENCES empresas(codigo_empresa) ON UPDATE CASCADE ON DELETE RESTRICT,null,null
-constraint,public,quadras_horario_valido,quadras,CHECK (((hora_fim > hora_inicio) OR ((hora_fim = '00:00:00'::time without time zone) AND (hora_inicio <> '00:00:00'::time without time zone)))),null,null
-constraint,public,quadras_valor_nonneg,quadras,CHECK (((valor IS NULL) OR (valor >= (0)::numeric))),null,null
-constraint,public,agendamento_participantes_agendamento_id_fkey,agendamento_participantes,FOREIGN KEY (agendamento_id) REFERENCES agendamentos(id) ON DELETE CASCADE,null,null
-constraint,public,agendamento_participantes_cliente_id_fkey,agendamento_participantes,FOREIGN KEY (cliente_id) REFERENCES clientes(id) ON UPDATE CASCADE ON DELETE RESTRICT,null,null
-constraint,public,agendamento_participantes_pkey,agendamento_participantes,PRIMARY KEY (id),null,null
-constraint,public,agendamento_participantes_valor_cota_check,agendamento_participantes,CHECK ((valor_cota >= (0)::numeric)),null,null
-constraint,public,agp_codigo_empresa_fkey,agendamento_participantes,FOREIGN KEY (codigo_empresa) REFERENCES empresas(codigo_empresa) ON UPDATE CASCADE ON DELETE RESTRICT,null,null
-constraint,public,agp_finalizadora_id_fkey,agendamento_participantes,FOREIGN KEY (finalizadora_id) REFERENCES finalizadoras(id) ON UPDATE CASCADE ON DELETE SET NULL,null,null
-constraint,public,fk_agp_cliente,agendamento_participantes,FOREIGN KEY (cliente_id) REFERENCES clientes(id) ON UPDATE CASCADE ON DELETE RESTRICT,null,null
-constraint,realtime,messages_pkey,messages,"PRIMARY KEY (id, inserted_at)",null,null
-constraint,public,estoque_baixa_log_pkey,estoque_baixa_log,PRIMARY KEY (comanda_id),null,null
-constraint,public,empresa_counters_pkey,empresa_counters,PRIMARY KEY (empresa_id),null,null
-constraint,public,colaboradores_codigo_empresa_fkey,colaboradores,FOREIGN KEY (codigo_empresa) REFERENCES empresas(codigo_empresa) ON DELETE RESTRICT,null,null
-constraint,public,user_profiles_pkey,colaboradores,PRIMARY KEY (id),null,null
-constraint,storage,buckets_analytics_pkey,buckets_analytics,PRIMARY KEY (id),null,null
+constraint,public,contas_receber_baixas_finalizadora_id_fkey,contas_receber_baixas,FOREIGN KEY (finalizadora_id) REFERENCES finalizadoras(id),null,null
+constraint,auth,mfa_factors_last_challenged_at_key,mfa_factors,UNIQUE (last_challenged_at),null,null
+constraint,public,contas_receber_baixas_pagamento_id_fkey,contas_receber_baixas,FOREIGN KEY (pagamento_id) REFERENCES pagamentos(id),null,null
 constraint,realtime,messages_2025_12_09_pkey,messages_2025_12_09,"PRIMARY KEY (id, inserted_at)",null,null
-constraint,public,agendamentos_codigo_empresa_fkey,agendamentos,FOREIGN KEY (codigo_empresa) REFERENCES empresas(codigo_empresa) ON UPDATE CASCADE ON DELETE RESTRICT,null,null
-constraint,public,agendamentos_valor_nonneg,agendamentos,CHECK (((valor_total IS NULL) OR (valor_total >= (0)::numeric))),null,null
+constraint,public,isis_chat_sessions_pkey,isis_chat_sessions,PRIMARY KEY (id),null,null
+constraint,public,isis_chat_messages_from_role_check,isis_chat_messages,"CHECK ((from_role = ANY (ARRAY['assistant'::text, 'user'::text])))",null,null
+constraint,public,isis_chat_messages_pkey,isis_chat_messages,PRIMARY KEY (id),null,null
+constraint,public,isis_chat_messages_session_id_fkey,isis_chat_messages,FOREIGN KEY (session_id) REFERENCES isis_chat_sessions(id) ON DELETE CASCADE,null,null
+constraint,storage,s3_multipart_uploads_parts_upload_id_fkey,s3_multipart_uploads_parts,FOREIGN KEY (upload_id) REFERENCES storage.s3_multipart_uploads(id) ON DELETE CASCADE,null,null
+constraint,storage,s3_multipart_uploads_parts_bucket_id_fkey,s3_multipart_uploads_parts,FOREIGN KEY (bucket_id) REFERENCES storage.buckets(id),null,null
+constraint,public,contas_pagar_pkey,contas_pagar,PRIMARY KEY (id),null,null
+constraint,public,contas_pagar_fornecedor_id_fkey,contas_pagar,FOREIGN KEY (fornecedor_id) REFERENCES clientes(id),null,null
+constraint,realtime,messages_2025_12_10_pkey,messages_2025_12_10,"PRIMARY KEY (id, inserted_at)",null,null
+constraint,public,agendamentos_isis_session_id_fkey,agendamentos,FOREIGN KEY (isis_session_id) REFERENCES isis_chat_sessions(id) ON DELETE SET NULL,null,null
+constraint,public,produtos_fornecedor_id_fkey,produtos,FOREIGN KEY (fornecedor_id) REFERENCES clientes(id) ON DELETE SET NULL,null,null
+constraint,public,compras_codigo_empresa_check,compras,CHECK ((codigo_empresa > 0)),null,null
+constraint,public,compras_valores_check,compras,CHECK ((valor_total >= (0)::numeric)),null,null
+constraint,public,compras_pkey,compras,PRIMARY KEY (id),null,null
+constraint,public,compras_fornecedor_id_fkey,compras,FOREIGN KEY (fornecedor_id) REFERENCES clientes(id) ON DELETE SET NULL,null,null
+constraint,realtime,messages_pkey,messages,"PRIMARY KEY (id, inserted_at)",null,null
+constraint,public,companies_pkey,empresas,PRIMARY KEY (id),null,null
+constraint,public,companies_company_code_key,empresas,UNIQUE (codigo_empresa),null,null
+constraint,public,users_pkey,usuarios,PRIMARY KEY (id),null,null
+constraint,public,users_id_fkey,usuarios,FOREIGN KEY (id) REFERENCES auth.users(id),null,null
+constraint,public,compras_criado_por_fkey,compras,FOREIGN KEY (criado_por) REFERENCES auth.users(id),null,null
+constraint,public,courts_pkey,quadras,PRIMARY KEY (id),null,null
+constraint,public,compras_itens_quantidade_check,compras_itens,CHECK ((quantidade > (0)::numeric)),null,null
+constraint,public,customers_pkey,clientes,PRIMARY KEY (id),null,null
+constraint,public,products_pkey,produtos,PRIMARY KEY (id),null,null
+constraint,public,bookings_pkey,agendamentos,PRIMARY KEY (id),null,null
+constraint,realtime,messages_2025_12_11_pkey,messages_2025_12_11,"PRIMARY KEY (id, inserted_at)",null,null
 constraint,public,bookings_court_id_fkey,agendamentos,FOREIGN KEY (quadra_id) REFERENCES quadras(id),null,null
 constraint,public,bookings_customer_id_fkey,agendamentos,FOREIGN KEY (cliente_id) REFERENCES clientes(id),null,null
-constraint,public,bookings_pkey,agendamentos,PRIMARY KEY (id),null,null
-constraint,storage,prefixes_bucketId_fkey,prefixes,FOREIGN KEY (bucket_id) REFERENCES storage.buckets(id),null,null
+constraint,public,sales_pkey,vendas,PRIMARY KEY (id),null,null
+constraint,realtime,messages_2025_12_14_pkey,messages_2025_12_14,"PRIMARY KEY (id, inserted_at)",null,null
+constraint,public,sales_customer_id_fkey,vendas,FOREIGN KEY (cliente_id) REFERENCES clientes(id),null,null
+constraint,public,sale_items_pkey,itens_venda,PRIMARY KEY (id),null,null
+constraint,public,sale_items_sale_id_fkey,itens_venda,FOREIGN KEY (venda_id) REFERENCES vendas(id),null,null
+constraint,public,sale_items_product_id_fkey,itens_venda,FOREIGN KEY (produto_id) REFERENCES produtos(id),null,null
+constraint,public,user_profiles_pkey,colaboradores,PRIMARY KEY (id),null,null
+constraint,public,quadras_valor_nonneg,quadras,CHECK (((valor IS NULL) OR (valor >= (0)::numeric))),null,null
+constraint,public,agendamento_participantes_valor_cota_check,agendamento_participantes,CHECK ((valor_cota >= (0)::numeric)),null,null
+constraint,public,compras_itens_valores_check,compras_itens,CHECK ((valor_total >= (0)::numeric)),null,null
+constraint,public,agendamento_participantes_pkey,agendamento_participantes,PRIMARY KEY (id),null,null
+constraint,public,agendamento_participantes_agendamento_id_fkey,agendamento_participantes,FOREIGN KEY (agendamento_id) REFERENCES agendamentos(id) ON DELETE CASCADE,null,null
+constraint,public,agendamentos_valor_nonneg,agendamentos,CHECK (((valor_total IS NULL) OR (valor_total >= (0)::numeric))),null,null
+constraint,public,compras_itens_pkey,compras_itens,PRIMARY KEY (id),null,null
+constraint,public,empresa_counters_pkey,empresa_counters,PRIMARY KEY (empresa_id),null,null
+constraint,public,usuarios_codigo_empresa_fkey,usuarios,FOREIGN KEY (codigo_empresa) REFERENCES empresas(codigo_empresa) ON UPDATE CASCADE ON DELETE RESTRICT,null,null
 constraint,storage,prefixes_pkey,prefixes,"PRIMARY KEY (bucket_id, level, name)",null,null
-constraint,public,products_pkey,produtos,PRIMARY KEY (id),null,null
+constraint,storage,prefixes_bucketId_fkey,prefixes,FOREIGN KEY (bucket_id) REFERENCES storage.buckets(id),null,null
+constraint,public,compras_itens_compra_id_fkey,compras_itens,FOREIGN KEY (compra_id) REFERENCES compras(id) ON DELETE CASCADE,null,null
+constraint,public,compras_itens_produto_id_fkey,compras_itens,FOREIGN KEY (produto_id) REFERENCES produtos(id) ON DELETE SET NULL,null,null
+constraint,public,colaboradores_codigo_empresa_fkey,colaboradores,FOREIGN KEY (codigo_empresa) REFERENCES empresas(codigo_empresa) ON DELETE RESTRICT,null,null
+constraint,public,contas_pagar_baixas_pkey,contas_pagar_baixas,PRIMARY KEY (id),null,null
+constraint,public,contas_pagar_baixas_conta_id_fkey,contas_pagar_baixas,FOREIGN KEY (conta_id) REFERENCES contas_pagar(id) ON DELETE CASCADE,null,null
+constraint,public,contas_pagar_baixas_caixa_movimentacao_id_fkey,contas_pagar_baixas,FOREIGN KEY (caixa_movimentacao_id) REFERENCES caixa_movimentacoes(id),null,null
+constraint,public,empresas_codigo_empresa_unique,empresas,UNIQUE (codigo_empresa),null,null
+constraint,public,quadras_codigo_empresa_fkey,quadras,FOREIGN KEY (codigo_empresa) REFERENCES empresas(codigo_empresa) ON UPDATE CASCADE ON DELETE RESTRICT,null,null
+constraint,public,clientes_codigo_empresa_fkey,clientes,FOREIGN KEY (codigo_empresa) REFERENCES empresas(codigo_empresa) ON UPDATE CASCADE ON DELETE RESTRICT,null,null
+constraint,public,agendamentos_codigo_empresa_fkey,agendamentos,FOREIGN KEY (codigo_empresa) REFERENCES empresas(codigo_empresa) ON UPDATE CASCADE ON DELETE RESTRICT,null,null
 constraint,public,produtos_company_code_fkey,produtos,FOREIGN KEY (codigo_empresa) REFERENCES empresas(codigo_empresa) ON UPDATE CASCADE ON DELETE RESTRICT,null,null
+constraint,public,vendas_company_code_fkey,vendas,FOREIGN KEY (codigo_empresa) REFERENCES empresas(codigo_empresa) ON UPDATE CASCADE ON DELETE RESTRICT,null,null
+constraint,public,isis_conversas_pkey,isis_conversas,PRIMARY KEY (id),null,null
+constraint,public,caixa_resumos_pkey,caixa_resumos,PRIMARY KEY (id),null,null
+constraint,public,caixa_resumos_caixa_sessao_id_fkey,caixa_resumos,FOREIGN KEY (caixa_sessao_id) REFERENCES caixa_sessoes(id) ON DELETE CASCADE,null,null
+constraint,auth,oauth_authorizations_scope_length,oauth_authorizations,CHECK ((char_length(scope) <= 4096)),null,null
+constraint,public,compras_inativado_por_fkey,compras,FOREIGN KEY (inativado_por) REFERENCES auth.users(id),null,null
+constraint,auth,oauth_authorizations_nonce_length,oauth_authorizations,CHECK ((char_length(nonce) <= 255)),null,null
+constraint,public,produtos_valor_custo_check,produtos,CHECK ((valor_custo >= (0)::numeric)),null,null
 constraint,public,produtos_estoque_check,produtos,CHECK ((estoque >= 0)),null,null
 constraint,public,produtos_estoque_minimo_check,produtos,CHECK ((estoque_minimo >= 0)),null,null
-constraint,public,produtos_fornecedor_id_fkey,produtos,FOREIGN KEY (fornecedor_id) REFERENCES clientes(id) ON DELETE SET NULL,null,null
 constraint,public,produtos_tipo_produto_check,produtos,"CHECK (((tipo_produto)::text = ANY ((ARRAY['venda'::character varying, 'uso_interno'::character varying])::text[])))",null,null
-constraint,public,produtos_valor_custo_check,produtos,CHECK ((valor_custo >= (0)::numeric)),null,null
-constraint,public,fk_mov_saldo_agendamento,movimentos_saldo,FOREIGN KEY (agendamento_id) REFERENCES agendamentos(id) ON DELETE CASCADE,null,null
-constraint,public,fk_mov_saldo_cliente,movimentos_saldo,FOREIGN KEY (cliente_id) REFERENCES clientes(id) ON DELETE CASCADE,null,null
-constraint,public,movimentos_saldo_pkey,movimentos_saldo,PRIMARY KEY (id),null,null
+constraint,public,agp_codigo_empresa_fkey,agendamento_participantes,FOREIGN KEY (codigo_empresa) REFERENCES empresas(codigo_empresa) ON UPDATE CASCADE ON DELETE RESTRICT,null,null
+constraint,public,isis_conversas_cliente_id_fkey,isis_conversas,FOREIGN KEY (cliente_id) REFERENCES clientes(id),null,null
+constraint,auth,oauth_client_states_pkey,oauth_client_states,PRIMARY KEY (id),null,null
+constraint,public,agendamento_participantes_cliente_id_fkey,agendamento_participantes,FOREIGN KEY (cliente_id) REFERENCES clientes(id) ON UPDATE CASCADE ON DELETE RESTRICT,null,null
+constraint,public,produto_categorias_pkey,produto_categorias,PRIMARY KEY (id),null,null
+constraint,public,fk_agp_cliente,agendamento_participantes,FOREIGN KEY (cliente_id) REFERENCES clientes(id) ON UPDATE CASCADE ON DELETE RESTRICT,null,null
 constraint,public,movimentos_saldo_tipo_check,movimentos_saldo,"CHECK ((tipo = ANY (ARRAY['credito'::text, 'debito'::text])))",null,null
 constraint,public,movimentos_saldo_valor_check,movimentos_saldo,CHECK ((valor > (0)::numeric)),null,null
-constraint,public,comanda_clientes_ck_nome,comanda_clientes,CHECK (((cliente_id IS NOT NULL) OR ((nome_livre IS NOT NULL) AND (length(TRIM(BOTH FROM nome_livre)) > 0)))),null,null
-constraint,public,comanda_clientes_cliente_id_fkey,comanda_clientes,FOREIGN KEY (cliente_id) REFERENCES clientes(id) ON DELETE SET NULL,null,null
-constraint,public,comanda_clientes_comanda_id_fkey,comanda_clientes,FOREIGN KEY (comanda_id) REFERENCES comandas(id) ON DELETE CASCADE,null,null
-constraint,public,comanda_clientes_pkey,comanda_clientes,PRIMARY KEY (id),null,null
-constraint,public,fk_comanda_clientes_cliente,comanda_clientes,FOREIGN KEY (cliente_id) REFERENCES clientes(id) ON DELETE SET NULL,null,null
-constraint,public,caixa_sessoes_pkey,caixa_sessoes,PRIMARY KEY (id),null,null
-constraint,public,caixa_sessoes_status_check,caixa_sessoes,"CHECK ((status = ANY (ARRAY['open'::text, 'closed'::text])))",null,null
-constraint,public,check_data_fechamento_required,quadras_dias_funcionamento,CHECK (((((tipo)::text = 'data_fechamento'::text) AND (data_fechamento IS NOT NULL)) OR ((tipo)::text <> 'data_fechamento'::text))),null,null
-constraint,public,check_dia_semana_required,quadras_dias_funcionamento,CHECK (((((tipo)::text = 'dia_semana'::text) AND (dia_semana IS NOT NULL)) OR ((tipo)::text <> 'dia_semana'::text))),null,null
-constraint,public,quadras_dias_funcionamento_dia_semana_check,quadras_dias_funcionamento,CHECK (((dia_semana >= 0) AND (dia_semana <= 6))),null,null
-constraint,public,quadras_dias_funcionamento_pkey,quadras_dias_funcionamento,PRIMARY KEY (id),null,null
-constraint,public,quadras_dias_funcionamento_quadra_id_fkey,quadras_dias_funcionamento,FOREIGN KEY (quadra_id) REFERENCES quadras(id) ON DELETE CASCADE,null,null
+constraint,public,movimentos_saldo_pkey,movimentos_saldo,PRIMARY KEY (id),null,null
+constraint,public,fk_mov_saldo_cliente,movimentos_saldo,FOREIGN KEY (cliente_id) REFERENCES clientes(id) ON DELETE CASCADE,null,null
+constraint,public,fk_mov_saldo_agendamento,movimentos_saldo,FOREIGN KEY (agendamento_id) REFERENCES agendamentos(id) ON DELETE CASCADE,null,null
+constraint,auth,sessions_oauth_client_id_fkey,sessions,FOREIGN KEY (oauth_client_id) REFERENCES auth.oauth_clients(id) ON DELETE CASCADE,null,null
 constraint,public,quadras_dias_funcionamento_tipo_check,quadras_dias_funcionamento,"CHECK (((tipo)::text = ANY ((ARRAY['dia_semana'::character varying, 'data_fechamento'::character varying])::text[])))",null,null
-constraint,public,contas_receber_cliente_id_fkey,contas_receber,FOREIGN KEY (cliente_id) REFERENCES clientes(id),null,null
-constraint,public,contas_receber_pkey,contas_receber,PRIMARY KEY (id),null,null
-constraint,public,contas_receber_baixas_conta_id_fkey,contas_receber_baixas,FOREIGN KEY (conta_id) REFERENCES contas_receber(id) ON DELETE CASCADE,null,null
-constraint,public,contas_receber_baixas_finalizadora_id_fkey,contas_receber_baixas,FOREIGN KEY (finalizadora_id) REFERENCES finalizadoras(id),null,null
-constraint,public,contas_receber_baixas_pagamento_id_fkey,contas_receber_baixas,FOREIGN KEY (pagamento_id) REFERENCES pagamentos(id),null,null
-constraint,public,contas_receber_baixas_pkey,contas_receber_baixas,PRIMARY KEY (id),null,null
-constraint,auth,oauth_authorizations_authorization_code_key,oauth_authorizations,UNIQUE (authorization_code),null,null
-constraint,auth,oauth_authorizations_authorization_code_length,oauth_authorizations,CHECK ((char_length(authorization_code) <= 255)),null,null
-constraint,auth,oauth_authorizations_authorization_id_key,oauth_authorizations,UNIQUE (authorization_id),null,null
-constraint,auth,oauth_authorizations_client_id_fkey,oauth_authorizations,FOREIGN KEY (client_id) REFERENCES auth.oauth_clients(id) ON DELETE CASCADE,null,null
-constraint,auth,oauth_authorizations_code_challenge_length,oauth_authorizations,CHECK ((char_length(code_challenge) <= 128)),null,null
-constraint,auth,oauth_authorizations_expires_at_future,oauth_authorizations,CHECK ((expires_at > created_at)),null,null
-constraint,auth,oauth_authorizations_nonce_length,oauth_authorizations,CHECK ((char_length(nonce) <= 255)),null,null
-constraint,auth,oauth_authorizations_pkey,oauth_authorizations,PRIMARY KEY (id),null,null
-constraint,auth,oauth_authorizations_redirect_uri_length,oauth_authorizations,CHECK ((char_length(redirect_uri) <= 2048)),null,null
-constraint,auth,oauth_authorizations_resource_length,oauth_authorizations,CHECK ((char_length(resource) <= 2048)),null,null
-constraint,auth,oauth_authorizations_scope_length,oauth_authorizations,CHECK ((char_length(scope) <= 4096)),null,null
-constraint,auth,oauth_authorizations_state_length,oauth_authorizations,CHECK ((char_length(state) <= 4096)),null,null
-constraint,auth,oauth_authorizations_user_id_fkey,oauth_authorizations,FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE,null,null
-constraint,public,compras_codigo_empresa_check,compras,CHECK ((codigo_empresa > 0)),null,null
-constraint,public,compras_criado_por_fkey,compras,FOREIGN KEY (criado_por) REFERENCES auth.users(id),null,null
-constraint,public,compras_fornecedor_id_fkey,compras,FOREIGN KEY (fornecedor_id) REFERENCES clientes(id) ON DELETE SET NULL,null,null
-constraint,public,compras_inativado_por_fkey,compras,FOREIGN KEY (inativado_por) REFERENCES auth.users(id),null,null
-constraint,public,compras_pkey,compras,PRIMARY KEY (id),null,null
-constraint,public,compras_valores_check,compras,CHECK ((valor_total >= (0)::numeric)),null,null
-constraint,public,compras_itens_compra_id_fkey,compras_itens,FOREIGN KEY (compra_id) REFERENCES compras(id) ON DELETE CASCADE,null,null
-constraint,public,compras_itens_pkey,compras_itens,PRIMARY KEY (id),null,null
-constraint,public,compras_itens_produto_id_fkey,compras_itens,FOREIGN KEY (produto_id) REFERENCES produtos(id) ON DELETE SET NULL,null,null
-constraint,public,compras_itens_quantidade_check,compras_itens,CHECK ((quantidade > (0)::numeric)),null,null
-constraint,public,compras_itens_valores_check,compras_itens,CHECK ((valor_total >= (0)::numeric)),null,null
-constraint,auth,oauth_consents_client_id_fkey,oauth_consents,FOREIGN KEY (client_id) REFERENCES auth.oauth_clients(id) ON DELETE CASCADE,null,null
-constraint,auth,oauth_consents_pkey,oauth_consents,PRIMARY KEY (id),null,null
-constraint,auth,oauth_consents_revoked_after_granted,oauth_consents,CHECK (((revoked_at IS NULL) OR (revoked_at >= granted_at))),null,null
-constraint,auth,oauth_consents_scopes_length,oauth_consents,CHECK ((char_length(scopes) <= 2048)),null,null
-constraint,auth,oauth_consents_scopes_not_empty,oauth_consents,CHECK ((char_length(TRIM(BOTH FROM scopes)) > 0)),null,null
-constraint,auth,oauth_consents_user_client_unique,oauth_consents,"UNIQUE (user_id, client_id)",null,null
-constraint,auth,oauth_consents_user_id_fkey,oauth_consents,FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE,null,null
-constraint,public,fk_pagamentos_caixa,pagamentos,FOREIGN KEY (caixa_id) REFERENCES caixa_sessoes(id) ON DELETE SET NULL,null,null
-constraint,public,fk_pagamentos_finalizadora,pagamentos,FOREIGN KEY (finalizadora_id) REFERENCES finalizadoras(id) ON DELETE SET NULL,null,null
-constraint,public,pagamentos_caixa_id_fkey,pagamentos,FOREIGN KEY (caixa_id) REFERENCES caixa_sessoes(id) ON DELETE SET NULL,null,null
-constraint,public,pagamentos_comanda_id_fkey,pagamentos,FOREIGN KEY (comanda_id) REFERENCES comandas(id) ON DELETE CASCADE,null,null
-constraint,public,pagamentos_finalizadora_id_fkey,pagamentos,FOREIGN KEY (finalizadora_id) REFERENCES finalizadoras(id) ON UPDATE CASCADE ON DELETE SET NULL,null,null
-constraint,public,pagamentos_origem_check,pagamentos,"CHECK (((origem = ANY (ARRAY['manual'::text, 'xml'::text, 'api'::text])) OR (origem IS NULL)))",null,null
-constraint,public,pagamentos_pkey,pagamentos,PRIMARY KEY (id),null,null
-constraint,public,pagamentos_valor_check,pagamentos,CHECK ((valor >= (0)::numeric)),null,null
-constraint,public,mesas_codigo_empresa_numero_key,mesas,"UNIQUE (codigo_empresa, numero)",null,null
+constraint,public,quadras_dias_funcionamento_dia_semana_check,quadras_dias_funcionamento,CHECK (((dia_semana >= 0) AND (dia_semana <= 6))),null,null
+constraint,public,check_dia_semana_required,quadras_dias_funcionamento,CHECK (((((tipo)::text = 'dia_semana'::text) AND (dia_semana IS NOT NULL)) OR ((tipo)::text <> 'dia_semana'::text))),null,null
+constraint,auth,sessions_scopes_length,sessions,CHECK ((char_length(scopes) <= 4096)),null,null
+constraint,public,isis_conversas_agendamento_id_fkey,isis_conversas,FOREIGN KEY (agendamento_id) REFERENCES agendamentos(id) ON DELETE SET NULL,null,null
+constraint,public,caixa_sessoes_status_check,caixa_sessoes,"CHECK ((status = ANY (ARRAY['open'::text, 'closed'::text])))",null,null
+constraint,public,caixa_sessoes_pkey,caixa_sessoes,PRIMARY KEY (id),null,null
 constraint,public,mesas_pkey,mesas,PRIMARY KEY (id),null,null
-constraint,public,caixa_movimentos_caixa_id_fkey,caixa_movimentos,FOREIGN KEY (caixa_id) REFERENCES caixa_sessoes(id) ON DELETE CASCADE,null,null
-constraint,public,caixa_movimentos_pkey,caixa_movimentos,PRIMARY KEY (id),null,null
+constraint,public,mesas_codigo_empresa_numero_key,mesas,"UNIQUE (codigo_empresa, numero)",null,null
+constraint,public,comandas_pkey,comandas,PRIMARY KEY (id),null,null
+constraint,public,comandas_mesa_id_fkey,comandas,FOREIGN KEY (mesa_id) REFERENCES mesas(id) ON DELETE SET NULL,null,null
+constraint,public,comanda_itens_quantidade_check,comanda_itens,CHECK ((quantidade > (0)::numeric)),null,null
+constraint,public,comanda_itens_preco_unitario_check,comanda_itens,CHECK ((preco_unitario >= (0)::numeric)),null,null
+constraint,public,comanda_itens_desconto_check,comanda_itens,CHECK ((desconto >= (0)::numeric)),null,null
+constraint,public,comanda_itens_pkey,comanda_itens,PRIMARY KEY (id),null,null
+constraint,public,comanda_itens_comanda_id_fkey,comanda_itens,FOREIGN KEY (comanda_id) REFERENCES comandas(id) ON DELETE CASCADE,null,null
+constraint,public,comanda_itens_produto_id_fkey,comanda_itens,FOREIGN KEY (produto_id) REFERENCES produtos(id) ON DELETE RESTRICT,null,null
+constraint,public,pagamentos_valor_check,pagamentos,CHECK ((valor >= (0)::numeric)),null,null
+constraint,public,pagamentos_pkey,pagamentos,PRIMARY KEY (id),null,null
+constraint,public,pagamentos_caixa_id_fkey,pagamentos,FOREIGN KEY (caixa_id) REFERENCES caixa_sessoes(id) ON DELETE SET NULL,null,null
 constraint,public,caixa_movimentos_valor_check,caixa_movimentos,CHECK ((valor >= (0)::numeric)),null,null
+constraint,public,caixa_movimentos_pkey,caixa_movimentos,PRIMARY KEY (id),null,null
+constraint,public,caixa_movimentos_caixa_id_fkey,caixa_movimentos,FOREIGN KEY (caixa_id) REFERENCES caixa_sessoes(id) ON DELETE CASCADE,null,null
+constraint,public,finalizadoras_tipo_check,finalizadoras,"CHECK ((tipo = ANY (ARRAY['dinheiro'::text, 'credito'::text, 'debito'::text, 'pix'::text, 'voucher'::text, 'outros'::text])))",null,null
+constraint,public,finalizadoras_pkey,finalizadoras,PRIMARY KEY (id),null,null
+constraint,public,pagamentos_finalizadora_id_fkey,pagamentos,FOREIGN KEY (finalizadora_id) REFERENCES finalizadoras(id) ON UPDATE CASCADE ON DELETE SET NULL,null,null
+constraint,public,comanda_clientes_ck_nome,comanda_clientes,CHECK (((cliente_id IS NOT NULL) OR ((nome_livre IS NOT NULL) AND (length(TRIM(BOTH FROM nome_livre)) > 0)))),null,null
+constraint,public,comanda_clientes_pkey,comanda_clientes,PRIMARY KEY (id),null,null
+constraint,realtime,messages_2025_12_12_pkey,messages_2025_12_12,"PRIMARY KEY (id, inserted_at)",null,null
+constraint,public,comanda_clientes_cliente_id_fkey,comanda_clientes,FOREIGN KEY (cliente_id) REFERENCES clientes(id) ON DELETE SET NULL,null,null
+constraint,realtime,messages_2025_12_15_pkey,messages_2025_12_15,"PRIMARY KEY (id, inserted_at)",null,null
 constraint,auth,oauth_clients_client_name_length,oauth_clients,CHECK ((char_length(client_name) <= 1024)),null,null
 constraint,auth,oauth_clients_client_uri_length,oauth_clients,CHECK ((char_length(client_uri) <= 2048)),null,null
 constraint,auth,oauth_clients_logo_uri_length,oauth_clients,CHECK ((char_length(logo_uri) <= 2048)),null,null
 constraint,auth,oauth_clients_pkey,oauth_clients,PRIMARY KEY (id),null,null
-constraint,public,agenda_settings_auto_cancel_hours_check,agenda_settings,CHECK (((auto_cancel_hours IS NULL) OR ((auto_cancel_hours >= 0) AND (auto_cancel_hours <= 168)))),null,null
-constraint,public,agenda_settings_auto_confirm_hours_check,agenda_settings,CHECK (((auto_confirm_hours IS NULL) OR ((auto_confirm_hours >= 0) AND (auto_confirm_hours <= 168)))),null,null
-constraint,public,agenda_settings_empresa_id_fkey,agenda_settings,FOREIGN KEY (empresa_id) REFERENCES empresas(id) ON DELETE CASCADE,null,null
-constraint,public,agenda_settings_pkey,agenda_settings,PRIMARY KEY (empresa_id),null,null
-constraint,public,finalizadoras_empresa_nome_unique,finalizadoras,"UNIQUE (codigo_empresa, nome)",null,null
-constraint,public,finalizadoras_pkey,finalizadoras,PRIMARY KEY (id),null,null
-constraint,public,finalizadoras_tipo_check,finalizadoras,"CHECK ((tipo = ANY (ARRAY['dinheiro'::text, 'credito'::text, 'debito'::text, 'pix'::text, 'voucher'::text, 'outros'::text])))",null,null
-constraint,storage,buckets_vectors_pkey,buckets_vectors,PRIMARY KEY (id),null,null
-constraint,storage,vector_indexes_bucket_id_fkey,vector_indexes,FOREIGN KEY (bucket_id) REFERENCES storage.buckets_vectors(id),null,null
-constraint,storage,vector_indexes_pkey,vector_indexes,PRIMARY KEY (id),null,null
-constraint,auth,mfa_factors_last_challenged_at_key,mfa_factors,UNIQUE (last_challenged_at),null,null
-constraint,auth,mfa_factors_pkey,mfa_factors,PRIMARY KEY (id),null,null
-constraint,auth,mfa_factors_user_id_fkey,mfa_factors,FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE,null,null
-constraint,public,caixa_resumos_caixa_sessao_id_fkey,caixa_resumos,FOREIGN KEY (caixa_sessao_id) REFERENCES caixa_sessoes(id) ON DELETE CASCADE,null,null
-constraint,public,caixa_resumos_pkey,caixa_resumos,PRIMARY KEY (id),null,null
-constraint,storage,objects_bucketId_fkey,objects,FOREIGN KEY (bucket_id) REFERENCES storage.buckets(id),null,null
-constraint,storage,objects_pkey,objects,PRIMARY KEY (id),null,null
-constraint,public,caixa_movimentacoes_caixa_sessao_id_fkey,caixa_movimentacoes,FOREIGN KEY (caixa_sessao_id) REFERENCES caixa_sessoes(id) ON DELETE CASCADE,null,null
-constraint,public,caixa_movimentacoes_pkey,caixa_movimentacoes,PRIMARY KEY (id),null,null
-constraint,public,caixa_movimentacoes_tipo_check,caixa_movimentacoes,"CHECK ((tipo = ANY (ARRAY['sangria'::text, 'suprimento'::text, 'troco'::text, 'ajuste'::text])))",null,null
-constraint,public,clientes_codigo_empresa_fkey,clientes,FOREIGN KEY (codigo_empresa) REFERENCES empresas(codigo_empresa) ON UPDATE CASCADE ON DELETE RESTRICT,null,null
-constraint,public,customers_pkey,clientes,PRIMARY KEY (id),null,null
-constraint,public,estoque_reservado_comanda_id_fkey,estoque_reservado,FOREIGN KEY (comanda_id) REFERENCES comandas(id) ON DELETE CASCADE,null,null
+constraint,public,check_data_fechamento_required,quadras_dias_funcionamento,CHECK (((((tipo)::text = 'data_fechamento'::text) AND (data_fechamento IS NOT NULL)) OR ((tipo)::text <> 'data_fechamento'::text))),null,null
+constraint,public,quadras_dias_funcionamento_pkey,quadras_dias_funcionamento,PRIMARY KEY (id),null,null
+constraint,public,quadras_dias_funcionamento_quadra_id_fkey,quadras_dias_funcionamento,FOREIGN KEY (quadra_id) REFERENCES quadras(id) ON DELETE CASCADE,null,null
+constraint,public,comanda_historico_pkey,comanda_historico,PRIMARY KEY (id),null,null
+constraint,public,comanda_historico_comanda_id_fkey,comanda_historico,FOREIGN KEY (comanda_id) REFERENCES comandas(id) ON DELETE CASCADE,null,null
 constraint,public,estoque_reservado_pkey,estoque_reservado,PRIMARY KEY (id),null,null
 constraint,public,estoque_reservado_produto_id_fkey,estoque_reservado,FOREIGN KEY (produto_id) REFERENCES produtos(id) ON DELETE CASCADE,null,null
-constraint,public,comanda_historico_comanda_id_fkey,comanda_historico,FOREIGN KEY (comanda_id) REFERENCES comandas(id) ON DELETE CASCADE,null,null
-constraint,public,comanda_historico_pkey,comanda_historico,PRIMARY KEY (id),null,null
-constraint,realtime,messages_2025_12_07_pkey,messages_2025_12_07,"PRIMARY KEY (id, inserted_at)",null,null
-constraint,public,contas_pagar_fornecedor_id_fkey,contas_pagar,FOREIGN KEY (fornecedor_id) REFERENCES clientes(id),null,null
-constraint,public,contas_pagar_pkey,contas_pagar,PRIMARY KEY (id),null,null
-constraint,public,contas_pagar_baixas_caixa_movimentacao_id_fkey,contas_pagar_baixas,FOREIGN KEY (caixa_movimentacao_id) REFERENCES caixa_movimentacoes(id),null,null
-constraint,public,contas_pagar_baixas_conta_id_fkey,contas_pagar_baixas,FOREIGN KEY (conta_id) REFERENCES contas_pagar(id) ON DELETE CASCADE,null,null
-constraint,public,contas_pagar_baixas_pkey,contas_pagar_baixas,PRIMARY KEY (id),null,null
-constraint,realtime,messages_2025_12_11_pkey,messages_2025_12_11,"PRIMARY KEY (id, inserted_at)",null,null
-constraint,public,chk_comandas_status_valid,comandas,"CHECK ((status = ANY (ARRAY['open'::text, 'closed'::text, 'cancelled'::text])))",null,null
-constraint,public,comandas_mesa_id_fkey,comandas,FOREIGN KEY (mesa_id) REFERENCES mesas(id) ON DELETE SET NULL,null,null
-constraint,public,comandas_origem_check,comandas,"CHECK (((origem = ANY (ARRAY['manual'::text, 'xml'::text, 'api'::text])) OR (origem IS NULL)))",null,null
-constraint,public,comandas_pkey,comandas,PRIMARY KEY (id),null,null
-constraint,public,fk_comandas_mesa,comandas,FOREIGN KEY (mesa_id) REFERENCES mesas(id) ON DELETE SET NULL,null,null
-constraint,public,comanda_itens_comanda_id_fkey,comanda_itens,FOREIGN KEY (comanda_id) REFERENCES comandas(id) ON DELETE CASCADE,null,null
-constraint,public,comanda_itens_desconto_check,comanda_itens,CHECK ((desconto >= (0)::numeric)),null,null
-constraint,public,comanda_itens_pkey,comanda_itens,PRIMARY KEY (id),null,null
-constraint,public,comanda_itens_preco_unitario_check,comanda_itens,CHECK ((preco_unitario >= (0)::numeric)),null,null
-constraint,public,comanda_itens_produto_id_fkey,comanda_itens,FOREIGN KEY (produto_id) REFERENCES produtos(id) ON DELETE RESTRICT,null,null
-constraint,public,comanda_itens_quantidade_check,comanda_itens,CHECK ((quantidade > (0)::numeric)),null,null
-constraint,public,fk_comanda_itens_comanda,comanda_itens,FOREIGN KEY (comanda_id) REFERENCES comandas(id) ON DELETE CASCADE,null,null
-constraint,public,fk_comanda_itens_produto,comanda_itens,FOREIGN KEY (produto_id) REFERENCES produtos(id) ON DELETE SET NULL,null,null
-constraint,realtime,messages_2025_12_08_pkey,messages_2025_12_08,"PRIMARY KEY (id, inserted_at)",null,null
-constraint,supabase_functions,migrations_pkey,migrations,PRIMARY KEY (version),null,null
-constraint,supabase_functions,hooks_pkey,hooks,PRIMARY KEY (id),null,null
-constraint,realtime,messages_2025_12_10_pkey,messages_2025_12_10,"PRIMARY KEY (id, inserted_at)",null,null
-constraint,public,user_ui_settings_pkey,user_ui_settings,"PRIMARY KEY (user_id, scope)",null,null
-constraint,public,user_ui_settings_user_id_fkey,user_ui_settings,FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE,null,null
-constraint,public,companies_company_code_key,empresas,UNIQUE (codigo_empresa),null,null
-constraint,public,companies_pkey,empresas,PRIMARY KEY (id),null,null
-constraint,public,empresas_codigo_empresa_unique,empresas,UNIQUE (codigo_empresa),null,null
-constraint,public,isis_conversas_agendamento_id_fkey,isis_conversas,FOREIGN KEY (agendamento_id) REFERENCES agendamentos(id) ON DELETE SET NULL,null,null
-constraint,public,isis_conversas_cliente_id_fkey,isis_conversas,FOREIGN KEY (cliente_id) REFERENCES clientes(id),null,null
-constraint,public,isis_conversas_pkey,isis_conversas,PRIMARY KEY (id),null,null
-constraint,realtime,messages_2025_12_12_pkey,messages_2025_12_12,"PRIMARY KEY (id, inserted_at)",null,null
-constraint,realtime,messages_2025_12_13_pkey,messages_2025_12_13,"PRIMARY KEY (id, inserted_at)",null,null
+constraint,public,estoque_reservado_comanda_id_fkey,estoque_reservado,FOREIGN KEY (comanda_id) REFERENCES comandas(id) ON DELETE CASCADE,null,null
 constraint,public,notas_fiscais_origem_check,notas_fiscais,"CHECK ((origem = ANY (ARRAY['comanda'::text, 'manual'::text])))",null,null
 constraint,public,notas_fiscais_pkey,notas_fiscais,PRIMARY KEY (id),null,null
+constraint,public,agenda_settings_auto_confirm_hours_check,agenda_settings,CHECK (((auto_confirm_hours IS NULL) OR ((auto_confirm_hours >= 0) AND (auto_confirm_hours <= 168)))),null,null
+constraint,public,agenda_settings_auto_cancel_hours_check,agenda_settings,CHECK (((auto_cancel_hours IS NULL) OR ((auto_cancel_hours >= 0) AND (auto_cancel_hours <= 168)))),null,null
+constraint,public,agenda_settings_pkey,agenda_settings,PRIMARY KEY (empresa_id),null,null
+constraint,public,agenda_settings_empresa_id_fkey,agenda_settings,FOREIGN KEY (empresa_id) REFERENCES empresas(id) ON DELETE CASCADE,null,null
+constraint,public,fk_comandas_mesa,comandas,FOREIGN KEY (mesa_id) REFERENCES mesas(id) ON DELETE SET NULL,null,null
+constraint,public,fk_comanda_itens_comanda,comanda_itens,FOREIGN KEY (comanda_id) REFERENCES comandas(id) ON DELETE CASCADE,null,null
+constraint,public,fk_comanda_itens_produto,comanda_itens,FOREIGN KEY (produto_id) REFERENCES produtos(id) ON DELETE SET NULL,null,null
+constraint,storage,buckets_vectors_pkey,buckets_vectors,PRIMARY KEY (id),null,null
+constraint,public,fk_comanda_clientes_cliente,comanda_clientes,FOREIGN KEY (cliente_id) REFERENCES clientes(id) ON DELETE SET NULL,null,null
+constraint,storage,vector_indexes_pkey,vector_indexes,PRIMARY KEY (id),null,null
+constraint,public,fk_pagamentos_caixa,pagamentos,FOREIGN KEY (caixa_id) REFERENCES caixa_sessoes(id) ON DELETE SET NULL,null,null
+constraint,public,fk_pagamentos_finalizadora,pagamentos,FOREIGN KEY (finalizadora_id) REFERENCES finalizadoras(id) ON DELETE SET NULL,null,null
+constraint,public,estoque_baixa_log_pkey,estoque_baixa_log,PRIMARY KEY (comanda_id),null,null
+constraint,storage,vector_indexes_bucket_id_fkey,vector_indexes,FOREIGN KEY (bucket_id) REFERENCES storage.buckets_vectors(id),null,null
+constraint,storage,buckets_analytics_pkey,buckets_analytics,PRIMARY KEY (id),null,null
+constraint,supabase_migrations,schema_migrations_pkey,schema_migrations,PRIMARY KEY (version),null,null
+constraint,supabase_migrations,seed_files_pkey,seed_files,PRIMARY KEY (path),null,null
+constraint,public,chk_comandas_status_valid,comandas,"CHECK ((status = ANY (ARRAY['open'::text, 'closed'::text, 'cancelled'::text])))",null,null
+constraint,public,caixa_movimentacoes_tipo_check,caixa_movimentacoes,"CHECK ((tipo = ANY (ARRAY['sangria'::text, 'suprimento'::text, 'troco'::text, 'ajuste'::text])))",null,null
+constraint,public,caixa_movimentacoes_pkey,caixa_movimentacoes,PRIMARY KEY (id),null,null
+constraint,public,caixa_movimentacoes_caixa_sessao_id_fkey,caixa_movimentacoes,FOREIGN KEY (caixa_sessao_id) REFERENCES caixa_sessoes(id) ON DELETE CASCADE,null,null
+constraint,public,user_ui_settings_pkey,user_ui_settings,"PRIMARY KEY (user_id, scope)",null,null
+constraint,public,user_ui_settings_user_id_fkey,user_ui_settings,FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE,null,null
+constraint,public,comanda_clientes_comanda_id_fkey,comanda_clientes,FOREIGN KEY (comanda_id) REFERENCES comandas(id) ON DELETE CASCADE,null,null
+constraint,public,pagamentos_comanda_id_fkey,pagamentos,FOREIGN KEY (comanda_id) REFERENCES comandas(id) ON DELETE CASCADE,null,null
+constraint,supabase_functions,migrations_pkey,migrations,PRIMARY KEY (version),null,null
+constraint,supabase_functions,hooks_pkey,hooks,PRIMARY KEY (id),null,null
+constraint,realtime,messages_2025_12_13_pkey,messages_2025_12_13,"PRIMARY KEY (id, inserted_at)",null,null
+constraint,public,finalizadoras_empresa_nome_unique,finalizadoras,"UNIQUE (codigo_empresa, nome)",null,null
+constraint,public,agp_finalizadora_id_fkey,agendamento_participantes,FOREIGN KEY (finalizadora_id) REFERENCES finalizadoras(id) ON UPDATE CASCADE ON DELETE SET NULL,null,null
+constraint,public,pagamentos_origem_check,pagamentos,"CHECK (((origem = ANY (ARRAY['manual'::text, 'xml'::text, 'api'::text])) OR (origem IS NULL)))",null,null
+constraint,public,comandas_origem_check,comandas,"CHECK (((origem = ANY (ARRAY['manual'::text, 'xml'::text, 'api'::text])) OR (origem IS NULL)))",null,null
+constraint,auth,oauth_authorizations_redirect_uri_length,oauth_authorizations,CHECK ((char_length(redirect_uri) <= 2048)),null,null
+constraint,auth,oauth_authorizations_state_length,oauth_authorizations,CHECK ((char_length(state) <= 4096)),null,null
+constraint,auth,oauth_authorizations_resource_length,oauth_authorizations,CHECK ((char_length(resource) <= 2048)),null,null
+constraint,auth,oauth_authorizations_code_challenge_length,oauth_authorizations,CHECK ((char_length(code_challenge) <= 128)),null,null
+constraint,auth,oauth_authorizations_authorization_code_length,oauth_authorizations,CHECK ((char_length(authorization_code) <= 255)),null,null
+constraint,auth,oauth_authorizations_expires_at_future,oauth_authorizations,CHECK ((expires_at > created_at)),null,null
+constraint,auth,oauth_authorizations_pkey,oauth_authorizations,PRIMARY KEY (id),null,null
+constraint,auth,oauth_authorizations_authorization_id_key,oauth_authorizations,UNIQUE (authorization_id),null,null
+constraint,auth,oauth_authorizations_authorization_code_key,oauth_authorizations,UNIQUE (authorization_code),null,null
+constraint,auth,oauth_authorizations_client_id_fkey,oauth_authorizations,FOREIGN KEY (client_id) REFERENCES auth.oauth_clients(id) ON DELETE CASCADE,null,null
+constraint,auth,oauth_authorizations_user_id_fkey,oauth_authorizations,FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE,null,null
+constraint,auth,oauth_consents_scopes_length,oauth_consents,CHECK ((char_length(scopes) <= 2048)),null,null
+constraint,auth,oauth_consents_scopes_not_empty,oauth_consents,CHECK ((char_length(TRIM(BOTH FROM scopes)) > 0)),null,null
+constraint,auth,oauth_consents_revoked_after_granted,oauth_consents,CHECK (((revoked_at IS NULL) OR (revoked_at >= granted_at))),null,null
+constraint,auth,oauth_consents_pkey,oauth_consents,PRIMARY KEY (id),null,null
+constraint,auth,oauth_consents_user_client_unique,oauth_consents,"UNIQUE (user_id, client_id)",null,null
+constraint,auth,oauth_consents_user_id_fkey,oauth_consents,FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE,null,null
+constraint,auth,oauth_consents_client_id_fkey,oauth_consents,FOREIGN KEY (client_id) REFERENCES auth.oauth_clients(id) ON DELETE CASCADE,null,null
+constraint,public,contas_receber_pkey,contas_receber,PRIMARY KEY (id),null,null
 index,auth,sso_domains_pkey,sso_domains,CREATE UNIQUE INDEX sso_domains_pkey ON auth.sso_domains USING btree (id),null,null
 index,auth,sso_domains_sso_provider_id_idx,sso_domains,CREATE INDEX sso_domains_sso_provider_id_idx ON auth.sso_domains USING btree (sso_provider_id),null,null
 index,auth,sso_domains_domain_idx,sso_domains,CREATE UNIQUE INDEX sso_domains_domain_idx ON auth.sso_domains USING btree (lower(domain)),null,null
@@ -1876,6 +1916,8 @@ index,storage,buckets_analytics_pkey,buckets_analytics,CREATE UNIQUE INDEX bucke
 index,storage,buckets_analytics_unique_name_idx,buckets_analytics,CREATE UNIQUE INDEX buckets_analytics_unique_name_idx ON storage.buckets_analytics USING btree (name) WHERE (deleted_at IS NULL),null,null
 index,realtime,messages_2025_12_09_pkey,messages_2025_12_09,"CREATE UNIQUE INDEX messages_2025_12_09_pkey ON realtime.messages_2025_12_09 USING btree (id, inserted_at)",null,null
 index,realtime,messages_2025_12_09_inserted_at_topic_idx,messages_2025_12_09,"CREATE INDEX messages_2025_12_09_inserted_at_topic_idx ON realtime.messages_2025_12_09 USING btree (inserted_at DESC, topic) WHERE ((extension = 'broadcast'::text) AND (private IS TRUE))",null,null
+index,public,idx_agendamentos_created_by_isis,agendamentos,CREATE INDEX idx_agendamentos_created_by_isis ON public.agendamentos USING btree (created_by_isis),null,null
+index,public,idx_agendamentos_isis_session_id,agendamentos,CREATE INDEX idx_agendamentos_isis_session_id ON public.agendamentos USING btree (isis_session_id),null,null
 index,public,bookings_pkey,agendamentos,CREATE UNIQUE INDEX bookings_pkey ON public.agendamentos USING btree (id),null,null
 index,public,agendamentos_codigo_empresa_idx,agendamentos,CREATE INDEX agendamentos_codigo_empresa_idx ON public.agendamentos USING btree (codigo_empresa),null,null
 index,public,ux_agendamentos_empresa_codigo,agendamentos,"CREATE UNIQUE INDEX ux_agendamentos_empresa_codigo ON public.agendamentos USING btree (codigo_empresa, codigo)",null,null
@@ -2021,8 +2063,6 @@ index,public,comanda_historico_pkey,comanda_historico,CREATE UNIQUE INDEX comand
 index,public,idx_comanda_historico_comanda_id,comanda_historico,CREATE INDEX idx_comanda_historico_comanda_id ON public.comanda_historico USING btree (comanda_id),null,null
 index,public,idx_comanda_historico_codigo_empresa,comanda_historico,CREATE INDEX idx_comanda_historico_codigo_empresa ON public.comanda_historico USING btree (codigo_empresa),null,null
 index,public,idx_comanda_historico_tipo,comanda_historico,CREATE INDEX idx_comanda_historico_tipo ON public.comanda_historico USING btree (tipo_alteracao),null,null
-index,realtime,messages_2025_12_07_pkey,messages_2025_12_07,"CREATE UNIQUE INDEX messages_2025_12_07_pkey ON realtime.messages_2025_12_07 USING btree (id, inserted_at)",null,null
-index,realtime,messages_2025_12_07_inserted_at_topic_idx,messages_2025_12_07,"CREATE INDEX messages_2025_12_07_inserted_at_topic_idx ON realtime.messages_2025_12_07 USING btree (inserted_at DESC, topic) WHERE ((extension = 'broadcast'::text) AND (private IS TRUE))",null,null
 index,public,contas_pagar_pkey,contas_pagar,CREATE UNIQUE INDEX contas_pagar_pkey ON public.contas_pagar USING btree (id),null,null
 index,public,idx_contas_pagar_empresa_status,contas_pagar,"CREATE INDEX idx_contas_pagar_empresa_status ON public.contas_pagar USING btree (codigo_empresa, status)",null,null
 index,public,idx_contas_pagar_empresa_vencimento,contas_pagar,"CREATE INDEX idx_contas_pagar_empresa_vencimento ON public.contas_pagar USING btree (codigo_empresa, data_vencimento)",null,null
@@ -2054,8 +2094,6 @@ index,public,idx_comanda_itens_codigo_empresa,comanda_itens,CREATE INDEX idx_com
 index,public,idx_comanda_itens_produto,comanda_itens,CREATE INDEX idx_comanda_itens_produto ON public.comanda_itens USING btree (produto_id),null,null
 index,public,idx_comanda_itens_desconto_tipo,comanda_itens,CREATE INDEX idx_comanda_itens_desconto_tipo ON public.comanda_itens USING btree (desconto_tipo) WHERE (desconto_tipo IS NOT NULL),null,null
 index,net,_http_response_created_idx,_http_response,CREATE INDEX _http_response_created_idx ON net._http_response USING btree (created),null,null
-index,realtime,messages_2025_12_08_pkey,messages_2025_12_08,"CREATE UNIQUE INDEX messages_2025_12_08_pkey ON realtime.messages_2025_12_08 USING btree (id, inserted_at)",null,null
-index,realtime,messages_2025_12_08_inserted_at_topic_idx,messages_2025_12_08,"CREATE INDEX messages_2025_12_08_inserted_at_topic_idx ON realtime.messages_2025_12_08 USING btree (inserted_at DESC, topic) WHERE ((extension = 'broadcast'::text) AND (private IS TRUE))",null,null
 index,supabase_functions,migrations_pkey,migrations,CREATE UNIQUE INDEX migrations_pkey ON supabase_functions.migrations USING btree (version),null,null
 index,supabase_functions,hooks_pkey,hooks,CREATE UNIQUE INDEX hooks_pkey ON supabase_functions.hooks USING btree (id),null,null
 index,supabase_functions,supabase_functions_hooks_request_id_idx,hooks,CREATE INDEX supabase_functions_hooks_request_id_idx ON supabase_functions.hooks USING btree (request_id),null,null
@@ -2079,6 +2117,16 @@ index,public,notas_fiscais_pkey,notas_fiscais,CREATE UNIQUE INDEX notas_fiscais_
 index,public,idx_notas_fiscais_empresa,notas_fiscais,CREATE INDEX idx_notas_fiscais_empresa ON public.notas_fiscais USING btree (codigo_empresa),null,null
 index,public,idx_notas_fiscais_status,notas_fiscais,CREATE INDEX idx_notas_fiscais_status ON public.notas_fiscais USING btree (status),null,null
 index,public,idx_notas_fiscais_criado_em,notas_fiscais,CREATE INDEX idx_notas_fiscais_criado_em ON public.notas_fiscais USING btree (criado_em DESC),null,null
+index,public,isis_chat_sessions_pkey,isis_chat_sessions,CREATE UNIQUE INDEX isis_chat_sessions_pkey ON public.isis_chat_sessions USING btree (id),null,null
+index,public,idx_isis_chat_sessions_started,isis_chat_sessions,CREATE INDEX idx_isis_chat_sessions_started ON public.isis_chat_sessions USING btree (started_at DESC),null,null
+index,public,isis_chat_messages_pkey,isis_chat_messages,CREATE UNIQUE INDEX isis_chat_messages_pkey ON public.isis_chat_messages USING btree (id),null,null
+index,public,idx_isis_chat_messages_session_created,isis_chat_messages,"CREATE INDEX idx_isis_chat_messages_session_created ON public.isis_chat_messages USING btree (session_id, created_at DESC)",null,null
+index,realtime,messages_2025_12_14_pkey,messages_2025_12_14,"CREATE UNIQUE INDEX messages_2025_12_14_pkey ON realtime.messages_2025_12_14 USING btree (id, inserted_at)",null,null
+index,realtime,messages_2025_12_14_inserted_at_topic_idx,messages_2025_12_14,"CREATE INDEX messages_2025_12_14_inserted_at_topic_idx ON realtime.messages_2025_12_14 USING btree (inserted_at DESC, topic) WHERE ((extension = 'broadcast'::text) AND (private IS TRUE))",null,null
+index,realtime,messages_2025_12_15_pkey,messages_2025_12_15,"CREATE UNIQUE INDEX messages_2025_12_15_pkey ON realtime.messages_2025_12_15 USING btree (id, inserted_at)",null,null
+index,realtime,messages_2025_12_15_inserted_at_topic_idx,messages_2025_12_15,"CREATE INDEX messages_2025_12_15_inserted_at_topic_idx ON realtime.messages_2025_12_15 USING btree (inserted_at DESC, topic) WHERE ((extension = 'broadcast'::text) AND (private IS TRUE))",null,null
+index,auth,oauth_client_states_pkey,oauth_client_states,CREATE UNIQUE INDEX oauth_client_states_pkey ON auth.oauth_client_states USING btree (id),null,null
+index,auth,idx_oauth_client_states_created_at,oauth_client_states,CREATE INDEX idx_oauth_client_states_created_at ON auth.oauth_client_states USING btree (created_at),null,null
 trigger,public,trg_ag_participantes_set_empresa,agendamento_participantes,CREATE TRIGGER trg_ag_participantes_set_empresa BEFORE INSERT OR UPDATE OF agendamento_id ON public.agendamento_participantes FOR EACH ROW EXECUTE FUNCTION set_ag_participantes_codigo_empresa(),null,null
 trigger,public,trg_mov_saldo_apply,movimentos_saldo,CREATE TRIGGER trg_mov_saldo_apply AFTER INSERT OR DELETE OR UPDATE ON public.movimentos_saldo FOR EACH ROW EXECUTE FUNCTION fn_mov_saldo_apply(),null,null
 trigger,public,trg_mesas_updated_at,mesas,CREATE TRIGGER trg_mesas_updated_at BEFORE UPDATE ON public.mesas FOR EACH ROW EXECUTE FUNCTION set_updated_at(),null,null
@@ -2328,6 +2376,7 @@ function,public,trg_comandas_baixar_estoque,null,() returns trigger,postgres,nul
 function,public,update_compras_timestamp,null,() returns trigger,postgres,null
 function,realtime,build_prepared_statement_sql,null,"(prepared_statement_name text, entity regclass, columns realtime.wal_column[]) returns text",supabase_admin,null
 function,realtime,send,null,"(payload jsonb, event text, topic text, private boolean) returns void",supabase_admin,null
+function,public,create_isis_session,null,"(p_empresa_codigo text, p_cliente_id bigint, p_source text) returns uuid",postgres,null
 function,realtime,broadcast_changes,null,"(topic_name text, event_name text, operation text, table_name text, table_schema text, new record, old record, level text) returns void",supabase_admin,null
 function,realtime,is_visible_through_filters,null,"(columns realtime.wal_column[], filters realtime.user_defined_filter[]) returns boolean",supabase_admin,null
 function,realtime,topic,null,() returns text,supabase_realtime_admin,null
@@ -2396,7 +2445,6 @@ type,public,agenda_settings,null,agenda_settings,null,null
 type,public,movimentos_saldo,null,movimentos_saldo,null,null
 type,realtime,messages,null,realtime.messages,null,null
 type,public,user_ui_settings,null,user_ui_settings,null,null
-type,realtime,messages_2025_12_08,null,realtime.messages_2025_12_08,null,null
 type,realtime,messages_2025_12_10,null,realtime.messages_2025_12_10,null,null
 type,public,payment_status,null,payment_status,null,null
 type,public,contas_pagar_baixas,null,contas_pagar_baixas,null,null
@@ -2412,7 +2460,6 @@ type,public,comanda_historico,null,comanda_historico,null,null
 type,public,estoque_reservado,null,estoque_reservado,null,null
 type,public,colaboradores,null,colaboradores,null,null
 type,public,agendamentos,null,agendamentos,null,null
-type,realtime,messages_2025_12_07,null,realtime.messages_2025_12_07,null,null
 type,realtime,messages_2025_12_09,null,realtime.messages_2025_12_09,null,null
 type,public,mesa_status,null,mesa_status,null,null
 type,public,comanda_status,null,comanda_status,null,null
@@ -2424,6 +2471,7 @@ type,public,caixa_movimentos,null,caixa_movimentos,null,null
 type,public,v_agendamento_participantes,null,v_agendamento_participantes,null,null
 type,public,agendamento_participantes,null,agendamento_participantes,null,null
 type,public,comanda_clientes,null,comanda_clientes,null,null
+type,auth,oauth_client_states,null,auth.oauth_client_states,null,null
 type,storage,buckets_vectors,null,storage.buckets_vectors,null,null
 type,storage,vector_indexes,null,storage.vector_indexes,null,null
 type,auth,oauth_authorization_status,null,auth.oauth_authorization_status,null,null
@@ -2437,6 +2485,8 @@ type,public,contas_receber,null,contas_receber,null,null
 type,public,contas_receber_baixas,null,contas_receber_baixas,null,null
 type,public,contas_pagar,null,contas_pagar,null,null
 type,public,notas_fiscais,null,notas_fiscais,null,null
+type,realtime,messages_2025_12_14,null,realtime.messages_2025_12_14,null,null
+type,realtime,messages_2025_12_15,null,realtime.messages_2025_12_15,null,null
 type,public,compras,null,compras,null,null
 type,public,compras_itens,null,compras_itens,null,null
 type,public,quadras_dias_funcionamento,null,quadras_dias_funcionamento,null,null
@@ -2453,6 +2503,8 @@ type,supabase_functions,migrations,null,supabase_functions.migrations,null,null
 type,supabase_functions,hooks,null,supabase_functions.hooks,null,null
 type,realtime,messages_2025_12_12,null,realtime.messages_2025_12_12,null,null
 type,realtime,messages_2025_12_13,null,realtime.messages_2025_12_13,null,null
+type,public,isis_chat_sessions,null,isis_chat_sessions,null,null
+type,public,isis_chat_messages,null,isis_chat_messages,null,null
 extension,pg_catalog,plpgsql,null,1.0,null,PL/pgSQL procedural language
 extension,extensions,pg_net,null,0.14.0,null,Async HTTP
 extension,extensions,pgcrypto,null,1.3,null,cryptographic functions
@@ -2782,9 +2834,7 @@ grant,public,idx_caixa_resumos_periodo,null,null,postgres,null
 grant,public,caixa_movimentacoes_id_seq,null,"postgres=rwU/postgres,anon=rwU/postgres,authenticated=rwU/postgres,service_role=rwU/postgres",postgres,null
 grant,public,idx_caixa_mov_tipo,null,null,postgres,null
 grant,public,idx_pagamentos_xml_chave,null,null,postgres,null
-grant,realtime,messages_2025_12_07_pkey,null,null,supabase_admin,null
 grant,public,comandas_pkey,null,null,postgres,null
-grant,realtime,messages_2025_12_07_inserted_at_topic_idx,null,null,supabase_admin,null
 grant,public,idx_comandas_mesa,null,null,postgres,null
 grant,public,clientes,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
 grant,public,estoque_reservado,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
@@ -2792,7 +2842,6 @@ grant,public,comanda_historico,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/po
 grant,public,idx_mesas_nome,null,null,postgres,null
 grant,public,idx_comandas_origem,null,null,postgres,null
 grant,public,idx_comandas_xml_chave,null,null,postgres,null
-grant,realtime,messages_2025_12_07,null,"supabase_admin=arwdDxtm/supabase_admin,postgres=arwdDxtm/supabase_admin,dashboard_user=arwdDxtm/supabase_admin",supabase_admin,null
 grant,realtime,messages_2025_12_11_inserted_at_topic_idx,null,null,supabase_admin,null
 grant,realtime,messages_2025_12_09_pkey,null,null,supabase_admin,null
 grant,realtime,messages_2025_12_09_inserted_at_topic_idx,null,null,supabase_admin,null
@@ -2816,8 +2865,6 @@ grant,public,contas_pagar_baixas_pkey,null,null,postgres,null
 grant,public,idx_cp_baixas_empresa_conta,null,null,postgres,null
 grant,public,idx_cp_baixas_empresa_data,null,null,postgres,null
 grant,public,idx_comandas_agendamento_id,null,null,postgres,null
-grant,realtime,messages_2025_12_08_pkey,null,null,supabase_admin,null
-grant,realtime,messages_2025_12_08_inserted_at_topic_idx,null,null,supabase_admin,null
 grant,public,comandas,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
 grant,public,comanda_itens,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
 grant,public,idx_comanda_itens_desconto_tipo,null,null,postgres,null
@@ -2839,7 +2886,6 @@ grant,net,http_request_queue_id_seq,null,"supabase_admin=rwU/supabase_admin,=rwU
 grant,net,http_request_queue,null,"supabase_admin=arwdDxtm/supabase_admin,=arwdDxtm/supabase_admin",supabase_admin,null
 grant,net,_http_response,null,"supabase_admin=arwdDxtm/supabase_admin,=arwdDxtm/supabase_admin",supabase_admin,null
 grant,supabase_functions,migrations_pkey,null,null,supabase_functions_admin,null
-grant,realtime,messages_2025_12_08,null,"supabase_admin=arwdDxtm/supabase_admin,postgres=arwdDxtm/supabase_admin,dashboard_user=arwdDxtm/supabase_admin",supabase_admin,null
 grant,supabase_functions,migrations,null,"supabase_functions_admin=arwdDxtm/supabase_functions_admin,postgres=arwdDxtm/supabase_functions_admin,anon=arwdDxtm/supabase_functions_admin,authenticated=arwdDxtm/supabase_functions_admin,service_role=arwdDxtm/supabase_functions_admin",supabase_functions_admin,null
 grant,supabase_functions,hooks,null,"supabase_functions_admin=arwdDxtm/supabase_functions_admin,postgres=arwdDxtm/supabase_functions_admin,anon=arwdDxtm/supabase_functions_admin,authenticated=arwdDxtm/supabase_functions_admin,service_role=arwdDxtm/supabase_functions_admin",supabase_functions_admin,null
 grant,supabase_functions,hooks_pkey,null,null,supabase_functions_admin,null
@@ -2867,3 +2913,20 @@ grant,public,idx_notas_fiscais_empresa,null,null,postgres,null
 grant,public,idx_notas_fiscais_status,null,null,postgres,null
 grant,public,idx_notas_fiscais_criado_em,null,null,postgres,null
 grant,public,notas_fiscais,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
+grant,public,isis_chat_sessions,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
+grant,public,isis_chat_sessions_pkey,null,null,postgres,null
+grant,public,isis_chat_messages_pkey,null,null,postgres,null
+grant,public,idx_isis_chat_messages_session_created,null,null,postgres,null
+grant,public,idx_isis_chat_sessions_started,null,null,postgres,null
+grant,public,idx_agendamentos_created_by_isis,null,null,postgres,null
+grant,public,idx_agendamentos_isis_session_id,null,null,postgres,null
+grant,public,isis_chat_messages,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
+grant,auth,oauth_client_states_pkey,null,null,supabase_auth_admin,null
+grant,auth,idx_oauth_client_states_created_at,null,null,supabase_auth_admin,null
+grant,realtime,messages_2025_12_15_pkey,null,null,supabase_admin,null
+grant,realtime,messages_2025_12_14_pkey,null,null,supabase_admin,null
+grant,realtime,messages_2025_12_14_inserted_at_topic_idx,null,null,supabase_admin,null
+grant,realtime,messages_2025_12_14,null,"supabase_admin=arwdDxtm/supabase_admin,postgres=arwdDxtm/supabase_admin,dashboard_user=arwdDxtm/supabase_admin",supabase_admin,null
+grant,realtime,messages_2025_12_15_inserted_at_topic_idx,null,null,supabase_admin,null
+grant,realtime,messages_2025_12_15,null,"supabase_admin=arwdDxtm/supabase_admin,postgres=arwdDxtm/supabase_admin,dashboard_user=arwdDxtm/supabase_admin",supabase_admin,null
+grant,auth,oauth_client_states,null,"postgres=arwdDxtm/supabase_auth_admin,supabase_auth_admin=arwdDxtm/supabase_auth_admin,dashboard_user=arwdDxtm/supabase_auth_admin",supabase_auth_admin,null

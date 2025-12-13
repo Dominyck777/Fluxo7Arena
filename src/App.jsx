@@ -7,6 +7,7 @@ import ProtectedRoute from '@/components/ProtectedRoute';
 import { AlertsProvider } from '@/contexts/AlertsContext';
 import { ModalsProvider } from '@/contexts/ModalsContext';
 import { AgendaProvider } from '@/contexts/AgendaContext';
+import { IsisProvider } from '@/contexts/IsisContext';
 import DashboardPage from '@/pages/DashboardPage';
 import AgendaPage from '@/pages/AgendaPage';
 import VendasPage from '@/pages/VendasPage';
@@ -109,7 +110,7 @@ function PrivateApp() {
                 <Routes>
                   <Route path="/" element={<DashboardPage />} />
                   <Route path="/agenda" element={<AgendaPage sidebarVisible={sidebarVisible} />} />
-                  <Route path="/isis" element={<IsisPremiumPage />} />
+                  <Route path="/isis" element={<IsisProvider><IsisPremiumPage /></IsisProvider>} />
                   <Route path="/vendas" element={<VendasPage />} />
                   <Route path="/balcao" element={<BalcaoPage />} />
                   <Route path="/produtos" element={<ProdutosPage />} />
