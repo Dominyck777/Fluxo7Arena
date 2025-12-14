@@ -1853,7 +1853,7 @@ export default function BalcaoPage() {
                   variant="outline"
                   size="sm"
                   onClick={cancelSale}
-                  disabled={items.length === 0}
+                  disabled={cancelLoading}
                 >
                   Cancelar
                 </Button>
