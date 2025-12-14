@@ -1,48 +1,175 @@
-Show! Bora agendar a Quadra Prime? 🏐
+Está tudo correto?
 
-13:15
+11:09
+
+✅ Confirmar Agendamento
+
+11:10
+
+Assistente Virtual
+🎉 Pronto! Seu agendamento foi confirmado com sucesso!
+
+11:10
+
+Assistente Virtual
+🎉 AGENDAMENTO CONFIRMADO
+
+🆔 Código: #40
+
+📍 Local
+Quadra Prime
+📍 Endereço
+Avenida do Esporte, 822 - Jardim Olímpico, Contagem - MG
+
+
+📅 Quando
+14/12/2025 (domingo)
+⏰ 13:00 às 15:00 (2h)
+
+🏆 Modalidade
+Futsal
+
+👥 Participantes (19)
+• Ithalo prime
+• Lucas
+• Bruno
+• Thiago
+• Tarcio
+• Marcos
+• Maycon
+• Cidão
+• Gabriel
+• Diego
+• Rodrigo
+• Túlio
+• Lucas
+• Matheus
+• Bruno S
+• Bruninho
+• Adriano
+• Dhyonne
+• Hiiago C
+
+💰 Valor Total: R$ 120,00
+💵 Valor Dividido: R$ 6,32 por pessoa
+
+👤 Responsável: Ithalo prime
+
+
+11:10
+
+Assistente Virtual
+O que você gostaria de fazer?
+
+11:10
+
+🎲 Gerar Times
+
+11:10
+
+Assistente Virtual
+🏆 Times gerados (Futsal)
+
+🟠 Time 1 (5):
+1) Lucas (Goleiro)
+2) Adriano
+3) Rodrigo
+4) Cidão
+5) Maycon
+
+🔵 Time 2 (5):
+1) Bruno (Goleiro)
+2) Ithalo prime
+3) Tarcio
+4) Bruno S
+5) Thiago
+
+🟢 Time 3 (5):
+1) Lucas (Goleiro)
+2) Gabriel
+3) Matheus
+4) Túlio
+5) Dhyonne
+
+🟣 Time 4 (5):
+1) Lucas (Goleiro)
+2) Marcos
+3) Hiiago C
+4) Diego
+5) Bruninho
+
+
+11:10
+
+Assistente Virtual
+Tudo certo com os times?
+
+11:10
+
+✅ Concluir
+
+11:11
+
+Assistente Virtual
+Beleza! O que você gostaria de fazer agora?
+
+11:11
+
+Assistente Virtual
+Em que posso te auxiliar?
+
+11:11
+
+📅 Fazer Agendamento
+
+11:11
+
+Assistente Virtual
+Perfeito! Vamos marcar sua reserva na Quadra Prime! 🏆
+
+11:11
 
 Assistente Virtual
 Para qual dia você gostaria de agendar?
 
-13:15
+11:11
 
-Hoje (10/12)
+Hoje (14/12)
 
-13:15
+11:11
 
 Assistente Virtual
-Tenho horários livres das 13:30 às 15:00, e das 16:30 às 22:00! 🕒
+Tenho horários livres das 11:30 às 13:00, e das 15:00 às 22:00! 🕒
 
-13:15
+11:11
 
 Assistente Virtual
 Escolha o horário de início e término: ⏰
 
-13:15
+11:11
 
-18:00 - 20:30 • Volei
+16:00 - 18:30 • Volei
 
-13:15
+11:11
 
 Assistente Virtual
 Perfeito! Ithalo prime, você já está na lista! 🎯
 
-13:15
+11:11
 
 Assistente Virtual
 Quer adicionar mais pessoas? Digite o nome e clique em "Adicionar" para cada um, ou finalize quando quiser.
 
-13:15
+11:11
 
-✓ Eu + douglas (2 pessoas)
+✓ Eu + Victor, Diney, Ronaldo, Giovana, Murilo, Eduardo, Peixe, Fellipe, Linniker, Icaro, Caminotto, Hiago, Cleiton, Tozato, Rafaela, Lucas R, Diego, Leonardo, Karina, Gustavo, Ruan, Jéssica, Thiago (24 pessoas)
 
-13:15
+11:12
 
 Assistente Virtual
-Legal! Vamos revisar juntos:
+Perfeito! Revisa comigo os dados:
 
-13:16
+11:12
 
 Assistente Virtual
 📋 RESUMO DO AGENDAMENTO
@@ -53,49 +180,71 @@ Quadra Prime
 Avenida do Esporte, 822 - Jardim Olímpico, Contagem - MG
 
 📅 Data
-10/12/2025 (quarta-feira)
+14/12/2025 (domingo)
 
 ⏰ Horário
-18:00 às 20:30
+16:00 às 18:30
 ⏱️ Duração: 2h 30min
 
 🏆 Modalidade
 Volei
 
-👥 Participantes (2)
+👥 Participantes (24)
 👤 Ithalo prime (você)
-👥 douglas
+👥 Victor
+👥 Diney
+👥 Ronaldo
+👥 Giovana
+👥 Murilo
+👥 Eduardo
+👥 Peixe
+👥 Fellipe
+👥 Linniker
+👥 Icaro
+👥 Caminotto
+👥 Hiago
+👥 Cleiton
+👥 Tozato
+👥 Rafaela
+👥 Lucas R
+👥 Diego
+👥 Leonardo
+👥 Karina
+👥 Gustavo
+👥 Ruan
+👥 Jéssica
+👥 Thiago
 
 💰 Valor Total
 R$ 150,00
 💵 Valor Dividido
-R$ 75,00 por pessoa
+R$ 6,25 por pessoa
 
 👤 Responsável
 Ithalo prime
 📞 (34) 99893-6085
 
 
-13:16
+11:12
 
 Assistente Virtual
 Está tudo correto?
 
-13:16
+11:12
 
-✅ Confirmar Agendamento
+✅ Salvar Alterações
 
-13:16
+11:12
 
 Assistente Virtual
-🎉 Pronto! Seu agendamento foi confirmado com sucesso!
+🎉 Perfeito! Suas alterações foram salvas com sucesso!
 
-13:16
+11:12
 
 Assistente Virtual
 🎉 AGENDAMENTO CONFIRMADO
 
-🆔 Código: #28
+🆔 Código: #40
 
 📍 Local
 Quadra Prime
@@ -104,177 +253,46 @@ Avenida do Esporte, 822 - Jardim Olímpico, Contagem - MG
 
 
 📅 Quando
-10/12/2025 (quarta-feira)
-⏰ 18:00 às 20:30 (2h 30min)
+14/12/2025 (domingo)
+⏰ 16:00 às 18:30 (2h 30min)
 
 🏆 Modalidade
 Volei
 
-👥 Participantes (2)
+👥 Participantes (24)
 • Ithalo prime
-• douglas
+• Victor
+• Diney
+• Ronaldo
+• Giovana
+• Murilo
+• Eduardo
+• Peixe
+• Fellipe
+• Linniker
+• Icaro
+• Caminotto
+• Hiago
+• Cleiton
+• Tozato
+• Rafaela
+• Lucas R
+• Diego
+• Leonardo
+• Karina
+• Gustavo
+• Ruan
+• Jéssica
+• Thiago
 
 💰 Valor Total: R$ 150,00
-💵 Valor Dividido: R$ 75,00 por pessoa
+💵 Valor Dividido: R$ 6,25 por pessoa
 
 👤 Responsável: Ithalo prime
 
 
-13:16
+11:12
 
 Assistente Virtual
 O que você gostaria de fazer?
 
-13:16
-
-✏️ Editar Agendamento
-
-13:16
-
-Assistente Virtual
-Claro! O que você gostaria de alterar?
-
-13:16
-
-Assistente Virtual
-📋 RESUMO DO AGENDAMENTO
-
-🏟️ Quadra
-Quadra Prime
-📍 Endereço
-Avenida do Esporte, 822 - Jardim Olímpico, Contagem - MG
-
-📅 Data
-10/12/2025 (quarta-feira)
-
-⏰ Horário
-18:00 às 20:30
-⏱️ Duração: 2h 30min
-
-🏆 Modalidade
-Volei
-
-👥 Participantes (2)
-👤 Ithalo prime (você)
-👥 douglas
-
-💰 Valor Total
-R$ 150,00
-💵 Valor Dividido
-R$ 75,00 por pessoa
-
-👤 Responsável
-Ithalo prime
-📞 (34) 99893-6085
-
-
-13:16
-
-Assistente Virtual
-Está tudo correto?
-
-13:16
-
-✏️ Editar Horário e Esporte
-
-13:16
-
-Assistente Virtual
-Tenho horários livres das 13:30 às 15:00, e das 16:30 às 22:00! 🕒
-
-13:16
-
-Assistente Virtual
-Escolha o horário de início e término: ⏰
-
-13:16
-
-17:00 - 22:00 • Volei
-
-13:16
-
-Assistente Virtual
-Show! Confirma se tá tudo certo:
-
-13:16
-
-Assistente Virtual
-📋 RESUMO DO AGENDAMENTO
-
-🏟️ Quadra
-Quadra Prime
-📍 Endereço
-Avenida do Esporte, 822 - Jardim Olímpico, Contagem - MG
-
-📅 Data
-10/12/2025 (quarta-feira)
-
-⏰ Horário
-17:00 às 22:00
-⏱️ Duração: 5h
-
-🏆 Modalidade
-Volei
-
-👥 Participantes (2)
-👤 Ithalo prime (você)
-👥 douglas
-
-💰 Valor Total
-R$ 300,00
-💵 Valor Dividido
-R$ 150,00 por pessoa
-
-👤 Responsável
-Ithalo prime
-📞 (34) 99893-6085
-
-
-13:16
-
-Assistente Virtual
-Está tudo correto?
-
-13:16
-
-✅ Confirmar Agendamento
-
-13:17
-
-Assistente Virtual
-🎉 Pronto! Seu agendamento foi confirmado com sucesso!
-
-13:17
-
-Assistente Virtual
-🎉 AGENDAMENTO CONFIRMADO
-
-🆔 Código: #29
-
-📍 Local
-Quadra Prime
-📍 Endereço
-Avenida do Esporte, 822 - Jardim Olímpico, Contagem - MG
-
-
-📅 Quando
-10/12/2025 (quarta-feira)
-⏰ 17:00 às 22:00 (5h)
-
-🏆 Modalidade
-Volei
-
-👥 Participantes (2)
-• Ithalo prime
-• douglas
-
-💰 Valor Total: R$ 300,00
-💵 Valor Dividido: R$ 150,00 por pessoa
-
-👤 Responsável: Ithalo prime
-
-
-13:17
-
-Assistente Virtual
-O que você gostaria de fazer?

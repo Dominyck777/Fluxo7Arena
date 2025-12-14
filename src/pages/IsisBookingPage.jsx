@@ -2491,6 +2491,48 @@ ${listaNomes}
     }
     
     switch (button.value) {
+      case 'novo_agendamento': {
+        // Usuário escolheu criar um NOVO agendamento: limpar qualquer estado de edição/criação anterior
+        addUserMessage('📅 Fazer Agendamento');
+        try {
+          setAgendamentoCriado(null);
+        } catch {}
+        try { updateSelection('editing_agendamento', null); } catch {}
+        // Resetar seleções relacionadas ao agendamento anterior
+        try { updateSelection('quadra', null); } catch {}
+        try { updateSelection('data', null); } catch {}
+        try { updateSelection('horario', null); } catch {}
+        try { updateSelection('modalidade', null); } catch {}
+        try { updateSelection('quantidade', null); } catch {}
+        try { updateSelection('nomes', []); } catch {}
+        try { updateSelection('participantes', []); } catch {}
+        // Limpa papéis fixos (levantadores/goleiros) para o novo fluxo
+        try { updateSelection('levantadores', []); } catch {}
+        try { updateSelection('goleiros', []); } catch {}
+        try { updateSelection('fixos', []); } catch {}
+        try { updateSelection('fixoRoles', {}); } catch {}
+        try { setEditingType(null); } catch {}
+        try { setShowInput(false); } catch {}
+        // Inicia fluxo normal de novo agendamento
+        await iniciarAgendamento();
+        break;
+      }
+      case 'buscar_agendamento': {
+        // Fluxo de editar agendamento existente (busca/seleção ocorre em outras partes do fluxo)
+        addUserMessage('✏️ Editar Agendamento');
+        // Aqui mantemos o estado; o fluxo de busca/carregamento existente continuará
+        // Caso haja necessidade futura, podemos abrir imediatamente a busca/lista
+        // por enquanto, apenas mostramos o menu inicial novamente
+        perguntarAcaoInicial();
+        break;
+      }
+      case 'finalizar_atendimento': {
+        addUserMessage('👋 Finalizar Atendimento');
+        // Reseta conversa para estado inicial
+        try { resetConversation(); } catch {}
+        addIsisMessage('Atendimento finalizado. Se precisar, é só me chamar de novo! 🙌', 400);
+        break;
+      }
       case 'corrigir_telefone': {
         addUserMessage('☎️ Informei o telefone errado');
         updateSelection('cliente', null);
