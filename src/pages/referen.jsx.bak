@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { IsisProvider, useIsis } from '@/contexts/IsisContext';
@@ -14,14 +14,14 @@ import { IsisAvaliacaoInput } from '@/components/isis/IsisAvaliacaoInput';
 import { IsisPremiumLoading } from '@/components/isis/IsisPremiumLoading';
 import { getIsisMessage } from '@/lib/isisMessages';
 import { supabase } from '@/lib/supabase';
-import { adicionarFeedbackIsis } from '@/lib/isisFeedback';
+import { adicionarFeedbackIsis } from '@/lib/jsonbinService';
 import { format, addDays, startOfDay, setHours, setMinutes, addMinutes } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { toast } from '@/components/ui/use-toast';
 import { ArrowLeft, Calendar, Clock, Users, MapPin, Bot, Trophy, Building2 } from 'lucide-react';
 
 /**
- * PÃ¡gina principal do agendamento via Isis
+ * Página principal do agendamento via Isis
  */
 const IsisBookingPageContent = () => {
   const { nomeFantasia } = useParams();
@@ -66,11 +66,11 @@ const IsisBookingPageContent = () => {
   const [loadingEmpresa, setLoadingEmpresa] = useState(true);
   const [tipoIdentificacao, setTipoIdentificacao] = useState('telefone'); // 'telefone' ou 'email'
   const [showInput, setShowInput] = useState(false); // Controla quando mostrar input
-  const [editingType, setEditingType] = useState(null); // Controla qual tipo de ediÃ§Ã£o estÃ¡ ativa: 'participantes', 'horario', etc.
-  const [agendamentoCriado, setAgendamentoCriado] = useState(null); // Armazena o agendamento criado para ediÃ§Ãµes posteriores
-  const [identificacaoIniciada, setIdentificacaoIniciada] = useState(false); // Flag para evitar mÃºltiplas execuÃ§Ãµes
-  const [deferredPrompt, setDeferredPrompt] = useState(null); // Guardar evento de instalaÃ§Ã£o PWA
-  // Mostra opcionalmente uma correÃ§Ã£o de login (telefone/email) no prÃ³ximo menu apenas uma vez apÃ³s identificaÃ§Ã£o
+  const [editingType, setEditingType] = useState(null); // Controla qual tipo de edição está ativa: 'participantes', 'horario', etc.
+  const [agendamentoCriado, setAgendamentoCriado] = useState(null); // Armazena o agendamento criado para edições posteriores
+  const [identificacaoIniciada, setIdentificacaoIniciada] = useState(false); // Flag para evitar múltiplas execuções
+  const [deferredPrompt, setDeferredPrompt] = useState(null); // Guardar evento de instalação PWA
+  // Mostra opcionalmente uma correção de login (telefone/email) no próximo menu apenas uma vez após identificação
   const [correctionOptionOnce, setCorrectionOptionOnce] = useState(null); // 'telefone' | 'email' | null
   
   // Logo da empresa com cache-buster (igual ao Header principal)
@@ -80,7 +80,7 @@ const IsisBookingPageContent = () => {
     return empresa?.logo_url || '';
   }, [empresa?.logo_url]);
   
-  // Busca cÃ³digo da empresa pelo nome fantasia (rota ou subdomÃ­nio)
+  // Busca código da empresa pelo nome fantasia (rota ou subdomínio)
   useEffect(() => {
     const buscarEmpresaPorNome = async () => {
       if (!nomeFantasiaEfetivo) {
@@ -94,14 +94,14 @@ const IsisBookingPageContent = () => {
         // Busca empresa pelo nome fantasia (URL-friendly)
         const nomeDecodificado = decodeURIComponent(nomeFantasiaEfetivo);
         
-        // Normaliza o nome para busca flexÃ­vel (remove espaÃ§os, hÃ­fens, etc.)
+        // Normaliza o nome para busca flexível (remove espaços, hífens, etc.)
         const nomeNormalizado = nomeDecodificado
           .toLowerCase()
-          .replace(/[\s\-_]+/g, '') // Remove espaÃ§os, hÃ­fens e underscores
+          .replace(/[\s\-_]+/g, '') // Remove espaços, hífens e underscores
           .trim();
         
         console.log('[Isis] Nome normalizado para busca:', nomeNormalizado);
-        // 1) Tenta via RPC (melhor para contornar RLS). Se a funÃ§Ã£o nÃ£o existir, cai no fallback abaixo.
+        // 1) Tenta via RPC (melhor para contornar RLS). Se a função não existir, cai no fallback abaixo.
         let empresaEncontradaViaRpc = null;
         try {
           const { data: rpcData, error: rpcErr } = await supabase.rpc('get_empresa_public_by_slug', { p_slug: nomeNormalizado });
@@ -132,7 +132,7 @@ const IsisBookingPageContent = () => {
         }
 
         if (!empresaFinal) {
-          console.error('[Isis] Empresa nÃ£o encontrada (RPC e fallback)');
+          console.error('[Isis] Empresa não encontrada (RPC e fallback)');
           setCodigoEmpresa(null);
           setLoadingEmpresa(false);
           return;
@@ -153,7 +153,7 @@ const IsisBookingPageContent = () => {
     buscarEmpresaPorNome();
   }, [nomeFantasiaEfetivo]);
 
-  // Captura o evento de instalaÃ§Ã£o PWA para disparar quando o usuÃ¡rio clicar em "Instalar App"
+  // Captura o evento de instalação PWA para disparar quando o usuário clicar em "Instalar App"
   useEffect(() => {
     const handler = (e) => {
       try { e.preventDefault(); } catch {}
@@ -163,7 +163,7 @@ const IsisBookingPageContent = () => {
     return () => window.removeEventListener('beforeinstallprompt', handler);
   }, []);
 
-  // Auto-prompt quando chegamos com ?install=1 na URL (apÃ³s redirecionar para o subdomÃ­nio)
+  // Auto-prompt quando chegamos com ?install=1 na URL (após redirecionar para o subdomínio)
   useEffect(() => {
     try {
       const params = new URLSearchParams(window.location.search || '');
@@ -173,21 +173,21 @@ const IsisBookingPageContent = () => {
       const promptEvt = window.__installPrompt || deferredPrompt;
       const sendTutorialAndNext = () => {
         const tutorial = [
-          'ðŸ“² Como instalar o app:',
+          '📲 Como instalar o app:',
           '',
-          'â€¢ Chrome (Android/PC):',
-          '  1) Toque nos 3 pontinhos (â‹®) do navegador',
-          '  2) Escolha "Instalar app" ou "Adicionar Ã  tela inicial"',
+          '• Chrome (Android/PC):',
+          '  1) Toque nos 3 pontinhos (⋮) do navegador',
+          '  2) Escolha "Instalar app" ou "Adicionar à tela inicial"',
           '  3) Confirme em "Instalar"',
           '',
-          'â€¢ Safari (iPhone/iPad):',
-          '  1) Toque no botÃ£o Compartilhar (quadrado com seta â†‘)',
-          '  2) Selecione "Adicionar Ã  Tela de InÃ­cio"',
+          '• Safari (iPhone/iPad):',
+          '  1) Toque no botão Compartilhar (quadrado com seta ↑)',
+          '  2) Selecione "Adicionar à Tela de Início"',
           '  3) Toque em "Adicionar"',
         ].join('\n');
         addIsisMessage(tutorial, 400);
         setTimeout(() => {
-          addIsisMessage('Beleza! O que vocÃª gostaria de fazer agora?', 600);
+          addIsisMessage('Beleza! O que você gostaria de fazer agora?', 600);
           setTimeout(() => { try { perguntarAcaoInicial(); } catch {} }, 800);
         }, 700);
       };
@@ -197,7 +197,7 @@ const IsisBookingPageContent = () => {
             if (promptEvt === deferredPrompt) setDeferredPrompt(null);
             if (promptEvt === window.__installPrompt) window.__installPrompt = null;
             await promptEvt.prompt();
-            await promptEvt.userChoice; // ignoramos o outcome â€” sempre mostramos tutorial em seguida
+            await promptEvt.userChoice; // ignoramos o outcome — sempre mostramos tutorial em seguida
           }
         } catch {}
         sendTutorialAndNext();
@@ -205,7 +205,7 @@ const IsisBookingPageContent = () => {
     } catch {}
   }, [deferredPrompt]);
   
-  // Inicia conversa com identificaÃ§Ã£o do cliente
+  // Inicia conversa com identificação do cliente
   useEffect(() => {
     console.log('[DEBUG] useEffect iniciarConversa:', {
       codigoEmpresa,
@@ -216,22 +216,22 @@ const IsisBookingPageContent = () => {
     });
     
     if (!codigoEmpresa || loadingEmpresa) {
-      console.log('[DEBUG] Saindo - sem cÃ³digo ou ainda carregando');
+      console.log('[DEBUG] Saindo - sem código ou ainda carregando');
       return;
     }
     
-    // Verifica se jÃ¡ tem cliente identificado ou se identificaÃ§Ã£o jÃ¡ foi iniciada
+    // Verifica se já tem cliente identificado ou se identificação já foi iniciada
     if (!selections.cliente && !identificacaoIniciada) {
-      console.log('[DEBUG] Cliente nÃ£o identificado e identificaÃ§Ã£o nÃ£o iniciada, agendando iniciarIdentificacao em 1s');
-      setIdentificacaoIniciada(true); // Marca como iniciada para evitar duplicaÃ§Ã£o
+      console.log('[DEBUG] Cliente não identificado e identificação não iniciada, agendando iniciarIdentificacao em 1s');
+      setIdentificacaoIniciada(true); // Marca como iniciada para evitar duplicação
       
       // Aguarda mais tempo para garantir que o loading premium saiu completamente da tela
       setTimeout(() => {
-        console.log('[DEBUG] Executando iniciarIdentificacao apÃ³s delay (loading fora da tela)');
+        console.log('[DEBUG] Executando iniciarIdentificacao após delay (loading fora da tela)');
         iniciarIdentificacao();
-      }, 2500); // 2.5 segundos adicionais apÃ³s loading premium terminar
+      }, 2500); // 2.5 segundos adicionais após loading premium terminar
     } else {
-      console.log('[DEBUG] Cliente jÃ¡ identificado ou identificaÃ§Ã£o jÃ¡ iniciada, nÃ£o fazendo nada');
+      console.log('[DEBUG] Cliente já identificado ou identificação já iniciada, não fazendo nada');
     }
   }, [codigoEmpresa, loadingEmpresa, selections.cliente, identificacaoIniciada]);
   
@@ -244,7 +244,7 @@ const IsisBookingPageContent = () => {
       }
       
       try {
-        // Define empresa atual na sessÃ£o do Supabase para RLS
+        // Define empresa atual na sessão do Supabase para RLS
         console.log('[useEffect] Definindo empresa atual para RLS:', codigoEmpresa);
         await supabase.rpc('set_current_empresa', { 
           empresa_codigo: String(codigoEmpresa) 
@@ -262,7 +262,7 @@ const IsisBookingPageContent = () => {
     initializeApp();
   }, [codigoEmpresa]);
   
-  // FunÃ§Ã£o para obter cumprimento baseado no horÃ¡rio
+  // Função para obter cumprimento baseado no horário
   const getCumprimentoPorHorario = () => {
     const agora = new Date();
     const hora = agora.getHours();
@@ -276,7 +276,7 @@ const IsisBookingPageContent = () => {
     }
   };
 
-  // Inicia identificaÃ§Ã£o do cliente
+  // Inicia identificação do cliente
   const iniciarIdentificacao = () => {
     console.log('[DEBUG] iniciarIdentificacao INICIOU:', {
       loadingEmpresa,
@@ -290,17 +290,17 @@ const IsisBookingPageContent = () => {
     const nomeEmpresa = empresa?.nome_fantasia || empresa?.razao_social || 'Arena Palace';
     const cumprimento = getCumprimentoPorHorario();
     
-    // Mensagem Ãºnica de boas-vindas com identificaÃ§Ã£o
+    // Mensagem única de boas-vindas com identificação
     const mensagensBoasVindas = [
-      `**${cumprimento}!** Tudo bem? ðŸ˜Š\n\nSou a **Ãsis**, assistente virtual da **${nomeEmpresa}** e estou aqui para tornar seu **agendamento** super fÃ¡cil!\n\nPara comeÃ§ar, qual seu **telefone** ou **e-mail**?`,
-      `Hey! **${cumprimento}!** âš½ **Ãsis** na Ã¡rea!\n\nSou a assistente virtual da **${nomeEmpresa}** e vim facilitar sua vida.\n\nBora **agendar**? Me passa seu **telefone** ou **e-mail**:`,
-      `**${cumprimento}!** Prazer em te atender! ðŸ’ª\n\nSou a **Ãsis** da **${nomeEmpresa}**, sua assistente virtual para **agendamentos**.\n\nPara comeÃ§ar, preciso do seu **telefone** ou **e-mail**:`,
-      `Opa! **${cumprimento}!** ðŸŽ¾ **Ãsis** aqui, sua assistente virtual da **${nomeEmpresa}**!\n\nVamos **marcar seu horÃ¡rio**? Ã‰ rapidinho!\n\nMe informa seu **telefone** ou **e-mail**:`,
-      `**${cumprimento}!** Seja bem-vindo! ðŸ¤—\n\nEu sou a **Ãsis**, sua assistente virtual aqui na **${nomeEmpresa}**.\n\nVou te ajudar a **agendar seu horÃ¡rio** rapidinho!\n\nInforme seu **telefone** ou **e-mail**:`
+      `**${cumprimento}!** Tudo bem? 😊\n\nSou a **Ísis**, assistente virtual da **${nomeEmpresa}** e estou aqui para tornar seu **agendamento** super fácil!\n\nPara começar, qual seu **telefone** ou **e-mail**?`,
+      `Hey! **${cumprimento}!** ⚽ **Ísis** na área!\n\nSou a assistente virtual da **${nomeEmpresa}** e vim facilitar sua vida.\n\nBora **agendar**? Me passa seu **telefone** ou **e-mail**:`,
+      `**${cumprimento}!** Prazer em te atender! 💪\n\nSou a **Ísis** da **${nomeEmpresa}**, sua assistente virtual para **agendamentos**.\n\nPara começar, preciso do seu **telefone** ou **e-mail**:`,
+      `Opa! **${cumprimento}!** 🎾 **Ísis** aqui, sua assistente virtual da **${nomeEmpresa}**!\n\nVamos **marcar seu horário**? É rapidinho!\n\nMe informa seu **telefone** ou **e-mail**:`,
+      `**${cumprimento}!** Seja bem-vindo! 🤗\n\nEu sou a **Ísis**, sua assistente virtual aqui na **${nomeEmpresa}**.\n\nVou te ajudar a **agendar seu horário** rapidinho!\n\nInforme seu **telefone** ou **e-mail**:`
     ];
     
     const randomIndex = Math.floor(Math.random() * mensagensBoasVindas.length);
-    console.log('[DEBUG] Mostrando indicador de digitaÃ§Ã£o primeiro:', {
+    console.log('[DEBUG] Mostrando indicador de digitação primeiro:', {
       loadingEmpresa,
       timestamp: new Date().toISOString()
     });
@@ -308,26 +308,26 @@ const IsisBookingPageContent = () => {
     // Primeiro mostra o indicador de "digitando" (...)
     setIsTyping(true);
     
-    // Scroll logo apÃ³s comeÃ§ar a digitar (para mostrar o indicador)
+    // Scroll logo após começar a digitar (para mostrar o indicador)
     setTimeout(() => {
-      console.log('[DEBUG] Fazendo scroll inicial para mostrar indicador de digitaÃ§Ã£o');
+      console.log('[DEBUG] Fazendo scroll inicial para mostrar indicador de digitação');
       chatEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-    }, 300); // 300ms apÃ³s comeÃ§ar a digitar
+    }, 300); // 300ms após começar a digitar
     
     // Depois de um tempo, remove o indicador e mostra a mensagem
     setTimeout(() => {
-      console.log('[DEBUG] Enviando mensagem da Isis apÃ³s indicador de digitaÃ§Ã£o');
+      console.log('[DEBUG] Enviando mensagem da Isis após indicador de digitação');
       setIsTyping(false);
-      addIsisMessage(mensagensBoasVindas[randomIndex], 0); // Sem delay adicional pois jÃ¡ esperou
+      addIsisMessage(mensagensBoasVindas[randomIndex], 0); // Sem delay adicional pois já esperou
       
-      // Scroll novamente apÃ³s mensagem aparecer
+      // Scroll novamente após mensagem aparecer
       setTimeout(() => {
-        console.log('[DEBUG] Fazendo scroll apÃ³s mensagem aparecer');
+        console.log('[DEBUG] Fazendo scroll após mensagem aparecer');
         chatEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
       }, 100);
     }, 3500); // 3.5 segundos mostrando "digitando"
     
-    // Mostra input apÃ³s mensagem aparecer
+    // Mostra input após mensagem aparecer
     setTimeout(() => {
       console.log('[DEBUG] Mostrando input');
       setShowInput(true);
@@ -344,17 +344,17 @@ const IsisBookingPageContent = () => {
   const buscarCliente = async (valor) => {
     try {
       console.log('[DEBUG] Buscando cliente com valor:', valor);
-      console.log('[DEBUG] CÃ³digo empresa:', codigoEmpresa);
+      console.log('[DEBUG] Código empresa:', codigoEmpresa);
       
       // Remove caracteres especiais do telefone para busca
       const valorLimpo = valor.replace(/\D/g, '');
       
-      // Se for nÃºmero (telefone), busca por telefone/whatsapp/celular1 que contenha os dÃ­gitos
+      // Se for número (telefone), busca por telefone/whatsapp/celular1 que contenha os dígitos
       if (valorLimpo.length >= 10) {
         console.log('[DEBUG] Buscando telefone:', valorLimpo);
         
         // Busca TODOS os clientes ativos da empresa e filtra no JavaScript
-        // (mais confiÃ¡vel do que queries complexas com .or())
+        // (mais confiável do que queries complexas com .or())
         const { data: todosClientes, error } = await supabase
           .from('clientes')
           .select('id, nome, email, telefone, whatsapp, celular1, codigo')
@@ -365,7 +365,7 @@ const IsisBookingPageContent = () => {
         
         console.log('[DEBUG] Total de clientes ativos:', todosClientes?.length);
         
-        // Filtra no JavaScript procurando o telefone sem mÃ¡scara
+        // Filtra no JavaScript procurando o telefone sem máscara
         const clienteEncontrado = todosClientes?.find(c => {
           const tel = (c.telefone || '').replace(/\D/g, '');
           const whats = (c.whatsapp || '').replace(/\D/g, '');
@@ -381,7 +381,7 @@ const IsisBookingPageContent = () => {
         return clienteEncontrado || null;
       }
       
-      // Se nÃ£o for nÃºmero, busca por email
+      // Se não for número, busca por email
       const { data: clientes, error } = await supabase
         .from('clientes')
         .select('id, nome, email, telefone, whatsapp, codigo')
@@ -419,23 +419,23 @@ const IsisBookingPageContent = () => {
     const match = dataTexto.match(regex);
     
     if (!match) {
-      addIsisMessage('**Formato invÃ¡lido!** Por favor, use o formato DD/MM/AAAA (exemplo: 15/12/2024)', 400);
+      addIsisMessage('**Formato inválido!** Por favor, use o formato DD/MM/AAAA (exemplo: 15/12/2024)', 400);
       return;
     }
 
     const [, dia, mes, ano] = match;
     const dataEscolhida = new Date(parseInt(ano), parseInt(mes) - 1, parseInt(dia));
     
-    // Valida se a data Ã© vÃ¡lida
+    // Valida se a data é válida
     if (isNaN(dataEscolhida.getTime()) || 
         dataEscolhida.getDate() !== parseInt(dia) ||
         dataEscolhida.getMonth() !== parseInt(mes) - 1 ||
         dataEscolhida.getFullYear() !== parseInt(ano)) {
-      addIsisMessage('**Data invÃ¡lida!** Verifique se o dia, mÃªs e ano estÃ£o corretos.', 400);
+      addIsisMessage('**Data inválida!** Verifique se o dia, mês e ano estão corretos.', 400);
       return;
     }
 
-    // Valida se a data nÃ£o Ã© no passado
+    // Valida se a data não é no passado
     const hoje = new Date();
     hoje.setHours(0, 0, 0, 0);
     dataEscolhida.setHours(0, 0, 0, 0);
@@ -445,26 +445,26 @@ const IsisBookingPageContent = () => {
       return;
     }
 
-    // Data vÃ¡lida - verifica funcionamento ANTES de confirmar
+    // Data válida - verifica funcionamento ANTES de confirmar
     addUserMessage(dataTexto);
     
-    // Formata data para exibiÃ§Ã£o
+    // Formata data para exibição
     const dataFormatada = format(dataEscolhida, "dd/MM/yyyy", { locale: ptBR });
     const diaSemana = format(dataEscolhida, "EEEE", { locale: ptBR });
 
-    // Carrega horÃ¡rios disponÃ­veis para verificar se a quadra funciona
+    // Carrega horários disponíveis para verificar se a quadra funciona
     setIsLoading(true);
     const resultado = await loadHorariosDisponiveis(selections.quadra.id, dataEscolhida);
     setIsLoading(false);
 
-    // Verifica se a quadra estÃ¡ fechada ANTES de confirmar
+    // Verifica se a quadra está fechada ANTES de confirmar
     if (resultado.fechada) {
       if (resultado.motivo === 'data_especifica') {
-        addIsisMessage(`**Ops!** A quadra estarÃ¡ **fechada** no dia **${dataFormatada}** (${diaSemana}). ðŸš«\n\n**Motivo:** ${resultado.observacao}`, 800);
+        addIsisMessage(`**Ops!** A quadra estará **fechada** no dia **${dataFormatada}** (${diaSemana}). 🚫\n\n**Motivo:** ${resultado.observacao}`, 800);
       } else if (resultado.motivo === 'dia_semana') {
         const diaDaSemana = format(dataEscolhida, "EEEE", { locale: ptBR });
-        const preposicao = diaDaSemana === 'domingo' || diaDaSemana === 'sÃ¡bado' ? 'aos' : 'Ã s';
-        addIsisMessage(`**Ops!** A quadra nÃ£o funciona ${preposicao} **${diaDaSemana}s**. ðŸš«\n\nEscolha outro dia da semana!`, 800);
+        const preposicao = diaDaSemana === 'domingo' || diaDaSemana === 'sábado' ? 'aos' : 'às';
+        addIsisMessage(`**Ops!** A quadra não funciona ${preposicao} **${diaDaSemana}s**. 🚫\n\nEscolha outro dia da semana!`, 800);
       }
       
       // Reativa input imediatamente
@@ -472,7 +472,7 @@ const IsisBookingPageContent = () => {
         addIsisMessage('Digite **outra data** no formato DD/MM/AAAA:', 1200);
         setTimeout(() => {
           setShowInput(true);
-          // Scroll apÃ³s input aparecer
+          // Scroll após input aparecer
           setTimeout(() => {
             chatEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
           }, 200);
@@ -481,53 +481,53 @@ const IsisBookingPageContent = () => {
       return;
     }
 
-    // SÃ³ confirma a data se a quadra funcionar
+    // Só confirma a data se a quadra funcionar
     updateSelection('data', dataEscolhida);
     setShowInput(false);
     setTipoIdentificacao('telefone'); // Reseta para telefone
     
-    addIsisMessage(`**Perfeito!** Data escolhida: **${dataFormatada}** (${diaSemana}) ðŸ“…`, 600);
+    addIsisMessage(`**Perfeito!** Data escolhida: **${dataFormatada}** (${diaSemana}) 📅`, 600);
 
     const slots = resultado.slots;
     if (slots.length === 0) {
-      addIsisMessage('Ops! NÃ£o encontrei **horÃ¡rios disponÃ­veis** para esse dia. ðŸ˜” Que tal tentar outra data?', 800);
-      // Volta para seleÃ§Ã£o de data
+      addIsisMessage('Ops! Não encontrei **horários disponíveis** para esse dia. 😔 Que tal tentar outra data?', 800);
+      // Volta para seleção de data
       setTimeout(() => {
         perguntarData();
       }, 1200);
       return;
     }
 
-    // Agrupa slots em intervalos contÃ­nuos
+    // Agrupa slots em intervalos contínuos
     const intervalos = agruparSlotsEmIntervalos(slots);
     
     // Monta mensagem com os intervalos
     let msgIntervalos = '';
     if (intervalos.length === 1) {
-      msgIntervalos = `Tenho **horÃ¡rios livres** das **${intervalos[0].inicio}** Ã s **${intervalos[0].fim}**! ðŸ•’`;
+      msgIntervalos = `Tenho **horários livres** das **${intervalos[0].inicio}** às **${intervalos[0].fim}**! 🕒`;
     } else {
       const partes = intervalos.map((int, idx) => {
         if (idx === intervalos.length - 1) {
-          return `e das **${int.inicio}** Ã s **${int.fim}**`;
+          return `e das **${int.inicio}** às **${int.fim}**`;
         } else if (idx === 0) {
-          return `das **${int.inicio}** Ã s **${int.fim}**`;
+          return `das **${int.inicio}** às **${int.fim}**`;
         } else {
-          return `das **${int.inicio}** Ã s **${int.fim}**`;
+          return `das **${int.inicio}** às **${int.fim}**`;
         }
       });
-      msgIntervalos = `Tenho **horÃ¡rios livres** ${partes.join(', ')}! ðŸ•’`;
+      msgIntervalos = `Tenho **horários livres** ${partes.join(', ')}! 🕒`;
     }
 
     addIsisMessage(msgIntervalos, 1000);
 
     setTimeout(() => {
-      addIsisMessage('Escolha o horÃ¡rio de inÃ­cio e tÃ©rmino: â°', 1200);
+      addIsisMessage('Escolha o horário de início e término: ⏰', 1200);
       nextStep('horario');
       
-      // Mostra input apÃ³s mensagem aparecer
+      // Mostra input após mensagem aparecer
       setTimeout(() => {
         setShowInput(true);
-        // Scroll apÃ³s input aparecer
+        // Scroll após input aparecer
         setTimeout(() => {
           chatEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }, 300);
@@ -535,9 +535,9 @@ const IsisBookingPageContent = () => {
     }, 1600);
   };
   
-  // Handler para identificaÃ§Ã£o (telefone, email ou data customizada)
+  // Handler para identificação (telefone, email ou data customizada)
   const handleIdentificacaoSubmit = async (valor) => {
-    // Se Ã© data customizada, processa diferente
+    // Se é data customizada, processa diferente
     if (tipoIdentificacao === 'data_custom') {
       return await handleDataCustomizada(valor);
     }
@@ -547,7 +547,7 @@ const IsisBookingPageContent = () => {
       return;
     }
     
-    // Formata para exibiÃ§Ã£o (telefone com mÃ¡scara)
+    // Formata para exibição (telefone com máscara)
     const valorExibicao = tipoIdentificacao === 'telefone' 
       ? `(${valor.slice(0,2)}) ${valor.slice(2,7)}-${valor.slice(7)}`
       : valor;
@@ -566,44 +566,44 @@ const IsisBookingPageContent = () => {
       
       const nomeCurto = getNomeCurto(cliente.nome);
       
-      // VariaÃ§Ãµes de mensagem de boas-vindas apÃ³s identificaÃ§Ã£o (sem repetir cumprimento)
+      // Variações de mensagem de boas-vindas após identificação (sem repetir cumprimento)
       const saudacoes = [
-        `**${nomeCurto}!** ðŸ‘‹`,
-        `Opa, **${nomeCurto}!** ðŸ˜Š`,
-        `E aÃ­, **${nomeCurto}!** ðŸŽ¾`,
-        `**${nomeCurto}!** Que bom te ver! ðŸ‘‹`,
-        `Fala, **${nomeCurto}!** ðŸ’ª`,
-        `**${nomeCurto}!** Tudo bem? ðŸ˜Š`,
-        `Hey, **${nomeCurto}!** ðŸ`
+        `**${nomeCurto}!** 👋`,
+        `Opa, **${nomeCurto}!** 😊`,
+        `E aí, **${nomeCurto}!** 🎾`,
+        `**${nomeCurto}!** Que bom te ver! 👋`,
+        `Fala, **${nomeCurto}!** 💪`,
+        `**${nomeCurto}!** Tudo bem? 😊`,
+        `Hey, **${nomeCurto}!** 🏐`
       ];
       
       const randomIndex = Math.floor(Math.random() * saudacoes.length);
       addIsisMessage(saudacoes[randomIndex], 600);
       
-      // Sinaliza para incluir a correÃ§Ã£o no prÃ³ximo menu (apenas uma vez)
+      // Sinaliza para incluir a correção no próximo menu (apenas uma vez)
       let tipo = 'telefone';
       try {
         tipo = selections?.identificacao_tipo || tipoIdentificacao || 'telefone';
         if (tipo === 'email') setCorrectionOptionOnce('email');
         else setCorrectionOptionOnce('telefone');
       } catch {}
-      // Mostra diretamente o menu padrÃ£o (com a correÃ§Ã£o embutida). Passa o tipo explicitamente como fallback.
+      // Mostra diretamente o menu padrão (com a correção embutida). Passa o tipo explicitamente como fallback.
       const inject = (tipo === 'email') ? 'email' : 'telefone';
       setTimeout(() => { perguntarAcaoInicial(inject); }, 600);
     } else {
-      // Cliente nÃ£o encontrado, pedir cadastro completo
-      // Salva o valor formatado (com mÃ¡scara) que o usuÃ¡rio digitou
+      // Cliente não encontrado, pedir cadastro completo
+      // Salva o valor formatado (com máscara) que o usuário digitou
       updateSelection('identificacao_valor', valorExibicao);
       updateSelection('identificacao_tipo', tipoIdentificacao);
       setShowInput(false); // Esconde input
       
-      addIsisMessage('NÃ£o encontrei seu cadastro. Sem problemas! Vamos fazer rapidinho. ðŸ˜Š', 800);
-      addIsisMessage('Preciso de algumas informaÃ§Ãµes:', 1400);
+      addIsisMessage('Não encontrei seu cadastro. Sem problemas! Vamos fazer rapidinho. 😊', 800);
+      addIsisMessage('Preciso de algumas informações:', 1400);
       
-      // Mostra input de cadastro apÃ³s mensagens
+      // Mostra input de cadastro após mensagens
       setTimeout(() => {
         setShowInput(true);
-        // Rola PARA CIMA apÃ³s input aparecer (mobile)
+        // Rola PARA CIMA após input aparecer (mobile)
         setTimeout(() => {
           chatEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }, 200);
@@ -618,7 +618,7 @@ const IsisBookingPageContent = () => {
   
   // Handler para cadastro completo de novo cliente
   const handleCadastroSubmit = async (dados) => {
-    // Formata para exibiÃ§Ã£o
+    // Formata para exibição
     let mensagem = `Nome: ${dados.nome}`;
     if (dados.telefone) {
       const telefoneFormatado = `(${dados.telefone.slice(0,2)}) ${dados.telefone.slice(2,7)}-${dados.telefone.slice(7)}`;
@@ -641,7 +641,7 @@ const IsisBookingPageContent = () => {
       
       // Verificar duplicidade por telefone/email antes de criar
       try {
-        // 1) Telefone: procurar cliente ativo com mesmo nÃºmero (telefone/whatsapp/celular1)
+        // 1) Telefone: procurar cliente ativo com mesmo número (telefone/whatsapp/celular1)
         if (telefone) {
           const numeroLimpo = String(telefone || '').replace(/\D/g, '');
           const { data: todosClientes, error: dupErrTel } = await supabase
@@ -660,16 +660,16 @@ const IsisBookingPageContent = () => {
               setIsLoading(false);
               updateSelection('cliente_sugerido', matchTel);
               addIsisMessageWithButtons(
-                `Encontrei um cadastro existente para este telefone: **${getNomeCurto(matchTel.nome)}**. Ã‰ vocÃª?`,
+                `Encontrei um cadastro existente para este telefone: **${getNomeCurto(matchTel.nome)}**. É você?`,
                 [
-                  { label: 'âœ… Sim, sou eu', value: 'confirm_cliente_existente' },
-                  { label: 'âŒ NÃ£o, quero corrigir', value: 'corrigir_cadastro' }
+                  { label: '✅ Sim, sou eu', value: 'confirm_cliente_existente' },
+                  { label: '❌ Não, quero corrigir', value: 'corrigir_cadastro' }
                 ],
                 200
               );
               setShowInput(false);
               nextStep('confirmar_cliente_existente');
-              return; // aguarda confirmaÃ§Ã£o do usuÃ¡rio
+              return; // aguarda confirmação do usuário
             }
           }
         }
@@ -688,25 +688,25 @@ const IsisBookingPageContent = () => {
               setIsLoading(false);
               updateSelection('cliente_sugerido', matchEmail);
               addIsisMessageWithButtons(
-                `Este e-mail jÃ¡ possui cadastro: **${getNomeCurto(matchEmail.nome)}**. Ã‰ vocÃª?`,
+                `Este e-mail já possui cadastro: **${getNomeCurto(matchEmail.nome)}**. É você?`,
                 [
-                  { label: 'âœ… Sim, sou eu', value: 'confirm_cliente_existente' },
-                  { label: 'âŒ NÃ£o, quero corrigir', value: 'corrigir_cadastro' }
+                  { label: '✅ Sim, sou eu', value: 'confirm_cliente_existente' },
+                  { label: '❌ Não, quero corrigir', value: 'corrigir_cadastro' }
                 ],
                 200
               );
               setShowInput(false);
               nextStep('confirmar_cliente_existente');
-              return; // aguarda confirmaÃ§Ã£o do usuÃ¡rio
+              return; // aguarda confirmação do usuário
             }
           }
         }
       } catch {}
 
-      // Prosseguindo com criaÃ§Ã£o: exibe loading agora (nÃ£o antes da pergunta)
+      // Prosseguindo com criação: exibe loading agora (não antes da pergunta)
       addIsisMessage(getIsisMessage('loading'));
 
-      // Busca prÃ³ximo cÃ³digo disponÃ­vel
+      // Busca próximo código disponível
       const { data: counter } = await supabase
         .from('empresa_counters')
         .select('next_cliente_codigo')
@@ -731,11 +731,11 @@ const IsisBookingPageContent = () => {
         .single();
       
       if (error) {
-        // Se for erro de cÃ³digo duplicado, tenta novamente com prÃ³ximo cÃ³digo
+        // Se for erro de código duplicado, tenta novamente com próximo código
         if (error.code === '23505' && error.message.includes('uq_clientes_empresa_codigo')) {
-          console.log('[Isis] CÃ³digo duplicado, tentando prÃ³ximo cÃ³digo...');
+          console.log('[Isis] Código duplicado, tentando próximo código...');
           
-          // Tenta com prÃ³ximo cÃ³digo disponÃ­vel
+          // Tenta com próximo código disponível
           const { data: novoClienteRetry, error: errorRetry } = await supabase
             .from('clientes')
             .insert({
@@ -752,7 +752,7 @@ const IsisBookingPageContent = () => {
           
           if (errorRetry) throw errorRetry;
           
-          // Atualiza counter para cÃ³digo + 2
+          // Atualiza counter para código + 2
           await supabase
             .from('empresa_counters')
             .update({ next_cliente_codigo: proximoCodigo + 2 })
@@ -761,7 +761,7 @@ const IsisBookingPageContent = () => {
           setIsLoading(false);
           updateSelection('cliente', novoClienteRetry);
           
-          addIsisMessage(`Pronto, ${nome}! Cadastro realizado com sucesso! ðŸŽ‰`, 800);
+          addIsisMessage(`Pronto, ${nome}! Cadastro realizado com sucesso! 🎉`, 800);
           
           setTimeout(() => {
             iniciarAgendamento();
@@ -773,7 +773,7 @@ const IsisBookingPageContent = () => {
         throw error;
       }
       
-      // Atualiza counter para prÃ³ximo cÃ³digo
+      // Atualiza counter para próximo código
       await supabase
         .from('empresa_counters')
         .update({ next_cliente_codigo: proximoCodigo + 1 })
@@ -782,7 +782,7 @@ const IsisBookingPageContent = () => {
       setIsLoading(false);
       updateSelection('cliente', novoCliente);
       
-      addIsisMessage(`Pronto, ${nome}! Cadastro realizado com sucesso! ðŸŽ‰`, 800);
+      addIsisMessage(`Pronto, ${nome}! Cadastro realizado com sucesso! 🎉`, 800);
       
       setTimeout(() => {
         iniciarAgendamento();
@@ -795,7 +795,7 @@ const IsisBookingPageContent = () => {
     }
   };
   
-  // Mostra seleÃ§Ã£o de data
+  // Mostra seleção de data
   const mostrarSelecaoData = () => {
     const hoje = new Date();
     const amanha = addDays(hoje, 1);
@@ -804,32 +804,32 @@ const IsisBookingPageContent = () => {
       {
         label: `Hoje (${format(hoje, 'dd/MM')})`,
         value: format(hoje, 'yyyy-MM-dd'),
-        icon: 'ðŸ“…',
+        icon: '📅',
         date: hoje
       },
       {
-        label: `AmanhÃ£ (${format(amanha, 'dd/MM')})`,
+        label: `Amanhã (${format(amanha, 'dd/MM')})`,
         value: format(amanha, 'yyyy-MM-dd'),
-        icon: 'ðŸ“…',
+        icon: '📅',
         date: amanha
       },
       {
         label: 'Outro dia...',
         value: 'custom',
-        icon: 'ðŸ“…'
+        icon: '📅'
       }
     ];
     
-    addIsisMessageWithButtons('Para qual dia vocÃª gostaria de agendar?', dataButtons, 600);
+    addIsisMessageWithButtons('Para qual dia você gostaria de agendar?', dataButtons, 600);
     nextStep('data');
   };
 
-  // Handler para mudar data no input de horÃ¡rio
+  // Handler para mudar data no input de horário
   const handleMudarData = () => {
-    addUserMessage('ðŸ“… Mudar Data');
+    addUserMessage('📅 Mudar Data');
     setShowInput(false);
     
-    // Volta para seleÃ§Ã£o de data
+    // Volta para seleção de data
     setTimeout(() => {
       mostrarSelecaoData();
     }, 400);
@@ -838,13 +838,13 @@ const IsisBookingPageContent = () => {
   // Pergunta se quer agendar ou editar agendamento
   const perguntarAcaoInicial = (injectCorrectionType = null) => {
     const perguntasVariadas = [
-      'O que vocÃª gostaria de fazer hoje?',
+      'O que você gostaria de fazer hoje?',
       'Como posso te ajudar?',
-      'Qual Ã© o plano para hoje?',
+      'Qual é o plano para hoje?',
       'O que vamos fazer?',
       'Em que posso te auxiliar?',
       'Qual sua necessidade hoje?',
-      'Como posso ser Ãºtil?'
+      'Como posso ser útil?'
     ];
     
     const randomPergunta = perguntasVariadas[Math.floor(Math.random() * perguntasVariadas.length)];
@@ -853,45 +853,45 @@ const IsisBookingPageContent = () => {
       {
         label: 'Fazer Agendamento',
         value: 'novo_agendamento',
-        icon: 'ðŸ“…'
+        icon: '📅'
       },
       {
         label: 'Editar Agendamento',
         value: 'buscar_agendamento',
-        icon: 'âœï¸'
+        icon: '✏️'
       },
       {
         label: 'Finalizar Atendimento',
         value: 'finalizar_atendimento',
-        icon: 'ðŸ‘‹'
+        icon: '👋'
       }
     ];
-    // Se hÃ¡ uma correÃ§Ã£o a oferecer (apenas uma vez apÃ³s identificaÃ§Ã£o), injeta antes de Finalizar
+    // Se há uma correção a oferecer (apenas uma vez após identificação), injeta antes de Finalizar
     const correction = injectCorrectionType || correctionOptionOnce;
     if (correction === 'telefone') {
       acaoButtons = [
         acaoButtons[0],
         acaoButtons[1],
-        { label: 'Informei o telefone errado', value: 'corrigir_telefone', icon: 'â˜Žï¸' },
+        { label: 'Informei o telefone errado', value: 'corrigir_telefone', icon: '☎️' },
         acaoButtons[2]
       ];
     } else if (correction === 'email') {
       acaoButtons = [
         acaoButtons[0],
         acaoButtons[1],
-        { label: 'Informei o e-mail errado', value: 'corrigir_email', icon: 'âœ‰ï¸' },
+        { label: 'Informei o e-mail errado', value: 'corrigir_email', icon: '✉️' },
         acaoButtons[2]
       ];
     }
     
     addIsisMessageWithButtons(randomPergunta, acaoButtons, 600);
-    // Limpa o uso Ãºnico apÃ³s exibir o menu
+    // Limpa o uso único após exibir o menu
     if (correctionOptionOnce) {
       setTimeout(() => setCorrectionOptionOnce(null), 0);
     }
   };
 
-  // Mostra um tutorial rÃ¡pido de instalaÃ§Ã£o PWA (Chrome e Safari)
+  // Mostra um tutorial rápido de instalação PWA (Chrome e Safari)
   const mostrarTutorialInstalacao = () => {
     try {
       const ua = navigator.userAgent || '';
@@ -899,31 +899,31 @@ const IsisBookingPageContent = () => {
       const isSafari = /^((?!chrome|android).)*safari/i.test(ua);
       const isStandalone = (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone;
       if (isStandalone) {
-        addIsisMessage('VocÃª jÃ¡ estÃ¡ com o app instalado! ðŸŽ‰ Abra-o diretamente da sua tela inicial.', 400);
+        addIsisMessage('Você já está com o app instalado! 🎉 Abra-o diretamente da sua tela inicial.', 400);
         return;
       }
       const chromeSteps = [
-        'Toque no Ã­cone â‹® no canto superior direito',
-        'Escolha "Adicionar Ã  tela inicial"',
+        'Toque no ícone ⋮ no canto superior direito',
+        'Escolha "Adicionar à tela inicial"',
         'Confirme em "Adicionar"'
-      ].map(s => `â€¢ ${s}`).join('\n');
+      ].map(s => `• ${s}`).join('\n');
       const safariSteps = [
-        'Toque no botÃ£o Compartilhar (Ã­cone de quadrado com seta para cima)',
-        'Escolha "Adicionar Ã  Tela de InÃ­cio"',
+        'Toque no botão Compartilhar (ícone de quadrado com seta para cima)',
+        'Escolha "Adicionar à Tela de Início"',
         'Toque em "Adicionar" no topo'
-      ].map(s => `â€¢ ${s}`).join('\n');
+      ].map(s => `• ${s}`).join('\n');
       const msg = (isIOS || isSafari)
-        ? `ðŸ“² Para instalar no Safari (iPhone/iPad):\n${safariSteps}`
-        : `ðŸ“² Para instalar no Chrome (Android):\n${chromeSteps}`;
+        ? `📲 Para instalar no Safari (iPhone/iPad):\n${safariSteps}`
+        : `📲 Para instalar no Chrome (Android):\n${chromeSteps}`;
       addIsisMessage(msg, 600);
     } catch (_) {
-      addIsisMessage('Para instalar, use o menu do navegador e selecione "Adicionar Ã  Tela Inicial".', 600);
+      addIsisMessage('Para instalar, use o menu do navegador e selecione "Adicionar à Tela Inicial".', 600);
     }
   };
   
-  // Inicia o fluxo de agendamento apÃ³s identificaÃ§Ã£o
+  // Inicia o fluxo de agendamento após identificação
   const iniciarAgendamento = async () => {
-    console.log('[iniciarAgendamento] Dados disponÃ­veis:', {
+    console.log('[iniciarAgendamento] Dados disponíveis:', {
       quadras: quadras?.length || 0,
       empresa: !!empresa,
       empresaNome: empresa?.nome_fantasia || empresa?.razao_social
@@ -932,9 +932,9 @@ const IsisBookingPageContent = () => {
     let quadrasParaUsar = quadras;
     let empresaParaUsar = empresa;
     
-    // Se quadras nÃ£o estÃ£o carregadas, carrega empresa e quadras
+    // Se quadras não estão carregadas, carrega empresa e quadras
     if (!quadrasParaUsar || quadrasParaUsar.length === 0) {
-      console.log('[iniciarAgendamento] Quadras nÃ£o disponÃ­veis, carregando...');
+      console.log('[iniciarAgendamento] Quadras não disponíveis, carregando...');
       const dadosCarregados = await loadEmpresa(false); // false = sem loading na tela
       
       quadrasParaUsar = dadosCarregados.quadras;
@@ -942,20 +942,20 @@ const IsisBookingPageContent = () => {
       
       // Verifica se conseguiu carregar
       if (!quadrasParaUsar || quadrasParaUsar.length === 0) {
-        console.error('[iniciarAgendamento] Quadras ainda nÃ£o disponÃ­veis apÃ³s carregar!');
-        addIsisMessage('Ops! NÃ£o consegui carregar as quadras. Tente novamente.', 600);
+        console.error('[iniciarAgendamento] Quadras ainda não disponíveis após carregar!');
+        addIsisMessage('Ops! Não consegui carregar as quadras. Tente novamente.', 600);
         return;
       }
     }
     
     if (!empresaParaUsar) {
-      console.error('[iniciarAgendamento] Empresa nÃ£o disponÃ­vel!');
-      addIsisMessage('Ops! NÃ£o consegui carregar os dados da empresa. Tente novamente.', 600);
+      console.error('[iniciarAgendamento] Empresa não disponível!');
+      addIsisMessage('Ops! Não consegui carregar os dados da empresa. Tente novamente.', 600);
       return;
     }
     
     setTimeout(() => {
-      iniciarConversa(quadrasParaUsar, empresaParaUsar, true); // true = jÃ¡ identificado
+      iniciarConversa(quadrasParaUsar, empresaParaUsar, true); // true = já identificado
     }, 800);
   };
   
@@ -965,7 +965,7 @@ const IsisBookingPageContent = () => {
         setLoadingEmpresa(true);
       }
       
-      // Delay mÃ­nimo para mostrar o loading premium (3.5 segundos)
+      // Delay mínimo para mostrar o loading premium (3.5 segundos)
       const startTime = Date.now();
       const minLoadingTime = 3500;
       console.log('[DEBUG] Loading premium INICIOU:', {
@@ -984,8 +984,8 @@ const IsisBookingPageContent = () => {
       if (empresaError) throw empresaError;
       if (!empresaData) {
         toast({
-          title: 'Empresa nÃ£o encontrada',
-          description: 'Verifique o cÃ³digo e tente novamente',
+          title: 'Empresa não encontrada',
+          description: 'Verifique o código e tente novamente',
           variant: 'destructive'
         });
         return { empresa: null, quadras: [] };
@@ -1008,9 +1008,9 @@ const IsisBookingPageContent = () => {
         throw quadrasError;
       }
       
-      // Se nÃ£o conseguiu carregar quadras devido a RLS, cria uma quadra padrÃ£o temporÃ¡ria
+      // Se não conseguiu carregar quadras devido a RLS, cria uma quadra padrão temporária
       if (!quadrasData || quadrasData.length === 0) {
-        console.warn('[loadEmpresa] Nenhuma quadra encontrada devido a RLS. Criando quadra temporÃ¡ria.');
+        console.warn('[loadEmpresa] Nenhuma quadra encontrada devido a RLS. Criando quadra temporária.');
         const quadraTemporaria = [{
           id: 'temp-quadra-1004',
           nome: 'Quadra Principal',
@@ -1020,7 +1020,7 @@ const IsisBookingPageContent = () => {
           valor: 30,
           codigo_empresa: String(codigoEmpresa),
           status: 'Ativa',
-          descricao: 'Quadra temporÃ¡ria (problema de permissÃ£o)'
+          descricao: 'Quadra temporária (problema de permissão)'
         }];
         
         setQuadras(quadraTemporaria);
@@ -1029,11 +1029,11 @@ const IsisBookingPageContent = () => {
       
       setQuadras(quadrasData || []);
       
-      // Garante delay mÃ­nimo antes de finalizar loading
+      // Garante delay mínimo antes de finalizar loading
       const elapsedTime = Date.now() - startTime;
       const remainingTime = Math.max(0, minLoadingTime - elapsedTime);
       
-      console.log('[DEBUG] Verificando delay mÃ­nimo:', {
+      console.log('[DEBUG] Verificando delay mínimo:', {
         elapsedTime,
         remainingTime,
         willWait: remainingTime > 0,
@@ -1041,9 +1041,9 @@ const IsisBookingPageContent = () => {
       });
       
       if (remainingTime > 0) {
-        console.log('[DEBUG] Aguardando delay mÃ­nimo de', remainingTime, 'ms');
+        console.log('[DEBUG] Aguardando delay mínimo de', remainingTime, 'ms');
         await new Promise(resolve => setTimeout(resolve, remainingTime));
-        console.log('[DEBUG] Delay mÃ­nimo CONCLUÃDO');
+        console.log('[DEBUG] Delay mínimo CONCLUÍDO');
       }
       
       return { empresa: empresaData, quadras: quadrasData || [] };
@@ -1051,7 +1051,7 @@ const IsisBookingPageContent = () => {
     } catch (error) {
       console.error('[Isis] Erro ao carregar empresa:', error);
       
-      // Mesmo em caso de erro, respeita o delay mÃ­nimo
+      // Mesmo em caso de erro, respeita o delay mínimo
       const elapsedTime = Date.now() - startTime;
       const remainingTime = Math.max(0, minLoadingTime - elapsedTime);
       
@@ -1061,7 +1061,7 @@ const IsisBookingPageContent = () => {
       
       toast({
         title: 'Erro ao carregar',
-        description: 'NÃ£o foi possÃ­vel carregar os dados da empresa',
+        description: 'Não foi possível carregar os dados da empresa',
         variant: 'destructive'
       });
       return { empresa: null, quadras: [] };
@@ -1082,22 +1082,22 @@ const IsisBookingPageContent = () => {
       jaIdentificado
     });
     
-    // Mensagem de boas-vindas personalizada com nome da empresa (variaÃ§Ãµes)
+    // Mensagem de boas-vindas personalizada com nome da empresa (variações)
     const nomeEmpresa = empresaData.nome_fantasia || empresaData.razao_social;
     const cumprimento = getCumprimentoPorHorario();
     
-    // Se hÃ¡ apenas uma quadra, auto-seleciona e pula para data
+    // Se há apenas uma quadra, auto-seleciona e pula para data
     if (quadrasList.length === 1) {
       console.log('[iniciarConversa] Uma quadra detectada, auto-selecionando:', quadrasList[0].nome);
       const quadraUnica = quadrasList[0];
       
-      // SÃ³ envia boas-vindas se cliente jÃ¡ foi identificado (evita duplicaÃ§Ã£o)
+      // Só envia boas-vindas se cliente já foi identificado (evita duplicação)
       if (jaIdentificado) {
         const greetingVariationsSingle = [
-          `Perfeito! Agora vamos **agendar** seu horÃ¡rio na **${quadraUnica.nome}!** ðŸŽ¾`,
-          `Ã“timo! Vou te ajudar a **marcar sua partida** na **${quadraUnica.nome}!** âš½`,
-          `Show! Bora **agendar** a **${quadraUnica.nome}?** ðŸ`,
-          `Perfeito! Vamos **marcar sua reserva** na **${quadraUnica.nome}!** ðŸ†`
+          `Perfeito! Agora vamos **agendar** seu horário na **${quadraUnica.nome}!** 🎾`,
+          `Ótimo! Vou te ajudar a **marcar sua partida** na **${quadraUnica.nome}!** ⚽`,
+          `Show! Bora **agendar** a **${quadraUnica.nome}?** 🏐`,
+          `Perfeito! Vamos **marcar sua reserva** na **${quadraUnica.nome}!** 🏆`
         ];
         
         const randomIndex = Math.floor(Math.random() * greetingVariationsSingle.length);
@@ -1109,7 +1109,7 @@ const IsisBookingPageContent = () => {
       // Auto-seleciona a quadra
       updateSelection('quadra', quadraUnica);
       
-      // Vai direto para seleÃ§Ã£o de data (sem mensagem "afterQuadra")
+      // Vai direto para seleção de data (sem mensagem "afterQuadra")
       setTimeout(() => {
         const hoje = new Date();
         const amanha = addDays(hoje, 1);
@@ -1118,55 +1118,55 @@ const IsisBookingPageContent = () => {
           {
             label: `Hoje (${format(hoje, 'dd/MM')})`,
             value: format(hoje, 'yyyy-MM-dd'),
-            icon: 'ðŸ“…',
+            icon: '📅',
             date: hoje
           },
           {
-            label: `AmanhÃ£ (${format(amanha, 'dd/MM')})`,
+            label: `Amanhã (${format(amanha, 'dd/MM')})`,
             value: format(amanha, 'yyyy-MM-dd'),
-            icon: 'ðŸ“…',
+            icon: '📅',
             date: amanha
           },
           {
             label: 'Outro dia...',
             value: 'custom',
-            icon: 'ðŸ—“ï¸'
+            icon: '🗓️'
           }
         ];
         
-        addIsisMessageWithButtons('Para qual dia vocÃª gostaria de agendar?', dataButtons, 800);
+        addIsisMessageWithButtons('Para qual dia você gostaria de agendar?', dataButtons, 800);
         nextStep('data');
       }, 1200);
       
       return;
     }
     
-    // Se hÃ¡ mÃºltiplas quadras, mostra seleÃ§Ã£o
+    // Se há múltiplas quadras, mostra seleção
     let greeting;
     
     if (jaIdentificado) {
-      // Cliente jÃ¡ identificado - mensagem curta
+      // Cliente já identificado - mensagem curta
       const perguntasQuadra = [
-        'Qual quadra vocÃª quer reservar? ðŸ',
-        'Qual quadra te interessa? ðŸŽ¾',
-        'Me diz, qual quadra? âš½',
-        'Qual quadra vocÃª prefere? ðŸ€',
-        'Bora escolher a quadra? Qual delas? ðŸ’ª'
+        'Qual quadra você quer reservar? 🏐',
+        'Qual quadra te interessa? 🎾',
+        'Me diz, qual quadra? ⚽',
+        'Qual quadra você prefere? 🏀',
+        'Bora escolher a quadra? Qual delas? 💪'
       ];
       const randomIdx = Math.floor(Math.random() * perguntasQuadra.length);
       greeting = perguntasQuadra[randomIdx];
     } else {
-      // Cliente nÃ£o identificado - nÃ£o envia mensagem aqui (evita duplicaÃ§Ã£o)
-      // A mensagem de boas-vindas jÃ¡ foi enviada em iniciarIdentificacao()
+      // Cliente não identificado - não envia mensagem aqui (evita duplicação)
+      // A mensagem de boas-vindas já foi enviada em iniciarIdentificacao()
       return;
     }
     
-    // Monta botÃµes de quadras com descriÃ§Ã£o (se houver)
+    // Monta botões de quadras com descrição (se houver)
     const quadraButtons = quadrasList.map(q => ({
       label: q.nome,
-      subtitle: q.descricao || null, // DescriÃ§Ã£o opcional
+      subtitle: q.descricao || null, // Descrição opcional
       value: q.id,
-      icon: 'ðŸŸï¸',
+      icon: '🏟️',
       quadra: q
     }));
     
@@ -1174,7 +1174,7 @@ const IsisBookingPageContent = () => {
     nextStep('quadra');
   };
   
-  // Handler para seleÃ§Ã£o de quadra
+  // Handler para seleção de quadra
   const handleQuadraSelection = async (button) => {
     console.log('[handleQuadraSelection] Iniciando...', { button, currentStep });
     const quadra = button.quadra;
@@ -1182,39 +1182,39 @@ const IsisBookingPageContent = () => {
     addUserMessage(quadra.nome);
     updateSelection('quadra', quadra);
     
-    // Se estÃ¡ editando (review), recarrega horÃ¡rios para a nova quadra
+    // Se está editando (review), recarrega horários para a nova quadra
     if (currentStep === 'review') {
-      console.log('[handleQuadraSelection] Modo ediÃ§Ã£o detectado - recarregando horÃ¡rios');
+      console.log('[handleQuadraSelection] Modo edição detectado - recarregando horários');
       console.log('[handleQuadraSelection] Quadra ID:', quadra.id);
       console.log('[handleQuadraSelection] Data:', selections.data);
       
       setShowInput(false);
-      setEditingType('horario'); // Define que estÃ¡ editando horÃ¡rio apÃ³s trocar quadra
+      setEditingType('horario'); // Define que está editando horário após trocar quadra
       setIsLoading(true);
       
-      // Recarrega horÃ¡rios disponÃ­veis para a nova quadra (incluindo horÃ¡rio atual se editando)
+      // Recarrega horários disponíveis para a nova quadra (incluindo horário atual se editando)
       const resultado = await loadHorariosDisponiveis(quadra.id, selections.data, agendamentoCriado?.id);
       
       console.log('[handleQuadraSelection] Resultado:', resultado);
       
       setIsLoading(false);
       
-      // Verifica se a quadra estÃ¡ fechada
+      // Verifica se a quadra está fechada
       if (resultado.fechada) {
         const dataFormatada = format(selections.data, "dd/MM/yyyy", { locale: ptBR });
         const diaSemana = format(selections.data, "EEEE", { locale: ptBR });
         
         if (resultado.motivo === 'data_especifica') {
-          addIsisMessage(`**Ops!** A **${quadra.nome}** estarÃ¡ **fechada** no dia **${dataFormatada}** (${diaSemana}). ðŸš«\n\n**Motivo:** ${resultado.observacao}`, 800);
+          addIsisMessage(`**Ops!** A **${quadra.nome}** estará **fechada** no dia **${dataFormatada}** (${diaSemana}). 🚫\n\n**Motivo:** ${resultado.observacao}`, 800);
         } else if (resultado.motivo === 'dia_semana') {
           const diaDaSemana = format(selections.data, "EEEE", { locale: ptBR });
-          const preposicao = diaDaSemana === 'domingo' || diaDaSemana === 'sÃ¡bado' ? 'aos' : 'Ã s';
-          addIsisMessage(`**Ops!** A **${quadra.nome}** nÃ£o funciona ${preposicao} **${diaDaSemana}s**. ðŸš«`, 800);
+          const preposicao = diaDaSemana === 'domingo' || diaDaSemana === 'sábado' ? 'aos' : 'às';
+          addIsisMessage(`**Ops!** A **${quadra.nome}** não funciona ${preposicao} **${diaDaSemana}s**. 🚫`, 800);
         }
         
         setTimeout(() => {
           addIsisMessage('Escolha **outra quadra** ou **mude a data**:', 1200);
-          // Volta para seleÃ§Ã£o de quadra ou data
+          // Volta para seleção de quadra ou data
           setTimeout(() => {
             mostrarSelecaoData();
           }, 400);
@@ -1224,52 +1224,52 @@ const IsisBookingPageContent = () => {
       
       const slots = resultado.slots;
       if (slots && slots.length > 0) {
-        // Agrupa slots em intervalos contÃ­nuos
+        // Agrupa slots em intervalos contínuos
         const intervalos = agruparSlotsEmIntervalos(slots);
         
         // Monta mensagem com os intervalos (igual fluxo normal)
         let msgIntervalos = '';
         if (intervalos.length === 1) {
-          msgIntervalos = `Tenho **horÃ¡rios livres** das **${intervalos[0].inicio}** Ã s **${intervalos[0].fim}**! ðŸ•’`;
+          msgIntervalos = `Tenho **horários livres** das **${intervalos[0].inicio}** às **${intervalos[0].fim}**! 🕒`;
         } else {
           const partes = intervalos.map((int, idx) => {
             if (idx === intervalos.length - 1) {
-              return `e das **${int.inicio}** Ã s **${int.fim}**`;
+              return `e das **${int.inicio}** às **${int.fim}**`;
             } else if (idx === 0) {
-              return `das **${int.inicio}** Ã s **${int.fim}**`;
+              return `das **${int.inicio}** às **${int.fim}**`;
             } else {
-              return `das **${int.inicio}** Ã s **${int.fim}**`;
+              return `das **${int.inicio}** às **${int.fim}**`;
             }
           });
-          msgIntervalos = `Tenho **horÃ¡rios livres** ${partes.join(', ')}! ðŸ•’`;
+          msgIntervalos = `Tenho **horários livres** ${partes.join(', ')}! 🕒`;
         }
         
-        console.log('[handleQuadraSelection] Mostrando horÃ¡rios disponÃ­veis e input de horÃ¡rio');
+        console.log('[handleQuadraSelection] Mostrando horários disponíveis e input de horário');
         addIsisMessage(msgIntervalos, 600);
         
         setTimeout(() => {
-          addIsisMessage('Escolha o horÃ¡rio de inÃ­cio e tÃ©rmino: â°', 800);
+          addIsisMessage('Escolha o horário de início e término: ⏰', 800);
           
           // Aguarda a mensagem aparecer e depois mostra input
           setTimeout(() => {
             console.log('[handleQuadraSelection] Ativando showInput=true');
             setShowInput(true);
-            // Scroll apÃ³s input aparecer
+            // Scroll após input aparecer
             setTimeout(() => {
               chatEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
             }, 300);
           }, 1000);
         }, 800);
       } else {
-        console.log('[handleQuadraSelection] Nenhum horÃ¡rio disponÃ­vel');
-        addIsisMessage('Ops! NÃ£o encontrei **horÃ¡rios disponÃ­veis** para essa quadra nesse dia. ðŸ˜”');
+        console.log('[handleQuadraSelection] Nenhum horário disponível');
+        addIsisMessage('Ops! Não encontrei **horários disponíveis** para essa quadra nesse dia. 😔');
       }
       return;
     }
     
-    console.log('[handleQuadraSelection] Fluxo normal (nÃ£o ediÃ§Ã£o)');
+    console.log('[handleQuadraSelection] Fluxo normal (não edição)');
     
-    // Mensagem apÃ³s selecionar quadra
+    // Mensagem após selecionar quadra
     const afterQuadraMsg = getIsisMessage('afterQuadra', { quadra: quadra.nome });
     addIsisMessage(afterQuadraMsg, 600);
     
@@ -1280,40 +1280,40 @@ const IsisBookingPageContent = () => {
       {
         label: `Hoje (${format(hoje, 'dd/MM')})`,
         value: format(hoje, 'yyyy-MM-dd'),
-        icon: 'ðŸ“…',
+        icon: '📅',
         date: hoje
       },
       {
-        label: `AmanhÃ£ (${format(amanha, 'dd/MM')})`,
+        label: `Amanhã (${format(amanha, 'dd/MM')})`,
         value: format(amanha, 'yyyy-MM-dd'),
-        icon: 'ðŸ“…',
+        icon: '📅',
         date: amanha
       },
       {
         label: 'Outro dia...',
         value: 'custom',
-        icon: 'ðŸ—“ï¸'
+        icon: '🗓️'
       }
     ];
     
-    addIsisMessageWithButtons('Para qual dia vocÃª gostaria de agendar?', dataButtons, 1000);
+    addIsisMessageWithButtons('Para qual dia você gostaria de agendar?', dataButtons, 1000);
     nextStep('data');
   };
   
-  // Handler para seleÃ§Ã£o de data
+  // Handler para seleção de data
   const handleDataSelection = async (button) => {
     console.log('[handleDataSelection] Iniciando...', { button, currentStep });
     
     if (button.value === 'custom') {
       // Implementar seletor de data customizado
-      addUserMessage('ðŸ“… Outro dia...');
+      addUserMessage('📅 Outro dia...');
       addIsisMessage('**Perfeito!** Me informe a **data desejada** no formato DD/MM/AAAA:', 600);
       
       // Ativa input de texto para data customizada
       setTipoIdentificacao('data_custom');
       setTimeout(() => {
         setShowInput(true);
-        // Scroll apÃ³s input aparecer
+        // Scroll após input aparecer
         setTimeout(() => {
           chatEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }, 300);
@@ -1325,34 +1325,34 @@ const IsisBookingPageContent = () => {
     addUserMessage(button.label);
     updateSelection('data', dataEscolhida);
     
-    // Se estÃ¡ editando (review), recarrega horÃ¡rios para a nova data
+    // Se está editando (review), recarrega horários para a nova data
     if (currentStep === 'review') {
-      console.log('[handleDataSelection] Modo ediÃ§Ã£o detectado - recarregando horÃ¡rios');
+      console.log('[handleDataSelection] Modo edição detectado - recarregando horários');
       console.log('[handleDataSelection] Quadra ID:', selections.quadra?.id);
       console.log('[handleDataSelection] Nova Data:', dataEscolhida);
       
       setShowInput(false);
-      setEditingType('horario'); // Define que estÃ¡ editando horÃ¡rio apÃ³s trocar data
+      setEditingType('horario'); // Define que está editando horário após trocar data
       setIsLoading(true);
       
-      // Recarrega horÃ¡rios disponÃ­veis para a nova data (incluindo horÃ¡rio atual se editando)
+      // Recarrega horários disponíveis para a nova data (incluindo horário atual se editando)
       const resultado = await loadHorariosDisponiveis(selections.quadra.id, dataEscolhida, agendamentoCriado?.id);
       
       console.log('[handleDataSelection] Resultado:', resultado);
       
       setIsLoading(false);
       
-      // Verifica se a quadra estÃ¡ fechada
+      // Verifica se a quadra está fechada
       if (resultado.fechada) {
         const dataFormatada = format(dataEscolhida, "dd/MM/yyyy", { locale: ptBR });
         const diaSemana = format(dataEscolhida, "EEEE", { locale: ptBR });
         
         if (resultado.motivo === 'data_especifica') {
-          addIsisMessage(`**Ops!** A quadra estarÃ¡ **fechada** no dia **${dataFormatada}** (${diaSemana}). ðŸš«\n\n**Motivo:** ${resultado.observacao}`, 800);
+          addIsisMessage(`**Ops!** A quadra estará **fechada** no dia **${dataFormatada}** (${diaSemana}). 🚫\n\n**Motivo:** ${resultado.observacao}`, 800);
         } else if (resultado.motivo === 'dia_semana') {
           const diaDaSemana = format(dataEscolhida, "EEEE", { locale: ptBR });
-          const preposicao = diaDaSemana === 'domingo' || diaDaSemana === 'sÃ¡bado' ? 'aos' : 'Ã s';
-          addIsisMessage(`**Ops!** A quadra nÃ£o funciona ${preposicao} **${diaDaSemana}s**. ðŸš«`, 800);
+          const preposicao = diaDaSemana === 'domingo' || diaDaSemana === 'sábado' ? 'aos' : 'às';
+          addIsisMessage(`**Ops!** A quadra não funciona ${preposicao} **${diaDaSemana}s**. 🚫`, 800);
         }
         
         setTimeout(() => {
@@ -1366,52 +1366,52 @@ const IsisBookingPageContent = () => {
       
       const slots = resultado.slots;
       if (slots && slots.length > 0) {
-        // Agrupa slots em intervalos contÃ­nuos
+        // Agrupa slots em intervalos contínuos
         const intervalos = agruparSlotsEmIntervalos(slots);
         
         // Monta mensagem com os intervalos (igual fluxo normal)
         let msgIntervalos = '';
         if (intervalos.length === 1) {
-          msgIntervalos = `Tenho **horÃ¡rios livres** das **${intervalos[0].inicio}** Ã s **${intervalos[0].fim}**! ðŸ•’`;
+          msgIntervalos = `Tenho **horários livres** das **${intervalos[0].inicio}** às **${intervalos[0].fim}**! 🕒`;
         } else {
           const partes = intervalos.map((int, idx) => {
             if (idx === intervalos.length - 1) {
-              return `e das **${int.inicio}** Ã s **${int.fim}**`;
+              return `e das **${int.inicio}** às **${int.fim}**`;
             } else if (idx === 0) {
-              return `das **${int.inicio}** Ã s **${int.fim}**`;
+              return `das **${int.inicio}** às **${int.fim}**`;
             } else {
-              return `das **${int.inicio}** Ã s **${int.fim}**`;
+              return `das **${int.inicio}** às **${int.fim}**`;
             }
           });
-          msgIntervalos = `Tenho **horÃ¡rios livres** ${partes.join(', ')}! ðŸ•’`;
+          msgIntervalos = `Tenho **horários livres** ${partes.join(', ')}! 🕒`;
         }
         
-        console.log('[handleDataSelection] Mostrando horÃ¡rios disponÃ­veis e input');
+        console.log('[handleDataSelection] Mostrando horários disponíveis e input');
         addIsisMessage(msgIntervalos, 600);
         
         setTimeout(() => {
-          addIsisMessage('Escolha o horÃ¡rio de inÃ­cio e tÃ©rmino: â°', 800);
+          addIsisMessage('Escolha o horário de início e término: ⏰', 800);
           
           // Aguarda a mensagem aparecer e depois mostra input
           setTimeout(() => {
             console.log('[handleDataSelection] Ativando showInput=true');
             setShowInput(true);
-            // Scroll apÃ³s input aparecer
+            // Scroll após input aparecer
             setTimeout(() => {
               chatEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
             }, 300);
           }, 1000);
         }, 800);
       } else {
-        console.log('[handleDataSelection] Nenhum horÃ¡rio disponÃ­vel');
-        addIsisMessage('Ops! NÃ£o encontrei **horÃ¡rios disponÃ­veis** para essa quadra nesse dia. ðŸ˜” Tente outra data.');
+        console.log('[handleDataSelection] Nenhum horário disponível');
+        addIsisMessage('Ops! Não encontrei **horários disponíveis** para essa quadra nesse dia. 😔 Tente outra data.');
       }
       return;
     }
     
-    console.log('[handleDataSelection] Fluxo normal (nÃ£o ediÃ§Ã£o)');
+    console.log('[handleDataSelection] Fluxo normal (não edição)');
     
-    // Carrega horÃ¡rios disponÃ­veis
+    // Carrega horários disponíveis
     setIsLoading(true);
     
     const resultado = await loadHorariosDisponiveis(selections.quadra.id, dataEscolhida);
@@ -1420,22 +1420,22 @@ const IsisBookingPageContent = () => {
     
     setIsLoading(false);
     
-    // Verifica se a quadra estÃ¡ fechada
+    // Verifica se a quadra está fechada
     if (resultado.fechada) {
       const dataFormatada = format(dataEscolhida, "dd/MM/yyyy", { locale: ptBR });
       const diaSemana = format(dataEscolhida, "EEEE", { locale: ptBR });
       
       if (resultado.motivo === 'data_especifica') {
-        addIsisMessage(`**Ops!** A quadra estarÃ¡ **fechada** no dia **${dataFormatada}** (${diaSemana}). ðŸš«\n\n**Motivo:** ${resultado.observacao}`, 800);
+        addIsisMessage(`**Ops!** A quadra estará **fechada** no dia **${dataFormatada}** (${diaSemana}). 🚫\n\n**Motivo:** ${resultado.observacao}`, 800);
       } else if (resultado.motivo === 'dia_semana') {
         const diaDaSemana = format(dataEscolhida, "EEEE", { locale: ptBR });
-        const preposicao = diaDaSemana === 'domingo' || diaDaSemana === 'sÃ¡bado' ? 'aos' : 'Ã s';
-        addIsisMessage(`**Ops!** A quadra nÃ£o funciona ${preposicao} **${diaDaSemana}s**. ðŸš«\n\nEscolha outro dia da semana!`, 800);
+        const preposicao = diaDaSemana === 'domingo' || diaDaSemana === 'sábado' ? 'aos' : 'às';
+        addIsisMessage(`**Ops!** A quadra não funciona ${preposicao} **${diaDaSemana}s**. 🚫\n\nEscolha outro dia da semana!`, 800);
       }
       
-      // Volta para seleÃ§Ã£o de data
+      // Volta para seleção de data
       setTimeout(() => {
-        addIsisMessage('Que tal tentar **outra data**? ðŸ˜Š', 1200);
+        addIsisMessage('Que tal tentar **outra data**? 😊', 1200);
         setTimeout(() => {
           mostrarSelecaoData();
         }, 400);
@@ -1445,41 +1445,41 @@ const IsisBookingPageContent = () => {
     
     const slots = resultado.slots;
     if (slots.length === 0) {
-      console.log('[handleDataSelection] Nenhum horÃ¡rio disponÃ­vel');
-      addIsisMessage('Ops! NÃ£o encontrei **horÃ¡rios disponÃ­veis** para esse dia. ðŸ˜” Que tal tentar outro dia?');
+      console.log('[handleDataSelection] Nenhum horário disponível');
+      addIsisMessage('Ops! Não encontrei **horários disponíveis** para esse dia. 😔 Que tal tentar outro dia?');
       return;
     }
     
-    // Agrupa slots em intervalos contÃ­nuos
+    // Agrupa slots em intervalos contínuos
     const intervalos = agruparSlotsEmIntervalos(slots);
     
     // Monta mensagem com os intervalos
     let msgIntervalos = '';
     if (intervalos.length === 1) {
-      msgIntervalos = `Tenho **horÃ¡rios livres** das **${intervalos[0].inicio}** Ã s **${intervalos[0].fim}**! ðŸ•’`;
+      msgIntervalos = `Tenho **horários livres** das **${intervalos[0].inicio}** às **${intervalos[0].fim}**! 🕒`;
     } else {
       const partes = intervalos.map((int, idx) => {
         if (idx === intervalos.length - 1) {
-          return `e das **${int.inicio}** Ã s **${int.fim}**`;
+          return `e das **${int.inicio}** às **${int.fim}**`;
         } else if (idx === 0) {
-          return `das **${int.inicio}** Ã s **${int.fim}**`;
+          return `das **${int.inicio}** às **${int.fim}**`;
         } else {
-          return `das **${int.inicio}** Ã s **${int.fim}**`;
+          return `das **${int.inicio}** às **${int.fim}**`;
         }
       });
-      msgIntervalos = `Tenho **horÃ¡rios livres** ${partes.join(', ')}! ðŸ•’`;
+      msgIntervalos = `Tenho **horários livres** ${partes.join(', ')}! 🕒`;
     }
     
     addIsisMessage(msgIntervalos, 800);
     
     setTimeout(() => {
-      addIsisMessage('Escolha o horÃ¡rio de inÃ­cio e tÃ©rmino: â°', 1000);
+      addIsisMessage('Escolha o horário de início e término: ⏰', 1000);
       nextStep('horario');
       
-      // Mostra input apÃ³s mensagem aparecer
+      // Mostra input após mensagem aparecer
       setTimeout(() => {
         setShowInput(true);
-        // ForÃ§a scroll PARA CIMA apÃ³s select aparecer (principalmente mobile)
+        // Força scroll PARA CIMA após select aparecer (principalmente mobile)
         // block: 'start' faz rolar para mostrar o topo do elemento
         setTimeout(() => {
           chatEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -1494,7 +1494,7 @@ const IsisBookingPageContent = () => {
     }, 1400);
   };
   
-  // Carrega horÃ¡rios disponÃ­veis
+  // Carrega horários disponíveis
   const loadHorariosDisponiveis = async (quadraId, data, agendamentoEditandoId = null) => {
     try {
       console.log('[loadHorariosDisponiveis] quadraId:', quadraId);
@@ -1504,12 +1504,12 @@ const IsisBookingPageContent = () => {
       const quadra = quadras.find(q => q.id === quadraId);
       
       if (!quadra) {
-        console.error('[loadHorariosDisponiveis] Quadra nÃ£o encontrada:', quadraId);
+        console.error('[loadHorariosDisponiveis] Quadra não encontrada:', quadraId);
         return [];
       }
       
       console.log('[loadHorariosDisponiveis] Quadra encontrada:', quadra.nome);
-      console.log('[loadHorariosDisponiveis] HorÃ¡rio funcionamento:', quadra.hora_inicio, '-', quadra.hora_fim);
+      console.log('[loadHorariosDisponiveis] Horário funcionamento:', quadra.hora_inicio, '-', quadra.hora_fim);
       
       // Verificar se a quadra funciona na data selecionada
       const dataFormatada = format(data, 'yyyy-MM-dd');
@@ -1517,7 +1517,7 @@ const IsisBookingPageContent = () => {
       
       console.log('[loadHorariosDisponiveis] Verificando funcionamento para:', dataFormatada, 'dia da semana:', diaSemana);
       
-      // Buscar configuraÃ§Ãµes de funcionamento
+      // Buscar configurações de funcionamento
       const { data: configuracoes, error: configError } = await supabase
         .from('quadras_dias_funcionamento')
         .select('*')
@@ -1526,19 +1526,19 @@ const IsisBookingPageContent = () => {
         .or(`and(tipo.eq.data_fechamento,data_fechamento.eq.${dataFormatada}),and(tipo.eq.dia_semana,dia_semana.eq.${diaSemana})`);
       
       if (configError) {
-        console.error('[loadHorariosDisponiveis] Erro ao buscar configuraÃ§Ãµes de funcionamento:', configError);
-        // Em caso de erro, continua sem verificaÃ§Ã£o (comportamento anterior)
+        console.error('[loadHorariosDisponiveis] Erro ao buscar configurações de funcionamento:', configError);
+        // Em caso de erro, continua sem verificação (comportamento anterior)
       } else {
-        console.log('[loadHorariosDisponiveis] ConfiguraÃ§Ãµes encontradas:', configuracoes?.length || 0);
+        console.log('[loadHorariosDisponiveis] Configurações encontradas:', configuracoes?.length || 0);
         
-        // Verificar fechamento especÃ­fico para esta data (prioridade maior)
+        // Verificar fechamento específico para esta data (prioridade maior)
         const fechamentoEspecifico = configuracoes?.find(
           config => config.tipo === 'data_fechamento' && 
                    config.data_fechamento === dataFormatada
         );
         
         if (fechamentoEspecifico && !fechamentoEspecifico.funciona) {
-          console.log('[loadHorariosDisponiveis] Quadra fechada em data especÃ­fica:', fechamentoEspecifico.observacao);
+          console.log('[loadHorariosDisponiveis] Quadra fechada em data específica:', fechamentoEspecifico.observacao);
           return { 
             slots: [], 
             fechada: true, 
@@ -1554,13 +1554,13 @@ const IsisBookingPageContent = () => {
         );
         
         if (funcionamentoSemanal && !funcionamentoSemanal.funciona) {
-          console.log('[loadHorariosDisponiveis] Quadra nÃ£o funciona neste dia da semana');
-          const diasSemana = ['domingo', 'segunda-feira', 'terÃ§a-feira', 'quarta-feira', 'quinta-feira', 'sexta-feira', 'sÃ¡bado'];
+          console.log('[loadHorariosDisponiveis] Quadra não funciona neste dia da semana');
+          const diasSemana = ['domingo', 'segunda-feira', 'terça-feira', 'quarta-feira', 'quinta-feira', 'sexta-feira', 'sábado'];
           return { 
             slots: [], 
             fechada: true, 
             motivo: 'dia_semana', 
-            observacao: `Quadra fechada Ã s ${diasSemana[diaSemana]}s`
+            observacao: `Quadra fechada às ${diasSemana[diaSemana]}s`
           };
         }
         
@@ -1570,7 +1570,7 @@ const IsisBookingPageContent = () => {
       const dataInicio = startOfDay(data);
       const dataFim = addDays(dataInicio, 1);
       
-      // Busca agendamentos existentes (exceto cancelados e o que estÃ¡ sendo editado)
+      // Busca agendamentos existentes (exceto cancelados e o que está sendo editado)
       let query = supabase
         .from('agendamentos')
         .select('inicio, fim, status')
@@ -1580,7 +1580,7 @@ const IsisBookingPageContent = () => {
         .lt('inicio', dataFim.toISOString())
         .neq('status', 'canceled');
       
-      // Se estÃ¡ editando um agendamento, exclui ele da busca
+      // Se está editando um agendamento, exclui ele da busca
       if (agendamentoEditandoId) {
         query = query.neq('id', agendamentoEditandoId);
         console.log('[loadHorariosDisponiveis] Excluindo agendamento sendo editado:', agendamentoEditandoId);
@@ -1596,7 +1596,7 @@ const IsisBookingPageContent = () => {
       const horaInicio = parseInt(quadra.hora_inicio?.split(':')[0] || '6');
       let horaFim = parseInt(quadra.hora_fim?.split(':')[0] || '24');
       
-      // Se hora_fim Ã© 00:00 (meia-noite), tratar como 24h
+      // Se hora_fim é 00:00 (meia-noite), tratar como 24h
       if (horaFim === 0) {
         horaFim = 24;
       }
@@ -1610,10 +1610,10 @@ const IsisBookingPageContent = () => {
           const inicio = setMinutes(setHours(data, hora), minuto);
           const fim = addMinutes(inicio, 30);
           
-          // Ignora horÃ¡rios que jÃ¡ passaram APENAS se for hoje
+          // Ignora horários que já passaram APENAS se for hoje
           if (ehHoje && inicio < agora) continue;
           
-          // Verifica se nÃ£o conflita com agendamentos existentes
+          // Verifica se não conflita com agendamentos existentes
           const conflito = agendamentos?.some(ag => {
             const agInicio = new Date(ag.inicio);
             const agFim = new Date(ag.fim);
@@ -1624,13 +1624,13 @@ const IsisBookingPageContent = () => {
             const agInicioMin = Math.floor(agInicio.getTime() / 60000);
             const agFimMin = Math.floor(agFim.getTime() / 60000);
             
-            // Slots que terminam quando agendamento comeÃ§a NÃƒO conflitam
-            // Slots que comeÃ§am quando agendamento termina NÃƒO conflitam
+            // Slots que terminam quando agendamento começa NÃO conflitam
+            // Slots que começam quando agendamento termina NÃO conflitam
             if (slotFimMin === agInicioMin || slotInicioMin === agFimMin) {
               return false;
             }
             
-            // Verifica sobreposiÃ§Ã£o real
+            // Verifica sobreposição real
             return (slotInicioMin < agFimMin && slotFimMin > agInicioMin);
           });
           
@@ -1645,11 +1645,11 @@ const IsisBookingPageContent = () => {
         }
       }
       
-      console.log('[loadHorariosDisponiveis] Total de slots disponÃ­veis:', slots.length);
+      console.log('[loadHorariosDisponiveis] Total de slots disponíveis:', slots.length);
       
       setHorariosDisponiveis(slots);
       
-      // Retorna objeto com informaÃ§Ãµes completas para compatibilidade
+      // Retorna objeto com informações completas para compatibilidade
       return {
         slots: slots,
         fechada: false,
@@ -1658,13 +1658,13 @@ const IsisBookingPageContent = () => {
       };
       
     } catch (error) {
-      console.error('[loadHorariosDisponiveis] Erro ao carregar horÃ¡rios:', error);
+      console.error('[loadHorariosDisponiveis] Erro ao carregar horários:', error);
       setHorariosDisponiveis([]);
       return {
         slots: [],
         fechada: false,
         motivo: 'erro',
-        observacao: 'Erro ao carregar horÃ¡rios'
+        observacao: 'Erro ao carregar horários'
       };
     }
   };
@@ -1680,11 +1680,11 @@ const IsisBookingPageContent = () => {
     };
     
     for (let i = 1; i < slots.length; i++) {
-      // Se o slot atual comeÃ§a onde o anterior termina, Ã© contÃ­nuo
+      // Se o slot atual começa onde o anterior termina, é contínuo
       if (slots[i].inicio === intervaloAtual.fim) {
         intervaloAtual.fim = slots[i].fim;
       } else {
-        // Intervalo quebrou, salva o atual e comeÃ§a um novo
+        // Intervalo quebrou, salva o atual e começa um novo
         intervalos.push(intervaloAtual);
         intervaloAtual = {
           inicio: slots[i].inicio,
@@ -1693,7 +1693,7 @@ const IsisBookingPageContent = () => {
       }
     }
     
-    // Adiciona o Ãºltimo intervalo
+    // Adiciona o último intervalo
     intervalos.push(intervaloAtual);
     
     // Converte HH:mm em minutos, tratando 00:00 como 24:00 (fim do dia)
@@ -1703,16 +1703,16 @@ const IsisBookingPageContent = () => {
       return h * 60 + m;
     };
     
-    // Filtra para manter apenas intervalos com duraÃ§Ã£o mÃ­nima de 60 minutos
+    // Filtra para manter apenas intervalos com duração mínima de 60 minutos
     return intervalos.filter((int) => {
       const dur = toMinutes(int.fim) - toMinutes(int.inicio);
       return dur >= 60;
     });
   };
   
-  // Handler para input de horÃ¡rio (inÃ­cio, fim e esporte juntos)
+  // Handler para input de horário (início, fim e esporte juntos)
   const handleHorarioSubmit = ({ inicio, fim, esporte }) => {
-    // O componente jÃ¡ valida que os horÃ¡rios estÃ£o disponÃ­veis e sÃ£o vÃ¡lidos
+    // O componente já valida que os horários estão disponíveis e são válidos
     const [h1, m1] = inicio.split(':').map(Number);
     const [h2, m2] = fim.split(':').map(Number);
     
@@ -1729,26 +1729,26 @@ const IsisBookingPageContent = () => {
       fimDate
     };
     
-    addUserMessage(`${horario.inicio} - ${horario.fim} â€¢ ${esporte}`);
+    addUserMessage(`${horario.inicio} - ${horario.fim} • ${esporte}`);
     
-    console.log('[handleHorarioSubmit] Atualizando horÃ¡rio:', horario);
+    console.log('[handleHorarioSubmit] Atualizando horário:', horario);
     console.log('[handleHorarioSubmit] Atualizando esporte:', esporte);
     
     updateSelection('horario', horario);
     updateSelection('esporte', esporte);
     setShowInput(false); // Esconde input
     
-    // Se estÃ¡ editando horÃ¡rio (mesmo que currentStep tenha mudado por causa da mudanÃ§a de data), volta pro resumo
+    // Se está editando horário (mesmo que currentStep tenha mudado por causa da mudança de data), volta pro resumo
     if (currentStep === 'review' || editingType === 'horario') {
       setTimeout(() => {
-        setEditingType(null); // Limpa o tipo de ediÃ§Ã£o
+        setEditingType(null); // Limpa o tipo de edição
         nextStep('review'); // Garante que volta para review
         mostrarResumo(horario, esporte); // Passa os valores atualizados diretamente
       }, 600);
       return;
     }
     
-    // Inicializa lista de participantes com o usuÃ¡rio identificado
+    // Inicializa lista de participantes com o usuário identificado
     const participantesIniciais = [{
       nome: selections.cliente.nome,
       cliente_id: selections.cliente.id,
@@ -1758,13 +1758,13 @@ const IsisBookingPageContent = () => {
     
     const nomeCurto = getNomeCurto(selections.cliente.nome);
     
-    addIsisMessage(`Perfeito! ${nomeCurto}, vocÃª jÃ¡ estÃ¡ na lista! ðŸŽ¯`, 800);
+    addIsisMessage(`Perfeito! ${nomeCurto}, você já está na lista! 🎯`, 800);
     addIsisMessage('Quer adicionar mais pessoas? Digite o nome e clique em "Adicionar" para cada um, ou finalize quando quiser.', 1400);
     
     // Mostra input de participantes
     setTimeout(() => {
       setShowInput(true);
-      // Rola PARA CIMA apÃ³s input aparecer (mobile)
+      // Rola PARA CIMA após input aparecer (mobile)
       setTimeout(() => {
         chatEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }, 200);
@@ -1784,17 +1784,17 @@ const IsisBookingPageContent = () => {
     const participantesAtuais = selections.participantes || [];
     const novoParticipante = {
       nome: nome.trim(),
-      cliente_id: null, // SerÃ¡ cliente consumidor
+      cliente_id: null, // Será cliente consumidor
       principal: false
     };
     
     const novosParticipantes = [...participantesAtuais, novoParticipante];
     updateSelection('participantes', novosParticipantes);
     
-    // NÃƒO envia mensagem ao chat - apenas atualiza a lista localmente
+    // NÃO envia mensagem ao chat - apenas atualiza a lista localmente
   };
 
-  // Adiciona participantes em lote (usado pela importaÃ§Ã£o com IA)
+  // Adiciona participantes em lote (usado pela importação com IA)
   const handleAdicionarParticipantesLote = (nomes) => {
     if (!Array.isArray(nomes) || nomes.length === 0) return;
 
@@ -1827,16 +1827,16 @@ const IsisBookingPageContent = () => {
 
     const editing = Boolean(selections?.editing_agendamento);
     if (editing) {
-      // Em ediÃ§Ã£o: substituir toda a lista (exceto o principal) pelos importados
+      // Em edição: substituir toda a lista (exceto o principal) pelos importados
       // 1) encontra principal atual ou self
       let principal = baseLista.find(p => p.principal) || (selfName && cliente ? { nome: selfName, cliente_id: cliente.id, principal: true } : null);
-      // 2) constrÃ³i lista apenas com principal, se houver
+      // 2) constrói lista apenas com principal, se houver
       if (principal) {
         const key = canonicalKey(principal.nome);
         vistos.add(key);
         resultado.push({ ...principal, principal: true });
       }
-      // 3) adiciona apenas os importados, Ãºnicos e sem o principal
+      // 3) adiciona apenas os importados, únicos e sem o principal
       nomes.forEach((n) => {
         const nomeStr = String(n || '').trim();
         if (!nomeStr) return;
@@ -1859,7 +1859,7 @@ const IsisBookingPageContent = () => {
           principal: isPrincipal
         });
       });
-      // Adiciona nomes importados, evitando duplicados e o prÃ³prio usuÃ¡rio
+      // Adiciona nomes importados, evitando duplicados e o próprio usuário
       nomes.forEach((n) => {
         const nomeStr = String(n || '').trim();
         if (!nomeStr) return;
@@ -1886,7 +1886,7 @@ const IsisBookingPageContent = () => {
   const handleRemoverParticipante = (index) => {
     const participantesAtuais = selections.participantes || [];
     
-    // NÃ£o permite remover o primeiro (usuÃ¡rio principal)
+    // Não permite remover o primeiro (usuário principal)
     if (index === 0) return;
     
     const novosParticipantes = participantesAtuais.filter((_, i) => i !== index);
@@ -1898,7 +1898,7 @@ const IsisBookingPageContent = () => {
     const participantes = selections.participantes || [];
     
     if (participantes.length === 0) {
-      addIsisMessage('VocÃª precisa ter pelo menos 1 participante!', 400);
+      addIsisMessage('Você precisa ter pelo menos 1 participante!', 400);
       return;
     }
     
@@ -1908,27 +1908,27 @@ const IsisBookingPageContent = () => {
     
     // Monta mensagem com lista de participantes
     if (total === 1) {
-      // Apenas o usuÃ¡rio
-      addUserMessage(`âœ“ Apenas eu por enquanto`);
+      // Apenas o usuário
+      addUserMessage(`✓ Apenas eu por enquanto`);
     } else {
-      // UsuÃ¡rio + outros
+      // Usuário + outros
       const listaNomes = participantes
         .filter(p => !p.principal)
         .map(p => p.nome)
         .join(', ');
       
-      addUserMessage(`âœ“ Eu + ${listaNomes} (${total} pessoas)`);
+      addUserMessage(`✓ Eu + ${listaNomes} (${total} pessoas)`);
     }
     
-    // Sempre vai para o resumo (seja ediÃ§Ã£o ou primeira vez)
+    // Sempre vai para o resumo (seja edição ou primeira vez)
     setTimeout(() => {
-      setEditingType(null); // Limpa o tipo de ediÃ§Ã£o
+      setEditingType(null); // Limpa o tipo de edição
       mostrarResumo();
     }, 600);
   };
   
   
-  // Mostra resumo para confirmaÃ§Ã£o
+  // Mostra resumo para confirmação
   const mostrarResumo = (
     horarioAtualizado = null, 
     esporteAtualizado = null, 
@@ -1938,30 +1938,30 @@ const IsisBookingPageContent = () => {
     participantesAtualizados = null,
     agendamentoParaEdicao = null
   ) => {
-    // Usa valores passados como parÃ¢metro ou valores do estado
+    // Usa valores passados como parâmetro ou valores do estado
     const horarioFinal = horarioAtualizado || selections.horario;
     const esporteFinal = esporteAtualizado || selections.esporte;
     const quadraFinal = quadraAtualizada || selections.quadra;
     const dataFinal = dataAtualizada || selections.data;
     const participantesFinal = participantesAtualizados || selections.participantes || [];
-    // Considera ediÃ§Ã£o apenas quando veio um agendamento para ediÃ§Ã£o ou flag explÃ­cita de ediÃ§Ã£o
+    // Considera edição apenas quando veio um agendamento para edição ou flag explícita de edição
     const isEditing = Boolean(agendamentoParaEdicao || selections?.editing_agendamento);
     const agendamentoFinal = agendamentoParaEdicao || null;
     
     console.log('[mostrarResumo] Selections atuais:', selections);
-    console.log('[mostrarResumo] HorÃ¡rio usado:', horarioFinal);
+    console.log('[mostrarResumo] Horário usado:', horarioFinal);
     console.log('[mostrarResumo] Esporte usado:', esporteFinal);
     console.log('[mostrarResumo] Quadra atual:', quadraFinal);
     console.log('[mostrarResumo] Data atual:', dataFinal);
-    console.log('[mostrarResumo] Modo ediÃ§Ã£o inicial:', modoEdicaoInicial);
+    console.log('[mostrarResumo] Modo edição inicial:', modoEdicaoInicial);
     
-    // Verifica se todos os dados necessÃ¡rios estÃ£o disponÃ­veis
+    // Verifica se todos os dados necessários estão disponíveis
     if (!dataFinal || !horarioFinal || !quadraFinal) {
-      console.error('[mostrarResumo] Dados obrigatÃ³rios faltando:', { dataFinal, horarioFinal, quadraFinal });
+      console.error('[mostrarResumo] Dados obrigatórios faltando:', { dataFinal, horarioFinal, quadraFinal });
       return;
     }
     
-    // Mensagem ANTES do resumo (apenas se nÃ£o for modo ediÃ§Ã£o inicial)
+    // Mensagem ANTES do resumo (apenas se não for modo edição inicial)
     if (!modoEdicaoInicial) {
       const msg = getIsisMessage('reviewData');
       addIsisMessage(msg, 400);
@@ -1969,22 +1969,22 @@ const IsisBookingPageContent = () => {
     
     const listaNomes = participantesFinal
       .map((p, i) => {
-        const bullet = i === 0 ? 'ðŸ‘¤' : 'ðŸ‘¥';
-        const suffix = i === 0 ? ' (vocÃª)' : '';
+        const bullet = i === 0 ? '👤' : '👥';
+        const suffix = i === 0 ? ' (você)' : '';
         return `${bullet} ${p.nome}${suffix}`;
       })
       .join('\n');
     
-    // Formata data de forma mais legÃ­vel
+    // Formata data de forma mais legível
     const dataFormatada = format(dataFinal, "dd/MM/yyyy", { locale: ptBR });
     const diaSemana = format(dataFinal, "EEEE", { locale: ptBR });
     
-    // Calcula duraÃ§Ã£o do agendamento
+    // Calcula duração do agendamento
     const [h1, m1] = horarioFinal.inicio.split(':').map(Number);
     const [h2, m2] = horarioFinal.fim.split(':').map(Number);
     let duracaoMinutos = (h2 * 60 + m2) - (h1 * 60 + m1);
     
-    // Se fim for 00:00, Ã© meia-noite do dia seguinte
+    // Se fim for 00:00, é meia-noite do dia seguinte
     if (h2 === 0 && m2 === 0) {
       duracaoMinutos = (24 * 60) - (h1 * 60 + m1);
     }
@@ -1995,29 +1995,29 @@ const IsisBookingPageContent = () => {
       ? `${duracaoHoras}h ${duracaoMinutosResto}min`
       : `${duracaoHoras}h`;
     
-    // Calcula valor total baseado na duraÃ§Ã£o (valor da quadra Ã© por meia hora)
+    // Calcula valor total baseado na duração (valor da quadra é por meia hora)
     const valorPorMeiaHora = quadraFinal.valor || 0;
     const slots = duracaoMinutos / 30; // Slots de 30 minutos
     const valorTotal = Math.round(valorPorMeiaHora * slots * 100) / 100;
     const valorDividido = valorTotal / participantesFinal.length;
     
-    console.log('[mostrarResumo] CÃ¡lculo do valor:');
+    console.log('[mostrarResumo] Cálculo do valor:');
     console.log('- Valor por meia hora:', valorPorMeiaHora);
     console.log('- Slots de 30min:', slots);
-    console.log('- DuraÃ§Ã£o em minutos:', duracaoMinutos);
+    console.log('- Duração em minutos:', duracaoMinutos);
     console.log('- Valor total:', valorTotal);
     console.log('- Participantes:', participantesFinal.length);
     console.log('- Valor dividido:', valorDividido);
     
-    // Resumo com emojis e formataÃ§Ã£o limpa
-    // EndereÃ§o da empresa (opcional)
+    // Resumo com emojis e formatação limpa
+    // Endereço da empresa (opcional)
     const enderecoEmpresa = selections?.empresa?.endereco && String(selections.empresa.endereco).trim().length > 0
       ? String(selections.empresa.endereco).trim()
       : null;
 
-    const blocoEndereco = enderecoEmpresa ? `\nðŸ“ **EndereÃ§o**\n${enderecoEmpresa}\n` : '';
+    const blocoEndereco = enderecoEmpresa ? `\n📍 **Endereço**\n${enderecoEmpresa}\n` : '';
 
-    // Formata contato do responsÃ¡vel (telefone/whatsapp) com mÃ¡scara BR
+    // Formata contato do responsável (telefone/whatsapp) com máscara BR
     const formatTelBR = (v) => {
       if (!v) return 'N/A';
       const d = String(v).replace(/\D/g, '');
@@ -2028,32 +2028,32 @@ const IsisBookingPageContent = () => {
     const contatoBruto = selections.cliente.telefone || selections.cliente.whatsapp || null;
     const contatoFormatado = formatTelBR(contatoBruto);
 
-    const resumo = `ðŸ“‹ **RESUMO DO AGENDAMENTO**\n\nðŸŸï¸ **Quadra**\n${quadraFinal.nome}${blocoEndereco}\nðŸ“… **Data**\n${dataFormatada} (${diaSemana})\n\nâ° **HorÃ¡rio**\n${horarioFinal.inicio} Ã s ${horarioFinal.fim}\nâ±ï¸ DuraÃ§Ã£o: **${duracaoTexto}**\n\nðŸ† **Modalidade**\n${esporteFinal}\n\nðŸ‘¥ **Participantes** (${participantesFinal.length})\n${listaNomes}\n\nðŸ’° **Valor Total**\nR$ **${valorTotal.toFixed(2).replace('.', ',')}**\nðŸ’µ **Valor Dividido**\nR$ **${valorDividido.toFixed(2).replace('.', ',')}** por pessoa\n\nðŸ‘¤ **ResponsÃ¡vel**\n${selections.cliente.nome}\nðŸ“ž ${contatoFormatado}`;
+    const resumo = `📋 **RESUMO DO AGENDAMENTO**\n\n🏟️ **Quadra**\n${quadraFinal.nome}${blocoEndereco}\n📅 **Data**\n${dataFormatada} (${diaSemana})\n\n⏰ **Horário**\n${horarioFinal.inicio} às ${horarioFinal.fim}\n⏱️ Duração: **${duracaoTexto}**\n\n🏆 **Modalidade**\n${esporteFinal}\n\n👥 **Participantes** (${participantesFinal.length})\n${listaNomes}\n\n💰 **Valor Total**\nR$ **${valorTotal.toFixed(2).replace('.', ',')}**\n💵 **Valor Dividido**\nR$ **${valorDividido.toFixed(2).replace('.', ',')}** por pessoa\n\n👤 **Responsável**\n${selections.cliente.nome}\n📞 ${contatoFormatado}`;
     
-    // Delay menor se for modo ediÃ§Ã£o inicial
+    // Delay menor se for modo edição inicial
     const delay = modoEdicaoInicial ? 200 : 1000;
-    // Converte **negrito** (markdown) para *negrito* (WhatsApp) apenas no texto de cÃ³pia
+    // Converte **negrito** (markdown) para *negrito* (WhatsApp) apenas no texto de cópia
     const resumoCopyText = resumo.replace(/\*\*(.+?)\*\*/g, '*$1*');
     addIsisMessage({ text: resumo, copyable: true, copyText: resumoCopyText }, delay);
     
-    // BotÃµes de confirmaÃ§Ã£o e ediÃ§Ã£o
+    // Botões de confirmação e edição
     const confirmButtons = [
       { 
-        label: isEditing ? 'Salvar AlteraÃ§Ãµes' : 'Confirmar Agendamento', 
+        label: isEditing ? 'Salvar Alterações' : 'Confirmar Agendamento', 
         value: isEditing ? 'confirm' : 'criar agendamento', 
-        icon: 'âœ…'
+        icon: '✅'
       }
     ];
     
-    // BotÃµes de ediÃ§Ã£o
+    // Botões de edição
     const editButtons = [];
     
-    // Editar Quadra - sÃ³ se tiver mais de uma
+    // Editar Quadra - só se tiver mais de uma
     if (quadras.length > 1) {
       editButtons.push({
         label: 'Editar Quadra',
         value: 'edit_quadra',
-        icon: 'ðŸŸï¸'
+        icon: '🏟️'
       });
     }
     
@@ -2061,71 +2061,71 @@ const IsisBookingPageContent = () => {
     editButtons.push({
       label: 'Editar Data',
       value: 'edit_data',
-      icon: 'ðŸ“…'
+      icon: '📅'
     });
     
-    // Editar HorÃ¡rio e Esporte
+    // Editar Horário e Esporte
     editButtons.push({
-      label: 'Editar HorÃ¡rio e Esporte',
+      label: 'Editar Horário e Esporte',
       value: 'edit_horario',
-      icon: 'â°'
+      icon: '⏰'
     });
     
     // Editar Participantes
     editButtons.push({
       label: 'Editar Participantes',
       value: 'edit_participantes',
-      icon: 'ðŸ‘¥'
+      icon: '👥'
     });
     
     // Gerar Times:
-    // - Deve aparecer ao entrar na ediÃ§Ã£o (modoEdicaoInicial)
-    // - Deve aparecer ao revisar um agendamento existente, desde que nÃ£o esteja no resumo pÃ³s-ediÃ§Ã£o
+    // - Deve aparecer ao entrar na edição (modoEdicaoInicial)
+    // - Deve aparecer ao revisar um agendamento existente, desde que não esteja no resumo pós-edição
     const allowGenerateInReview = modoEdicaoInicial || (isEditing && !Boolean(selections?.editing_agendamento));
     if (allowGenerateInReview) {
       editButtons.push({
         label: 'Gerar Times',
         value: 'gerar_times',
-        icon: 'ðŸŽ²'
+        icon: '🎲'
       });
     }
     
-    // Cancelar Agendamento (sÃ³ se estiver editando um agendamento existente)
+    // Cancelar Agendamento (só se estiver editando um agendamento existente)
     if (isEditing) {
       editButtons.push({
         label: 'Cancelar Agendamento',
         value: 'cancelar_agendamento',
-        icon: 'âŒ'
+        icon: '❌'
       });
     }
     
-    // Junta todos os botÃµes em uma Ãºnica mensagem
+    // Junta todos os botões em uma única mensagem
     const allButtons = [...confirmButtons, ...editButtons];
     
     
-    // Delay menor para botÃµes se for modo ediÃ§Ã£o inicial
+    // Delay menor para botões se for modo edição inicial
     const buttonsDelay = modoEdicaoInicial ? 400 : 1600;
-    addIsisMessageWithButtons('EstÃ¡ tudo correto?', allButtons, buttonsDelay);
+    addIsisMessageWithButtons('Está tudo correto?', allButtons, buttonsDelay);
     
     nextStep('review');
   };
   
-  // Mostra resumo final apÃ³s agendamento confirmado
+  // Mostra resumo final após agendamento confirmado
   const mostrarResumoFinal = (agendamento, isUpdate = false) => {
-    // Mensagem de confirmaÃ§Ã£o (verde)
+    // Mensagem de confirmação (verde)
     const successMessage = isUpdate 
-      ? 'ðŸŽ‰ **Perfeito!** Suas **alteraÃ§Ãµes** foram **salvas com sucesso!**'
-      : 'ðŸŽ‰ **Pronto!** Seu **agendamento** foi **confirmado com sucesso!**';
+      ? '🎉 **Perfeito!** Suas **alterações** foram **salvas com sucesso!**'
+      : '🎉 **Pronto!** Seu **agendamento** foi **confirmado com sucesso!**';
     addIsisMessage(successMessage, 600, 'green');
     
     const participantes = selections.participantes || [];
-    const listaNomes = participantes.map(p => `â€¢ ${p.nome}`).join('\n');
+    const listaNomes = participantes.map(p => `• ${p.nome}`).join('\n');
     
     // Formata data
     const dataFormatada = format(selections.data, "dd/MM/yyyy", { locale: ptBR });
     const diaSemana = format(selections.data, "EEEE", { locale: ptBR });
     
-    // Calcula duraÃ§Ã£o
+    // Calcula duração
     const [h1, m1] = selections.horario.inicio.split(':').map(Number);
     const [h2, m2] = selections.horario.fim.split(':').map(Number);
     let duracaoMinutos = (h2 * 60 + m2) - (h1 * 60 + m1);
@@ -2138,78 +2138,78 @@ const IsisBookingPageContent = () => {
       ? `${duracaoHoras}h ${duracaoMinutosResto}min`
       : `${duracaoHoras}h`;
     
-    // Calcula valor total baseado na duraÃ§Ã£o (valor da quadra Ã© por meia hora)
+    // Calcula valor total baseado na duração (valor da quadra é por meia hora)
     const valorPorMeiaHora = selections.quadra.valor || 0;
     const slots = duracaoMinutos / 30; // Slots de 30 minutos
     const valorTotal = Math.round(valorPorMeiaHora * slots * 100) / 100;
     const valorDivididoFinal = participantes.length > 0 ? (valorTotal / participantes.length) : 0;
     
     // Resumo final (visual diferente - mais limpo e focado)
-    // EndereÃ§o da empresa para o resumo final (opcional)
+    // Endereço da empresa para o resumo final (opcional)
     const enderecoEmpresaFinal = selections?.empresa?.endereco && String(selections.empresa.endereco).trim().length > 0
       ? String(selections.empresa.endereco).trim()
       : null;
-    const blocoEnderecoFinal = enderecoEmpresaFinal ? `\nðŸ“ **EndereÃ§o**\n${enderecoEmpresaFinal}\n` : '';
+    const blocoEnderecoFinal = enderecoEmpresaFinal ? `\n📍 **Endereço**\n${enderecoEmpresaFinal}\n` : '';
 
-    const resumoFinal = `ðŸŽ‰ **AGENDAMENTO CONFIRMADO**
+    const resumoFinal = `🎉 **AGENDAMENTO CONFIRMADO**
 
-ðŸ†” **CÃ³digo:** #${agendamento.codigo}
+🆔 **Código:** #${agendamento.codigo}
 
-ðŸ“ **Local**
+📍 **Local**
 ${selections.quadra.nome}${blocoEnderecoFinal}
 
-ðŸ“… **Quando**
+📅 **Quando**
 ${dataFormatada} (${diaSemana})
-â° ${selections.horario.inicio} Ã s ${selections.horario.fim} **(${duracaoTexto})**
+⏰ ${selections.horario.inicio} às ${selections.horario.fim} **(${duracaoTexto})**
 
-ðŸ† **Modalidade**
+🏆 **Modalidade**
 ${selections.esporte}
 
-ðŸ‘¥ **Participantes** (${participantes.length})
+👥 **Participantes** (${participantes.length})
 ${listaNomes}
 
-ðŸ’° **Valor Total:** R$ **${valorTotal.toFixed(2).replace('.', ',')}**
-ðŸ’µ **Valor Dividido:** R$ **${valorDivididoFinal.toFixed(2).replace('.', ',')}** por pessoa
+💰 **Valor Total:** R$ **${valorTotal.toFixed(2).replace('.', ',')}**
+💵 **Valor Dividido:** R$ **${valorDivididoFinal.toFixed(2).replace('.', ',')}** por pessoa
 
-ðŸ‘¤ **ResponsÃ¡vel:** ${selections.cliente.nome}`;
+👤 **Responsável:** ${selections.cliente.nome}`;
     
     const resumoFinalCopyText = resumoFinal.replace(/\*\*(.+?)\*\*/g, '*$1*');
     addIsisMessage({ text: resumoFinal, copyable: true, copyText: resumoFinalCopyText }, 1200);
     
-    // BotÃµes finais (garantir que "Finalizar Atendimento" seja o Ãºltimo)
+    // Botões finais (garantir que "Finalizar Atendimento" seja o último)
     const finalButtons = [
       {
         label: 'Gerar Times',
         value: 'gerar_times',
-        icon: 'ðŸŽ²'
+        icon: '🎲'
       },
       {
         label: 'Editar Agendamento',
         value: 'editar_agendamento',
-        icon: 'âœï¸'
+        icon: '✏️'
       },
       {
         label: 'Cancelar Agendamento',
         value: 'cancelar_agendamento',
-        icon: 'âŒ'
+        icon: '❌'
       },
       {
         label: 'Finalizar Atendimento',
         value: 'finalizar',
-        icon: 'âœ…'
+        icon: '✅'
       }
     ];
     
-    addIsisMessageWithButtons('O que vocÃª gostaria de fazer?', finalButtons, 1800);
+    addIsisMessageWithButtons('O que você gostaria de fazer?', finalButtons, 1800);
   };
   
-  // Gera times com base na modalidade e apresenta no chat (com opÃ§Ã£o de regenerar)
+  // Gera times com base na modalidade e apresenta no chat (com opção de regenerar)
   const gerarTimesEApresentar = async () => {
     try { setIsTyping(true); } catch {}
     try {
       const nomes = (selections.participantes || []).map(p => String(p?.nome || '').trim()).filter(Boolean);
       if (!nomes || nomes.length === 0) {
-        addIsisMessage('NÃ£o hÃ¡ participantes suficientes para formar times.');
+        addIsisMessage('Não há participantes suficientes para formar times.');
         return;
       }
       const rawModalidade = String(selections?.esporte || selections?.quadra?.tipo || '').toLowerCase();
@@ -2221,10 +2221,10 @@ ${listaNomes}
         });
         if (data && Number(data.teamSize) > 0) teamSize = Number(data.teamSize);
       } catch {}
-      // HeurÃ­stica de fallback
+      // Heurística de fallback
       if (!teamSize) {
-        if (/areia/.test(rawModalidade)) teamSize = 2; // vÃ´lei de praia
-        else if (/(v[Ã´o]lei)/.test(rawModalidade)) teamSize = 6; // vÃ´lei indoor
+        if (/areia/.test(rawModalidade)) teamSize = 2; // vôlei de praia
+        else if (/(v[ôo]lei)/.test(rawModalidade)) teamSize = 6; // vôlei indoor
         else if (/(hand|handebol)/.test(rawModalidade)) teamSize = 7; // handebol
         else if (/(futsal|society)/.test(rawModalidade)) teamSize = 5; // futsal / society
         else if (/(futebol|campo)/.test(rawModalidade)) teamSize = 11; // futebol de campo
@@ -2245,12 +2245,12 @@ ${listaNomes}
       // labels opcionais por fixo: selections.fixoRoles = { nomeLower: 'Levantador'|'Goleiro' }
       const fixoRolesMap = (() => {
         const out = {};
-        // ExplÃ­citos (nomeLower -> role)
+        // Explícitos (nomeLower -> role)
         const raw = selections?.fixoRoles;
         if (raw && typeof raw === 'object') {
           for (const k of Object.keys(raw)) out[k] = raw[k];
         }
-        // Derivados das listas especÃ­ficas
+        // Derivados das listas específicas
         goleiros.forEach(n => { out[norm(n)] = 'Goleiro'; });
         levantadores.forEach(n => { out[norm(n)] = 'Levantador'; });
         return out;
@@ -2261,26 +2261,26 @@ ${listaNomes}
         return ` (${role})`;
       };
 
-      // Particiona em fixos e nÃ£o-fixos
+      // Particiona em fixos e não-fixos
       const fixos = nomes.filter(isFixo);
       const livres = nomes.filter((n) => !isFixo(n));
 
-      // Embaralha apenas os nÃ£o-fixos para aleatoriedade
+      // Embaralha apenas os não-fixos para aleatoriedade
       const arrLivres = livres.slice();
       for (let i = arrLivres.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [arrLivres[i], arrLivres[j]] = [arrLivres[j], arrLivres[i]]; }
 
-      // Gera o mÃ¡ximo de times completos possÃ­vel e define reservas
+      // Gera o máximo de times completos possível e define reservas
       if (teamSize < 2) teamSize = 2;
-      const fmt = (xs) => xs.map((n, i) => `${i + 1}) ${n}${getFixoLabel(n)}`).join('\n') || 'â€”';
+      const fmt = (xs) => xs.map((n, i) => `${i + 1}) ${n}${getFixoLabel(n)}`).join('\n') || '—';
       const totalCount = nomes.length;
       let teamCount = Math.ceil(totalCount / teamSize);
       const titleModalidade = rawModalidade ? (rawModalidade[0].toUpperCase() + rawModalidade.slice(1)) : 'modalidade';
-      let text = `ðŸ† **Times gerados (${titleModalidade})**`;
-      const teamIcons = ['ðŸŸ ', 'ðŸ”µ', 'ðŸŸ¢', 'ðŸŸ£', 'ðŸŸ¡', 'ðŸŸ¤'];
-      // Identifica modalidade para priorizar papÃ©is
+      let text = `🏆 **Times gerados (${titleModalidade})**`;
+      const teamIcons = ['🟠', '🔵', '🟢', '🟣', '🟡', '🟤'];
+      // Identifica modalidade para priorizar papéis
       const modalidadeLower = (rawModalidade || '').toLowerCase();
-      const isSoccerLike = /(fut|society|sal[aÃ£]o)/.test(modalidadeLower);
-      const isVolleyLike = /(v[oÃ´]lei|volei)/.test(modalidadeLower);
+      const isSoccerLike = /(fut|society|sal[aã]o)/.test(modalidadeLower);
+      const isVolleyLike = /(v[oô]lei|volei)/.test(modalidadeLower);
       if (teamCount >= 2) {
         // Cria recipientes vazios
         const teams = Array.from({ length: teamCount }, () => []);
@@ -2327,30 +2327,30 @@ ${listaNomes}
           }
           if (teams[bestIdx].length < teamSize) teams[bestIdx].push(p);
         }
-        // 4.1) Se ainda faltar preencher vagas, NÃƒO repetir o mesmo jogador no mesmo time.
-        // MantÃ©m a regra de no mÃ¡ximo 1 goleiro/levantador por time. Se nÃ£o houver jogador
-        // de papel obrigatÃ³rio disponÃ­vel sem duplicar, mantÃ©m o time incompleto.
+        // 4.1) Se ainda faltar preencher vagas, NÃO repetir o mesmo jogador no mesmo time.
+        // Mantém a regra de no máximo 1 goleiro/levantador por time. Se não houver jogador
+        // de papel obrigatório disponível sem duplicar, mantém o time incompleto.
         for (let t = 0; t < teams.length; t++) {
           while (teams[t].length < teamSize) {
             if (isSoccerLike && goleiros.length > 0) {
-              // Adiciona no mÃ¡ximo 1 goleiro por time
+              // Adiciona no máximo 1 goleiro por time
               const hasGk = teams[t].some(name => goleiros.includes(name));
               if (hasGk) break;
               const g = goleiros.find(name => !teams[t].includes(name));
               if (g) {
                 teams[t].push(g);
               } else {
-                break; // todos os goleiros jÃ¡ estÃ£o neste time
+                break; // todos os goleiros já estão neste time
               }
             } else if (isVolleyLike && levantadores.length > 0) {
-              // Adiciona no mÃ¡ximo 1 levantador por time
+              // Adiciona no máximo 1 levantador por time
               const hasSetter = teams[t].some(name => levantadores.includes(name));
               if (hasSetter) break;
               const l = levantadores.find(name => !teams[t].includes(name));
               if (l) {
                 teams[t].push(l);
               } else {
-                break; // todos os levantadores jÃ¡ estÃ£o neste time
+                break; // todos os levantadores já estão neste time
               }
             } else {
               break;
@@ -2367,72 +2367,72 @@ ${listaNomes}
           text += `\n\n**${icon} Time ${idx + 1} (${t.length})**:\n${fmt(t)}`;
         });
         if (reservas.length) {
-          text += `\n\n**ðŸª‘ Reservas (${reservas.length})**:\n${fmt(reservas)}`;
+          text += `\n\n**🪑 Reservas (${reservas.length})**:\n${fmt(reservas)}`;
         }
       } else {
         // Participantes insuficientes para 2 times completos: ainda assim montar 2 times balanceados
         const arr = [...fixos, ...arrLivres];
         if (arr.length === 0) {
-          addIsisMessage('NÃ£o hÃ¡ participantes suficientes para formar times.');
+          addIsisMessage('Não há participantes suficientes para formar times.');
           return;
         }
         if (arr.length === 1) {
           // Caso limite: apenas 1 jogador
-          text += `\n\nâ„¹ï¸ Ainda nÃ£o hÃ¡ jogadores suficientes para formar 2 times. Adicione mais participantes.`;
-          text += `\n\n**ðŸŸ  Time 1 (1)**:\n1) ${arr[0]}${getFixoLabel(arr[0])}`;
+          text += `\n\nℹ️ Ainda não há jogadores suficientes para formar 2 times. Adicione mais participantes.`;
+          text += `\n\n**🟠 Time 1 (1)**:\n1) ${arr[0]}${getFixoLabel(arr[0])}`;
         } else {
           const t1Count = Math.min(teamSize, Math.ceil(arr.length / 2));
           const t2Count = Math.min(teamSize, arr.length - t1Count);
           const t1 = arr.slice(0, t1Count);
           const t2 = arr.slice(t1Count, t1Count + t2Count);
-          text += `\n\nâš ï¸ Jogadores insuficientes para 2 equipes completas de ${teamSize}. Montei 2 times balanceados de ${t1.length} e ${t2.length}.`;
-          text += `\n\n**ðŸŸ  Time 1 (${t1.length})**:\n${fmt(t1)}`;
-          text += `\n\n**ðŸ”µ Time 2 (${t2.length})**:\n${fmt(t2)}`;
+          text += `\n\n⚠️ Jogadores insuficientes para 2 equipes completas de ${teamSize}. Montei 2 times balanceados de ${t1.length} e ${t2.length}.`;
+          text += `\n\n**🟠 Time 1 (${t1.length})**:\n${fmt(t1)}`;
+          text += `\n\n**🔵 Time 2 (${t2.length})**:\n${fmt(t2)}`;
         }
       }
       const copyText = text.replace(/\*\*(.+?)\*\*/g, '*$1*');
       addIsisMessage({ text, copyable: true, copyText }, 600);
-      // Sempre permite "Gerar novamente" apÃ³s gerar
+      // Sempre permite "Gerar novamente" após gerar
       const allowRegen = true;
       const again = [
-        ...(allowRegen ? [{ label: 'Gerar novamente', value: 'gerar_times_again', icon: 'ðŸŽ²' }] : []),
-        { label: 'Concluir', value: 'aceitar_times', icon: 'âœ…' },
+        ...(allowRegen ? [{ label: 'Gerar novamente', value: 'gerar_times_again', icon: '🎲' }] : []),
+        { label: 'Concluir', value: 'aceitar_times', icon: '✅' },
       ];
-      // Mostra as opÃ§Ãµes logo abaixo do balÃ£o de times, com rÃ³tulo visÃ­vel
+      // Mostra as opções logo abaixo do balão de times, com rótulo visível
       addIsisMessageWithButtons('Tudo certo com os times?', again, 1400);
     } catch (e) {
-      addIsisMessage('NÃ£o foi possÃ­vel gerar times agora. Tente novamente.');
+      addIsisMessage('Não foi possível gerar times agora. Tente novamente.');
     }
   };
 
-  // Handler para confirmaÃ§Ã£o final
+  // Handler para confirmação final
   const handleConfirmacao = async (button) => {
-    // Se o botÃ£o tem propriedade 'quadra', Ã© um botÃ£o de seleÃ§Ã£o de quadra
+    // Se o botão tem propriedade 'quadra', é um botão de seleção de quadra
     if (button.quadra) {
       await handleQuadraSelection(button);
       return;
     }
     
-    // Se o botÃ£o tem propriedade 'date', Ã© um botÃ£o de seleÃ§Ã£o de data
+    // Se o botão tem propriedade 'date', é um botão de seleção de data
     if (button.date) {
       await handleDataSelection(button);
       return;
     }
     
-    // Se o botÃ£o tem propriedade 'agendamento', Ã© um botÃ£o de seleÃ§Ã£o de agendamento
+    // Se o botão tem propriedade 'agendamento', é um botão de seleção de agendamento
     if (button.agendamento) {
       const dataFormatada = format(new Date(button.agendamento.inicio), 'dd/MM/yyyy', { locale: ptBR });
       const horaInicio = format(new Date(button.agendamento.inicio), 'HH:mm');
       const horaFim = format(new Date(button.agendamento.fim), 'HH:mm');
       
-      addUserMessage(`${dataFormatada} â€¢ ${horaInicio}-${horaFim}`);
+      addUserMessage(`${dataFormatada} • ${horaInicio}-${horaFim}`);
       await carregarAgendamentoParaEdicao(button.agendamento);
       return;
     }
     
     switch (button.value) {
       case 'corrigir_telefone': {
-        addUserMessage('â˜Žï¸ Informei o telefone errado');
+        addUserMessage('☎️ Informei o telefone errado');
         updateSelection('cliente', null);
         updateSelection('identificacao_valor', null);
         setTipoIdentificacao('telefone');
@@ -2441,7 +2441,7 @@ ${listaNomes}
         break;
       }
       case 'corrigir_email': {
-        addUserMessage('âœ‰ï¸ Informei o e-mail errado');
+        addUserMessage('✉️ Informei o e-mail errado');
         updateSelection('cliente', null);
         updateSelection('identificacao_valor', null);
         setTipoIdentificacao('email');
@@ -2455,26 +2455,26 @@ ${listaNomes}
       }
       case 'gerar_times':
       case 'gerar_times_again': {
-        addUserMessage(button.value === 'gerar_times_again' ? 'ðŸŽ² Gerar novamente' : 'ðŸŽ² Gerar Times');
+        addUserMessage(button.value === 'gerar_times_again' ? '🎲 Gerar novamente' : '🎲 Gerar Times');
         await gerarTimesEApresentar();
         break;
       }
       case 'aceitar_times': {
-        addUserMessage('âœ… Concluir');
-        // Pergunta o que fazer agora e mostra o mesmo menu inicial pÃ³s-identificaÃ§Ã£o
-        addIsisMessage('Beleza! O que vocÃª gostaria de fazer agora?', 400);
+        addUserMessage('✅ Concluir');
+        // Pergunta o que fazer agora e mostra o mesmo menu inicial pós-identificação
+        addIsisMessage('Beleza! O que você gostaria de fazer agora?', 400);
         setTimeout(() => {
           perguntarAcaoInicial();
         }, 800);
         break;
       }
       case 'confirm':
-        // Marca botÃ£o como clicado (usuÃ¡rio vÃª)
+        // Marca botão como clicado (usuário vê)
         const isEditFlow = Boolean(selections?.editing_agendamento) || Boolean(agendamentoCriado);
-        const confirmText = isEditFlow ? 'âœ… Salvar AlteraÃ§Ãµes' : 'âœ… Confirmar Agendamento';
+        const confirmText = isEditFlow ? '✅ Salvar Alterações' : '✅ Confirmar Agendamento';
         addUserMessage(confirmText);
         
-        // Confirma agendamento (atualiza no modo ediÃ§Ã£o; cria no fluxo novo)
+        // Confirma agendamento (atualiza no modo edição; cria no fluxo novo)
         if (isEditFlow) {
           await atualizarAgendamento();
         } else {
@@ -2482,30 +2482,30 @@ ${listaNomes}
         }
         break;
       case 'criar agendamento':
-        // Fluxo explÃ­cito para novo agendamento
-        addUserMessage('âœ… Confirmar Agendamento');
+        // Fluxo explícito para novo agendamento
+        addUserMessage('✅ Confirmar Agendamento');
         await criarAgendamento();
         break;
         
       case 'edit_quadra':
-        addUserMessage('âœï¸ Editar Quadra');
+        addUserMessage('✏️ Editar Quadra');
         
-        // Mostra botÃµes de quadras novamente (igual ao fluxo inicial)
+        // Mostra botões de quadras novamente (igual ao fluxo inicial)
         const quadraButtons = quadras.map(q => ({
           label: q.nome,
           value: q.id,
-          icon: 'ðŸŸï¸',
+          icon: '🏟️',
           subtitle: q.descricao || q.tipo || null,
           quadra: q
         }));
         
-        addIsisMessageWithButtons('Qual quadra vocÃª quer?', quadraButtons, 600);
+        addIsisMessageWithButtons('Qual quadra você quer?', quadraButtons, 600);
         break;
         
       case 'edit_data':
-        addUserMessage('âœï¸ Editar Data');
+        addUserMessage('✏️ Editar Data');
         
-        // Mostra botÃµes de data (igual ao fluxo inicial)
+        // Mostra botões de data (igual ao fluxo inicial)
         const hoje = new Date();
         const amanha = addDays(hoje, 1);
         
@@ -2513,19 +2513,19 @@ ${listaNomes}
           {
             label: `Hoje (${format(hoje, 'dd/MM')})`,
             value: format(hoje, 'yyyy-MM-dd'),
-            icon: 'ðŸ“…',
+            icon: '📅',
             date: hoje
           },
           {
-            label: `AmanhÃ£ (${format(amanha, 'dd/MM')})`,
+            label: `Amanhã (${format(amanha, 'dd/MM')})`,
             value: format(amanha, 'yyyy-MM-dd'),
-            icon: 'ðŸ“…',
+            icon: '📅',
             date: amanha
           },
           {
             label: 'Outro dia...',
             value: 'custom',
-            icon: 'ðŸ—“ï¸'
+            icon: '🗓️'
           }
         ];
         
@@ -2533,31 +2533,31 @@ ${listaNomes}
         break;
         
       case 'edit_horario':
-        addUserMessage('âœï¸ Editar HorÃ¡rio e Esporte');
+        addUserMessage('✏️ Editar Horário e Esporte');
         setShowInput(false);
-        setEditingType('horario'); // Define que estÃ¡ editando horÃ¡rio
+        setEditingType('horario'); // Define que está editando horário
         setIsLoading(true);
         
-        // Recarrega horÃ¡rios disponÃ­veis (incluindo horÃ¡rio atual se editando agendamento existente)
+        // Recarrega horários disponíveis (incluindo horário atual se editando agendamento existente)
         const resultado = await loadHorariosDisponiveis(selections.quadra.id, selections.data, agendamentoCriado?.id);
         
         setIsLoading(false);
         
-        // Verifica se a quadra estÃ¡ fechada
+        // Verifica se a quadra está fechada
         if (resultado.fechada) {
           const dataFormatada = format(selections.data, "dd/MM/yyyy", { locale: ptBR });
           const diaSemana = format(selections.data, "EEEE", { locale: ptBR });
           
           if (resultado.motivo === 'data_especifica') {
-            addIsisMessage(`**Ops!** A quadra estarÃ¡ **fechada** no dia **${dataFormatada}** (${diaSemana}). ðŸš«\n\n**Motivo:** ${resultado.observacao}`, 800);
+            addIsisMessage(`**Ops!** A quadra estará **fechada** no dia **${dataFormatada}** (${diaSemana}). 🚫\n\n**Motivo:** ${resultado.observacao}`, 800);
           } else if (resultado.motivo === 'dia_semana') {
             const diaDaSemana = format(selections.data, "EEEE", { locale: ptBR });
-            const preposicao = diaDaSemana === 'domingo' || diaDaSemana === 'sÃ¡bado' ? 'aos' : 'Ã s';
-            addIsisMessage(`**Ops!** A quadra nÃ£o funciona ${preposicao} **${diaDaSemana}s**. ðŸš«`, 800);
+            const preposicao = diaDaSemana === 'domingo' || diaDaSemana === 'sábado' ? 'aos' : 'às';
+            addIsisMessage(`**Ops!** A quadra não funciona ${preposicao} **${diaDaSemana}s**. 🚫`, 800);
           }
           
           setTimeout(() => {
-            addIsisMessage('NÃ£o Ã© possÃ­vel editar o horÃ¡rio. Escolha **outra data** ou **quadra**:', 1200);
+            addIsisMessage('Não é possível editar o horário. Escolha **outra data** ou **quadra**:', 1200);
             setTimeout(() => {
               mostrarSelecaoData();
             }, 400);
@@ -2567,31 +2567,31 @@ ${listaNomes}
         
         const horariosSlots = resultado.slots;
         if (horariosSlots && horariosSlots.length > 0) {
-          // Agrupa slots em intervalos contÃ­nuos
+          // Agrupa slots em intervalos contínuos
           const intervalos = agruparSlotsEmIntervalos(horariosSlots);
           
           // Monta mensagem com os intervalos (igual fluxo normal)
           let msgIntervalos = '';
           if (intervalos.length === 1) {
-            msgIntervalos = `Tenho **horÃ¡rios livres** das **${intervalos[0].inicio}** Ã s **${intervalos[0].fim}**! ðŸ•’`;
+            msgIntervalos = `Tenho **horários livres** das **${intervalos[0].inicio}** às **${intervalos[0].fim}**! 🕒`;
           } else {
             const partes = intervalos.map((int, idx) => {
               if (idx === intervalos.length - 1) {
-                return `e das **${int.inicio}** Ã s **${int.fim}**`;
+                return `e das **${int.inicio}** às **${int.fim}**`;
               } else if (idx === 0) {
-                return `das **${int.inicio}** Ã s **${int.fim}**`;
+                return `das **${int.inicio}** às **${int.fim}**`;
               } else {
-                return `das **${int.inicio}** Ã s **${int.fim}**`;
+                return `das **${int.inicio}** às **${int.fim}**`;
               }
             });
-            msgIntervalos = `Tenho **horÃ¡rios livres** ${partes.join(', ')}! ðŸ•’`;
+            msgIntervalos = `Tenho **horários livres** ${partes.join(', ')}! 🕒`;
           }
           
           addIsisMessage(msgIntervalos, 600);
           
           setTimeout(() => {
-            addIsisMessage('Escolha o horÃ¡rio de inÃ­cio e tÃ©rmino: â°', 800);
-            // MantÃ©m no step review para detectar ediÃ§Ã£o
+            addIsisMessage('Escolha o horário de início e término: ⏰', 800);
+            // Mantém no step review para detectar edição
             
             setTimeout(() => {
               setShowInput(true);
@@ -2601,14 +2601,14 @@ ${listaNomes}
             }, 1000);
           }, 800);
         } else {
-          addIsisMessage('Ops! NÃ£o encontrei **horÃ¡rios disponÃ­veis**. ðŸ˜”');
+          addIsisMessage('Ops! Não encontrei **horários disponíveis**. 😔');
         }
         break;
         
       case 'edit_participantes':
-        addUserMessage('âœï¸ Editar Participantes');
+        addUserMessage('✏️ Editar Participantes');
         setShowInput(false);
-        setEditingType('participantes'); // Define que estÃ¡ editando participantes
+        setEditingType('participantes'); // Define que está editando participantes
         
         addIsisMessage('Edite a lista de participantes:', 600);
         
@@ -2619,50 +2619,50 @@ ${listaNomes}
           }, 200);
         }, 800);
         
-        // MantÃ©m no step review (handleFinalizarParticipantes sempre volta pro resumo)
+        // Mantém no step review (handleFinalizarParticipantes sempre volta pro resumo)
         break;
       
       case 'finalizar':
-        addUserMessage('âœ… Finalizar Atendimento');
+        addUserMessage('✅ Finalizar Atendimento');
         
         // Mensagem de agradecimento (para agendamentos criados)
         const thankYouMessages = [
-          'Pronto! Seu agendamento estÃ¡ confirmado! ðŸŽ‰',
-          'Perfeito! Agendamento realizado com sucesso! âœ…',
-          'Tudo certo! Seu horÃ¡rio estÃ¡ garantido! ðŸ†',
-          'Sucesso! Agendamento confirmado! ðŸ’ª'
+          'Pronto! Seu agendamento está confirmado! 🎉',
+          'Perfeito! Agendamento realizado com sucesso! ✅',
+          'Tudo certo! Seu horário está garantido! 🏆',
+          'Sucesso! Agendamento confirmado! 💪'
         ];
         
         const randomThankYou = thankYouMessages[Math.floor(Math.random() * thankYouMessages.length)];
         addIsisMessage(randomThankYou, 800);
         
-        // Vai direto para avaliaÃ§Ã£o ao invÃ©s de perguntar o que fazer
+        // Vai direto para avaliação ao invés de perguntar o que fazer
         setTimeout(() => {
           iniciarAvaliacao();
         }, 1400);
         break;
       
       case 'cancelar_agendamento':
-        addUserMessage('âŒ Cancelar Agendamento');
+        addUserMessage('❌ Cancelar Agendamento');
         
         // Confirma se realmente quer cancelar
         const cancelButtons = [
           {
             label: 'Sim, cancelar',
             value: 'confirmar_cancelamento',
-            icon: 'âœ…'
+            icon: '✅'
           },
           {
-            label: 'NÃ£o, voltar',
+            label: 'Não, voltar',
             value: 'voltar_cancelamento',
-            icon: 'â†©ï¸'
+            icon: '↩️'
           }
         ];
         
         const cancelMessages = [
           'Tem certeza que deseja cancelar este agendamento?',
           'Confirma o cancelamento do agendamento?',
-          'Realmente quer cancelar? Esta aÃ§Ã£o nÃ£o pode ser desfeita.',
+          'Realmente quer cancelar? Esta ação não pode ser desfeita.',
           'Deseja mesmo cancelar este agendamento?'
         ];
         
@@ -2675,55 +2675,55 @@ ${listaNomes}
         break;
         
       case 'voltar_cancelamento':
-        addUserMessage('â†©ï¸ Voltar');
+        addUserMessage('↩️ Voltar');
         addIsisMessage('Ok! Voltando ao resumo do agendamento.', 400);
         setTimeout(() => {
-          // Volta para o resumo de ediÃ§Ã£o sem mensagem de confirmaÃ§Ã£o
+          // Volta para o resumo de edição sem mensagem de confirmação
           mostrarResumo(null, null, true, null, null, null, agendamentoCriado);
         }, 800);
         break;
       
       case 'editar_agendamento':
-        addUserMessage('âœï¸ Editar Agendamento');
+        addUserMessage('✏️ Editar Agendamento');
         
-        addIsisMessage('Claro! O que vocÃª gostaria de alterar?', 600);
+        addIsisMessage('Claro! O que você gostaria de alterar?', 600);
         
-        // Volta para o resumo de revisÃ£o para permitir ediÃ§Ã£o (sem mensagem de confirmaÃ§Ã£o)
+        // Volta para o resumo de revisão para permitir edição (sem mensagem de confirmação)
         setTimeout(() => {
-          mostrarResumo(null, null, true); // true = modo ediÃ§Ã£o inicial
+          mostrarResumo(null, null, true); // true = modo edição inicial
         }, 800);
         break;
       
       case 'novo_agendamento':
-        addUserMessage('ðŸ“… Fazer Agendamento');
+        addUserMessage('📅 Fazer Agendamento');
         iniciarAgendamento();
         break;
         
       case 'buscar_agendamento':
-        addUserMessage('âœï¸ Editar Agendamento');
+        addUserMessage('✏️ Editar Agendamento');
         addIsisMessage('Vou buscar seus agendamentos...', 600);
         buscarAgendamentosCliente();
         break;
         
       case 'finalizar_atendimento':
-        addUserMessage('ðŸ‘‹ Finalizar Atendimento');
+        addUserMessage('👋 Finalizar Atendimento');
         
-        // Inicia processo de avaliaÃ§Ã£o
+        // Inicia processo de avaliação
         iniciarAvaliacao();
         break;
         
       default:
-        console.warn('[Isis] AÃ§Ã£o nÃ£o reconhecida:', button.value);
+        console.warn('[Isis] Ação não reconhecida:', button.value);
     }
   };
   
-  // Busca agendamentos do cliente para ediÃ§Ã£o
+  // Busca agendamentos do cliente para edição
   const buscarAgendamentosCliente = async () => {
     try {
       console.log('[buscarAgendamentosCliente] Iniciando busca de agendamentos...');
       // setIsLoading(true); // Removido para usar apenas indicador de digitando
       
-      // Busca agendamentos futuros do cliente (nÃ£o cancelados)
+      // Busca agendamentos futuros do cliente (não cancelados)
       const { data: agendamentos, error } = await supabase
         .from('agendamentos')
         .select(`
@@ -2748,8 +2748,8 @@ ${listaNomes}
       
       if (!agendamentos || agendamentos.length === 0) {
         // Nenhum agendamento encontrado
-        addIsisMessage('NÃ£o encontrei agendamentos futuros para vocÃª. ðŸ˜”', 800);
-        addIsisMessage('Que tal fazer um novo agendamento? ðŸ˜Š', 1400);
+        addIsisMessage('Não encontrei agendamentos futuros para você. 😔', 800);
+        addIsisMessage('Que tal fazer um novo agendamento? 😊', 1400);
         
         setTimeout(() => {
           iniciarAgendamento();
@@ -2764,14 +2764,14 @@ ${listaNomes}
         const horaInicio = format(new Date(agendamento.inicio), 'HH:mm');
         const horaFim = format(new Date(agendamento.fim), 'HH:mm');
         
-        addIsisMessage(`Encontrei seu agendamento para ${dataFormatada} das ${horaInicio} Ã s ${horaFim} - ${agendamento.modalidade}! ðŸŽ¯`, 800);
+        addIsisMessage(`Encontrei seu agendamento para ${dataFormatada} das ${horaInicio} às ${horaFim} - ${agendamento.modalidade}! 🎯`, 800);
         
         setTimeout(() => {
           carregarAgendamentoParaEdicao(agendamento);
         }, 1200);
       } else {
-        // MÃºltiplos agendamentos - permite escolher
-        addIsisMessage(`Encontrei ${agendamentos.length} agendamentos futuros! Qual vocÃª quer editar?`, 800);
+        // Múltiplos agendamentos - permite escolher
+        addIsisMessage(`Encontrei ${agendamentos.length} agendamentos futuros! Qual você quer editar?`, 800);
         
         const agendamentoButtons = agendamentos.map(ag => {
           const dataInicio = new Date(ag.inicio);
@@ -2780,7 +2780,7 @@ ${listaNomes}
           const horaInicio = format(dataInicio, 'HH:mm');
           const horaFim = format(new Date(ag.fim), 'HH:mm');
           
-          // Calcula duraÃ§Ã£o
+          // Calcula duração
           const duracaoMinutos = (new Date(ag.fim) - dataInicio) / (1000 * 60);
           const duracaoHoras = Math.floor(duracaoMinutos / 60);
           const duracaoRestante = duracaoMinutos % 60;
@@ -2791,15 +2791,15 @@ ${listaNomes}
             duracaoTexto = `${duracaoRestante}m`;
           }
           
-          // Recalcula valor correto baseado na duraÃ§Ã£o e valor da quadra
+          // Recalcula valor correto baseado na duração e valor da quadra
           const valorPorMeiaHora = Number(ag.quadras?.valor ?? 0);
           const slots = duracaoMinutos / 30; // Slots de 30 minutos
           const valorCorreto = Math.round(valorPorMeiaHora * slots * 100) / 100;
           
-          // Usa valor recalculado ao invÃ©s do valor do banco
+          // Usa valor recalculado ao invés do valor do banco
           const valorFormatado = valorCorreto.toFixed(2).replace('.', ',');
           
-          // Determina se Ã© hoje, amanhÃ£ ou outra data
+          // Determina se é hoje, amanhã ou outra data
           const hoje = new Date();
           const amanha = new Date(hoje);
           amanha.setDate(hoje.getDate() + 1);
@@ -2808,16 +2808,16 @@ ${listaNomes}
           if (dataInicio.toDateString() === hoje.toDateString()) {
             dataDisplay = 'Hoje';
           } else if (dataInicio.toDateString() === amanha.toDateString()) {
-            dataDisplay = 'AmanhÃ£';
+            dataDisplay = 'Amanhã';
           } else {
             dataDisplay = `${diaSemana.charAt(0).toUpperCase() + diaSemana.slice(1)}, ${dataFormatada}`;
           }
           
           return {
-            label: `${dataDisplay} â€¢ ${horaInicio}-${horaFim}`,
+            label: `${dataDisplay} • ${horaInicio}-${horaFim}`,
             value: `editar_agendamento_${ag.id}`,
-            icon: 'ðŸŸï¸',
-            subtitle: `${(ag.quadras?.nome || 'Quadra')} â€¢ ${(ag.modalidade || 'â€”')} â€¢ ${duracaoTexto}`,
+            icon: '🏟️',
+            subtitle: `${(ag.quadras?.nome || 'Quadra')} • ${(ag.modalidade || '—')} • ${duracaoTexto}`,
             agendamento: ag
           };
         });
@@ -2831,7 +2831,7 @@ ${listaNomes}
       console.error('[Isis] Erro ao buscar agendamentos:', error);
       // setIsLoading(false); // Removido para usar apenas indicador de digitando
       
-      addIsisMessage('Ops! Tive um problema ao buscar seus agendamentos. ðŸ˜”', 800);
+      addIsisMessage('Ops! Tive um problema ao buscar seus agendamentos. 😔', 800);
       addIsisMessage('Que tal tentar fazer um novo agendamento?', 1400);
       
       setTimeout(() => {
@@ -2840,15 +2840,15 @@ ${listaNomes}
     }
   };
   
-  // Carrega agendamento existente para ediÃ§Ã£o
+  // Carrega agendamento existente para edição
   const carregarAgendamentoParaEdicao = async (agendamento) => {
     try {
       console.log('[carregarAgendamentoParaEdicao] Iniciando carregamento do agendamento:', agendamento.id);
-      // Usa indicador de digitando ao invÃ©s de loading
+      // Usa indicador de digitando ao invés de loading
       // setIsLoading(true);
       
       // Busca dados completos do agendamento
-      console.debug('[carregarAgendamentoParaEdicao] Iniciando JOIN: agendamentos â‡¢ quadras, agendamento_participantes');
+      console.debug('[carregarAgendamentoParaEdicao] Iniciando JOIN: agendamentos ⇢ quadras, agendamento_participantes');
       const { data: agendamentoCompleto, error: agendamentoError } = await supabase
         .from('agendamentos')
         .select(`
@@ -2867,15 +2867,15 @@ ${listaNomes}
       
       if (agendamentoError) {
         console.error('[Isis] Erro ao buscar agendamento:', agendamentoError);
-        throw new Error(`Agendamento nÃ£o encontrado ou inacessÃ­vel: ${agendamentoError.message}`);
+        throw new Error(`Agendamento não encontrado ou inacessível: ${agendamentoError.message}`);
       }
       
       if (!agendamentoCompleto) {
-        throw new Error('Agendamento nÃ£o encontrado');
+        throw new Error('Agendamento não encontrado');
       }
       
-      // Empresa jÃ¡ foi carregada no useEffect inicial, nÃ£o precisa carregar novamente
-      // await loadEmpresa(); // REMOVIDO - nÃ£o Ã© necessÃ¡rio, a empresa jÃ¡ estÃ¡ carregada
+      // Empresa já foi carregada no useEffect inicial, não precisa carregar novamente
+      // await loadEmpresa(); // REMOVIDO - não é necessário, a empresa já está carregada
       
       // setIsLoading(false); // Removido para usar apenas indicador de digitando
       
@@ -2907,11 +2907,11 @@ ${listaNomes}
       });
       updateSelection('esporte', agendamentoCompleto.modalidade);
       
-      // Monta lista de participantes garantindo que o cliente responsÃ¡vel seja o principal
+      // Monta lista de participantes garantindo que o cliente responsável seja o principal
       const participanteClienteId = agendamentoCompleto.cliente_id || selections.cliente?.id || null;
       let brutos = agendamentoCompleto.agendamento_participantes || [];
 
-      // Se o JOIN nÃ£o trouxe participantes (possÃ­vel bloqueio de RLS), tenta SELECT direto para log/contorno
+      // Se o JOIN não trouxe participantes (possível bloqueio de RLS), tenta SELECT direto para log/contorno
       if (!brutos || brutos.length === 0) {
         try {
           console.debug('[carregarAgendamentoParaEdicao] JOIN sem participantes. Fazendo SELECT direto em agendamento_participantes...');
@@ -2961,9 +2961,9 @@ ${listaNomes}
           }));
       
       updateSelection('participantes', participantes);
-      // Marca que estamos no fluxo de ediÃ§Ã£o de agendamento existente
+      // Marca que estamos no fluxo de edição de agendamento existente
       try { updateSelection('editing_agendamento', true); } catch {}
-      // Restaura papÃ©is fixos a partir do banco (meta_roles); fallback para localStorage
+      // Restaura papéis fixos a partir do banco (meta_roles); fallback para localStorage
       try {
         const meta = agendamentoCompleto?.meta_roles || null;
         if (meta && typeof meta === 'object') {
@@ -2991,11 +2991,11 @@ ${listaNomes}
         }
       } catch {}
       
-      // Armazena o agendamento para ediÃ§Ã£o IMEDIATAMENTE
+      // Armazena o agendamento para edição IMEDIATAMENTE
       setAgendamentoCriado(agendamentoCompleto);
       
-      // Mostra resumo em modo de ediÃ§Ã£o
-      addIsisMessage('Perfeito! Aqui estÃ£o os detalhes do seu agendamento:', 600);
+      // Mostra resumo em modo de edição
+      addIsisMessage('Perfeito! Aqui estão os detalhes do seu agendamento:', 600);
       
       // Aguarda tempo suficiente para que as selections sejam atualizadas pelo contexto
       setTimeout(() => {
@@ -3009,45 +3009,45 @@ ${listaNomes}
         
         if (quadraFromJoin) {
           mostrarResumo(
-            horarioData,                           // horÃ¡rio
+            horarioData,                           // horário
             agendamentoCompleto.modalidade,        // esporte
-            true,                                  // modo ediÃ§Ã£o inicial
+            true,                                  // modo edição inicial
             quadraFromJoin,                        // quadra garantida
             dataAgendamento,                       // data
             participantes,                         // participantes
-            agendamentoCompleto                    // agendamento para ediÃ§Ã£o
+            agendamentoCompleto                    // agendamento para edição
           );
           nextStep('review');
         } else {
-          // Se ainda nÃ£o temos quadra, orientar usuÃ¡rio a selecionar novamente
-          addIsisMessage('NÃ£o consegui carregar os dados da quadra deste agendamento. Vamos escolher a quadra novamente?', 800);
+          // Se ainda não temos quadra, orientar usuário a selecionar novamente
+          addIsisMessage('Não consegui carregar os dados da quadra deste agendamento. Vamos escolher a quadra novamente?', 800);
           setTimeout(() => {
-            // Reaproveita fluxo de seleÃ§Ã£o de quadra inicial
+            // Reaproveita fluxo de seleção de quadra inicial
             const quadraButtons = quadras.map(q => ({
               label: q.nome,
               value: q.id,
-              icon: 'ðŸŸï¸',
+              icon: '🏟️',
               subtitle: q.descricao || q.tipo || null,
               quadra: q
             }));
-            addIsisMessageWithButtons('Qual quadra vocÃª quer?', quadraButtons, 600);
+            addIsisMessageWithButtons('Qual quadra você quer?', quadraButtons, 600);
           }, 1200);
         }
-      }, 1400); // Delay Ãºnico maior para aguardar atualizaÃ§Ã£o do contexto
+      }, 1400); // Delay único maior para aguardar atualização do contexto
       
     } catch (error) {
       console.error('[Isis] Erro ao carregar agendamento:', error);
       // setIsLoading(false); // Removido para usar apenas indicador de digitando
       
-      // Mensagem mais especÃ­fica baseada no tipo de erro
-      if (error.message.includes('nÃ£o encontrado')) {
-        addIsisMessage('Ops! Este agendamento nÃ£o foi encontrado ou pode ter sido cancelado. ðŸ˜”', 800);
+      // Mensagem mais específica baseada no tipo de erro
+      if (error.message.includes('não encontrado')) {
+        addIsisMessage('Ops! Este agendamento não foi encontrado ou pode ter sido cancelado. 😔', 800);
         addIsisMessage('Vou buscar seus agendamentos atualizados...', 1400);
         setTimeout(() => {
           buscarAgendamentosCliente(); // Busca novamente
         }, 2000);
       } else {
-        addIsisMessage('Ops! Tive um problema ao carregar o agendamento. ðŸ˜”', 800);
+        addIsisMessage('Ops! Tive um problema ao carregar o agendamento. 😔', 800);
         addIsisMessage('Que tal tentar fazer um novo agendamento?', 1400);
         setTimeout(() => {
           iniciarAgendamento();
@@ -3079,10 +3079,10 @@ ${listaNomes}
       
       // Mensagens variadas de cancelamento
       const cancelSuccessMessages = [
-        'âœ… Agendamento cancelado com sucesso!',
-        'âœ… Pronto! Seu agendamento foi cancelado.',
-        'âœ… Cancelamento realizado! Agendamento removido.',
-        'âœ… Feito! O agendamento foi cancelado com sucesso.'
+        '✅ Agendamento cancelado com sucesso!',
+        '✅ Pronto! Seu agendamento foi cancelado.',
+        '✅ Cancelamento realizado! Agendamento removido.',
+        '✅ Feito! O agendamento foi cancelado com sucesso.'
       ];
       
       const randomSuccessMsg = cancelSuccessMessages[Math.floor(Math.random() * cancelSuccessMessages.length)];
@@ -3093,7 +3093,7 @@ ${listaNomes}
       
       // Pergunta o que quer fazer agora
       setTimeout(() => {
-        addIsisMessage('O que vocÃª gostaria de fazer agora?', 800);
+        addIsisMessage('O que você gostaria de fazer agora?', 800);
         setTimeout(() => {
           perguntarAcaoInicial();
         }, 1200);
@@ -3108,82 +3108,82 @@ ${listaNomes}
     }
   };
   
-  // Inicia processo de avaliaÃ§Ã£o
+  // Inicia processo de avaliação
   const iniciarAvaliacao = () => {
-    // Desabilita todos os botÃµes anteriores para evitar que apareÃ§am durante avaliaÃ§Ã£o
+    // Desabilita todos os botões anteriores para evitar que apareçam durante avaliação
     disableAllButtons();
     
     const mensagensAvaliacao = [
-      // Mensagens diretas e amigÃ¡veis
-      'Antes de finalizar, que tal me dar uma avaliaÃ§Ã£o? ðŸ˜Š',
-      'Para finalizar, gostaria que avaliasse nosso atendimento! â­',
-      'Quase pronto! Me ajuda com uma avaliaÃ§Ã£o rÃ¡pida? ðŸŒŸ',
-      'Ãšltima etapa! Como foi nosso atendimento hoje? â­',
-      'Para encerrar, que nota vocÃª daria para nosso atendimento? ðŸ˜Š',
+      // Mensagens diretas e amigáveis
+      'Antes de finalizar, que tal me dar uma avaliação? 😊',
+      'Para finalizar, gostaria que avaliasse nosso atendimento! ⭐',
+      'Quase pronto! Me ajuda com uma avaliação rápida? 🌟',
+      'Última etapa! Como foi nosso atendimento hoje? ⭐',
+      'Para encerrar, que nota você daria para nosso atendimento? 😊',
       
-      // Mensagens mais casuais e descontraÃ­das
-      'Ei, que tal me contar como foi a experiÃªncia? ðŸ¤”',
-      'Curiosa para saber: como vocÃª avalia nosso atendimento? ðŸ’­',
-      'Rapidinho aqui: o que achou do nosso serviÃ§o? âš¡',
-      'Me conta aÃ­, como foi para vocÃª hoje? ðŸ˜„',
-      'Sua opiniÃ£o Ã© super importante! Como foi tudo? ðŸ’¬',
+      // Mensagens mais casuais e descontraídas
+      'Ei, que tal me contar como foi a experiência? 🤔',
+      'Curiosa para saber: como você avalia nosso atendimento? 💭',
+      'Rapidinho aqui: o que achou do nosso serviço? ⚡',
+      'Me conta aí, como foi para você hoje? 😄',
+      'Sua opinião é super importante! Como foi tudo? 💬',
       
       // Mensagens focadas na melhoria
-      'Sua avaliaÃ§Ã£o nos ajuda a melhorar! Como foi? ðŸ“ˆ',
-      'Para continuarmos evoluindo, como vocÃª nos avalia? ðŸš€',
-      'Queremos sempre melhorar! Que nota vocÃª daria? ðŸ’ª',
-      'Seu feedback Ã© ouro para nÃ³s! Como foi o atendimento? ðŸ†',
-      'Ajude-nos a ser ainda melhores! Qual sua avaliaÃ§Ã£o? âœ¨',
+      'Sua avaliação nos ajuda a melhorar! Como foi? 📈',
+      'Para continuarmos evoluindo, como você nos avalia? 🚀',
+      'Queremos sempre melhorar! Que nota você daria? 💪',
+      'Seu feedback é ouro para nós! Como foi o atendimento? 🏆',
+      'Ajude-nos a ser ainda melhores! Qual sua avaliação? ✨',
       
       // Mensagens mais pessoais
-      'Espero ter te ajudado bem! Como vocÃª me avalia? ðŸ¤—',
-      'Fiz um bom trabalho hoje? Me conta sua opiniÃ£o! ðŸ˜Š',
-      'Consegui resolver tudo certinho? Que tal uma avaliaÃ§Ã£o? ðŸ‘',
-      'Antes de vocÃª ir, me diz como foi nossa conversa? ðŸ’«',
-      'Sua experiÃªncia foi boa? Adoraria saber! ðŸŒˆ',
+      'Espero ter te ajudado bem! Como você me avalia? 🤗',
+      'Fiz um bom trabalho hoje? Me conta sua opinião! 😊',
+      'Consegui resolver tudo certinho? Que tal uma avaliação? 👍',
+      'Antes de você ir, me diz como foi nossa conversa? 💫',
+      'Sua experiência foi boa? Adoraria saber! 🌈',
       
-      // Mensagens com gratidÃ£o
-      'Obrigada pela confianÃ§a! Como foi para vocÃª? ðŸ™',
-      'Foi um prazer te atender! Que nota vocÃª daria? ðŸ’',
-      'AgradeÃ§o pela paciÃªncia! Como avalia nosso serviÃ§o? ðŸŒ¸',
-      'Muito obrigada! Me conta como foi tudo? ðŸ’–',
+      // Mensagens com gratidão
+      'Obrigada pela confiança! Como foi para você? 🙏',
+      'Foi um prazer te atender! Que nota você daria? 💝',
+      'Agradeço pela paciência! Como avalia nosso serviço? 🌸',
+      'Muito obrigada! Me conta como foi tudo? 💖',
       
       // Mensagens incentivando honestidade
-      'Pode ser sincero(a)! Como foi o atendimento? ðŸŽ¯',
-      'Sem papas na lÃ­ngua: que nota vocÃª daria? ðŸ˜‰',
-      'Honestamente, como vocÃª nos avalia? ðŸ”',
-      'Sua opiniÃ£o real Ã© importante! Como foi? ðŸ’¯',
+      'Pode ser sincero(a)! Como foi o atendimento? 🎯',
+      'Sem papas na língua: que nota você daria? 😉',
+      'Honestamente, como você nos avalia? 🔍',
+      'Sua opinião real é importante! Como foi? 💯',
       
-      // Mensagens mais tÃ©cnicas/profissionais
-      'Para finalizar o atendimento, preciso da sua avaliaÃ§Ã£o! ðŸ“‹',
-      'Processo quase concluÃ­do! Falta sÃ³ sua avaliaÃ§Ã£o! âœ…',
-      'Ãšltima etapa do nosso protocolo: sua opiniÃ£o! ðŸ“',
-      'Para encerrar com chave de ouro: como nos avalia? ðŸ”‘'
+      // Mensagens mais técnicas/profissionais
+      'Para finalizar o atendimento, preciso da sua avaliação! 📋',
+      'Processo quase concluído! Falta só sua avaliação! ✅',
+      'Última etapa do nosso protocolo: sua opinião! 📝',
+      'Para encerrar com chave de ouro: como nos avalia? 🔑'
     ];
     
     const randomMsg = mensagensAvaliacao[Math.floor(Math.random() * mensagensAvaliacao.length)];
     addIsisMessage(randomMsg, 800);
     
-    // Mostra input de avaliaÃ§Ã£o
+    // Mostra input de avaliação
     setTimeout(() => {
       setShowInput(true);
       nextStep('avaliacao');
       
-      // Scroll apÃ³s input aparecer
+      // Scroll após input aparecer
       setTimeout(() => {
         chatEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }, 300);
     }, 1200);
   };
   
-  // Handler para submissÃ£o da avaliaÃ§Ã£o
+  // Handler para submissão da avaliação
   const handleAvaliacaoSubmit = async (avaliacaoData) => {
     try {
-      // Mostra mensagem do usuÃ¡rio
+      // Mostra mensagem do usuário
       const ratingText = `${avaliacaoData.rating} estrela${avaliacaoData.rating > 1 ? 's' : ''}`;
       const userMsg = avaliacaoData.comentario 
-        ? `â­ ${ratingText}\nðŸ’¬ "${avaliacaoData.comentario}"`
-        : `â­ ${ratingText}`;
+        ? `⭐ ${ratingText}\n💬 "${avaliacaoData.comentario}"`
+        : `⭐ ${ratingText}`;
       
       addUserMessage(userMsg);
       setShowInput(false);
@@ -3191,7 +3191,7 @@ ${listaNomes}
       
       // Prepara dados do feedback conforme especificado
       const feedbackData = {
-        rating: avaliacaoData.rating, // SerÃ¡ mapeado para 'estrelas' no JSONBin
+        rating: avaliacaoData.rating, // Será mapeado para 'estrelas' no JSONBin
         comentario: avaliacaoData.comentario, // Input de texto opcional
         cliente_nome: selections.cliente?.nome, // Nome do cliente
         empresa_nome: empresa?.nome_fantasia || empresa?.razao_social || 'Arena' // Nome da empresa de quadras
@@ -3202,94 +3202,94 @@ ${listaNomes}
       
       setIsLoading(false);
       
-      // Mensagem Ãºnica de agradecimento + despedida baseada na avaliaÃ§Ã£o
+      // Mensagem única de agradecimento + despedida baseada na avaliação
       const nomeEmpresa = empresa?.nome_fantasia || empresa?.razao_social || 'a empresa';
       const hora = new Date().getHours();
       
-      // Despedida contextualizada por horÃ¡rio
+      // Despedida contextualizada por horário
       let despedidaHorario;
       if (hora >= 5 && hora < 12) {
-        despedidaHorario = 'Tenha um Ã³timo dia! â˜€ï¸';
+        despedidaHorario = 'Tenha um ótimo dia! ☀️';
       } else if (hora >= 12 && hora < 18) {
-        despedidaHorario = 'Tenha uma Ã³tima tarde! ðŸŒ¤ï¸';
+        despedidaHorario = 'Tenha uma ótima tarde! 🌤️';
       } else if (hora >= 18 && hora < 22) {
-        despedidaHorario = 'Tenha uma Ã³tima noite! ðŸŒ™';
+        despedidaHorario = 'Tenha uma ótima noite! 🌙';
       } else {
-        despedidaHorario = 'Tenha uma boa noite! ðŸŒƒ';
+        despedidaHorario = 'Tenha uma boa noite! 🌃';
       }
       
       let mensagemFinal;
       
       if (avaliacaoData.rating >= 4) {
         const mensagensPositivas = [
-          // Mensagens clÃ¡ssicas de agradecimento
-          `ðŸ¤© **Muito obrigada pela avaliaÃ§Ã£o!** A **${nomeEmpresa}** agradece imensamente! Foi um prazer te atender! ${despedidaHorario}`,
-          `ðŸ˜Š **Que bom que gostou!** A **${nomeEmpresa}** fica muito feliz! Volte sempre! ${despedidaHorario}`,
-          `ðŸŒŸ **Perfeito!** A **${nomeEmpresa}** agradece de coraÃ§Ã£o! Espero ter ajudado! ${despedidaHorario}`,
-          `ðŸ’– **Adorei seu feedback!** A **${nomeEmpresa}** estÃ¡ muito grata! Nos vemos em breve! ${despedidaHorario}`,
-          `ðŸŽ‰ **Excelente!** A **${nomeEmpresa}** agradece pela confianÃ§a! AtÃ© a prÃ³xima! ${despedidaHorario}`,
+          // Mensagens clássicas de agradecimento
+          `🤩 **Muito obrigada pela avaliação!** A **${nomeEmpresa}** agradece imensamente! Foi um prazer te atender! ${despedidaHorario}`,
+          `😊 **Que bom que gostou!** A **${nomeEmpresa}** fica muito feliz! Volte sempre! ${despedidaHorario}`,
+          `🌟 **Perfeito!** A **${nomeEmpresa}** agradece de coração! Espero ter ajudado! ${despedidaHorario}`,
+          `💖 **Adorei seu feedback!** A **${nomeEmpresa}** está muito grata! Nos vemos em breve! ${despedidaHorario}`,
+          `🎉 **Excelente!** A **${nomeEmpresa}** agradece pela confiança! Até a próxima! ${despedidaHorario}`,
           
           // Mensagens mais entusiasmadas
-          `ðŸš€ **Uau, que nota incrÃ­vel!** A **${nomeEmpresa}** estÃ¡ nas nuvens! Obrigada! ${despedidaHorario}`,
-          `âœ¨ **VocÃª Ã© demais!** A **${nomeEmpresa}** adora clientes como vocÃª! ${despedidaHorario}`,
-          `ðŸ† **Top demais!** A **${nomeEmpresa}** se sente campeÃ£ com seu feedback! ${despedidaHorario}`,
-          `ðŸ’« **Que alegria!** A **${nomeEmpresa}** fica radiante com sua avaliaÃ§Ã£o! ${despedidaHorario}`,
-          `ðŸŽŠ **Sensacional!** A **${nomeEmpresa}** estÃ¡ celebrando sua nota! ${despedidaHorario}`,
+          `🚀 **Uau, que nota incrível!** A **${nomeEmpresa}** está nas nuvens! Obrigada! ${despedidaHorario}`,
+          `✨ **Você é demais!** A **${nomeEmpresa}** adora clientes como você! ${despedidaHorario}`,
+          `🏆 **Top demais!** A **${nomeEmpresa}** se sente campeã com seu feedback! ${despedidaHorario}`,
+          `💫 **Que alegria!** A **${nomeEmpresa}** fica radiante com sua avaliação! ${despedidaHorario}`,
+          `🎊 **Sensacional!** A **${nomeEmpresa}** está celebrando sua nota! ${despedidaHorario}`,
           
           // Mensagens mais pessoais
-          `ðŸ˜ **Amei sua avaliaÃ§Ã£o!** Fico feliz em saber que te atendi bem! A **${nomeEmpresa}** agradece! ${despedidaHorario}`,
-          `ðŸ¤— **Que feedback maravilhoso!** Me deixou super feliz! A **${nomeEmpresa}** Ã© grata! ${despedidaHorario}`,
-          `ðŸ’ **Seu carinho me emociona!** A **${nomeEmpresa}** tem sorte de ter vocÃª! ${despedidaHorario}`,
-          `ðŸŒˆ **VocÃª iluminou meu dia!** A **${nomeEmpresa}** agradece de todo coraÃ§Ã£o! ${despedidaHorario}`,
+          `😍 **Amei sua avaliação!** Fico feliz em saber que te atendi bem! A **${nomeEmpresa}** agradece! ${despedidaHorario}`,
+          `🤗 **Que feedback maravilhoso!** Me deixou super feliz! A **${nomeEmpresa}** é grata! ${despedidaHorario}`,
+          `💝 **Seu carinho me emociona!** A **${nomeEmpresa}** tem sorte de ter você! ${despedidaHorario}`,
+          `🌈 **Você iluminou meu dia!** A **${nomeEmpresa}** agradece de todo coração! ${despedidaHorario}`,
           
           // Mensagens com convite para retorno
-          `ðŸŽ¯ **Nota mÃ¡xima!** A **${nomeEmpresa}** te espera sempre de braÃ§os abertos! ${despedidaHorario}`,
-          `ðŸ’Ž **Cliente 5 estrelas!** A **${nomeEmpresa}** adora te ter aqui! Volte logo! ${despedidaHorario}`,
-          `ðŸŒŸ **VocÃª Ã© especial!** A **${nomeEmpresa}** sempre terÃ¡ um lugar especial para vocÃª! ${despedidaHorario}`,
-          `ðŸŽª **Show de avaliaÃ§Ã£o!** A **${nomeEmpresa}** te aguarda para a prÃ³xima apresentaÃ§Ã£o! ${despedidaHorario}`
+          `🎯 **Nota máxima!** A **${nomeEmpresa}** te espera sempre de braços abertos! ${despedidaHorario}`,
+          `💎 **Cliente 5 estrelas!** A **${nomeEmpresa}** adora te ter aqui! Volte logo! ${despedidaHorario}`,
+          `🌟 **Você é especial!** A **${nomeEmpresa}** sempre terá um lugar especial para você! ${despedidaHorario}`,
+          `🎪 **Show de avaliação!** A **${nomeEmpresa}** te aguarda para a próxima apresentação! ${despedidaHorario}`
         ];
         mensagemFinal = mensagensPositivas[Math.floor(Math.random() * mensagensPositivas.length)];
       } else if (avaliacaoData.rating === 3) {
         const mensagensNeutras = [
           // Mensagens focadas em melhoria
-          `ðŸ˜Š **Obrigada pelo feedback!** A **${nomeEmpresa}** vai melhorar ainda mais! ${despedidaHorario}`,
-          `ðŸ™ **Agradecemos sua avaliaÃ§Ã£o!** A **${nomeEmpresa}** estÃ¡ trabalhando para evoluir! ${despedidaHorario}`,
-          `ðŸ’ª **Obrigada!** A **${nomeEmpresa}** valoriza seu retorno! Foi um prazer te atender! ${despedidaHorario}`,
+          `😊 **Obrigada pelo feedback!** A **${nomeEmpresa}** vai melhorar ainda mais! ${despedidaHorario}`,
+          `🙏 **Agradecemos sua avaliação!** A **${nomeEmpresa}** está trabalhando para evoluir! ${despedidaHorario}`,
+          `💪 **Obrigada!** A **${nomeEmpresa}** valoriza seu retorno! Foi um prazer te atender! ${despedidaHorario}`,
           
           // Mensagens mais otimistas
-          `ðŸŒ± **Toda avaliaÃ§Ã£o nos faz crescer!** A **${nomeEmpresa}** agradece sua sinceridade! ${despedidaHorario}`,
-          `ðŸŽ¯ **Feedback valioso!** A **${nomeEmpresa}** usa cada retorno para evoluir! ${despedidaHorario}`,
-          `ðŸ“ˆ **Obrigada pela nota!** A **${nomeEmpresa}** estÃ¡ sempre buscando melhorar! ${despedidaHorario}`,
-          `ðŸ”§ **Seu retorno Ã© importante!** A **${nomeEmpresa}** vai usar para aprimorar nosso serviÃ§o! ${despedidaHorario}`,
+          `🌱 **Toda avaliação nos faz crescer!** A **${nomeEmpresa}** agradece sua sinceridade! ${despedidaHorario}`,
+          `🎯 **Feedback valioso!** A **${nomeEmpresa}** usa cada retorno para evoluir! ${despedidaHorario}`,
+          `📈 **Obrigada pela nota!** A **${nomeEmpresa}** está sempre buscando melhorar! ${despedidaHorario}`,
+          `🔧 **Seu retorno é importante!** A **${nomeEmpresa}** vai usar para aprimorar nosso serviço! ${despedidaHorario}`,
           
           // Mensagens com convite para nova chance
-          `ðŸ¤ **Agradecemos a oportunidade!** A **${nomeEmpresa}** espera te surpreender na prÃ³xima! ${despedidaHorario}`,
-          `ðŸ’¡ **Obrigada pela dica!** A **${nomeEmpresa}** vai trabalhar para te conquistar! ${despedidaHorario}`,
-          `ðŸŽª **Toda crÃ­tica construtiva Ã© bem-vinda!** A **${nomeEmpresa}** agradece! ${despedidaHorario}`
+          `🤝 **Agradecemos a oportunidade!** A **${nomeEmpresa}** espera te surpreender na próxima! ${despedidaHorario}`,
+          `💡 **Obrigada pela dica!** A **${nomeEmpresa}** vai trabalhar para te conquistar! ${despedidaHorario}`,
+          `🎪 **Toda crítica construtiva é bem-vinda!** A **${nomeEmpresa}** agradece! ${despedidaHorario}`
         ];
         mensagemFinal = mensagensNeutras[Math.floor(Math.random() * mensagensNeutras.length)];
       } else {
         const mensagensNegativas = [
-          // Mensagens empÃ¡ticas e comprometidas
-          `ðŸ˜” **Obrigada pela sinceridade.** A **${nomeEmpresa}** vai trabalhar para melhorar! ${despedidaHorario}`,
-          `ðŸ’™ **Agradecemos seu feedback.** A **${nomeEmpresa}** estÃ¡ comprometida em evoluir! ${despedidaHorario}`,
-          `ðŸ™ **Obrigada por compartilhar.** A **${nomeEmpresa}** vai usar seu retorno para melhorar! ${despedidaHorario}`,
+          // Mensagens empáticas e comprometidas
+          `😔 **Obrigada pela sinceridade.** A **${nomeEmpresa}** vai trabalhar para melhorar! ${despedidaHorario}`,
+          `💙 **Agradecemos seu feedback.** A **${nomeEmpresa}** está comprometida em evoluir! ${despedidaHorario}`,
+          `🙏 **Obrigada por compartilhar.** A **${nomeEmpresa}** vai usar seu retorno para melhorar! ${despedidaHorario}`,
           
-          // Mensagens mais humildes e responsÃ¡veis
-          `ðŸ˜ž **Lamentamos nÃ£o ter atendido suas expectativas.** A **${nomeEmpresa}** vai se esforÃ§ar mais! ${despedidaHorario}`,
-          `ðŸ’” **Sentimos muito pela experiÃªncia.** A **${nomeEmpresa}** levarÃ¡ isso muito a sÃ©rio! ${despedidaHorario}`,
-          `ðŸ¤² **Assumimos a responsabilidade.** A **${nomeEmpresa}** vai fazer melhor da prÃ³xima vez! ${despedidaHorario}`,
-          `ðŸ˜“ **Sua insatisfaÃ§Ã£o nos preocupa.** A **${nomeEmpresa}** vai revisar todos os processos! ${despedidaHorario}`,
+          // Mensagens mais humildes e responsáveis
+          `😞 **Lamentamos não ter atendido suas expectativas.** A **${nomeEmpresa}** vai se esforçar mais! ${despedidaHorario}`,
+          `💔 **Sentimos muito pela experiência.** A **${nomeEmpresa}** levará isso muito a sério! ${despedidaHorario}`,
+          `🤲 **Assumimos a responsabilidade.** A **${nomeEmpresa}** vai fazer melhor da próxima vez! ${despedidaHorario}`,
+          `😓 **Sua insatisfação nos preocupa.** A **${nomeEmpresa}** vai revisar todos os processos! ${despedidaHorario}`,
           
           // Mensagens com pedido de nova oportunidade
-          `ðŸ”„ **Obrigada pelo alerta!** A **${nomeEmpresa}** espera uma nova chance de te impressionar! ${despedidaHorario}`,
-          `ðŸ’ª **Vamos melhorar!** A **${nomeEmpresa}** promete que da prÃ³xima vez serÃ¡ diferente! ${despedidaHorario}`,
-          `ðŸŽ¯ **Seu feedback Ã© nosso combustÃ­vel!** A **${nomeEmpresa}** vai usar para crescer! ${despedidaHorario}`,
-          `ðŸ› ï¸ **JÃ¡ estamos trabalhando nas melhorias!** A **${nomeEmpresa}** agradece sua paciÃªncia! ${despedidaHorario}`,
+          `🔄 **Obrigada pelo alerta!** A **${nomeEmpresa}** espera uma nova chance de te impressionar! ${despedidaHorario}`,
+          `💪 **Vamos melhorar!** A **${nomeEmpresa}** promete que da próxima vez será diferente! ${despedidaHorario}`,
+          `🎯 **Seu feedback é nosso combustível!** A **${nomeEmpresa}** vai usar para crescer! ${despedidaHorario}`,
+          `🛠️ **Já estamos trabalhando nas melhorias!** A **${nomeEmpresa}** agradece sua paciência! ${despedidaHorario}`,
           
           // Mensagens valorizando a honestidade
-          `ðŸ’¯ **Sua honestidade Ã© valiosa!** A **${nomeEmpresa}** prefere a verdade para evoluir! ${despedidaHorario}`,
-          `ðŸŽª **CrÃ­ticas nos fazem crescer!** A **${nomeEmpresa}** agradece sua coragem de falar! ${despedidaHorario}`
+          `💯 **Sua honestidade é valiosa!** A **${nomeEmpresa}** prefere a verdade para evoluir! ${despedidaHorario}`,
+          `🎪 **Críticas nos fazem crescer!** A **${nomeEmpresa}** agradece sua coragem de falar! ${despedidaHorario}`
         ];
         mensagemFinal = mensagensNegativas[Math.floor(Math.random() * mensagensNegativas.length)];
       }
@@ -3297,38 +3297,38 @@ ${listaNomes}
       addIsisMessage(mensagemFinal, 600);
       
     } catch (error) {
-      console.error('[Isis] Erro ao enviar avaliaÃ§Ã£o:', error);
+      console.error('[Isis] Erro ao enviar avaliação:', error);
       setIsLoading(false);
       
       const nomeEmpresa = empresa?.nome_fantasia || empresa?.razao_social || 'a empresa';
       const hora = new Date().getHours();
       
-      // Despedida contextualizada por horÃ¡rio
+      // Despedida contextualizada por horário
       let despedidaHorario;
       if (hora >= 5 && hora < 12) {
-        despedidaHorario = 'Tenha um Ã³timo dia! â˜€ï¸';
+        despedidaHorario = 'Tenha um ótimo dia! ☀️';
       } else if (hora >= 12 && hora < 18) {
-        despedidaHorario = 'Tenha uma Ã³tima tarde! ðŸŒ¤ï¸';
+        despedidaHorario = 'Tenha uma ótima tarde! 🌤️';
       } else if (hora >= 18 && hora < 22) {
-        despedidaHorario = 'Tenha uma Ã³tima noite! ðŸŒ™';
+        despedidaHorario = 'Tenha uma ótima noite! 🌙';
       } else {
-        despedidaHorario = 'Tenha uma boa noite! ðŸŒƒ';
+        despedidaHorario = 'Tenha uma boa noite! 🌃';
       }
       
       const mensagensErro = [
-        // Mensagens tÃ©cnicas mas amigÃ¡veis
-        `Ops! Tive um problema ao salvar sua avaliaÃ§Ã£o, mas a **${nomeEmpresa}** agradece muito seu feedback! ${despedidaHorario}`,
-        `ðŸ˜Š NÃ£o consegui salvar sua avaliaÃ§Ã£o, mas a **${nomeEmpresa}** agradece imensamente! ${despedidaHorario}`,
+        // Mensagens técnicas mas amigáveis
+        `Ops! Tive um problema ao salvar sua avaliação, mas a **${nomeEmpresa}** agradece muito seu feedback! ${despedidaHorario}`,
+        `😊 Não consegui salvar sua avaliação, mas a **${nomeEmpresa}** agradece imensamente! ${despedidaHorario}`,
         
-        // Mensagens mais descontraÃ­das
-        `ðŸ¤– Deu uma travadinha aqui, mas sua opiniÃ£o jÃ¡ ficou guardada no meu coraÃ§Ã£o! A **${nomeEmpresa}** agradece! ${despedidaHorario}`,
-        `ðŸ˜… Ops, falhei na tecnologia, mas nÃ£o falhei em te ouvir! A **${nomeEmpresa}** valoriza seu feedback! ${despedidaHorario}`,
-        `ðŸ”§ Parece que o sistema deu soluÃ§o, mas sua avaliaÃ§Ã£o foi ouvida! A **${nomeEmpresa}** agradece! ${despedidaHorario}`,
+        // Mensagens mais descontraídas
+        `🤖 Deu uma travadinha aqui, mas sua opinião já ficou guardada no meu coração! A **${nomeEmpresa}** agradece! ${despedidaHorario}`,
+        `😅 Ops, falhei na tecnologia, mas não falhei em te ouvir! A **${nomeEmpresa}** valoriza seu feedback! ${despedidaHorario}`,
+        `🔧 Parece que o sistema deu soluço, mas sua avaliação foi ouvida! A **${nomeEmpresa}** agradece! ${despedidaHorario}`,
         
         // Mensagens com humor leve
-        `ðŸ¤·â€â™€ï¸ A internet nÃ£o colaborou, mas sua opiniÃ£o chegou atÃ© mim! A **${nomeEmpresa}** Ã© grata! ${despedidaHorario}`,
-        `ðŸ“¡ Problema tÃ©cnico aqui, mas o importante Ã© que vocÃª compartilhou! A **${nomeEmpresa}** agradece! ${despedidaHorario}`,
-        `ðŸ’» O sistema travou, mas sua avaliaÃ§Ã£o nÃ£o passou despercebida! A **${nomeEmpresa}** valoriza! ${despedidaHorario}`
+        `🤷‍♀️ A internet não colaborou, mas sua opinião chegou até mim! A **${nomeEmpresa}** é grata! ${despedidaHorario}`,
+        `📡 Problema técnico aqui, mas o importante é que você compartilhou! A **${nomeEmpresa}** agradece! ${despedidaHorario}`,
+        `💻 O sistema travou, mas sua avaliação não passou despercebida! A **${nomeEmpresa}** valoriza! ${despedidaHorario}`
       ];
       
       const mensagemErro = mensagensErro[Math.floor(Math.random() * mensagensErro.length)];
@@ -3366,12 +3366,12 @@ ${listaNomes}
       // Array de nomes para campo 'clientes' do agendamento (usando ordem correta)
       const nomesArray = participantesOrdenados.map(p => p.nome);
       
-      // Calcula valor total baseado na duraÃ§Ã£o
+      // Calcula valor total baseado na duração
       const [h1, m1] = selections.horario.inicio.split(':').map(Number);
       const [h2, m2] = selections.horario.fim.split(':').map(Number);
       let duracaoMinutos = (h2 * 60 + m2) - (h1 * 60 + m1);
       
-      // Se fim for 00:00, Ã© meia-noite do dia seguinte
+      // Se fim for 00:00, é meia-noite do dia seguinte
       if (h2 === 0 && m2 === 0) {
         duracaoMinutos = (24 * 60) - (h1 * 60 + m1);
       }
@@ -3380,7 +3380,7 @@ ${listaNomes}
       const slots = duracaoMinutos / 30; // Slots de 30 minutos
       const valorTotal = Math.round(valorPorMeiaHora * slots * 100) / 100;
       
-      // Monta metaRoles a partir das selections (papÃ©is fixos)
+      // Monta metaRoles a partir das selections (papéis fixos)
       const metaRoles = {
         levantadores: Array.isArray(selections.levantadores) ? selections.levantadores : [],
         goleiros: Array.isArray(selections.goleiros) ? selections.goleiros : [],
@@ -3436,7 +3436,7 @@ ${listaNomes}
       
       // Atualiza o agendamento armazenado
       setAgendamentoCriado(agendamento);
-      // Salva papÃ©is fixos localmente para este agendamento
+      // Salva papéis fixos localmente para este agendamento
       try {
         const key = `f7a:fixos:${agendamento.id}`;
         const payload = {
@@ -3487,12 +3487,12 @@ ${listaNomes}
       // Array de nomes para campo 'clientes' do agendamento - usando ordem correta
       const nomesArrayOrdenado = participantesOrdenados.map(p => p.nome);
       
-      // Calcula valor total baseado na duraÃ§Ã£o
+      // Calcula valor total baseado na duração
       const [h1, m1] = selections.horario.inicio.split(':').map(Number);
       const [h2, m2] = selections.horario.fim.split(':').map(Number);
       let duracaoMinutos = (h2 * 60 + m2) - (h1 * 60 + m1);
       
-      // Se fim for 00:00, Ã© meia-noite do dia seguinte
+      // Se fim for 00:00, é meia-noite do dia seguinte
       if (h2 === 0 && m2 === 0) {
         duracaoMinutos = (24 * 60) - (h1 * 60 + m1);
       }
@@ -3501,7 +3501,7 @@ ${listaNomes}
       const slots = duracaoMinutos / 30; // Slots de 30 minutos
       const valorTotal = Math.round(valorPorMeiaHora * slots * 100) / 100;
       
-      // Monta metaRoles a partir das selections (papÃ©is fixos)
+      // Monta metaRoles a partir das selections (papéis fixos)
       const metaRoles = {
         levantadores: Array.isArray(selections.levantadores) ? selections.levantadores : [],
         goleiros: Array.isArray(selections.goleiros) ? selections.goleiros : [],
@@ -3509,7 +3509,7 @@ ${listaNomes}
         fixoRoles: (selections.fixoRoles && typeof selections.fixoRoles === 'object') ? selections.fixoRoles : {},
       };
 
-      // Busca o maior cÃ³digo jÃ¡ usado para esta empresa
+      // Busca o maior código já usado para esta empresa
       const { data: ultimoAgendamento } = await supabase
         .from('agendamentos')
         .select('codigo')
@@ -3519,17 +3519,17 @@ ${listaNomes}
         .single();
       
       let proximoCodigo = ultimoAgendamento ? ultimoAgendamento.codigo + 1 : 1;
-      console.log('[criarAgendamento] Ãšltimo cÃ³digo usado:', ultimoAgendamento?.codigo);
-      console.log('[criarAgendamento] PrÃ³ximo cÃ³digo inicial:', proximoCodigo);
+      console.log('[criarAgendamento] Último código usado:', ultimoAgendamento?.codigo);
+      console.log('[criarAgendamento] Próximo código inicial:', proximoCodigo);
       
-      // Tenta criar agendamento, incrementando cÃ³digo se necessÃ¡rio
+      // Tenta criar agendamento, incrementando código se necessário
       let agendamento;
       let tentativas = 0;
       const maxTentativas = 10;
       
       while (!agendamento && tentativas < maxTentativas) {
         tentativas++;
-        console.log('[criarAgendamento] Tentativa', tentativas, 'com cÃ³digo:', proximoCodigo);
+        console.log('[criarAgendamento] Tentativa', tentativas, 'com código:', proximoCodigo);
         
         const { data, error } = await supabase
           .from('agendamentos')
@@ -3553,25 +3553,25 @@ ${listaNomes}
         
         if (error) {
           if (error.code === '23505') {
-            // CÃ³digo duplicado, tenta o prÃ³ximo
-            console.log('[criarAgendamento] CÃ³digo', proximoCodigo, 'jÃ¡ existe, tentando prÃ³ximo...');
+            // Código duplicado, tenta o próximo
+            console.log('[criarAgendamento] Código', proximoCodigo, 'já existe, tentando próximo...');
             proximoCodigo++;
           } else {
-            // Outro erro, lanÃ§a exceÃ§Ã£o
+            // Outro erro, lança exceção
             throw error;
           }
         } else {
           // Sucesso!
           agendamento = data;
-          console.log('[criarAgendamento] Agendamento criado com cÃ³digo:', agendamento.codigo);
+          console.log('[criarAgendamento] Agendamento criado com código:', agendamento.codigo);
         }
       }
       
       if (!agendamento) {
-        throw new Error('NÃ£o foi possÃ­vel gerar um cÃ³digo Ãºnico apÃ³s ' + maxTentativas + ' tentativas');
+        throw new Error('Não foi possível gerar um código único após ' + maxTentativas + ' tentativas');
       }
       
-      // Atualizar counter para manter sincronizaÃ§Ã£o com AgendaPage
+      // Atualizar counter para manter sincronização com AgendaPage
       try {
         const { data: empresaData } = await supabase
           .from('empresas')
@@ -3588,11 +3588,11 @@ ${listaNomes}
           console.log('[criarAgendamento] Counter atualizado para:', agendamento.codigo + 1);
         }
       } catch (counterError) {
-        // NÃ£o bloqueia o fluxo se falhar - apenas loga
+        // Não bloqueia o fluxo se falhar - apenas loga
         console.warn('[criarAgendamento] Erro ao atualizar counter:', counterError);
       }
       
-      // Criar participantes usando a ordem jÃ¡ definida (cliente principal primeiro)
+      // Criar participantes usando a ordem já definida (cliente principal primeiro)
       const participantes = participantesOrdenados.map((p, index) => ({
         codigo_empresa: codigoEmpresa,
         agendamento_id: agendamento.id,
@@ -3613,9 +3613,9 @@ ${listaNomes}
       // Sucesso!
       setIsLoading(false);
       
-      // Armazena o agendamento criado para ediÃ§Ãµes posteriores
+      // Armazena o agendamento criado para edições posteriores
       setAgendamentoCriado(agendamento);
-      // Salva papÃ©is fixos localmente para este agendamento
+      // Salva papéis fixos localmente para este agendamento
       try {
         const key = `f7a:fixos:${agendamento.id}`;
         const payload = {
@@ -3647,11 +3647,11 @@ ${listaNomes}
     }
   };
   
-  // Handler centralizado para cliques em botÃµes
+  // Handler centralizado para cliques em botões
   const handleButtonClick = (button, sourceMessageId) => {
-    // Desabilita todos os botÃµes imediatamente para evitar cliques duplos
+    // Desabilita todos os botões imediatamente para evitar cliques duplos
     disableAllButtons();
-    // Oculta SOMENTE os botÃµes do balÃ£o de pergunta (mantendo o texto)
+    // Oculta SOMENTE os botões do balão de pergunta (mantendo o texto)
     if (sourceMessageId) {
       try { hideButtonsInMessage(sourceMessageId); } catch {}
     }
@@ -3664,7 +3664,7 @@ ${listaNomes}
         handleDataSelection(button);
         break;
       case 'identificacao':
-        // ApÃ³s identificaÃ§Ã£o, trata botÃµes de aÃ§Ã£o inicial
+        // Após identificação, trata botões de ação inicial
         handleConfirmacao(button);
         break;
       case 'review':
@@ -3681,20 +3681,20 @@ ${listaNomes}
             updateSelection('cliente', sugerido);
             updateSelection('cliente_sugerido', null);
             const nomeCurto = getNomeCurto(sugerido.nome || '');
-            addIsisMessage(`Perfeito, **${nomeCurto}**! ðŸ‘Œ`, 300);
+            addIsisMessage(`Perfeito, **${nomeCurto}**! 👌`, 300);
             setShowInput(false);
-            // segue para aÃ§Ãµes iniciais
+            // segue para ações iniciais
             setTimeout(() => {
               try { perguntarAcaoInicial(); } catch {}
             }, 700);
           } else {
-            // fallback: volta ao inÃ­cio de identificaÃ§Ã£o
+            // fallback: volta ao início de identificação
             setShowInput(true);
             nextStep('identificacao');
           }
         } else if (v === 'corrigir_cadastro') {
-          // Volta para o formulÃ¡rio de cadastro para correÃ§Ã£o dos dados
-          addIsisMessage('Sem problemas! Vamos corrigir seus dados. âœï¸', 300);
+          // Volta para o formulário de cadastro para correção dos dados
+          addIsisMessage('Sem problemas! Vamos corrigir seus dados. ✏️', 300);
           setShowInput(true);
           nextStep('cadastro');
         }
@@ -3709,7 +3709,7 @@ ${listaNomes}
   const renderInput = () => {
     console.log('[renderInput] currentStep:', currentStep, 'showInput:', showInput);
     
-    // NÃ£o mostra input se showInput for false (efeito de delay)
+    // Não mostra input se showInput for false (efeito de delay)
     if (!showInput) {
       console.log('[renderInput] showInput=false, retornando null');
       return null;
@@ -3739,7 +3739,7 @@ ${listaNomes}
               updateSelection('goleiros', gols);
               updateSelection('fixos', fixos);
               updateSelection('fixoRoles', map);
-              // Se jÃ¡ existe agendamento, persiste imediatamente no banco
+              // Se já existe agendamento, persiste imediatamente no banco
               if (agendamentoCriado?.id) {
                 (async () => {
                   try {
@@ -3814,18 +3814,18 @@ ${listaNomes}
           onMudarData={handleMudarData}
           onMudarQuadra={() => {
             try {
-              // ForÃ§a modo ediÃ§Ã£o de horÃ¡rio para que handleQuadraSelection recarregue os horÃ¡rios
+              // Força modo edição de horário para que handleQuadraSelection recarregue os horários
               setShowInput(false);
               setEditingType('horario');
               nextStep('review');
               const quadraButtons = (quadras || []).map(q => ({
                 label: q.nome,
                 value: q.id,
-                icon: 'ðŸŸï¸',
+                icon: '🏟️',
                 subtitle: q.descricao || q.tipo || null,
                 quadra: q
               }));
-              if (quadraButtons.length > 0) addIsisMessageWithButtons('Qual quadra vocÃª quer?', quadraButtons, 600);
+              if (quadraButtons.length > 0) addIsisMessageWithButtons('Qual quadra você quer?', quadraButtons, 600);
             } catch {}
           }}
           hasMultipleQuadras={(quadras || []).length > 1}
@@ -3848,7 +3848,7 @@ ${listaNomes}
     return null;
   };
   
-  // Tela quando nÃ£o hÃ¡ nome fantasia via rota NEM via subdomÃ­nio
+  // Tela quando não há nome fantasia via rota NEM via subdomínio
   if (!nomeFantasiaEfetivo) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center p-4">
@@ -3858,7 +3858,7 @@ ${listaNomes}
           transition={{ duration: 0.5 }}
           className="text-center max-w-2xl"
         >
-          {/* Isis Avatar com animaÃ§Ã£o */}
+          {/* Isis Avatar com animação */}
           <motion.div 
             className="mb-8 flex justify-center"
             initial={{ scale: 0.8, opacity: 0 }}
@@ -3883,7 +3883,7 @@ ${listaNomes}
             className="space-y-6"
           >
             <h1 className="text-3xl md:text-4xl font-bold text-text-primary mb-4">
-              {getCumprimentoPorHorario()}ðŸ‘‹! Tentando Agendar?
+              {getCumprimentoPorHorario()}👋! Tentando Agendar?
             </h1>
             
             <div className="bg-surface/70 backdrop-blur-sm border border-white/10 rounded-2xl p-8 shadow-xl">
@@ -3919,7 +3919,7 @@ ${listaNomes}
   
   // Loading inicial
   if (loadingEmpresa) {
-    return <IsisPremiumLoading message="Preparando sua experiÃªncia..." />;
+    return <IsisPremiumLoading message="Preparando sua experiência..." />;
   }
   
   if (!empresa) {
@@ -3931,7 +3931,7 @@ ${listaNomes}
           transition={{ duration: 0.5 }}
           className="text-center max-w-2xl"
         >
-          {/* Isis Avatar com animaÃ§Ã£o */}
+          {/* Isis Avatar com animação */}
           <motion.div 
             className="mb-8 flex justify-center"
             initial={{ scale: 0.8, opacity: 0 }}
@@ -3956,7 +3956,7 @@ ${listaNomes}
             className="space-y-6"
           >
             <h1 className="text-3xl md:text-4xl font-bold text-text-primary mb-4">
-              {getCumprimentoPorHorario()}! Tentando Agendar? ðŸ‘‹
+              {getCumprimentoPorHorario()}! Tentando Agendar? 👋
             </h1>
             
             <div className="bg-surface/70 backdrop-blur-sm border border-white/10 rounded-2xl p-8 shadow-xl">
@@ -4012,7 +4012,7 @@ ${listaNomes}
         className="bg-surface/70 backdrop-blur-xl border-b border-white/10 sticky top-0 z-20 shadow-lg"
       >
         <div className="container mx-auto px-4 md:px-6 py-3 md:py-4 flex items-center justify-between gap-3 md:gap-4">
-          {/* Ãsis + Badge AI */}
+          {/* Ísis + Badge AI */}
           <div className="flex items-center gap-2 md:gap-4">
             {/* Logo/Avatar */}
             <div className="relative group">
@@ -4022,10 +4022,10 @@ ${listaNomes}
               <div className="absolute bottom-0 right-0 w-3 h-3 md:w-4 md:h-4 bg-success rounded-full border-2 border-surface" />
             </div>
             
-            {/* Nome Ãsis com Badge AI Embaixo */}
+            {/* Nome Ísis com Badge AI Embaixo */}
             <div className="flex flex-col gap-0.5 md:gap-1">
               <h1 className="font-bold text-text-primary text-lg md:text-2xl tracking-tight leading-none">
-                Ãsis
+                Ísis
               </h1>
               
               {/* Badge AI Futurista */}
@@ -4035,7 +4035,7 @@ ${listaNomes}
                 
                 {/* Badge principal */}
                 <div className="relative px-2 py-0.5 md:px-2.5 md:py-1 bg-gradient-to-r from-cyan-500/20 via-purple-500/20 to-pink-500/20 backdrop-blur-sm border border-cyan-500/50 rounded-md flex items-center gap-1 md:gap-1.5 shadow-lg">
-                  {/* Ãcone de chip/circuito */}
+                  {/* Ícone de chip/circuito */}
                   <svg className="w-2.5 h-2.5 md:w-3 md:h-3 text-cyan-400" fill="currentColor" viewBox="0 0 20 20">
                     <path d="M13 7H7v6h6V7z"/>
                     <path fillRule="evenodd" d="M7 2a1 1 0 012 0v1h2V2a1 1 0 112 0v1h2a2 2 0 012 2v2h1a1 1 0 110 2h-1v2h1a1 1 0 110 2h-1v2a2 2 0 01-2 2h-2v1a1 1 0 11-2 0v-1H9v1a1 1 0 11-2 0v-1H5a2 2 0 01-2-2v-2H2a1 1 0 110-2h1V9H2a1 1 0 010-2h1V5a2 2 0 012-2h2V2zM5 5h10v10H5V5z" clipRule="evenodd"/>
@@ -4073,7 +4073,7 @@ ${listaNomes}
                       alt="Logo da empresa" 
                       className="w-full h-full object-cover"
                       onError={(e) => {
-                        // Fallback para Ã­cone se imagem nÃ£o carregar
+                        // Fallback para ícone se imagem não carregar
                         e.target.style.display = 'none';
                         e.target.nextSibling.style.display = 'block';
                       }}

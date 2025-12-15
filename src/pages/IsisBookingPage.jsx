@@ -14,6 +14,7 @@ import { IsisAvaliacaoInput } from '@/components/isis/IsisAvaliacaoInput';
 import { IsisPremiumLoading } from '@/components/isis/IsisPremiumLoading';
 import { getIsisMessage } from '@/lib/isisMessages';
 import { supabase } from '@/lib/supabase';
+import { adicionarFeedbackIsis } from '@/lib/isisFeedback';
 import { format, addDays, startOfDay, setHours, setMinutes, addMinutes } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { toast } from '@/components/ui/use-toast';
@@ -56,7 +57,8 @@ const IsisBookingPageContent = () => {
     setIsLoading,
     setIsTyping,
     chatEndRef,
-    sessionId
+    sessionId,
+    messages
   } = useIsis();
   
   const [empresa, setEmpresa] = useState(null);
@@ -3279,6 +3281,9 @@ ${listaNomes}
   // Handler para submissão da avaliação
   const handleAvaliacaoSubmit = async (avaliacaoData) => {
     try {
+      // Snapshot da conversa ATUAL (antes de registrar a mensagem de avaliação do usuário)
+      const snapshot = Array.isArray(messages) ? [...messages] : [];
+
       // Mostra mensagem do usuário
       const ratingText = `${avaliacaoData.rating} estrela${avaliacaoData.rating > 1 ? 's' : ''}`;
       const userMsg = avaliacaoData.comentario 
@@ -3289,19 +3294,26 @@ ${listaNomes}
       setShowInput(false);
       setIsLoading(true);
       
-      // Envia feedback para Edge Function (sem depender de .env no cliente)
-      await supabase.functions.invoke('isis-chat', {
-        body: {
-          mode: 'set_feedback',
-          estrelas: Number(avaliacaoData.rating),
-          comentario: avaliacaoData.comentario || null,
-          // Identidade para estruturar por cliente
-          cod_cliente: selections?.cliente?.id ? String(selections.cliente.id) : '',
-          nome_cliente: selections?.cliente?.nome || selections?.cliente?.name || '',
-          empresa: empresa?.nome_fantasia || empresa?.razao_social || '',
-          software: 'F7 Arena',
-          session_id: sessionId || undefined,
-        },
+      // Monta conversa até a ÚLTIMA interação da Isis (assistant)
+      const fullConv = snapshot.map(m => ({
+        ts: (m.timestamp instanceof Date) ? m.timestamp.toISOString() : new Date(m.timestamp || Date.now()).toISOString(),
+        from: m.from === 'isis' ? 'assistant' : 'user',
+        text: String(m.text ?? ''),
+      }));
+      let lastAssistantIndex = -1;
+      for (let i = fullConv.length - 1; i >= 0; i--) {
+        if (fullConv[i].from === 'assistant') { lastAssistantIndex = i; break; }
+      }
+      const conversaArray = lastAssistantIndex >= 0 ? fullConv.slice(0, lastAssistantIndex + 1) : fullConv;
+
+      // Salva feedback diretamente no Supabase (projeto ISIS)
+      await adicionarFeedbackIsis({
+        rating: Number(avaliacaoData.rating),
+        comentario: avaliacaoData.comentario || null,
+        cliente_codigo: selections?.cliente?.codigo ?? null,
+        cliente_nome: selections?.cliente?.nome || selections?.cliente?.name || null,
+        empresa_nome: empresa?.nome_fantasia || empresa?.razao_social || 'Desconhecida',
+        conversaArray,
       });
       
       setIsLoading(false);

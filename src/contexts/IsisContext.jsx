@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useRef, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
+import { supabaseIsis } from '@/lib/supabase-isis';
 
 const IsisContext = createContext();
 
@@ -73,14 +74,19 @@ export const IsisProvider = ({ children }) => {
   const JSONBIN_COLLECTION_ID = import.meta.env.VITE_JSONBIN_COLLECTION_ID || null;
   const ENV_BIN_ID = import.meta.env.VITE_JSONBIN_ISIS_BIN_ID || import.meta.env.VITE_JSONBIN_BIN_ID || null;
   const JSONBIN_BASE = 'https://api.jsonbin.io/v3/b';
-  const [jsonbinId, setJsonbinId] = useState(ENV_BIN_ID || (typeof window !== 'undefined' ? window.localStorage.getItem('ISIS_JSONBIN_BIN_ID') : null));
-  if (typeof window !== 'undefined') {
+  // Feature flag: desabilita sincronização via Edge (JSONBin) por padrão
+  const ENABLE_EDGE_PERSIST = (import.meta.env.VITE_ISIS_EDGE_SYNC === '1');
+  const [jsonbinId, setJsonbinId] = useState(ENABLE_EDGE_PERSIST ? (ENV_BIN_ID || (typeof window !== 'undefined' ? window.localStorage.getItem('ISIS_JSONBIN_BIN_ID') : null)) : null);
+  if (ENABLE_EDGE_PERSIST && typeof window !== 'undefined') {
     // Safe debug log (does not print key value)
     try { console.info('[Isis][JSONBin] keySource=%s binId=%s', JSONBIN_API_KEY_SOURCE, ENV_BIN_ID || window.localStorage.getItem('ISIS_JSONBIN_BIN_ID') || 'none'); } catch {}
   }
 
   // Chamada via supabase.functions (sem precisar de .env no cliente)
   const postToEdge = useCallback(async (payload) => {
+    if (!ENABLE_EDGE_PERSIST) {
+      return { ok: false, data: null };
+    }
     // Se não houver chave de JSONBin no cliente, evitamos chamadas de persistência para reduzir ruído
     if (!JSONBIN_API_KEY) {
       try { console.debug('[Isis][Edge] skipped (no JSONBIN key) mode=%s', payload?.mode); } catch {}
@@ -100,7 +106,7 @@ export const IsisProvider = ({ children }) => {
       try { console.debug('[Isis][Edge] invoke exception:', e); } catch {}
       return { ok: false, data: null };
     }
-  }, [JSONBIN_API_KEY]);
+  }, [JSONBIN_API_KEY, ENABLE_EDGE_PERSIST]);
 
   const createBin = useCallback(async (initialContent) => {
     if (!JSONBIN_API_KEY) return null;
@@ -302,53 +308,89 @@ export const IsisProvider = ({ children }) => {
       const company = empresaSel ? { code: empresaSel.codigo_empresa || empresaSel.codigoEmpresa, name: empresaSel.nome_fantasia || empresaSel.nome } : null;
       const clienteSel = selections?.cliente || null;
 
-      // Envia para Edge Function (fonte de verdade) com metadados
-      await postToEdge({
-        mode: 'append_message',
-        cod_cliente: clienteSel?.id ? String(clienteSel.id) : '_unknown',
-        nome_cliente: clienteSel?.nome || clienteSel?.name || '',
-        empresa: company?.name || '',
-        software: 'F7 Arena',
-        session_id: sessionId,
-        message: {
-          from: msg.from === 'isis' ? 'assistant' : 'user',
-          text: String(msg.text ?? ''),
-        }
-      });
-
-      // Best-effort: mantém persistência local/legada também (opcional)
+      // 1) Novo fluxo: salvar conversa na tabela 'isis' do projeto Supabase dedicado
       try {
-        const sid = await ensureSession();
-        if (!sid) return;
         const from = msg.from === 'isis' ? 'assistant' : 'user';
-        const entry = { ts: new Date().toISOString(), from, text: String(msg.text ?? '') };
-        let content = await loadBin();
-        if (!content) return;
-        content = ensureChatSessionsKey(content);
-        const empresa = selections?.empresa || null;
-        const company = empresa ? { code: empresa.codigo_empresa || empresa.codigoEmpresa, name: empresa.nome_fantasia || empresa.nome } : null;
-        const cliente = selections?.cliente || null;
-        const criteria = {
-          project: 'F7 Arena',
-          companyCode: company?.code || null,
-          clientCode: cliente?.id ? String(cliente.id) : null,
+        // Nome da empresa com fallback robusto para evitar null (coluna NOT NULL no projeto ISIS)
+        const empresaNomeSafe = (
+          company?.name ||
+          empresaSel?.nome_fantasia ||
+          empresaSel?.nome ||
+          empresaSel?.razao_social ||
+          'Desconhecida'
+        );
+        const row = {
+          id: `${Date.now()}${Math.random().toString(36).slice(2, 10)}`,
+          cod_cliente: clienteSel?.id ? String(clienteSel.id) : null,
+          nome_cliente: clienteSel?.nome || clienteSel?.name || null,
+          empresa: empresaNomeSafe,
+          projeto: 'fluxo7arena',
+          nota: null,
+          comentario: null,
+          conversa: JSON.stringify({ session_id: sessionId, from, text: String(msg.text ?? '') }),
+          timestamp: new Date().toISOString(),
         };
-        let idx = findSessionIndex(content, criteria);
-        if (idx === -1) {
-          content.chat_sessions.push({
-            client_code: criteria.clientCode,
-            client_name: cliente?.nome || cliente?.name || '',
-            company: company,
-            project: criteria.project,
-            conversation: [entry]
-          });
+        const { error: isisError } = await supabaseIsis.from('isis').insert(row);
+        if (isisError) {
+          try { console.error('[Isis][Chat] supabase-isis insert error:', isisError); } catch {}
         } else {
-          if (!Array.isArray(content.chat_sessions[idx].conversation)) content.chat_sessions[idx].conversation = [];
-          content.chat_sessions[idx].conversation.push(entry);
+          try { console.debug('[Isis][Chat] supabase-isis inserted'); } catch {}
         }
-        await saveBin(content);
-        tryUpdateSessionMeta(sid);
-      } catch {}
+      } catch (e) {
+        try { console.error('[Isis][Chat] supabase-isis exception:', e); } catch {}
+      }
+
+      // Envia para Edge Function (JSONBin) apenas se habilitado por flag
+      if (ENABLE_EDGE_PERSIST) {
+        await postToEdge({
+          mode: 'append_message',
+          cod_cliente: clienteSel?.id ? String(clienteSel.id) : '_unknown',
+          nome_cliente: clienteSel?.nome || clienteSel?.name || '',
+          empresa: company?.name || '',
+          software: 'F7 Arena',
+          session_id: sessionId,
+          message: {
+            from: msg.from === 'isis' ? 'assistant' : 'user',
+            text: String(msg.text ?? ''),
+          }
+        });
+      }
+
+      // Best-effort: persistência legada via JSONBin (desabilitada por padrão)
+      if (ENABLE_EDGE_PERSIST) {
+        try {
+          const sid = await ensureSession();
+          if (!sid) return;
+          const from = msg.from === 'isis' ? 'assistant' : 'user';
+          const entry = { ts: new Date().toISOString(), from, text: String(msg.text ?? '') };
+          let content = await loadBin();
+          if (!content) return;
+          content = ensureChatSessionsKey(content);
+          const empresa = selections?.empresa || null;
+          const company = empresa ? { code: empresa.codigo_empresa || empresa.codigoEmpresa, name: empresa.nome_fantasia || empresa.nome } : null;
+          const cliente = selections?.cliente || null;
+          const criteria = {
+            project: 'F7 Arena',
+            companyCode: company?.code || null,
+            clientCode: cliente?.id ? String(cliente.id) : null,
+          };
+          let idx = findSessionIndex(content, criteria);
+          if (idx === -1) {
+            content.chat_sessions.push({
+              client_code: criteria.clientCode,
+              client_name: cliente?.nome || cliente?.name || '',
+              company: company,
+              project: criteria.project,
+              conversation: [entry]
+            });
+          } else {
+            if (!Array.isArray(content.chat_sessions[idx].conversation)) content.chat_sessions[idx].conversation = [];
+            content.chat_sessions[idx].conversation.push(entry);
+          }
+          await saveBin(content);
+          tryUpdateSessionMeta(sid);
+        } catch {}
+      }
     } catch {}
   }, [ensureSession, tryUpdateSessionMeta, loadBin, saveBin, postToEdge, selections?.empresa, selections?.cliente, sessionId]);
   
