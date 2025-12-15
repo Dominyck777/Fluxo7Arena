@@ -101,6 +101,9 @@ function VendasPage() {
   const [isCreateTableDialog, setIsCreateTableDialog] = useState(false);
   const [isCreateMesaOpen, setIsCreateMesaOpen] = useState(false);
   const [isOpenTableDialog, setIsOpenTableDialog] = useState(false);
+  const [mesaOpening, setMesaOpening] = useState(false);
+  const [mesaCancelling, setMesaCancelling] = useState(false);
+  const [mesaClosing, setMesaClosing] = useState(false);
   const [pendingTable, setPendingTable] = useState(null);
   const [clienteNome, setClienteNome] = useState('');
   // Pagamento
@@ -727,17 +730,21 @@ function VendasPage() {
         (openComandas || []).forEach(c => byMesa.set(c.mesa_id, c));
         const uiTablesBase = (mesas || []).map((m) => {
           const c = byMesa.get(m.id);
-          let status = mapStatus(m.status);
+          let status;
           let comandaId = null;
           let customer = null;
           let totalHint = 0;
           let aberto_em = null;
           if (c) {
+            // Quando há comanda aberta para a mesa, forçamos status "em uso" ou "aguardando pagamento"
             status = (c.status === 'awaiting-payment' || c.status === 'awaiting_payment') ? 'awaiting-payment' : 'in-use';
             comandaId = c.id;
             customer = namesByComanda[c.id] || null;
             totalHint = totals[c.id] || 0;
             aberto_em = c.aberto_em || null;
+          } else {
+            // Sem comanda aberta, a mesa deve ser considerada livre, mesmo que m.status ainda não tenha sido atualizado
+            status = 'available';
           }
           return { id: m.id, number: m.numero, name: m.nome || null, status, order: [], customer, comandaId, totalHint, aberto_em };
         });
@@ -1110,16 +1117,20 @@ function VendasPage() {
       
       const uiTablesBase = (mesas || []).map((m) => {
         const c = byMesa.get(m.id);
-        let status = mapStatus(m.status);
+        let status;
         let comandaId = null;
         let customer = null;
         let totalHint = 0;
         
         if (c) {
+          // Quando há comanda aberta para a mesa, forçamos status "em uso" ou "aguardando pagamento"
           status = (c.status === 'awaiting-payment' || c.status === 'awaiting_payment') ? 'awaiting-payment' : 'in-use';
           comandaId = c.id;
           customer = namesByComanda[c.id] || null;
           totalHint = totalsByComanda[c.id] || 0;
+        } else {
+          // Sem comanda aberta, a mesa deve ser considerada livre, mesmo que m.status ainda não tenha sido atualizado
+          status = 'available';
         }
         return { id: m.id, number: m.numero, name: m.nome || null, status, order: [], customer, comandaId, totalHint };
       });
@@ -1207,216 +1218,39 @@ function VendasPage() {
       // para garantir que eventos de DELETE sem comanda_id ainda cheguem no fallback.
       let allowed = true;
       if (t !== 'comanda_itens' && t !== 'comanda_clientes') {
-        const sameCompany = String(row?.codigo_empresa || '') === String(codigoEmpresa || '');
-        allowed = sameCompany;
+        const rowEmpresa = row?.codigo_empresa;
+        // Se a linha não trouxer codigo_empresa, não bloqueamos (RLS já filtrou).
+        if (rowEmpresa != null && rowEmpresa !== '') {
+          const sameCompany = String(rowEmpresa) === String(codigoEmpresa || '');
+          allowed = sameCompany;
+        }
       }
-      if (!allowed) return;
-      // Atualização instantânea de totais de mesa ao alterar itens da comanda (cross-device e mobile)
+      if (!allowed) {
+        try {
+          console.log('[Realtime][Vendas] IGNORADO por empresa', { t, evt, rowEmpresa: row?.codigo_empresa, codigoEmpresa });
+        } catch {}
+        return;
+      }
       try {
-        if (t === 'comanda_itens') {
-          const comId = payload?.new?.comanda_id || payload?.old?.comanda_id || row?.comanda_id || null;
-          if (comId) {
-            (async () => {
-              try {
-                const itens = await listarItensDaComanda({ comandaId: comId, codigoEmpresa });
-                const order = (itens || []).map((it) => ({
-                  id: it.id,
-                  productId: it.produto_id,
-                  name: it.descricao || 'Item',
-                  price: Number(it.preco_unitario || 0),
-                  quantity: Number(it.quantidade || 1),
-                }));
-                const total = (order || []).reduce((acc, it) => acc + Number(it.price || 0) * Number(it.quantity || 0), 0);
-                setTables((prev) => prev.map((tb) => (String(tb.comandaId || '') === String(comId) ? { ...tb, totalHint: total } : tb)));
-                // Atualiza também a comanda aberta no mobile/desktop para remover o último item imediatamente
-                setSelectedTable((prev) => (prev && String(prev.comandaId || '') === String(comId) ? { ...prev, order, totalHint: total } : prev));
-                // Balcão: se for a comanda do balcão atual, sincronizar itens imediatamente
-                if (counterComandaIdRef.current && String(counterComandaIdRef.current) === String(comId)) {
-                  setCounterItems(order);
-                }
-              } catch {}
-            })();
-          } else if (String(evt || '').toUpperCase() === 'DELETE') {
-            // Fallback: alguns eventos de DELETE chegam sem comanda_id mesmo com REPLICA IDENTITY FULL.
-            // Neste caso, faz um refresh leve global + detalhes da mesa selecionada para sincronizar cross-device.
-            (async () => {
-              try {
-                try { await refreshTablesLight({ showToast: false }); } catch {}
-                const sel = selectedTableRef.current;
-                if (sel) {
-                  try { await refetchSelectedTableDetails(sel); } catch {}
-                }
-              } catch {}
-            })();
-          }
-        }
-        if (t === 'comanda_clientes') {
-          const comId = payload?.new?.comanda_id || payload?.old?.comanda_id || row?.comanda_id || null;
-          if (comId) {
-            (async () => {
-              try {
-                const vincs = await listarClientesDaComanda({ comandaId: comId, codigoEmpresa });
-                // Atualizar cliente selecionado no modo balcão, se for a mesma comanda
-                if (counterComandaIdRef.current && String(counterComandaIdRef.current) === String(comId)) {
-                  const ids = (vincs || []).map(v => v?.cliente_id || v?.clientes?.id || null).filter(Boolean).map(id => String(id));
-                  setCounterLinkedClientIds(ids);
-                  const first = Array.isArray(vincs) && vincs.length > 0 ? (vincs[0]?.cliente_id || vincs[0]?.clientes?.id || null) : null;
-                  setCounterSelectedClientId(first || null);
-                }
-                // Atualizar nomes dos clientes nos cards de mesas e na mesa selecionada
-                const names = (vincs || []).map(v => v?.nome).filter(Boolean);
-                const customerStr = names.length ? names.join(', ') : null;
-                setTables(prev => prev.map(tb => (
-                  String(tb.comandaId || '') === String(comId)
-                    ? { ...tb, customer: customerStr }
-                    : tb
-                )));
-                setSelectedTable(prev => {
-                  if (!prev || String(prev.comandaId || '') !== String(comId)) return prev;
-                  return { ...prev, customer: customerStr };
-                });
-                // Sincronizar lista interna do ManageClientsDialog em outros dispositivos
-                if (manageClientsOpenRef.current && manageClientsComandaRef.current && String(manageClientsComandaRef.current) === String(comId) && manageClientsSetLinkedRef.current) {
-                  const linked = (vincs || []).map(v => ({
-                    id: v.id,
-                    cliente_id: v.cliente_id,
-                    nome: v.nome || '',
-                    tipo: v.tipo || (v.cliente_id ? 'cadastrado' : 'livre')
-                  }));
-                  try {
-                    manageClientsSetLinkedRef.current(linked);
-                  } catch (err) {
-                    console.error('[Realtime][ManageClientsDialog] Erro ao aplicar linked remoto:', err);
-                  }
-                }
-              } catch {}
-            })();
-          } else if (String(evt || '').toUpperCase() === 'DELETE') {
-            // Fallback para eventos de DELETE em comanda_clientes sem comanda_id
-            (async () => {
-              try {
-                try { await refreshTablesLight({ showToast: false }); } catch {}
-                const sel = selectedTableRef.current;
-                if (sel) {
-                  try { await refetchSelectedTableDetails(sel); } catch {}
-                }
-              } catch {}
-            })();
-          }
-        }
+        console.log('[Realtime][Vendas] payload recebido', { t, evt, row, codigoEmpresa });
       } catch {}
-      // Otimista: se comanda fechou ou mesa ficou livre, atualizar UI imediatamente
-      try {
-        if (t === 'comandas') {
-          const mesaId = row?.mesa_id || row?.mesa || null;
-          const statusStr = String(row?.status || row?.situacao || '').toLowerCase();
-          const isClosedEvt = (evt === 'DELETE') || statusStr.includes('fechad') || statusStr.includes('closed') || statusStr.includes('encerr');
-          const isInsertEvt = String(evt || '').toUpperCase() === 'INSERT';
-          if (mesaId && isClosedEvt) {
-            freedTablesRef.current.set(mesaId, Date.now());
-            setTables((prev) => prev.map((tb) => (tb.id === mesaId ? { ...tb, status: 'available', comandaId: null, order: [], customer: null, totalHint: 0 } : tb)));
-            setSelectedTable((prev) => (prev && prev.id === mesaId) ? { ...prev, status: 'available', comandaId: null, order: [], customer: null, totalHint: 0 } : prev);
-          }
-          // Mesa abriu em outro dispositivo: adotar imediatamente a nova comanda
-          if (mesaId && isInsertEvt) {
-            const newComandaId = row?.id || null;
-            if (newComandaId) {
-              setTables((prev) => prev.map((tb) => (tb.id === mesaId ? { ...tb, status: 'in-use', comandaId: newComandaId } : tb)));
-              setSelectedTable((prev) => (prev && prev.id === mesaId) ? { ...prev, status: 'in-use', comandaId: newComandaId } : prev);
-            }
-          }
-          // Balcão: fechar/cancelar em outro dispositivo deve limpar imediatamente
-          const isBalcao = !mesaId; // mesa_id null -> balcão
-          if (isBalcao && isClosedEvt && counterComandaIdRef.current && (String(counterComandaIdRef.current) === String(row?.id || row?.comanda_id))) {
-            setCounterItems([]);
-            setCounterComandaId(null);
-            setCounterSelectedClientId(null);
-          }
-          // Balcão: adoção de nova comanda criada em outro dispositivo
-          if (isBalcao && isInsertEvt && ['open','awaiting-payment','awaiting_payment'].includes(statusStr)) {
-            const newId = row?.id || null;
-            if (newId) {
-              setCounterComandaId(newId);
-              (async () => {
-                try {
-                  const itens = await listarItensDaComanda({ comandaId: newId, codigoEmpresa });
-                  const order = (itens || []).map((it) => ({ id: it.id, productId: it.produto_id, name: it.descricao || 'Item', price: Number(it.preco_unitario || 0), quantity: Number(it.quantidade || 1) }));
-                  setCounterItems(order);
-                } catch {}
-              })();
-            }
-          }
-        }
-        if (t === 'mesas') {
-          const mesaId = row?.id || null;
-          const statusStr = String(row?.status || row?.situacao || '').toLowerCase();
-          const becameFree = statusStr.includes('livre') || statusStr.includes('available');
-          if (mesaId && becameFree) {
-            freedTablesRef.current.set(mesaId, Date.now());
-            setTables((prev) => prev.map((tb) => (tb.id === mesaId ? { ...tb, status: 'available', comandaId: null, order: [], customer: null, totalHint: 0 } : tb)));
-            setSelectedTable((prev) => (prev && prev.id === mesaId) ? { ...prev, status: 'available', comandaId: null, order: [], customer: null, totalHint: 0 } : prev);
-          }
-          const becameInUse = statusStr.includes('ocup') || statusStr.includes('in-use') || statusStr.includes('atend');
-          if (mesaId && becameInUse) {
-            setTables((prev) => prev.map((tb) => (tb.id === mesaId ? { ...tb, status: 'in-use' } : tb)));
-            setSelectedTable((prev) => (prev && prev.id === mesaId) ? { ...prev, status: 'in-use' } : prev);
-          }
-        }
-      } catch {}
-      if (rtDebounceRef.current) { try { clearTimeout(rtDebounceRef.current); } catch {} }
-      rtDebounceRef.current = setTimeout(async () => {
-        // Se for evento local de pagamentos recém gravado, ignorar para evitar loop/piscada
-        const isRecentLocalPayWrite = (t === 'pagamentos') && ((Date.now() - lastPaymentsWriteAtRef.current) < 1200);
-        if (t !== 'pagamentos' && !isRecentLocalPayWrite) {
-          try { await refreshTablesLight({ showToast: false }); } catch {}
-        }
-        const sel = selectedTableRef.current;
-        if (!sel) return;
-        const selComanda = sel.comandaId || null;
-        let affectedComanda = null;
-        if (t === 'comandas') affectedComanda = row?.id || row?.comanda_id || null;
-        if (t === 'comanda_itens' || t === 'comanda_clientes' || t === 'pagamentos') affectedComanda = row?.comanda_id || null;
-        // Sincronização instantânea do PayDialog via Realtime (cross-device)
-        if (t === 'pagamentos' && affectedComanda && isPayOpenRef.current && payDialogComandaRef.current && String(payDialogComandaRef.current) === String(affectedComanda) && payDialogSetLinesRef.current) {
-          const isLocal = (Date.now() - lastPaymentsWriteAtRef.current) < 800;
-          if (!isLocal) {
-            try {
-              const pend = await listarPagamentosPorComandaEStatus({ comandaId: affectedComanda, status: 'Pendente', codigoEmpresa });
-              const mapped = (pend || []).map((pg, idx) => {
-                const base = Number(pg.valor || 0);
-                const methodId = pg.finalizadora_id ? String(pg.finalizadora_id) : null;
-                const fin = (payMethods || []).find(m => String(m.id) === String(methodId));
-                const tPct = (fin && fin.taxa_percentual != null) ? Math.max(0, Number(fin.taxa_percentual) || 0) / 100 : 0;
-                const chargeFee = true;
-                const shown = chargeFee ? (base * (1 + tPct)) : base;
-                const valueStr = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(shown);
-                return { id: idx + 1, clientId: pg.cliente_id || null, methodId, chargeFee, baseValue: base, value: valueStr };
-              });
-              payDialogSetLinesRef.current(mapped);
-              if (payDialogSetNextIdRef.current) payDialogSetNextIdRef.current(mapped.length + 1);
-            } catch {}
-          }
-        }
-        if (affectedComanda && selComanda && String(affectedComanda) === String(selComanda)) {
-          // Evitar interferir no PayDialog enquanto o usuário edita pagamentos
-          if (t === 'pagamentos' && isPayOpenRef.current) {
-            // não refaz detalhes da mesa por evento de pagamentos durante edição
-          } else {
-            try { await refetchSelectedTableDetails(sel); } catch {}
-          }
-        }
-        if (t === 'mesas' && sel?.id && (row?.id === sel.id)) {
-          try { await refetchSelectedTableDetails(sel); } catch {}
-        }
-      }, 250);
+      // A partir daqui, para evitar estados inconsistentes entre devices, delegamos toda a
+      // sincronização de mesas/comandas para o snapshot do banco via refreshTablesLight.
+      (async () => {
+        try { await refreshTablesLight({ showToast: false }); } catch {}
+      })();
+      return;
     };
     ch
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'comandas', filter: `codigo_empresa=eq.${codigoEmpresa}` }, handler)
+      // Assinamos comandas SEM filtro de codigo_empresa e filtramos no handler,
+      // para capturar também eventos onde o codigo_empresa ainda não foi populado na linha.
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'comandas' }, handler)
       // comanda_itens/comanda_clientes podem não ter codigo_empresa: assinar sem filtro e filtrar no handler
       .on('postgres_changes', { event: '*', schema: 'public', table: 'comanda_itens' }, handler)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'comanda_clientes' }, handler)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'pagamentos', filter: `codigo_empresa=eq.${codigoEmpresa}` }, handler)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'mesas', filter: `codigo_empresa=eq.${codigoEmpresa}` }, handler)
+      // Mesas geralmente têm codigo_empresa preenchido, mas também filtramos no handler para segurança.
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'mesas' }, handler)
       .subscribe();
     rtChanRef.current = ch;
     if (pollTimerRef.current) { try { clearInterval(pollTimerRef.current); } catch {} }
@@ -1839,6 +1673,7 @@ function VendasPage() {
           if (!ln.methodId) { toast({ title: 'Forma de pagamento faltando', description: 'Selecione a finalizadora em todas as linhas.', variant: 'warning' }); return; }
           if (parseBRL(ln.value) <= 0) { toast({ title: 'Valor inválido', description: 'Informe valores maiores que zero.', variant: 'warning' }); return; }
         }
+        setMesaClosing(true);
         const effTotal = total > 0 ? total : 0;
         // Soma exibida (linhas já incluem taxa se ativa)
         const totalSum = (paymentLines || []).reduce((acc, ln) => acc + parseBRL(ln.value), 0);
@@ -1857,8 +1692,10 @@ function VendasPage() {
         const currentTableId = selectedTable.id;
         // UI otimista: fechar modal e liberar mesa imediatamente
         setTables((prev) => prev.map((t) => (t.id === currentTableId ? { ...t, status: 'available', order: [], comandaId: null, customer: null, totalHint: 0 } : t)));
-        setSelectedTable((prev) => (prev && prev.id === currentTableId) ? { ...prev, status: 'available', order: [], comandaId: null, customer: null, totalHint: 0 } : prev);
+        // Após fechar conta, não manter mesa selecionada para evitar reabrir painel/modal
+        setSelectedTable((prev) => (prev && prev.id === currentTableId) ? null : prev);
         setIsPayOpen(false);
+        try { setIsMobileModalOpen(false); } catch {}
         let refreshTotal = total;
         if (refreshTotal <= 0) {
           try {
@@ -1868,6 +1705,7 @@ function VendasPage() {
           } catch {}
         }
         setPayLoading(true);
+        setMesaClosing(true);
         await ensureCaixaAberto({ codigoEmpresa: userProfile?.codigo_empresa });
         // Garante que o rascunho atual esteja salvo antes de promover para Pago
         try {
@@ -1915,6 +1753,7 @@ function VendasPage() {
         toast({ title: 'Falha ao registrar pagamento', description: e?.message || 'Tente novamente', variant: 'destructive' });
       } finally {
         setPayLoading(false);
+        setMesaClosing(false);
       }
     };
 
@@ -2841,7 +2680,7 @@ function VendasPage() {
                       <AlertDialogFooter>
                         <AlertDialogCancel>Voltar</AlertDialogCancel>
                         <AlertDialogAction 
-                          disabled={false}
+                          disabled={mesaCancelling}
                           onClick={async (e) => {
                             // Fechar dialog imediatamente
                             const dialog = e.currentTarget.closest('[role="alertdialog"]');
@@ -2851,6 +2690,7 @@ function VendasPage() {
                             }
                             
                             try {
+                              setMesaCancelling(true);
                               // Limpar localStorage ANTES de cancelar para evitar restauração
                               const codigoEmpresa = userProfile?.codigo_empresa;
                               if (codigoEmpresa) {
@@ -2862,7 +2702,9 @@ function VendasPage() {
                               
                               await cancelarComandaEMesa({ comandaId: table.comandaId, codigoEmpresa });
                               
+                              // Limpar seleção e fechar modal mobile, se estiver aberto
                               setSelectedTable(null);
+                              try { setIsMobileModalOpen(false); } catch {}
                               await refreshTablesLight({ showToast: false });
                               
                               toast({ title: 'Comanda cancelada', variant: 'success' });
@@ -2870,6 +2712,8 @@ function VendasPage() {
                               console.error('[Cancelar Comanda] Erro:', err);
                               toast({ title: 'Falha ao cancelar comanda', description: err?.message || 'Tente novamente', variant: 'destructive' });
                               try { await refreshTablesLight({ showToast: false }); } catch (refreshErr) { console.error('[Cancelar Comanda] Erro ao recarregar após falha:', refreshErr); }
+                            } finally {
+                              setMesaCancelling(false);
                             }
                           }}
                         >Confirmar Cancelamento</AlertDialogAction>
@@ -2882,7 +2726,7 @@ function VendasPage() {
               )}
             </div>
           </div>
-          <div className="flex-1 min-h-0 overflow-y-auto p-4 thin-scroll">
+          <div className="flex-1 min-h-0 overflow-y-auto p-3 thin-scroll">
             {table.order.length === 0 ? (
               <div className="text-center text-text-muted pt-16">
                 <p>Comanda vazia. Adicione produtos na aba ao lado.</p>
@@ -2919,7 +2763,7 @@ function VendasPage() {
               </ul>
             )}
           </div>
-          <div className="p-4 border-t border-border mt-auto space-y-3">
+          <div className="p-3 border-t border-border mt-auto space-y-2">
             {/* Total */}
             <div className="flex justify-between items-center text-sm font-semibold text-text-secondary">
               <span>Total</span>
@@ -4337,6 +4181,7 @@ function VendasPage() {
     const confirmOpen = async (overrideSelectedIds = null) => {
       try {
         if (!pendingTable) return;
+        setMesaOpening(true);
         // 1) abre (ou obtém) a comanda para a mesa
         const comanda = await getOrCreateComandaForMesa({ mesaId: pendingTable.id, codigoEmpresa: userProfile?.codigo_empresa });
         // 2) associar clientes cadastrados selecionados + consumidores nome_livre
@@ -4455,6 +4300,8 @@ function VendasPage() {
       } catch (e) {
         console.error('[confirmOpen] Falha ao abrir mesa:', e?.message || e, e?.stack);
         toast({ title: 'Falha ao abrir mesa', description: e?.message || 'Tente novamente', variant: 'destructive' });
+      } finally {
+        setMesaOpening(false);
       }
     };
 
@@ -4778,9 +4625,9 @@ function VendasPage() {
             </Button>
             <Button 
               onClick={() => confirmOpen()} 
-              disabled={!pendingTable}
+              disabled={!pendingTable || mesaOpening}
             >
-              Confirmar Abertura
+              {mesaOpening ? 'Abrindo...' : 'Confirmar Abertura'}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -6125,6 +5972,31 @@ function VendasPage() {
         />
       )}
       
+      {/* Overlay global de carregamento ao abrir/cancelar/fechar conta */}
+      {(mesaOpening || mesaCancelling || mesaClosing) && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80">
+          <div className="px-8 py-6 rounded-xl bg-surface border border-border shadow-2xl flex flex-col items-center gap-4 max-w-sm w-[85vw] text-center">
+            <div className="w-8 h-8 rounded-full border-4 border-brand border-t-transparent animate-spin" aria-hidden="true" />
+            <div className="space-y-1">
+              <span className="block text-base font-semibold text-text-primary">
+                {mesaOpening
+                  ? 'Abrindo mesa...'
+                  : mesaCancelling
+                    ? 'Cancelando comanda...'
+                    : 'Fechando conta...'}
+              </span>
+              <span className="block text-xs text-text-muted">
+                {mesaOpening
+                  ? 'Aguarde, estamos criando a comanda e sincronizando com os outros dispositivos.'
+                  : mesaCancelling
+                    ? 'Aguarde, estamos cancelando a comanda e liberando a mesa em todos os dispositivos.'
+                    : 'Aguarde, estamos registrando os pagamentos e liberando a mesa em todos os dispositivos.'}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+
       {useMemo(
         () => (
           <ProductsModal

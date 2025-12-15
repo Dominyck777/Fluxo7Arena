@@ -528,28 +528,30 @@ export default function EmpresasPage() {
             </div>
 
 
-            <div className="md:col-span-2 lg:col-span-3 grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="grid grid-cols-1 gap-3 p-3 rounded-md border border-border">
-                <span className="text-xs text-text-muted">Transmite Nota • Homologação</span>
-                <Input label="Base URL (HML)" value={form.transmitenota_base_url_hml} onChange={(e)=>setForm({ ...form, transmitenota_base_url_hml: e.target.value })} placeholder="https://..." />
-                <Input label="ApiKey (HML)" value={form.transmitenota_apikey_hml} onChange={(e)=>setForm({ ...form, transmitenota_apikey_hml: e.target.value })} />
-                <div>
-                  <Button type="button" variant="outline" onClick={() => handleTestTN('hml')} disabled={loading}>
-                    {loading ? 'Testando...' : 'Testar conexão HML'}
-                  </Button>
+            {false && (
+              <div className="md:col-span-2 lg:col-span-3 grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 gap-3 p-3 rounded-md border border-border">
+                  <span className="text-xs text-text-muted">Transmite Nota • Homologação</span>
+                  <Input label="Base URL (HML)" value={form.transmitenota_base_url_hml} onChange={(e)=>setForm({ ...form, transmitenota_base_url_hml: e.target.value })} placeholder="https://..." />
+                  <Input label="ApiKey (HML)" value={form.transmitenota_apikey_hml} onChange={(e)=>setForm({ ...form, transmitenota_apikey_hml: e.target.value })} />
+                  <div>
+                    <Button type="button" variant="outline" onClick={() => handleTestTN('hml')} disabled={loading}>
+                      {loading ? 'Testando...' : 'Testar conexão HML'}
+                    </Button>
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 gap-3 p-3 rounded-md border border-border">
+                  <span className="text-xs text-text-muted">Transmite Nota • Produção</span>
+                  <Input label="Base URL (PROD)" value={form.transmitenota_base_url_prod} onChange={(e)=>setForm({ ...form, transmitenota_base_url_prod: e.target.value })} placeholder="https://..." />
+                  <Input label="ApiKey (PROD)" value={form.transmitenota_apikey_prod} onChange={(e)=>setForm({ ...form, transmitenota_apikey_prod: e.target.value })} />
+                  <div>
+                    <Button type="button" variant="outline" onClick={() => handleTestTN('prod')} disabled={loading}>
+                      {loading ? 'Testando...' : 'Testar conexão PROD'}
+                    </Button>
+                  </div>
                 </div>
               </div>
-              <div className="grid grid-cols-1 gap-3 p-3 rounded-md border border-border">
-                <span className="text-xs text-text-muted">Transmite Nota • Produção</span>
-                <Input label="Base URL (PROD)" value={form.transmitenota_base_url_prod} onChange={(e)=>setForm({ ...form, transmitenota_base_url_prod: e.target.value })} placeholder="https://..." />
-                <Input label="ApiKey (PROD)" value={form.transmitenota_apikey_prod} onChange={(e)=>setForm({ ...form, transmitenota_apikey_prod: e.target.value })} />
-                <div>
-                  <Button type="button" variant="outline" onClick={() => handleTestTN('prod')} disabled={loading}>
-                    {loading ? 'Testando...' : 'Testar conexão PROD'}
-                  </Button>
-                </div>
-              </div>
-            </div>
+            )}
 
             <div className="md:col-span-2 lg:col-span-2 grid grid-cols-1 gap-3">
               <div className="flex items-center gap-4">

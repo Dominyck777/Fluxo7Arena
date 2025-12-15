@@ -27,6 +27,9 @@ export default function BalcaoPage() {
   const [products, setProducts] = useState([]);
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [saleOpening, setSaleOpening] = useState(false);
+  const [saleCancelling, setSaleCancelling] = useState(false);
+  const [saleClosing, setSaleClosing] = useState(false);
   const [customerName, setCustomerName] = useState('');
   const [productSearch, setProductSearch] = useState('');
   const [addingProductId, setAddingProductId] = useState(null);
@@ -454,6 +457,7 @@ export default function BalcaoPage() {
   // Confirmar pagamento no Balcão
   const confirmPay = async () => {
     try {
+      setSaleClosing(true);
       if (!comandaId) { toast({ title: 'Nenhuma comanda aberta', description: 'Adicione itens para abrir uma comanda.', variant: 'warning' }); return; }
       const codigoEmpresa = userProfile?.codigo_empresa;
       if (!codigoEmpresa) { toast({ title: 'Empresa não definida', variant: 'destructive' }); return; }
@@ -550,7 +554,10 @@ export default function BalcaoPage() {
       setIsPayOpen(false);
     } catch (e) {
       toast({ title: 'Falha ao concluir', description: e?.message || 'Tente novamente', variant: 'destructive' });
-    } finally { setPayLoading(false); }
+    } finally {
+      setPayLoading(false);
+      setSaleClosing(false);
+    }
   };
 
   // Soma total (base + taxas)
@@ -1113,6 +1120,7 @@ export default function BalcaoPage() {
   const cancelSale = async () => {
     try {
       setCancelLoading(true);
+      setSaleCancelling(true);
       const codigoEmpresa = userProfile?.codigo_empresa;
       if (comandaId && codigoEmpresa) {
         try {
@@ -1138,6 +1146,7 @@ export default function BalcaoPage() {
       } catch {}
       setCancelLoading(false);
       toast({ title: 'Venda cancelada', variant: 'success' });
+      setSaleCancelling(false);
     }
   };
 
@@ -1323,21 +1332,14 @@ export default function BalcaoPage() {
         
         const itens = await listarItensDeTodasComandasAbertas({ codigoEmpresa });
         if (!active) return;
-        
-        console.log('[BalcaoPage] Itens de todas comandas abertas:', itens?.length || 0);
-        
+
         const map = new Map();
         for (const item of itens || []) {
           const pid = item.produto_id;
           const qty = Number(item.quantidade || 0);
           map.set(pid, (map.get(pid) || 0) + qty);
         }
-        
-        console.log('[BalcaoPage] Estoque reservado atualizado:', map.size, 'produtos diferentes');
-        if (map.size > 0) {
-          console.log('[BalcaoPage] Produtos reservados:', Array.from(map.entries()).map(([id, qty]) => ({ id, qty })));
-        }
-        
+
         setReservedStock(map);
       } catch (err) {
         console.error('[BalcaoPage] Erro ao buscar estoque reservado:', err);
@@ -1438,6 +1440,7 @@ export default function BalcaoPage() {
       const createdNow = !cid;
       if (!cid) {
         try {
+          setSaleOpening(true);
           const c = await getOrCreateComandaBalcao({ codigoEmpresa });
           cid = c.id;
           setComandaId(c.id);
@@ -1462,6 +1465,8 @@ export default function BalcaoPage() {
             return;
           }
           throw err;
+        } finally {
+          setSaleOpening(false);
         }
       }
       
@@ -1500,7 +1505,6 @@ export default function BalcaoPage() {
           reservedMap.set(pid, (reservedMap.get(pid) || 0) + qty);
         }
         setReservedStock(reservedMap);
-        console.log('[BalcaoPage:addProduct] Estoque reservado atualizado:', reservedMap.size, 'produtos');
       } catch (err) {
         console.error('[BalcaoPage:addProduct] Erro ao atualizar estoque reservado:', err);
       }
@@ -1582,6 +1586,7 @@ export default function BalcaoPage() {
       if (!codigoEmpresa) { toast({ title: 'Empresa não definida', variant: 'destructive' }); return; }
       if (!comandaId) {
         try {
+          setSaleOpening(true);
           const c = await getOrCreateComandaBalcao({ codigoEmpresa });
           if (!c?.id) { toast({ title: 'Comanda não encontrada', description: 'Abra uma comanda antes de pagar.', variant: 'destructive' }); setPayLoading(false); return; }
           setComandaId(c.id);
@@ -1592,6 +1597,8 @@ export default function BalcaoPage() {
             return;
           }
           throw err;
+        } finally {
+          setSaleOpening(false);
         }
       }
       // Validação forte de estoque antes do pagamento
@@ -1649,7 +1656,7 @@ export default function BalcaoPage() {
       }
       toast({ title: 'Falha ao iniciar pagamento', description: err?.message || 'Tente novamente', variant: 'destructive' });
     } finally {
-      // nada
+      setPayLoading(false);
     }
   };
 
@@ -1920,6 +1927,31 @@ export default function BalcaoPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Overlay global de carregamento para abrir/cancelar/fechar venda no balcão */}
+      {(saleOpening || saleCancelling || saleClosing) && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80">
+          <div className="px-8 py-6 rounded-xl bg-surface border border-border shadow-2xl flex flex-col items-center gap-4 max-w-sm w-[85vw] text-center">
+            <div className="w-8 h-8 rounded-full border-4 border-brand border-t-transparent animate-spin" aria-hidden="true" />
+            <div className="space-y-1">
+              <span className="block text-base font-semibold text-text-primary">
+                {saleOpening
+                  ? 'Abrindo venda...'
+                  : saleCancelling
+                    ? 'Cancelando venda...'
+                    : 'Fechando conta...'}
+              </span>
+              <span className="block text-xs text-text-muted">
+                {saleOpening
+                  ? 'Aguarde, estamos iniciando a venda e sincronizando com os dispositivos.'
+                  : saleCancelling
+                    ? 'Aguarde, estamos cancelando a venda e limpando os itens.'
+                    : 'Aguarde, estamos registrando o pagamento e encerrando a venda.'}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Product Picker (mobile e desktop) - lista de produtos em modal */}
       <Dialog open={isProductPickerOpen} onOpenChange={setIsProductPickerOpen}>
@@ -2736,6 +2768,7 @@ export default function BalcaoPage() {
                     return;
                   }
                   try {
+                    setSaleOpening(true);
                     const c = await getOrCreateComandaBalcao({ codigoEmpresa });
                     if (!c?.id) {
                       toast({ title: 'Falha ao abrir venda', description: 'Não foi possível criar a comanda.', variant: 'destructive' });
@@ -2766,6 +2799,8 @@ export default function BalcaoPage() {
                     console.error('[ClientWizard] Erro ao criar comanda de balcão:', err);
                     toast({ title: 'Falha ao iniciar venda', description: err?.message || 'Tente novamente.', variant: 'destructive' });
                     return;
+                  } finally {
+                    setSaleOpening(false);
                   }
                 } else {
                   // Validar que a comanda existe antes de adicionar clientes
@@ -2822,7 +2857,6 @@ export default function BalcaoPage() {
                     if (!error?.message?.includes('duplicate')) {
                       throw error;
                     }
-                    console.log('Alguns clientes já estavam vinculados, continuando...');
                   }
                   const vincs = await listarClientesDaComanda({ comandaId, codigoEmpresa });
                   const nomes = (vincs || []).map(v => v?.nome).filter(Boolean);
