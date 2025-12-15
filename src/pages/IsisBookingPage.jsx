@@ -2518,12 +2518,10 @@ ${listaNomes}
         break;
       }
       case 'buscar_agendamento': {
-        // Fluxo de editar agendamento existente (busca/seleção ocorre em outras partes do fluxo)
+        // Fluxo de editar agendamento existente: iniciar busca imediatamente
         addUserMessage('✏️ Editar Agendamento');
-        // Aqui mantemos o estado; o fluxo de busca/carregamento existente continuará
-        // Caso haja necessidade futura, podemos abrir imediatamente a busca/lista
-        // por enquanto, apenas mostramos o menu inicial novamente
-        perguntarAcaoInicial();
+        addIsisMessage('Vou buscar seus agendamentos...', 600);
+        buscarAgendamentosCliente();
         break;
       }
       case 'finalizar_atendimento': {
