@@ -1326,8 +1326,9 @@ const IsisBookingPageContent = () => {
     addUserMessage(button.label);
     updateSelection('data', dataEscolhida);
     
-    // Se está editando (review), recarrega horários para a nova data
-    if (currentStep === 'review') {
+    // Se está editando, recarrega horários para a nova data
+    const isEditFlow = Boolean(selections?.editing_agendamento) || Boolean(agendamentoCriado);
+    if (isEditFlow) {
       console.log('[handleDataSelection] Modo edição detectado - recarregando horários');
       console.log('[handleDataSelection] Quadra ID:', selections.quadra?.id);
       console.log('[handleDataSelection] Nova Data:', dataEscolhida);
@@ -2632,6 +2633,9 @@ ${listaNomes}
         ];
         
         addIsisMessageWithButtons('Para qual dia?', dataButtons, 600);
+        // Importante: mudar o step para 'data' para que o clique nos botões
+        // seja roteado para handleDataSelection (que trata 'custom')
+        nextStep('data');
         break;
         
       case 'edit_horario':
