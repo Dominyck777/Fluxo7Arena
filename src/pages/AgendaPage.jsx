@@ -6900,12 +6900,14 @@ function AgendaPage({ sidebarVisible = false }) {
                 <div className="md:hidden flex justify-center">
                   {selectedCourts.length === 1 ? (
                     // Badge quando há apenas uma quadra (mesmo estilo do select)
-                    <div className="flex items-center gap-3 px-4 py-2 rounded-lg w-full h-10 border-2 border-brand/30 bg-gradient-to-r from-brand/5 to-brand/10">
+                    <div className="inline-flex items-center justify-center gap-3 px-4 py-2 rounded-lg w-auto h-10 max-w-full border-2 border-brand/30 bg-gradient-to-r from-brand/5 to-brand/10">
                       <div
                         className="h-3 w-3 rounded-full shadow-sm"
                         style={{ backgroundColor: getCourtColor(selectedCourts[0]) }}
                       />
-                      <span className="font-semibold text-sm">{selectedCourts[0]}</span>
+                      <span className="font-semibold text-sm text-center whitespace-nowrap truncate">
+                        {selectedCourts[0]}
+                      </span>
                     </div>
                   ) : (
                     // Select quando há múltiplas quadras
