@@ -375,26 +375,27 @@ export default function IsisAnalyticsPage() {
   return (
     <motion.div variants={pageVariants} initial="hidden" animate="visible" className="space-y-4">
       {/* Hero */}
-      <motion.div variants={itemVariants} className="bg-surface/70 backdrop-blur-sm relative p-4 rounded-xl border border-white/10 overflow-hidden shadow-1">
+      <motion.div variants={itemVariants} className="bg-surface/70 backdrop-blur-sm relative p-4 md:p-6 rounded-xl border border-white/10 overflow-hidden shadow-1">
         <div className="absolute inset-0 bg-court-pattern opacity-[0.03] mix-blend-overlay"></div>
-        <div className="relative z-10 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="rounded-full p-[2px] bg-gradient-to-r from-fuchsia-500 via-violet-500 to-emerald-400 shadow-[0_0_12px_rgba(168,85,247,0.35)]">
-              <div className="rounded-full overflow-hidden bg-background w-10 h-10 grid place-items-center">
-                <IsisAvatar size="xs" className="w-10 h-10" />
+        <div className="relative z-10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-3 flex-1 min-w-0">
+            <div className="rounded-full p-[2px] bg-gradient-to-r from-fuchsia-500 via-violet-500 to-emerald-400 shadow-[0_0_12px_rgba(168,85,247,0.35)] flex-shrink-0">
+              <div className="rounded-full overflow-hidden bg-background w-10 h-10 sm:w-12 sm:h-12 grid place-items-center">
+                <IsisAvatar size="xs" className="w-10 h-10 sm:w-12 sm:h-12" />
               </div>
             </div>
-            <div>
-              <h1 className="text-2xl font-black text-text-primary tracking-tight flex items-center gap-2">
-                <BarChart3 className="h-6 w-6 text-brand" /> Análises da Ísis
+            <div className="min-w-0 flex-1">
+              <h1 className="text-xl sm:text-2xl font-black text-text-primary tracking-tight flex items-center gap-2 flex-wrap">
+                <BarChart3 className="h-5 w-5 sm:h-6 sm:w-6 text-brand flex-shrink-0" /> 
+                <span className="truncate">Análises da Ísis</span>
               </h1>
-              <p className="text-sm text-text-secondary">Como a Ísis está ajudando {empresaNome} a converter conversas em reservas.</p>
+              <p className="text-xs sm:text-sm text-text-secondary mt-1 line-clamp-2">Como a Ísis está ajudando {empresaNome} a converter conversas em reservas.</p>
             </div>
           </div>
           <button
             type="button"
             onClick={() => setSettingsOpen(true)}
-            className="inline-flex items-center justify-center w-10 h-10 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 hover:border-white/20 transition-all duration-200 text-text-secondary hover:text-text-primary"
+            className="inline-flex items-center justify-center w-10 h-10 sm:w-11 sm:h-11 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 hover:border-white/20 transition-all duration-200 text-text-secondary hover:text-text-primary flex-shrink-0 self-end sm:self-auto"
             title="Configurações da Ísis"
           >
             <Settings className="h-5 w-5" />
@@ -503,26 +504,28 @@ export default function IsisAnalyticsPage() {
       {!loading && (
         <motion.div variants={itemVariants} className="fx-card">
           <div className="flex items-center justify-between mb-3">
-            <h2 className="text-base font-bold text-text-primary">Últimos agendamentos criados pela Ísis</h2>
+            <h2 className="text-sm sm:text-base font-bold text-text-primary">Últimos agendamentos criados pela Ísis</h2>
           </div>
           {metrics.ultimasInteracoes.length === 0 ? (
             <div className="text-sm text-text-muted">Nenhum agendamento recente.</div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-text-secondary border-b border-white/10">
-                    <th className="w-8 py-2"></th>
-                    <th className="text-left py-2 pr-2">Código</th>
-                    <th className="text-left py-2 pr-2">Cliente</th>
-                    <th className="text-left py-2 pr-2">Quadra</th>
-                    <th className="text-left py-2 pr-2">Data</th>
-                    <th className="text-left py-2 pr-2">Horário</th>
-                    <th className="text-left py-2 pr-2">Status</th>
-                    <th className="text-left py-2 pr-2">Participantes</th>
-                    <th className="text-left py-2 pr-2">Criado em</th>
-                  </tr>
-                </thead>
+            <div className="overflow-x-auto -mx-4 sm:mx-0">
+              <div className="inline-block min-w-full align-middle">
+                <div className="overflow-hidden">
+                  <table className="min-w-full text-xs sm:text-sm">
+                    <thead>
+                      <tr className="text-text-secondary border-b border-white/10">
+                        <th className="w-8 py-2 pl-4 sm:pl-0"></th>
+                        <th className="text-left py-2 pr-2 whitespace-nowrap">Código</th>
+                        <th className="text-left py-2 pr-2 whitespace-nowrap">Cliente</th>
+                        <th className="text-left py-2 pr-2 whitespace-nowrap hidden sm:table-cell">Quadra</th>
+                        <th className="text-left py-2 pr-2 whitespace-nowrap">Data</th>
+                        <th className="text-left py-2 pr-2 whitespace-nowrap hidden md:table-cell">Horário</th>
+                        <th className="text-left py-2 pr-2 whitespace-nowrap">Status</th>
+                        <th className="text-left py-2 pr-2 whitespace-nowrap hidden lg:table-cell">Participantes</th>
+                        <th className="text-left py-2 pr-4 sm:pr-2 whitespace-nowrap hidden xl:table-cell">Criado em</th>
+                      </tr>
+                    </thead>
                 <tbody>
                   {metrics.ultimasInteracoes.map((a) => {
                     const dtIni = a.inicio ? new Date(a.inicio) : null;
@@ -546,63 +549,73 @@ export default function IsisAnalyticsPage() {
                     return (
                       <>
                         <tr key={a.id} className={`border-b border-white/10 align-top ${isOpen ? 'bg-white/[0.03]' : 'hover:bg-white/[0.02]'} transition-colors`}>
-                          <td className="py-2">
+                          <td className="py-2 pl-4 sm:pl-0">
                             <button
                               type="button"
                               aria-label={isOpen ? 'Recolher' : 'Expandir'}
                               onClick={(e) => { e.stopPropagation(); toggle(); }}
                               className={`inline-flex items-center justify-center w-6 h-6 rounded-md border border-white/10 hover:bg-white/5 transition-colors ${isOpen ? 'rotate-180' : ''}`}
                             >
-                              <ChevronDown className="w-4 h-4 text-text-secondary" />
+                              <ChevronDown className="w-3 h-3 sm:w-4 sm:h-4 text-text-secondary" />
                             </button>
                           </td>
-                          <td className="py-2 pr-2 font-semibold text-text-primary">#{a.codigo}</td>
-                          <td className="py-2 pr-2">{a.cliente_nome || (Array.isArray(a.clientes) && a.clientes[0]) || '—'}</td>
-                          <td className="py-2 pr-2">{a.quadra_nome || '—'}</td>
-                          <td className="py-2 pr-2">{dataStr}</td>
-                          <td className="py-2 pr-2">{horarioStr}</td>
+                          <td className="py-2 pr-2 font-semibold text-text-primary whitespace-nowrap">#{a.codigo}</td>
+                          <td className="py-2 pr-2 max-w-[120px] truncate">{a.cliente_nome || (Array.isArray(a.clientes) && a.clientes[0]) || '—'}</td>
+                          <td className="py-2 pr-2 hidden sm:table-cell max-w-[100px] truncate">{a.quadra_nome || '—'}</td>
+                          <td className="py-2 pr-2 whitespace-nowrap">{dataStr}</td>
+                          <td className="py-2 pr-2 hidden md:table-cell whitespace-nowrap text-xs">{horarioStr}</td>
                           <td className="py-2 pr-2">
-                            <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold tracking-wide ${st.cls}`}>{st.label}</span>
+                            <span className={`px-1.5 sm:px-2 py-0.5 rounded-full text-[10px] sm:text-[11px] font-bold tracking-wide whitespace-nowrap ${st.cls}`}>{st.label}</span>
                           </td>
-                          <td className="py-2 pr-2">
+                          <td className="py-2 pr-2 hidden lg:table-cell">
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-white/10 text-text-primary text-xs font-semibold">
                               <span className="w-1.5 h-1.5 rounded-full bg-brand/70"></span>
                               {count}
                             </span>
                           </td>
-                          <td className="py-2 pr-2">{a.criado_em ? new Date(a.criado_em).toLocaleString() : '-'}</td>
+                          <td className="py-2 pr-4 sm:pr-2 hidden xl:table-cell text-xs whitespace-nowrap">{a.criado_em ? new Date(a.criado_em).toLocaleString() : '-'}</td>
                         </tr>
                         {isOpen && (
                           <tr>
-                            <td colSpan={8} className="p-3 bg-white/[0.035] border-b border-white/10">
-                              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-2">
+                            <td colSpan={9} className="p-3 sm:p-4 bg-white/[0.035] border-b border-white/10">
+                              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-3">
                                 <div>
-                                  <div className="text-[11px] uppercase tracking-wider text-text-muted">Criado em</div>
-                                  <div className="font-medium text-text-primary">{a.criado_em ? new Date(a.criado_em).toLocaleString() : '-'}</div>
+                                  <div className="text-[10px] sm:text-[11px] uppercase tracking-wider text-text-muted">Criado em</div>
+                                  <div className="font-medium text-text-primary text-xs sm:text-sm">{a.criado_em ? new Date(a.criado_em).toLocaleString() : '-'}</div>
                                 </div>
                                 <div>
-                                  <div className="text-[11px] uppercase tracking-wider text-text-muted">Início</div>
-                                  <div className="font-medium text-text-primary">{a.inicio ? new Date(a.inicio).toLocaleString() : '-'}</div>
+                                  <div className="text-[10px] sm:text-[11px] uppercase tracking-wider text-text-muted">Início</div>
+                                  <div className="font-medium text-text-primary text-xs sm:text-sm">{a.inicio ? new Date(a.inicio).toLocaleString() : '-'}</div>
                                 </div>
                                 <div>
-                                  <div className="text-[11px] uppercase tracking-wider text-text-muted">Término</div>
-                                  <div className="font-medium text-text-primary">{a.fim ? new Date(a.fim).toLocaleString() : '-'}</div>
+                                  <div className="text-[10px] sm:text-[11px] uppercase tracking-wider text-text-muted">Término</div>
+                                  <div className="font-medium text-text-primary text-xs sm:text-sm">{a.fim ? new Date(a.fim).toLocaleString() : '-'}</div>
                                 </div>
                               </div>
-                              <div className="text-[11px] uppercase tracking-wider text-text-muted mb-2">Participantes</div>
+                              <div className="sm:hidden mb-3 grid grid-cols-2 gap-3">
+                                <div>
+                                  <div className="text-[10px] uppercase tracking-wider text-text-muted">Quadra</div>
+                                  <div className="font-medium text-text-primary text-xs truncate">{a.quadra_nome || '—'}</div>
+                                </div>
+                                <div>
+                                  <div className="text-[10px] uppercase tracking-wider text-text-muted">Horário</div>
+                                  <div className="font-medium text-text-primary text-xs">{horarioStr}</div>
+                                </div>
+                              </div>
+                              <div className="text-[10px] sm:text-[11px] uppercase tracking-wider text-text-muted mb-2">Participantes ({count})</div>
                               {Array.isArray(a.participantes) && a.participantes.length > 0 ? (
-                                <ul className="grid grid-cols-1 gap-1">
+                                <ul className="grid grid-cols-1 gap-1.5">
                                   {a.participantes.map((p, idx) => (
-                                    <li key={idx} className="flex items-center justify-between py-1 px-2 rounded-md border border-white/10 bg-white/5">
-                                      <span className="text-text-primary font-medium">{p.nome}</span>
-                                      <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold tracking-wide ${p.status_pagamento === 'Pago' ? 'bg-success/15 text-success border border-success/20' : 'bg-warning/15 text-warning border border-warning/20'}`}>
+                                    <li key={idx} className="flex items-center justify-between py-1.5 px-2 sm:px-3 rounded-md border border-white/10 bg-white/5 gap-2">
+                                      <span className="text-text-primary font-medium text-xs sm:text-sm truncate flex-1">{p.nome}</span>
+                                      <span className={`px-1.5 sm:px-2 py-0.5 rounded-full text-[10px] sm:text-[11px] font-bold tracking-wide whitespace-nowrap flex-shrink-0 ${p.status_pagamento === 'Pago' ? 'bg-success/15 text-success border border-success/20' : 'bg-warning/15 text-warning border border-warning/20'}`}>
                                         {p.status_pagamento}
                                       </span>
                                     </li>
                                   ))}
                                 </ul>
                               ) : (
-                                <div className="text-text-muted">Sem participantes cadastrados</div>
+                                <div className="text-text-muted text-xs sm:text-sm">Sem participantes cadastrados</div>
                               )}
                             </td>
                           </tr>
@@ -610,9 +623,11 @@ export default function IsisAnalyticsPage() {
                       </>
                     );
                   })}
-                </tbody>
-              </table>
+                  </tbody>
+                </table>
+              </div>
             </div>
+          </div>
           )}
         </motion.div>
       )}
