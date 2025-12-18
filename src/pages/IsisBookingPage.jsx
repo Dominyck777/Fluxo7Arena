@@ -400,16 +400,15 @@ const IsisBookingPageContent = () => {
     setTipoIdentificacao('telefone'); // Sempre inicia com telefone
     setShowInput(false); // Esconde input inicialmente
     
-    const nomeEmpresa = empresa?.nome_fantasia || empresa?.razao_social || 'Arena Palace';
     const cumprimento = getCumprimentoPorHorario();
     
     // Mensagem única de boas-vindas com identificação
     const mensagensBoasVindas = [
-      `**${cumprimento}!** Tudo bem? 😊\n\nSou a **Ísis**, assistente virtual da **${nomeEmpresa}** e estou aqui para tornar seu **agendamento** super fácil!\n\nPara começar, qual seu **telefone** ou **e-mail**?`,
-      `Hey! **${cumprimento}!** ⚽ **Ísis** na área!\n\nSou a assistente virtual da **${nomeEmpresa}** e vim facilitar sua vida.\n\nBora **agendar**? Me passa seu **telefone** ou **e-mail**:`,
-      `**${cumprimento}!** Prazer em te atender! 💪\n\nSou a **Ísis** da **${nomeEmpresa}**, sua assistente virtual para **agendamentos**.\n\nPara começar, preciso do seu **telefone** ou **e-mail**:`,
-      `Opa! **${cumprimento}!** 🎾 **Ísis** aqui, sua assistente virtual da **${nomeEmpresa}**!\n\nVamos **marcar seu horário**? É rapidinho!\n\nMe informa seu **telefone** ou **e-mail**:`,
-      `**${cumprimento}!** Seja bem-vindo! 🤗\n\nEu sou a **Ísis**, sua assistente virtual aqui na **${nomeEmpresa}**.\n\nVou te ajudar a **agendar seu horário** rapidinho!\n\nInforme seu **telefone** ou **e-mail**:`
+      `**${cumprimento}!** Tudo bem? 😊\n\nSou a **Ísis**, assistente virtual da **${nomeEmpresaFormatado}** e estou aqui para tornar seu **agendamento** super fácil!\n\nPara começar, qual seu **telefone** ou **e-mail**?`,
+      `Hey! **${cumprimento}!** ⚽ **Ísis** na área!\n\nSou a assistente virtual da **${nomeEmpresaFormatado}** e vim facilitar sua vida.\n\nBora **agendar**? Me passa seu **telefone** ou **e-mail**:`,
+      `**${cumprimento}!** Prazer em te atender! 💪\n\nSou a **Ísis** da **${nomeEmpresaFormatado}**, sua assistente virtual para **agendamentos**.\n\nPara começar, preciso do seu **telefone** ou **e-mail**:`,
+      `Opa! **${cumprimento}!** 🎾 **Ísis** aqui, sua assistente virtual da **${nomeEmpresaFormatado}**!\n\nVamos **marcar seu horário**? É rapidinho!\n\nMe informa seu **telefone** ou **e-mail**:`,
+      `**${cumprimento}!** Seja bem-vindo! 🤗\n\nEu sou a **Ísis**, sua assistente virtual aqui na **${nomeEmpresaFormatado}**.\n\nVou te ajudar a **agendar seu horário** rapidinho!\n\nInforme seu **telefone** ou **e-mail**:`
     ];
     
     const randomIndex = Math.floor(Math.random() * mensagensBoasVindas.length);
@@ -1179,7 +1178,6 @@ const IsisBookingPageContent = () => {
   const iniciarConversa = (quadrasList, empresaData, jaIdentificado = false) => {
     
     // Mensagem de boas-vindas personalizada com nome da empresa (variações)
-    const nomeEmpresa = empresaData.nome_fantasia || empresaData.razao_social;
     const cumprimento = getCumprimentoPorHorario();
     
     // Se há apenas uma quadra, auto-seleciona e pula para data
@@ -3582,7 +3580,6 @@ ${listaNomes}
       setIsLoading(false);
       
       // Mensagem única de agradecimento + despedida baseada na avaliação
-      const nomeEmpresa = empresa?.nome_fantasia || empresa?.razao_social || 'a empresa';
       const hora = new Date().getHours();
       
       // Despedida contextualizada por horário
@@ -3602,73 +3599,73 @@ ${listaNomes}
       if (avaliacaoData.rating >= 4) {
         const mensagensPositivas = [
           // Mensagens clássicas de agradecimento
-          `🤩 **Muito obrigada pela avaliação!** A **${nomeEmpresa}** agradece imensamente! Foi um prazer te atender! ${despedidaHorario}`,
-          `😊 **Que bom que gostou!** A **${nomeEmpresa}** fica muito feliz! Volte sempre! ${despedidaHorario}`,
-          `🌟 **Perfeito!** A **${nomeEmpresa}** agradece de coração! Espero ter ajudado! ${despedidaHorario}`,
-          `💖 **Adorei seu feedback!** A **${nomeEmpresa}** está muito grata! Nos vemos em breve! ${despedidaHorario}`,
-          `🎉 **Excelente!** A **${nomeEmpresa}** agradece pela confiança! Até a próxima! ${despedidaHorario}`,
+          `🤩 **Muito obrigada pela avaliação!** A **${nomeEmpresaFormatado}** agradece imensamente! Foi um prazer te atender! ${despedidaHorario}`,
+          `😊 **Que bom que gostou!** A **${nomeEmpresaFormatado}** fica muito feliz! Volte sempre! ${despedidaHorario}`,
+          `🌟 **Perfeito!** A **${nomeEmpresaFormatado}** agradece de coração! Espero ter ajudado! ${despedidaHorario}`,
+          `💖 **Adorei seu feedback!** A **${nomeEmpresaFormatado}** está muito grata! Nos vemos em breve! ${despedidaHorario}`,
+          `🎉 **Excelente!** A **${nomeEmpresaFormatado}** agradece pela confiança! Até a próxima! ${despedidaHorario}`,
           
           // Mensagens mais entusiasmadas
-          `🚀 **Uau, que nota incrível!** A **${nomeEmpresa}** está nas nuvens! Obrigada! ${despedidaHorario}`,
-          `✨ **Você é demais!** A **${nomeEmpresa}** adora clientes como você! ${despedidaHorario}`,
-          `🏆 **Top demais!** A **${nomeEmpresa}** se sente campeã com seu feedback! ${despedidaHorario}`,
-          `💫 **Que alegria!** A **${nomeEmpresa}** fica radiante com sua avaliação! ${despedidaHorario}`,
-          `🎊 **Sensacional!** A **${nomeEmpresa}** está celebrando sua nota! ${despedidaHorario}`,
+          `🚀 **Uau, que nota incrível!** A **${nomeEmpresaFormatado}** está nas nuvens! Obrigada! ${despedidaHorario}`,
+          `✨ **Você é demais!** A **${nomeEmpresaFormatado}** adora clientes como você! ${despedidaHorario}`,
+          `🏆 **Top demais!** A **${nomeEmpresaFormatado}** se sente campeã com seu feedback! ${despedidaHorario}`,
+          `💫 **Que alegria!** A **${nomeEmpresaFormatado}** fica radiante com sua avaliação! ${despedidaHorario}`,
+          `🎊 **Sensacional!** A **${nomeEmpresaFormatado}** está celebrando sua nota! ${despedidaHorario}`,
           
           // Mensagens mais pessoais
-          `😍 **Amei sua avaliação!** Fico feliz em saber que te atendi bem! A **${nomeEmpresa}** agradece! ${despedidaHorario}`,
-          `🤗 **Que feedback maravilhoso!** Me deixou super feliz! A **${nomeEmpresa}** é grata! ${despedidaHorario}`,
-          `💝 **Seu carinho me emociona!** A **${nomeEmpresa}** tem sorte de ter você! ${despedidaHorario}`,
-          `🌈 **Você iluminou meu dia!** A **${nomeEmpresa}** agradece de todo coração! ${despedidaHorario}`,
+          `😍 **Amei sua avaliação!** Fico feliz em saber que te atendi bem! A **${nomeEmpresaFormatado}** agradece! ${despedidaHorario}`,
+          `🤗 **Que feedback maravilhoso!** Me deixou super feliz! A **${nomeEmpresaFormatado}** é grata! ${despedidaHorario}`,
+          `💝 **Seu carinho me emociona!** A **${nomeEmpresaFormatado}** tem sorte de ter você! ${despedidaHorario}`,
+          `🌈 **Você iluminou meu dia!** A **${nomeEmpresaFormatado}** agradece de todo coração! ${despedidaHorario}`,
           
           // Mensagens com convite para retorno
-          `🎯 **Nota máxima!** A **${nomeEmpresa}** te espera sempre de braços abertos! ${despedidaHorario}`,
-          `💎 **Cliente 5 estrelas!** A **${nomeEmpresa}** adora te ter aqui! Volte logo! ${despedidaHorario}`,
-          `🌟 **Você é especial!** A **${nomeEmpresa}** sempre terá um lugar especial para você! ${despedidaHorario}`,
-          `🎪 **Show de avaliação!** A **${nomeEmpresa}** te aguarda para a próxima apresentação! ${despedidaHorario}`
+          `🎯 **Nota máxima!** A **${nomeEmpresaFormatado}** te espera sempre de braços abertos! ${despedidaHorario}`,
+          `💎 **Cliente 5 estrelas!** A **${nomeEmpresaFormatado}** adora te ter aqui! Volte logo! ${despedidaHorario}`,
+          `🌟 **Você é especial!** A **${nomeEmpresaFormatado}** sempre terá um lugar especial para você! ${despedidaHorario}`,
+          `🎪 **Show de avaliação!** A **${nomeEmpresaFormatado}** te aguarda para a próxima apresentação! ${despedidaHorario}`
         ];
         mensagemFinal = mensagensPositivas[Math.floor(Math.random() * mensagensPositivas.length)];
       } else if (avaliacaoData.rating === 3) {
         const mensagensNeutras = [
           // Mensagens focadas em melhoria
-          `😊 **Obrigada pelo feedback!** A **${nomeEmpresa}** vai melhorar ainda mais! ${despedidaHorario}`,
-          `🙏 **Agradecemos sua avaliação!** A **${nomeEmpresa}** está trabalhando para evoluir! ${despedidaHorario}`,
-          `💪 **Obrigada!** A **${nomeEmpresa}** valoriza seu retorno! Foi um prazer te atender! ${despedidaHorario}`,
+          `😊 **Obrigada pelo feedback!** A **${nomeEmpresaFormatado}** vai melhorar ainda mais! ${despedidaHorario}`,
+          `🙏 **Agradecemos sua avaliação!** A **${nomeEmpresaFormatado}** está trabalhando para evoluir! ${despedidaHorario}`,
+          `💪 **Obrigada!** A **${nomeEmpresaFormatado}** valoriza seu retorno! Foi um prazer te atender! ${despedidaHorario}`,
           
           // Mensagens mais otimistas
-          `🌱 **Toda avaliação nos faz crescer!** A **${nomeEmpresa}** agradece sua sinceridade! ${despedidaHorario}`,
-          `🎯 **Feedback valioso!** A **${nomeEmpresa}** usa cada retorno para evoluir! ${despedidaHorario}`,
-          `📈 **Obrigada pela nota!** A **${nomeEmpresa}** está sempre buscando melhorar! ${despedidaHorario}`,
-          `🔧 **Seu retorno é importante!** A **${nomeEmpresa}** vai usar para aprimorar nosso serviço! ${despedidaHorario}`,
+          `🌱 **Toda avaliação nos faz crescer!** A **${nomeEmpresaFormatado}** agradece sua sinceridade! ${despedidaHorario}`,
+          `🎯 **Feedback valioso!** A **${nomeEmpresaFormatado}** usa cada retorno para evoluir! ${despedidaHorario}`,
+          `📈 **Obrigada pela nota!** A **${nomeEmpresaFormatado}** está sempre buscando melhorar! ${despedidaHorario}`,
+          `🔧 **Seu retorno é importante!** A **${nomeEmpresaFormatado}** vai usar para aprimorar nosso serviço! ${despedidaHorario}`,
           
           // Mensagens com convite para nova chance
-          `🤝 **Agradecemos a oportunidade!** A **${nomeEmpresa}** espera te surpreender na próxima! ${despedidaHorario}`,
-          `💡 **Obrigada pela dica!** A **${nomeEmpresa}** vai trabalhar para te conquistar! ${despedidaHorario}`,
-          `🎪 **Toda crítica construtiva é bem-vinda!** A **${nomeEmpresa}** agradece! ${despedidaHorario}`
+          `🤝 **Agradecemos a oportunidade!** A **${nomeEmpresaFormatado}** espera te surpreender na próxima! ${despedidaHorario}`,
+          `💡 **Obrigada pela dica!** A **${nomeEmpresaFormatado}** vai trabalhar para te conquistar! ${despedidaHorario}`,
+          `🎪 **Toda crítica construtiva é bem-vinda!** A **${nomeEmpresaFormatado}** agradece! ${despedidaHorario}`
         ];
         mensagemFinal = mensagensNeutras[Math.floor(Math.random() * mensagensNeutras.length)];
       } else {
         const mensagensNegativas = [
           // Mensagens empáticas e comprometidas
-          `😔 **Obrigada pela sinceridade.** A **${nomeEmpresa}** vai trabalhar para melhorar! ${despedidaHorario}`,
-          `💙 **Agradecemos seu feedback.** A **${nomeEmpresa}** está comprometida em evoluir! ${despedidaHorario}`,
-          `🙏 **Obrigada por compartilhar.** A **${nomeEmpresa}** vai usar seu retorno para melhorar! ${despedidaHorario}`,
+          `😔 **Obrigada pela sinceridade.** A **${nomeEmpresaFormatado}** vai trabalhar para melhorar! ${despedidaHorario}`,
+          `💙 **Agradecemos seu feedback.** A **${nomeEmpresaFormatado}** está comprometida em evoluir! ${despedidaHorario}`,
+          `🙏 **Obrigada por compartilhar.** A **${nomeEmpresaFormatado}** vai usar seu retorno para melhorar! ${despedidaHorario}`,
           
           // Mensagens mais humildes e responsáveis
-          `😞 **Lamentamos não ter atendido suas expectativas.** A **${nomeEmpresa}** vai se esforçar mais! ${despedidaHorario}`,
-          `💔 **Sentimos muito pela experiência.** A **${nomeEmpresa}** levará isso muito a sério! ${despedidaHorario}`,
-          `🤲 **Assumimos a responsabilidade.** A **${nomeEmpresa}** vai fazer melhor da próxima vez! ${despedidaHorario}`,
-          `😓 **Sua insatisfação nos preocupa.** A **${nomeEmpresa}** vai revisar todos os processos! ${despedidaHorario}`,
+          `😞 **Lamentamos não ter atendido suas expectativas.** A **${nomeEmpresaFormatado}** vai se esforçar mais! ${despedidaHorario}`,
+          `💔 **Sentimos muito pela experiência.** A **${nomeEmpresaFormatado}** levará isso muito a sério! ${despedidaHorario}`,
+          `🤲 **Assumimos a responsabilidade.** A **${nomeEmpresaFormatado}** vai fazer melhor da próxima vez! ${despedidaHorario}`,
+          `😓 **Sua insatisfação nos preocupa.** A **${nomeEmpresaFormatado}** vai revisar todos os processos! ${despedidaHorario}`,
           
           // Mensagens com pedido de nova oportunidade
-          `🔄 **Obrigada pelo alerta!** A **${nomeEmpresa}** espera uma nova chance de te impressionar! ${despedidaHorario}`,
-          `💪 **Vamos melhorar!** A **${nomeEmpresa}** promete que da próxima vez será diferente! ${despedidaHorario}`,
-          `🎯 **Seu feedback é nosso combustível!** A **${nomeEmpresa}** vai usar para crescer! ${despedidaHorario}`,
-          `🛠️ **Já estamos trabalhando nas melhorias!** A **${nomeEmpresa}** agradece sua paciência! ${despedidaHorario}`,
+          `🔄 **Obrigada pelo alerta!** A **${nomeEmpresaFormatado}** espera uma nova chance de te impressionar! ${despedidaHorario}`,
+          `💪 **Vamos melhorar!** A **${nomeEmpresaFormatado}** promete que da próxima vez será diferente! ${despedidaHorario}`,
+          `🎯 **Seu feedback é nosso combustível!** A **${nomeEmpresaFormatado}** vai usar para crescer! ${despedidaHorario}`,
+          `🛠️ **Já estamos trabalhando nas melhorias!** A **${nomeEmpresaFormatado}** agradece sua paciência! ${despedidaHorario}`,
           
           // Mensagens valorizando a honestidade
-          `💯 **Sua honestidade é valiosa!** A **${nomeEmpresa}** prefere a verdade para evoluir! ${despedidaHorario}`,
-          `🎪 **Críticas nos fazem crescer!** A **${nomeEmpresa}** agradece sua coragem de falar! ${despedidaHorario}`
+          `💯 **Sua honestidade é valiosa!** A **${nomeEmpresaFormatado}** prefere a verdade para evoluir! ${despedidaHorario}`,
+          `🎪 **Críticas nos fazem crescer!** A **${nomeEmpresaFormatado}** agradece sua coragem de falar! ${despedidaHorario}`
         ];
         mensagemFinal = mensagensNegativas[Math.floor(Math.random() * mensagensNegativas.length)];
       }
@@ -3683,7 +3680,6 @@ ${listaNomes}
       console.error('[Isis] Erro ao enviar avaliação:', error);
       setIsLoading(false);
       
-      const nomeEmpresa = empresa?.nome_fantasia || empresa?.razao_social || 'a empresa';
       const hora = new Date().getHours();
       
       // Despedida contextualizada por horário
@@ -3700,18 +3696,18 @@ ${listaNomes}
       
       const mensagensErro = [
         // Mensagens técnicas mas amigáveis
-        `Ops! Tive um problema ao salvar sua avaliação, mas a **${nomeEmpresa}** agradece muito seu feedback! ${despedidaHorario}`,
-        `😊 Não consegui salvar sua avaliação, mas a **${nomeEmpresa}** agradece imensamente! ${despedidaHorario}`,
+        `Ops! Tive um problema ao salvar sua avaliação, mas a **${nomeEmpresaFormatado}** agradece muito seu feedback! ${despedidaHorario}`,
+        `😊 Não consegui salvar sua avaliação, mas a **${nomeEmpresaFormatado}** agradece imensamente! ${despedidaHorario}`,
         
         // Mensagens mais descontraídas
-        `🤖 Deu uma travadinha aqui, mas sua opinião já ficou guardada no meu coração! A **${nomeEmpresa}** agradece! ${despedidaHorario}`,
-        `😅 Ops, falhei na tecnologia, mas não falhei em te ouvir! A **${nomeEmpresa}** valoriza seu feedback! ${despedidaHorario}`,
-        `🔧 Parece que o sistema deu soluço, mas sua avaliação foi ouvida! A **${nomeEmpresa}** agradece! ${despedidaHorario}`,
+        `🤖 Deu uma travadinha aqui, mas sua opinião já ficou guardada no meu coração! A **${nomeEmpresaFormatado}** agradece! ${despedidaHorario}`,
+        `😅 Ops, falhei na tecnologia, mas não falhei em te ouvir! A **${nomeEmpresaFormatado}** valoriza seu feedback! ${despedidaHorario}`,
+        `🔧 Parece que o sistema deu soluço, mas sua avaliação foi ouvida! A **${nomeEmpresaFormatado}** agradece! ${despedidaHorario}`,
         
         // Mensagens com humor leve
-        `🤷‍♀️ A internet não colaborou, mas sua opinião chegou até mim! A **${nomeEmpresa}** é grata! ${despedidaHorario}`,
-        `📡 Problema técnico aqui, mas o importante é que você compartilhou! A **${nomeEmpresa}** agradece! ${despedidaHorario}`,
-        `💻 O sistema travou, mas sua avaliação não passou despercebida! A **${nomeEmpresa}** valoriza! ${despedidaHorario}`
+        `🤷‍♀️ A internet não colaborou, mas sua opinião chegou até mim! A **${nomeEmpresaFormatado}** é grata! ${despedidaHorario}`,
+        `📡 Problema técnico aqui, mas o importante é que você compartilhou! A **${nomeEmpresaFormatado}** agradece! ${despedidaHorario}`,
+        `💻 O sistema travou, mas sua avaliação não passou despercebida! A **${nomeEmpresaFormatado}** valoriza! ${despedidaHorario}`
       ];
       
       const mensagemErro = mensagensErro[Math.floor(Math.random() * mensagensErro.length)];
