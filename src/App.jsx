@@ -28,6 +28,7 @@ import ResetPasswordPage from '@/pages/ResetPasswordPage';
 import ConfiguracaoFiscalPage from '@/pages/ConfiguracaoFiscalPage';
 import FiscalHubPage from '@/pages/FiscalHubPage';
 import IsisPremiumPage from '@/pages/IsisPremiumPage';
+import IsisAnalyticsPage from '@/pages/IsisAnalyticsPage';
 import HistoricoComandasPage from '@/pages/HistoricoComandasPage';
 import PrintComandaPage from '@/pages/PrintComandaPage';
 import CreateCompanyPage from '@/pages/CreateCompanyPage';
@@ -111,6 +112,7 @@ function PrivateApp() {
                   <Route path="/" element={<DashboardPage />} />
                   <Route path="/agenda" element={<AgendaPage sidebarVisible={sidebarVisible} />} />
                   <Route path="/isis" element={<IsisProvider><IsisPremiumPage /></IsisProvider>} />
+                  <Route path="/isis/analytics" element={<IsisAnalyticsPage />} />
                   <Route path="/vendas" element={<VendasPage />} />
                   <Route path="/balcao" element={<BalcaoPage />} />
                   <Route path="/produtos" element={<ProdutosPage />} />

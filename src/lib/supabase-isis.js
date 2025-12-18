@@ -14,6 +14,10 @@ export const supabaseIsis = createClient(url, anon, {
     // Evita compartilhar storage com o cliente principal e suprime o warning
     storageKey: 'isis-auth',
     storage: undefined,
+    detectSessionInUrl: false,
+    autoRefreshToken: false,
   },
-  global: { headers: { 'X-Client-Info': 'fluxo7-isis-web' } },
+  global: { 
+    headers: { 'X-Client-Info': 'fluxo7-isis-web' } 
+  },
 })

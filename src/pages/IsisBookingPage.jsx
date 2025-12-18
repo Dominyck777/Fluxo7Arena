@@ -74,9 +74,51 @@ const IsisBookingPageContent = () => {
   // Mostra opcionalmente uma correção de login (telefone/email) no próximo menu apenas uma vez após identificação
   const [correctionOptionOnce, setCorrectionOptionOnce] = useState(null); // 'telefone' | 'email' | null
   
+  // Formata subdomínio para nome legível (ex: arenaminha -> Arena Minha)
+  const formatarNomeDeSubdominio = (subdomain) => {
+    if (!subdomain) return '';
+    // Remove caracteres especiais e divide por maiúsculas ou números
+    const palavras = subdomain
+      .replace(/([A-Z])/g, ' $1') // Adiciona espaço antes de maiúsculas
+      .replace(/([0-9]+)/g, ' $1') // Adiciona espaço antes de números
+      .trim()
+      .split(/[\s_-]+/) // Divide por espaços, underscores ou hífens
+      .filter(Boolean);
+    
+    // Capitaliza cada palavra
+    return palavras
+      .map(palavra => palavra.charAt(0).toUpperCase() + palavra.slice(1).toLowerCase())
+      .join(' ');
+  };
+  
+  // Nome formatado da empresa para exibição no header
+  const nomeEmpresaFormatado = React.useMemo(() => {
+    if (!empresa) return '';
+    
+    // 1ª prioridade: Nome de exibição configurado em agenda_settings
+    if (empresa.isis_display_name) {
+      return empresa.isis_display_name;
+    }
+    
+    // 2ª prioridade: Se foi acessado via slug personalizado, formata o slug
+    if (nomeFantasiaEfetivo) {
+      const formatted = formatarNomeDeSubdominio(nomeFantasiaEfetivo);
+      return formatted;
+    }
+    
+    // 3ª prioridade: Usa nome_fantasia ou razao_social do banco
+    if (empresa.nome_fantasia) {
+      return empresa.nome_fantasia;
+    }
+    if (empresa.razao_social) {
+      return empresa.razao_social;
+    }
+    
+    return 'Arena';
+  }, [empresa, nomeFantasiaEfetivo]);
+  
   // Logo da empresa com cache-buster (igual ao Header principal)
   const empresaLogoSrc = React.useMemo(() => {
-    console.log('[Isis] Logo da empresa:', { logo_url: empresa?.logo_url, empresa });
     if (empresa?.logo_url) return `${empresa.logo_url}?v=${Date.now()}`;
     return empresa?.logo_url || '';
   }, [empresa?.logo_url]);
@@ -90,8 +132,6 @@ const IsisBookingPageContent = () => {
       }
       
       try {
-        console.log('[Isis] Buscando empresa por nome fantasia:', nomeFantasiaEfetivo);
-        
         // Busca empresa pelo nome fantasia (URL-friendly)
         const nomeDecodificado = decodeURIComponent(nomeFantasiaEfetivo);
         
@@ -101,23 +141,41 @@ const IsisBookingPageContent = () => {
           .replace(/[\s\-_]+/g, '') // Remove espaços, hífens e underscores
           .trim();
         
-        console.log('[Isis] Nome normalizado para busca:', nomeNormalizado);
-        // 1) Tenta via RPC (melhor para contornar RLS). Se a função não existir, cai no fallback abaixo.
-        let empresaEncontradaViaRpc = null;
+        // 1) Tenta buscar por isis_subdomain configurado em agenda_settings
+        let empresaFinal = null;
+        let isisDisplayName = null;
         try {
-          const { data: rpcData, error: rpcErr } = await supabase.rpc('get_empresa_public_by_slug', { p_slug: nomeNormalizado });
-          if (!rpcErr && rpcData && rpcData.length > 0) {
-            empresaEncontradaViaRpc = rpcData[0];
+          const { data: settingsData } = await supabase
+            .from('agenda_settings')
+            .select('empresa_id, isis_subdomain, isis_display_name, empresas(codigo_empresa, nome_fantasia, razao_social, nome, logo_url, telefone, id)')
+            .eq('isis_subdomain', nomeNormalizado)
+            .single();
+          
+          if (settingsData?.empresas) {
+            empresaFinal = settingsData.empresas;
+            isisDisplayName = settingsData.isis_display_name;
           }
-        } catch (_) {}
+        } catch (e) {
+          // Não encontrou via isis_subdomain, tentando fallbacks
+        }
+        
+        // 2) Tenta via RPC (melhor para contornar RLS). Se a função não existir, cai no fallback abaixo.
+        if (!empresaFinal) {
+          let empresaEncontradaViaRpc = null;
+          try {
+            const { data: rpcData, error: rpcErr } = await supabase.rpc('get_empresa_public_by_slug', { p_slug: nomeNormalizado });
+            if (!rpcErr && rpcData && rpcData.length > 0) {
+              empresaEncontradaViaRpc = rpcData[0];
+            }
+          } catch (_) {}
+          empresaFinal = empresaEncontradaViaRpc || null;
+        }
 
-        let empresaFinal = empresaEncontradaViaRpc || null;
-
-        // 2) Fallback local: tenta selecionar e filtrar (pode falhar por RLS). Inclui 'nome' como candidato.
+        // 3) Fallback local: tenta selecionar e filtrar (pode falhar por RLS). Inclui 'nome' como candidato.
         if (!empresaFinal) {
           const { data: todasEmpresas, error } = await supabase
             .from('empresas')
-            .select('codigo_empresa, nome_fantasia, razao_social, nome, logo_url');
+            .select('codigo_empresa, nome_fantasia, razao_social, nome, logo_url, id');
 
           if (!error && Array.isArray(todasEmpresas)) {
             const emp = todasEmpresas.find((e) => {
@@ -131,17 +189,85 @@ const IsisBookingPageContent = () => {
             if (emp) empresaFinal = emp;
           }
         }
+        
+        // 4) Se encontrou empresa via fallback, verifica se ela tem subdomínio configurado
+        // Se tiver, bloqueia o acesso e exige uso do subdomínio
+        const empresaIdParaBusca = empresaFinal?.id || empresaFinal?.codigo_empresa;
+        
+        if (empresaFinal && !isisDisplayName && empresaIdParaBusca) {
+          try {
+            // Busca por empresa_id ou por codigo_empresa se id não estiver disponível
+            let checkSettings = null;
+            let checkError = null;
+            
+            if (empresaFinal.id) {
+              const result = await supabase
+                .from('agenda_settings')
+                .select('isis_subdomain, empresa_id')
+                .eq('empresa_id', empresaFinal.id)
+                .single();
+              checkSettings = result.data;
+              checkError = result.error;
+            } else if (empresaFinal.codigo_empresa) {
+              // Busca empresa.id pelo codigo_empresa primeiro
+              const { data: empresaComId } = await supabase
+                .from('empresas')
+                .select('id')
+                .eq('codigo_empresa', empresaFinal.codigo_empresa)
+                .single();
+              
+              if (empresaComId?.id) {
+                const result = await supabase
+                  .from('agenda_settings')
+                  .select('isis_subdomain, empresa_id')
+                  .eq('empresa_id', empresaComId.id)
+                  .single();
+                checkSettings = result.data;
+                checkError = result.error;
+              }
+            }
+            
+            if (checkSettings?.isis_subdomain) {
+              console.error('[Isis] Acesso bloqueado. Use o subdomínio configurado.');
+              setCodigoEmpresa(null);
+              setLoadingEmpresa(false);
+              return;
+            }
+          } catch (e) {
+            // Erro ao verificar subdomínio
+          }
+        }
 
         if (!empresaFinal) {
-          console.error('[Isis] Empresa não encontrada (RPC e fallback)');
+          console.error('[Isis] Empresa não encontrada');
           setCodigoEmpresa(null);
           setLoadingEmpresa(false);
           return;
         }
-
-        console.log('[Isis] Empresa encontrada:', empresaFinal);
+        
+        // Se não encontrou isis_display_name ainda (via subdomain), busca agora pelo empresa_id
+        if (!isisDisplayName && empresaFinal.id) {
+          try {
+            const { data: settingsData } = await supabase
+              .from('agenda_settings')
+              .select('isis_display_name')
+              .eq('empresa_id', empresaFinal.id)
+              .single();
+            if (settingsData?.isis_display_name) {
+              isisDisplayName = settingsData.isis_display_name;
+            }
+          } catch (e) {
+            // Não encontrou display name
+          }
+        }
+        
+        // Adiciona isis_display_name ao objeto empresa se existir
+        const empresaComDisplay = {
+          ...empresaFinal,
+          isis_display_name: isisDisplayName
+        };
+        setEmpresa(empresaComDisplay);
         setCodigoEmpresa(empresaFinal.codigo_empresa);
-        setEmpresa(empresaFinal);
         setLoadingEmpresa(false);
         
       } catch (error) {
@@ -208,31 +334,17 @@ const IsisBookingPageContent = () => {
   
   // Inicia conversa com identificação do cliente
   useEffect(() => {
-    console.log('[DEBUG] useEffect iniciarConversa:', {
-      codigoEmpresa,
-      loadingEmpresa,
-      hasCliente: !!selections.cliente,
-      identificacaoIniciada,
-      timestamp: new Date().toISOString()
-    });
-    
     if (!codigoEmpresa || loadingEmpresa) {
-      console.log('[DEBUG] Saindo - sem código ou ainda carregando');
       return;
     }
     
     // Verifica se já tem cliente identificado ou se identificação já foi iniciada
     if (!selections.cliente && !identificacaoIniciada) {
-      console.log('[DEBUG] Cliente não identificado e identificação não iniciada, agendando iniciarIdentificacao em 1s');
-      setIdentificacaoIniciada(true); // Marca como iniciada para evitar duplicação
+      setIdentificacaoIniciada(true);
       
-      // Aguarda mais tempo para garantir que o loading premium saiu completamente da tela
       setTimeout(() => {
-        console.log('[DEBUG] Executando iniciarIdentificacao após delay (loading fora da tela)');
         iniciarIdentificacao();
-      }, 2500); // 2.5 segundos adicionais após loading premium terminar
-    } else {
-      console.log('[DEBUG] Cliente já identificado ou identificação já iniciada, não fazendo nada');
+      }, 2500);
     }
   }, [codigoEmpresa, loadingEmpresa, selections.cliente, identificacaoIniciada]);
   
@@ -389,8 +501,6 @@ const IsisBookingPageContent = () => {
         .eq('codigo_empresa', codigoEmpresa)
         .eq('status', 'active')
         .ilike('email', `%${valor}%`);
-      
-      console.log('[DEBUG] Busca por email - Clientes encontrados:', clientes);
       
       if (error) throw error;
       return clientes?.[0] || null;
@@ -820,6 +930,17 @@ const IsisBookingPageContent = () => {
         icon: '📅'
       }
     ];
+    // Se houver mais de uma quadra ativa, adiciona o botão "Mudar quadra" no mesmo bloco
+    if (Array.isArray(quadras) && quadras.length > 1) {
+      dataButtons.push({ label: 'Mudar quadra', value: 'mudar_quadra', icon: '🏟️' });
+    }
+    
+    // Adiciona botão Menu
+    dataButtons.push({
+      label: '🏠 Menu',
+      value: 'menu',
+      action: 'menu'
+    });
     
     addIsisMessageWithButtons('Para qual dia você gostaria de agendar?', dataButtons, 600);
     nextStep('data');
@@ -924,18 +1045,11 @@ const IsisBookingPageContent = () => {
   
   // Inicia o fluxo de agendamento após identificação
   const iniciarAgendamento = async () => {
-    console.log('[iniciarAgendamento] Dados disponíveis:', {
-      quadras: quadras?.length || 0,
-      empresa: !!empresa,
-      empresaNome: empresa?.nome_fantasia || empresa?.razao_social
-    });
-    
     let quadrasParaUsar = quadras;
     let empresaParaUsar = empresa;
     
     // Se quadras não estão carregadas, carrega empresa e quadras
     if (!quadrasParaUsar || quadrasParaUsar.length === 0) {
-      console.log('[iniciarAgendamento] Quadras não disponíveis, carregando...');
       const dadosCarregados = await loadEmpresa(false); // false = sem loading na tela
       
       quadrasParaUsar = dadosCarregados.quadras;
@@ -966,14 +1080,8 @@ const IsisBookingPageContent = () => {
         setLoadingEmpresa(true);
       }
       
-      // Delay mínimo para mostrar o loading premium (3.5 segundos)
       const startTime = Date.now();
       const minLoadingTime = 3500;
-      console.log('[DEBUG] Loading premium INICIOU:', {
-        startTime,
-        minLoadingTime,
-        timestamp: new Date().toISOString()
-      });
       
       // Busca empresa
       const { data: empresaData, error: empresaError } = await supabase
@@ -992,7 +1100,11 @@ const IsisBookingPageContent = () => {
         return { empresa: null, quadras: [] };
       }
       
-      setEmpresa(empresaData);
+      // Preserva isis_display_name se já existir no estado
+      setEmpresa(prev => ({
+        ...empresaData,
+        isis_display_name: prev?.isis_display_name || empresaData.isis_display_name
+      }));
       updateSelection('empresa', empresaData);
       
       // Busca quadras ativas
@@ -1034,17 +1146,8 @@ const IsisBookingPageContent = () => {
       const elapsedTime = Date.now() - startTime;
       const remainingTime = Math.max(0, minLoadingTime - elapsedTime);
       
-      console.log('[DEBUG] Verificando delay mínimo:', {
-        elapsedTime,
-        remainingTime,
-        willWait: remainingTime > 0,
-        timestamp: new Date().toISOString()
-      });
-      
       if (remainingTime > 0) {
-        console.log('[DEBUG] Aguardando delay mínimo de', remainingTime, 'ms');
         await new Promise(resolve => setTimeout(resolve, remainingTime));
-        console.log('[DEBUG] Delay mínimo CONCLUÍDO');
       }
       
       return { empresa: empresaData, quadras: quadrasData || [] };
@@ -1068,20 +1171,12 @@ const IsisBookingPageContent = () => {
       return { empresa: null, quadras: [] };
     } finally {
       if (showLoading) {
-        console.log('[DEBUG] loadEmpresa FINALIZOU - setLoadingEmpresa(false):', {
-          timestamp: new Date().toISOString()
-        });
         setLoadingEmpresa(false);
       }
     }
   };
   
   const iniciarConversa = (quadrasList, empresaData, jaIdentificado = false) => {
-    console.log('[iniciarConversa] Iniciando com:', {
-      quadras: quadrasList?.length || 0,
-      empresa: empresaData?.nome_fantasia || empresaData?.razao_social,
-      jaIdentificado
-    });
     
     // Mensagem de boas-vindas personalizada com nome da empresa (variações)
     const nomeEmpresa = empresaData.nome_fantasia || empresaData.razao_social;
@@ -1089,7 +1184,6 @@ const IsisBookingPageContent = () => {
     
     // Se há apenas uma quadra, auto-seleciona e pula para data
     if (quadrasList.length === 1) {
-      console.log('[iniciarConversa] Uma quadra detectada, auto-selecionando:', quadrasList[0].nome);
       const quadraUnica = quadrasList[0];
       
       // Só envia boas-vindas se cliente já foi identificado (evita duplicação)
@@ -1132,6 +1226,11 @@ const IsisBookingPageContent = () => {
             label: 'Outro dia...',
             value: 'custom',
             icon: '🗓️'
+          },
+          {
+            label: '🏠 Menu',
+            value: 'menu',
+            action: 'menu'
           }
         ];
         
@@ -1171,32 +1270,66 @@ const IsisBookingPageContent = () => {
       quadra: q
     }));
     
+    // Adiciona botão Menu
+    quadraButtons.push({
+      label: '🏠 Menu',
+      value: 'menu',
+      action: 'menu'
+    });
+    
     addIsisMessageWithButtons(greeting, quadraButtons);
     nextStep('quadra');
   };
   
   // Handler para seleção de quadra
   const handleQuadraSelection = async (button) => {
-    console.log('[handleQuadraSelection] Iniciando...', { button, currentStep });
+    
+    // Se clicou em Menu, reseta estado e volta para a pergunta inicial
+    if (button.action === 'menu') {
+      addUserMessage('🏠 Menu');
+      
+      // Reseta estados do fluxo (sem apagar mensagens)
+      try { setAgendamentoCriado(null); } catch {}
+      try { updateSelection('editing_agendamento', null); } catch {}
+      try { updateSelection('quadra', null); } catch {}
+      try { updateSelection('data', null); } catch {}
+      try { updateSelection('horario', null); } catch {}
+      try { updateSelection('modalidade', null); } catch {}
+      try { updateSelection('quantidade', null); } catch {}
+      try { updateSelection('nomes', []); } catch {}
+      try { updateSelection('participantes', []); } catch {}
+      try { updateSelection('levantadores', []); } catch {}
+      try { updateSelection('goleiros', []); } catch {}
+      try { updateSelection('fixos', []); } catch {}
+      try { updateSelection('fixoRoles', {}); } catch {}
+      try { setEditingType(null); } catch {}
+      try { setShowInput(false); } catch {}
+      
+      // Muda step para identificacao para rotear botões corretamente
+      nextStep('identificacao');
+      
+      setTimeout(() => {
+        perguntarAcaoInicial();
+      }, 400);
+      return;
+    }
+    
     const quadra = button.quadra;
+    if (!quadra) {
+      console.error('[handleQuadraSelection] Quadra não encontrada no botão:', button);
+      return;
+    }
     
     addUserMessage(quadra.nome);
     updateSelection('quadra', quadra);
     
     // Se está editando (review), recarrega horários para a nova quadra
     if (currentStep === 'review') {
-      console.log('[handleQuadraSelection] Modo edição detectado - recarregando horários');
-      console.log('[handleQuadraSelection] Quadra ID:', quadra.id);
-      console.log('[handleQuadraSelection] Data:', selections.data);
-      
       setShowInput(false);
-      setEditingType('horario'); // Define que está editando horário após trocar quadra
+      setEditingType('horario');
       setIsLoading(true);
       
-      // Recarrega horários disponíveis para a nova quadra (incluindo horário atual se editando)
       const resultado = await loadHorariosDisponiveis(quadra.id, selections.data, agendamentoCriado?.id);
-      
-      console.log('[handleQuadraSelection] Resultado:', resultado);
       
       setIsLoading(false);
       
@@ -1264,6 +1397,12 @@ const IsisBookingPageContent = () => {
       } else {
         console.log('[handleQuadraSelection] Nenhum horário disponível');
         addIsisMessage('Ops! Não encontrei **horários disponíveis** para essa quadra nesse dia. 😔');
+        setTimeout(() => {
+          addIsisMessage('Que tal tentar **outra data**? 😊', 800);
+          setTimeout(() => {
+            mostrarSelecaoData();
+          }, 400);
+        }, 1200);
       }
       return;
     }
@@ -1294,6 +1433,11 @@ const IsisBookingPageContent = () => {
         label: 'Outro dia...',
         value: 'custom',
         icon: '🗓️'
+      },
+      {
+        label: '🏠 Menu',
+        value: 'menu',
+        action: 'menu'
       }
     ];
     
@@ -1304,6 +1448,36 @@ const IsisBookingPageContent = () => {
   // Handler para seleção de data
   const handleDataSelection = async (button) => {
     console.log('[handleDataSelection] Iniciando...', { button, currentStep });
+    
+    // Se clicou em Menu, reseta estado e volta para a pergunta inicial
+    if (button.action === 'menu') {
+      addUserMessage('🏠 Menu');
+      
+      // Reseta estados do fluxo (sem apagar mensagens)
+      try { setAgendamentoCriado(null); } catch {}
+      try { updateSelection('editing_agendamento', null); } catch {}
+      try { updateSelection('quadra', null); } catch {}
+      try { updateSelection('data', null); } catch {}
+      try { updateSelection('horario', null); } catch {}
+      try { updateSelection('modalidade', null); } catch {}
+      try { updateSelection('quantidade', null); } catch {}
+      try { updateSelection('nomes', []); } catch {}
+      try { updateSelection('participantes', []); } catch {}
+      try { updateSelection('levantadores', []); } catch {}
+      try { updateSelection('goleiros', []); } catch {}
+      try { updateSelection('fixos', []); } catch {}
+      try { updateSelection('fixoRoles', {}); } catch {}
+      try { setEditingType(null); } catch {}
+      try { setShowInput(false); } catch {}
+      
+      // Muda step para identificacao para rotear botões corretamente
+      nextStep('identificacao');
+      
+      setTimeout(() => {
+        perguntarAcaoInicial();
+      }, 400);
+      return;
+    }
     
     if (button.value === 'custom') {
       // Implementar seletor de data customizado
@@ -1323,6 +1497,11 @@ const IsisBookingPageContent = () => {
     }
     
     const dataEscolhida = button.date;
+    if (!dataEscolhida) {
+      console.error('[handleDataSelection] Data não encontrada no botão:', button);
+      return;
+    }
+    
     addUserMessage(button.label);
     updateSelection('data', dataEscolhida);
     
@@ -1449,6 +1628,12 @@ const IsisBookingPageContent = () => {
     if (slots.length === 0) {
       console.log('[handleDataSelection] Nenhum horário disponível');
       addIsisMessage('Ops! Não encontrei **horários disponíveis** para esse dia. 😔 Que tal tentar outro dia?');
+      setTimeout(() => {
+        addIsisMessage('Escolha **outra data**:', 800);
+        setTimeout(() => {
+          mostrarSelecaoData();
+        }, 400);
+      }, 1200);
       return;
     }
     
@@ -2098,6 +2283,12 @@ const IsisBookingPageContent = () => {
     // Junta todos os botões em uma única mensagem
     const allButtons = [...confirmButtons, ...editButtons];
     
+    // Adiciona botão Menu
+    allButtons.push({
+      label: '🏠 Menu',
+      value: 'menu',
+      action: 'menu'
+    });
     
     // Delay menor para botões se for modo edição inicial
     const buttonsDelay = modoEdicaoInicial ? 400 : 1600;
@@ -2470,6 +2661,36 @@ ${listaNomes}
 
   // Handler para confirmação final
   const handleConfirmacao = async (button) => {
+    // Se clicou em Menu, reseta estado e volta para a pergunta inicial
+    if (button.action === 'menu') {
+      addUserMessage('🏠 Menu');
+      
+      // Reseta estados do fluxo (sem apagar mensagens)
+      try { setAgendamentoCriado(null); } catch {}
+      try { updateSelection('editing_agendamento', null); } catch {}
+      try { updateSelection('quadra', null); } catch {}
+      try { updateSelection('data', null); } catch {}
+      try { updateSelection('horario', null); } catch {}
+      try { updateSelection('modalidade', null); } catch {}
+      try { updateSelection('quantidade', null); } catch {}
+      try { updateSelection('nomes', []); } catch {}
+      try { updateSelection('participantes', []); } catch {}
+      try { updateSelection('levantadores', []); } catch {}
+      try { updateSelection('goleiros', []); } catch {}
+      try { updateSelection('fixos', []); } catch {}
+      try { updateSelection('fixoRoles', {}); } catch {}
+      try { setEditingType(null); } catch {}
+      try { setShowInput(false); } catch {}
+      
+      // Muda step para identificacao para rotear botões corretamente
+      nextStep('identificacao');
+      
+      setTimeout(() => {
+        perguntarAcaoInicial();
+      }, 400);
+      return;
+    }
+    
     // Se o botão tem propriedade 'quadra', é um botão de seleção de quadra
     if (button.quadra) {
       await handleQuadraSelection(button);
@@ -3172,10 +3393,48 @@ ${listaNomes}
     try {
       setIsLoading(true);
       
-      // Atualiza status do agendamento para cancelado
+      // Verifica regra de cancelamento (tempo mínimo antes do agendamento)
+      const { data: settings } = await supabase
+        .from('agenda_settings')
+        .select('isis_cancel_min_hours_before')
+        .eq('empresa_id', empresa?.id)
+        .single();
+      
+      const minHours = settings?.isis_cancel_min_hours_before;
+      if (minHours !== null && minHours !== undefined) {
+        const agendamentoInicio = new Date(agendamentoCriado.inicio);
+        const agora = new Date();
+        const diffMs = agendamentoInicio - agora;
+        const diffHours = diffMs / (1000 * 60 * 60);
+        
+        if (diffHours < minHours) {
+          setIsLoading(false);
+          const telefone = empresa?.telefone || 'a arena';
+          const nomeArena = empresa?.isis_display_name || empresa?.nome_fantasia || empresa?.razao_social || 'a arena';
+          const mensagensRestricao = [
+            `⚠️ Ops! Só é possível cancelar com ${minHours} hora${minHours > 1 ? 's' : ''} de antecedência. Este agendamento está muito próximo.`,
+            `⚠️ Desculpe! O cancelamento só pode ser feito com ${minHours} hora${minHours > 1 ? 's' : ''} de antecedência. Seu agendamento já está próximo demais.`,
+          ];
+          const msgRestricao = mensagensRestricao[Math.floor(Math.random() * mensagensRestricao.length)];
+          
+          // Combina as duas mensagens em uma única
+          const mensagemCompleta = `${msgRestricao}\n\n📞 Para mais informações ou cancelamento de última hora, entre em contato diretamente com a ${nomeArena}: ${telefone}`;
+          addIsisMessage(mensagemCompleta, 600);
+          
+          setTimeout(() => {
+            addIsisMessage('O que você gostaria de fazer agora?', 800);
+            setTimeout(() => {
+              perguntarAcaoInicial();
+            }, 1200);
+          }, 1200);
+          return;
+        }
+      }
+      
+      // Atualiza status do agendamento para cancelado (autoria da Ísis)
       const { error: agendamentoError } = await supabase
         .from('agendamentos')
-        .update({ status: 'canceled' })
+        .update({ status: 'canceled', canceled_by: 'isis', canceled_at: new Date().toISOString() })
         .eq('id', agendamentoCriado.id);
       
       if (agendamentoError) throw agendamentoError;
@@ -3638,6 +3897,15 @@ ${listaNomes}
       };
 
       // Conversas/feedback ficam no JSONBin; não persistimos sessão no banco.
+      // Ainda assim, se houver um sessionId com formato UUID, vinculamos ao agendamento.
+      let isisSessionUUID = null;
+      try {
+        const sid = String(sessionId || '').trim();
+        const uuidRegex = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$/;
+        if (uuidRegex.test(sid)) {
+          isisSessionUUID = sid;
+        }
+      } catch {}
 
       // Busca o maior código já usado para esta empresa
       const { data: ultimoAgendamento } = await supabase
@@ -3661,22 +3929,37 @@ ${listaNomes}
         tentativas++;
         console.log('[criarAgendamento] Tentativa', tentativas, 'com código:', proximoCodigo);
         
+        // Monta payload e só inclui isis_session_id se sessão existir na tabela (evita FK 23503)
+        const insertPayload = {
+          codigo: proximoCodigo,
+          codigo_empresa: codigoEmpresa,
+          quadra_id: selections.quadra.id,
+          cliente_id: cliente.id,
+          clientes: nomesArrayOrdenado,
+          inicio: selections.horario.inicioDate.toISOString(),
+          fim: selections.horario.fimDate.toISOString(),
+          modalidade: selections.esporte,
+          status: 'scheduled',
+          valor_total: valorTotal,
+          meta_roles: metaRoles,
+          created_by_isis: true,
+        };
+        if (isisSessionUUID) {
+          try {
+            const { data: sess } = await supabase
+              .from('isis_chat_sessions')
+              .select('id')
+              .eq('id', isisSessionUUID)
+              .single();
+            if (sess?.id) {
+              insertPayload.isis_session_id = isisSessionUUID;
+            }
+          } catch (_) {}
+        }
+
         const { data, error } = await supabase
           .from('agendamentos')
-          .insert({
-            codigo: proximoCodigo,
-            codigo_empresa: codigoEmpresa,
-            quadra_id: selections.quadra.id,
-            cliente_id: cliente.id,
-            clientes: nomesArrayOrdenado,
-            inicio: selections.horario.inicioDate.toISOString(),
-            fim: selections.horario.fimDate.toISOString(),
-            modalidade: selections.esporte,
-            status: 'scheduled',
-            valor_total: valorTotal,
-            meta_roles: metaRoles,
-            created_by_isis: true
-          })
+          .insert(insertPayload)
           .select('id, codigo')
           .single();
         
@@ -3790,7 +4073,28 @@ ${listaNomes}
         handleQuadraSelection(button);
         break;
       case 'data':
-        handleDataSelection(button);
+        {
+          const v = (button?.value || '').toString();
+          if (v === 'mudar_quadra') {
+            try {
+              setShowInput(false);
+              // Oferece seleção de quadras
+              const quadraButtons = (quadras || []).map(q => ({
+                label: q.nome,
+                value: q.id,
+                icon: '🏟️',
+                subtitle: q.descricao || q.tipo || null,
+                quadra: q
+              }));
+              if (quadraButtons.length > 0) {
+                addIsisMessageWithButtons('Qual quadra você quer?', quadraButtons, 400);
+                nextStep('quadra');
+              }
+            } catch {}
+            break;
+          }
+          handleDataSelection(button);
+        }
         break;
       case 'identificacao':
         // Após identificação, trata botões de ação inicial
@@ -3836,16 +4140,11 @@ ${listaNomes}
   
   // Renderiza input apropriado baseado no step
   const renderInput = () => {
-    console.log('[renderInput] currentStep:', currentStep, 'showInput:', showInput);
-    
-    // Não mostra input se showInput for false (efeito de delay)
     if (!showInput) {
-      console.log('[renderInput] showInput=false, retornando null');
       return null;
     }
     
     if (currentStep === 'participantes' || (currentStep === 'review' && showInput && editingType === 'participantes')) {
-      console.log('[renderInput] Renderizando IsisParticipantesInput');
       
       return (
         <IsisParticipantesInput
@@ -3933,9 +4232,6 @@ ${listaNomes}
     }
     
     if (currentStep === 'horario' || (currentStep === 'review' && showInput && editingType === 'horario')) {
-      console.log('[renderInput] Renderizando IsisHorarioInput');
-      console.log('[renderInput] horariosDisponiveis:', horariosDisponiveis?.length || 0);
-      console.log('[renderInput] esportes:', selections.quadra?.modalidades);
       
       return (
         <IsisHorarioInput
@@ -3965,7 +4261,6 @@ ${listaNomes}
     }
     
     if (currentStep === 'avaliacao') {
-      console.log('[renderInput] Renderizando IsisAvaliacaoInput');
       
       return (
         <IsisAvaliacaoInput
@@ -4217,7 +4512,7 @@ ${listaNomes}
                 
                 {/* Nome - aumentado no mobile */}
                 <h2 className="text-sm md:text-base font-bold text-text-primary tracking-wide truncate max-w-[140px] md:max-w-none">
-                  {empresa.nome_fantasia || empresa.razao_social}
+                  {nomeEmpresaFormatado}
                 </h2>
               </div>
             </div>

@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useEffect, useRef } from 'react';
-import { NavLink, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Calendar, ShoppingCart, Users, UserCog, LifeBuoy, Settings, Trophy, Package, Wallet, ChevronDown, Layers, Building2, Banknote, Folder, CreditCard, ShoppingBag, Bot } from 'lucide-react';
+import { NavLink, useLocation, useNavigate } from 'react-router-dom';
+import { LayoutDashboard, Calendar, ShoppingCart, Users, UserCog, LifeBuoy, Trophy, Package, Wallet, ChevronDown, Layers, Building2, Banknote, Folder, CreditCard, ShoppingBag, Bot, Settings } from 'lucide-react';
 import { IsisAvatar } from '@/components/isis/IsisAvatar';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from '@/components/ui/button';
@@ -67,6 +67,7 @@ const NavItem = ({ to, icon: Icon, label, index, onNavigate }) => {
 };
 
 function Sidebar({ onNavigate, isVisible, setIsVisible, sidebarPinned }) {
+  const navigate = useNavigate();
   const location = useLocation();
   const groupPaths = ['/produtos', '/compras', '/clientes', '/equipe', '/quadras', '/empresas', '/finalizadoras'];
   const groupActive = useMemo(() => groupPaths.includes(location.pathname), [location.pathname]);
@@ -294,6 +295,15 @@ function Sidebar({ onNavigate, isVisible, setIsVisible, sidebarPinned }) {
               <span className="text-lg font-extrabold bg-clip-text text-transparent bg-gradient-to-r from-fuchsia-400 via-violet-300 to-emerald-300">
                 Ísis
               </span>
+              {/* Botão de gerenciar (Dashboard Analítica) */}
+              <button
+                type="button"
+                title="Dashboard analítica da Ísis"
+                onClick={(e) => { e.preventDefault(); e.stopPropagation(); navigate('/isis/analytics'); }}
+                className="ml-auto inline-flex items-center justify-center p-2.5 rounded-full text-text-secondary hover:text-text-primary hover:bg-white/10 transition-all border border-white/10 hover:border-white/20 cursor-pointer shadow-sm hover:shadow"
+              >
+                <Settings className="h-5 w-5" />
+              </button>
             </NavLink>
           </motion.li>
         </ul>
