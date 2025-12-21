@@ -4579,18 +4579,20 @@ ${listaNomes}
  */
 export default function IsisBookingPage() {
   return (
-    <IsisProvider>
-      <IsisErrorBoundaryWrapper>
-        <IsisBookingPageContent />
-      </IsisErrorBoundaryWrapper>
-    </IsisProvider>
+    <ErrorBoundaryIsis>
+      <IsisProvider>
+        <IsisErrorBoundaryWrapper>
+          <IsisBookingPageContent />
+        </IsisErrorBoundaryWrapper>
+      </IsisProvider>
+    </ErrorBoundaryIsis>
   );
 }
 
 function IsisErrorBoundaryWrapper({ children }) {
   // Tenta pegar da IsisContext; se indisponível num crash, faz fallback consultando o supabase via slug/subdomínio
   const { selections } = useIsis();
-  const [meta, setMeta] = React.useState({ name: '', phone: '' });
+  const [meta, setMeta] = React.useState({ name: '', phone: '', source: 'init' });
 
   React.useEffect(() => {
     const pickFromContext = () => {
@@ -4621,28 +4623,33 @@ function IsisErrorBoundaryWrapper({ children }) {
 
     const fromCtx = pickFromContext();
     if (fromCtx) {
-      setMeta({ name: fromCtx.name, phone: fromCtx.phone });
+      try { console.info('[IsisError][Meta] Using context data', { name: !!fromCtx.name, phone: !!fromCtx.phone }); } catch {}
+      setMeta({ name: fromCtx.name, phone: fromCtx.phone, source: 'context' });
       return;
     }
 
     const slug = inferSlug();
     if (!slug) {
-      setMeta((m) => m.name || m.phone ? m : { name: '', phone: '' });
+      try { console.warn('[IsisError][Meta] No slug inferred from URL'); } catch {}
+      setMeta((m) => m.name || m.phone ? m : { name: '', phone: '', source: 'none' });
       return;
     }
 
     (async () => {
       try {
+        try { console.info('[IsisError][Meta] Start fetch by slug', { slug }); } catch {}
         // 1) Tenta via RPC público (contorna RLS): get_empresa_public_by_slug
         const norm = String(slug || '').toLowerCase().replace(/[\s\-_]+/g, '').trim();
         let name = '';
         let phone = '';
+        let phoneSource = '';
         try {
           const { data: rpcData, error: rpcErr } = await supabase.rpc('get_empresa_public_by_slug', { p_slug: norm });
           if (!rpcErr && Array.isArray(rpcData) && rpcData.length > 0) {
             const e = rpcData[0] || {};
             name = e.isis_display_name || e.nome_fantasia || e.razao_social || e.nome || '';
-            phone = e.telefone || '';
+            if (e.telefone) { phone = e.telefone; phoneSource = 'rpc.telefone'; }
+            try { console.info('[IsisError][Meta] RPC result', { hasName: !!name, phoneSource, hasPhone: !!phone }); } catch {}
           }
         } catch {}
 
@@ -4656,13 +4663,26 @@ function IsisErrorBoundaryWrapper({ children }) {
               .single();
             const emp = data?.empresas || {};
             name = name || data?.isis_display_name || emp?.nome_fantasia || emp?.razao_social || emp?.nome || '';
-            phone = phone || emp?.telefone || '';
+            if (!phone && emp?.telefone) { phone = emp.telefone; phoneSource = 'settings.telefone'; }
+            try { console.info('[IsisError][Meta] Settings result', { hasName: !!name, phoneSource, hasPhone: !!phone }); } catch {}
           } catch {}
         }
 
-        setMeta({ name: name || slug, phone: phone || '' });
+        // 3) Último recurso: melhorar a apresentação do slug como nome
+        const prettyFromSlug = (s) => {
+          try {
+            const raw = String(s || '').replace(/[\s_\-]+/g, ' ').trim();
+            return raw.split(' ').filter(Boolean).map(p => p.charAt(0).toUpperCase() + p.slice(1).toLowerCase()).join(' ');
+          } catch { return s; }
+        };
+
+        const finalName = name || prettyFromSlug(slug);
+        const finalPhone = phone || '';
+        try { console.info('[IsisError][Meta] Final', { finalName, hasPhone: !!finalPhone, phoneSource: phoneSource || 'none' }); } catch {}
+        setMeta({ name: finalName, phone: finalPhone, source: phoneSource || 'computed' });
       } catch (_) {
-        setMeta({ name: slug, phone: '' });
+        try { console.error('[IsisError][Meta] Exception during meta fetch', _); } catch {}
+        setMeta({ name: slug, phone: '', source: 'error' });
       }
     })();
   }, [selections?.empresa]);
@@ -4677,16 +4697,76 @@ function IsisErrorBoundaryWrapper({ children }) {
 class ErrorBoundaryIsis extends React.Component {
   constructor(props) {
     super(props);
-    this.state = { hasError: false };
+    this.state = { hasError: false, companyName: '', companyPhone: '' };
   }
   static getDerivedStateFromError() {
     return { hasError: true };
   }
   componentDidCatch(error, info) {
     try { console.error('[Isis] Uncaught error:', error, info); } catch {}
+    // Se props não trouxerem meta, tenta resolver por conta própria (outer boundary)
+    if (!this.props.companyName || !this.props.companyPhone) {
+      (async () => {
+        try {
+          const inferSlug = () => {
+            try {
+              const host = typeof window !== 'undefined' ? (window.location.host || '') : '';
+              const path = typeof window !== 'undefined' ? (window.location.pathname || '') : '';
+              const base = 'f7arena.com';
+              if (host && host.endsWith(base)) {
+                const sub = host.slice(0, -base.length).replace(/\.$/, '').toLowerCase();
+                if (sub && sub !== 'www') return sub;
+              }
+              const m = path.match(/\/agendar\/([^\/?#]+)/i);
+              if (m && m[1]) return decodeURIComponent(m[1]);
+            } catch {}
+            return null;
+          };
+          const prettyFromSlug = (s) => {
+            try {
+              const raw = String(s || '').replace(/[\s_\-]+/g, ' ').trim();
+              return raw.split(' ').filter(Boolean).map(p => p.charAt(0).toUpperCase() + p.slice(1).toLowerCase()).join(' ');
+            } catch { return s; }
+          };
+          const slug = inferSlug();
+          if (!slug) return;
+          const norm = String(slug).toLowerCase().replace(/[\s\-_]+/g, '').trim();
+          let name = '';
+          let phone = '';
+          // 1) RPC
+          try {
+            const { data: rpcData, error: rpcErr } = await supabase.rpc('get_empresa_public_by_slug', { p_slug: norm });
+            if (!rpcErr && Array.isArray(rpcData) && rpcData.length > 0) {
+              const e = rpcData[0] || {};
+              name = e.isis_display_name || e.nome_fantasia || e.razao_social || e.nome || '';
+              if (e.telefone) phone = e.telefone;
+              try { console.info('[IsisError][Outer] RPC', { hasName: !!name, hasPhone: !!phone }); } catch {}
+            }
+          } catch {}
+          // 2) agenda_settings
+          if (!name || !phone) {
+            try {
+              const { data } = await supabase
+                .from('agenda_settings')
+                .select('isis_display_name, empresas(nome_fantasia, razao_social, nome, telefone)')
+                .eq('isis_subdomain', norm)
+                .single();
+              const emp = data?.empresas || {};
+              name = name || data?.isis_display_name || emp?.nome_fantasia || emp?.razao_social || emp?.nome || '';
+              if (!phone && emp?.telefone) phone = emp.telefone;
+              try { console.info('[IsisError][Outer] Settings', { hasName: !!name, hasPhone: !!phone }); } catch {}
+            } catch {}
+          }
+          this.setState({ companyName: name || prettyFromSlug(slug), companyPhone: phone || '' });
+        } catch (e) {
+          try { console.error('[IsisError][Outer] meta fetch failed', e); } catch {}
+        }
+      })();
+    }
   }
   render() {
     if (this.state.hasError) {
+      try { console.info('[IsisError][Render] Props', { companyName: this.props.companyName, companyPhone: this.props.companyPhone }); } catch {}
       // Helpers dentro do render para evitar imports adicionais
       const inferCompanyFromLocation = () => {
         try {
@@ -4713,8 +4793,8 @@ class ErrorBoundaryIsis extends React.Component {
         } catch { return raw || ''; }
       };
       const fallbackName = inferCompanyFromLocation();
-      const companyName = this.props.companyName || fallbackName || 'a arena';
-      const companyPhone = formatPhone(this.props.companyPhone || '');
+      const companyName = this.props.companyName || this.state.companyName || fallbackName || 'a arena';
+      const companyPhone = formatPhone(this.props.companyPhone || this.state.companyPhone || '');
 
       return (
         <div className="min-h-screen w-full flex items-center justify-center bg-background text-text-primary p-6">
