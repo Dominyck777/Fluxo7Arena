@@ -74,6 +74,15 @@ const IsisBookingPageContent = () => {
   // Mostra opcionalmente uma correção de login (telefone/email) no próximo menu apenas uma vez após identificação
   const [correctionOptionOnce, setCorrectionOptionOnce] = useState(null); // 'telefone' | 'email' | null
   
+  // Rota oculta de teste de erro: use ?crash=1 para acionar o ErrorBoundary
+  if (typeof window !== 'undefined') {
+    const params = new URLSearchParams(window.location.search || '');
+    if (params.get('crash') === '1') {
+      // Lança erro durante a renderização para ser capturado pelo ErrorBoundary
+      throw new Error('Isis forced crash test');
+    }
+  }
+  
   // Formata subdomínio para nome legível (ex: arenaminha -> Arena Minha)
   const formatarNomeDeSubdominio = (subdomain) => {
     if (!subdomain) return '';
@@ -739,6 +748,7 @@ const IsisBookingPageContent = () => {
     }
     
     addUserMessage(mensagem);
+    setShowInput(false);
     
     // Cria o cliente no banco
     await criarNovoCliente(dados.nome, dados.email, dados.telefone);
@@ -869,6 +879,7 @@ const IsisBookingPageContent = () => {
             .eq('empresa_id', empresa?.id);
           
           setIsLoading(false);
+          setShowInput(false);
           updateSelection('cliente', novoClienteRetry);
           
           addIsisMessage(`Pronto, ${nome}! Cadastro realizado com sucesso! 🎉`, 800);
@@ -890,6 +901,7 @@ const IsisBookingPageContent = () => {
         .eq('empresa_id', empresa?.id);
       
       setIsLoading(false);
+      setShowInput(false);
       updateSelection('cliente', novoCliente);
       
       addIsisMessage(`Pronto, ${nome}! Cadastro realizado com sucesso! 🎉`, 800);
@@ -4568,7 +4580,173 @@ ${listaNomes}
 export default function IsisBookingPage() {
   return (
     <IsisProvider>
-      <IsisBookingPageContent />
+      <IsisErrorBoundaryWrapper>
+        <IsisBookingPageContent />
+      </IsisErrorBoundaryWrapper>
     </IsisProvider>
   );
+}
+
+function IsisErrorBoundaryWrapper({ children }) {
+  // Tenta pegar da IsisContext; se indisponível num crash, faz fallback consultando o supabase via slug/subdomínio
+  const { selections } = useIsis();
+  const [meta, setMeta] = React.useState({ name: '', phone: '' });
+
+  React.useEffect(() => {
+    const pickFromContext = () => {
+      try {
+        const empresa = selections?.empresa || null;
+        if (empresa) {
+          const name = empresa.isis_display_name || empresa.nome_fantasia || empresa.razao_social || empresa.nome || '';
+          const phone = empresa.telefone || '';
+          if (name || phone) return { name, phone };
+        }
+      } catch {}
+      return null;
+    };
+    const inferSlug = () => {
+      try {
+        const host = window.location.host || '';
+        const path = window.location.pathname || '';
+        const base = 'f7arena.com';
+        if (host.endsWith(base)) {
+          const sub = host.slice(0, -base.length).replace(/\.$/, '').toLowerCase();
+          if (sub && sub !== 'www') return sub;
+        }
+        const m = path.match(/\/agendar\/([^\/?#]+)/i);
+        if (m && m[1]) return decodeURIComponent(m[1]);
+      } catch {}
+      return null;
+    };
+
+    const fromCtx = pickFromContext();
+    if (fromCtx) {
+      setMeta({ name: fromCtx.name, phone: fromCtx.phone });
+      return;
+    }
+
+    const slug = inferSlug();
+    if (!slug) {
+      setMeta((m) => m.name || m.phone ? m : { name: '', phone: '' });
+      return;
+    }
+
+    (async () => {
+      try {
+        // 1) Tenta via RPC público (contorna RLS): get_empresa_public_by_slug
+        const norm = String(slug || '').toLowerCase().replace(/[\s\-_]+/g, '').trim();
+        let name = '';
+        let phone = '';
+        try {
+          const { data: rpcData, error: rpcErr } = await supabase.rpc('get_empresa_public_by_slug', { p_slug: norm });
+          if (!rpcErr && Array.isArray(rpcData) && rpcData.length > 0) {
+            const e = rpcData[0] || {};
+            name = e.isis_display_name || e.nome_fantasia || e.razao_social || e.nome || '';
+            phone = e.telefone || '';
+          }
+        } catch {}
+
+        // 2) Se não encontrou nome/telefone, tenta agenda_settings pelo isis_subdomain
+        if (!name || !phone) {
+          try {
+            const { data } = await supabase
+              .from('agenda_settings')
+              .select('isis_display_name, empresas(nome_fantasia, razao_social, nome, telefone)')
+              .eq('isis_subdomain', norm)
+              .single();
+            const emp = data?.empresas || {};
+            name = name || data?.isis_display_name || emp?.nome_fantasia || emp?.razao_social || emp?.nome || '';
+            phone = phone || emp?.telefone || '';
+          } catch {}
+        }
+
+        setMeta({ name: name || slug, phone: phone || '' });
+      } catch (_) {
+        setMeta({ name: slug, phone: '' });
+      }
+    })();
+  }, [selections?.empresa]);
+
+  return (
+    <ErrorBoundaryIsis companyName={meta.name} companyPhone={meta.phone}>
+      {children}
+    </ErrorBoundaryIsis>
+  );
+}
+
+class ErrorBoundaryIsis extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false };
+  }
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+  componentDidCatch(error, info) {
+    try { console.error('[Isis] Uncaught error:', error, info); } catch {}
+  }
+  render() {
+    if (this.state.hasError) {
+      // Helpers dentro do render para evitar imports adicionais
+      const inferCompanyFromLocation = () => {
+        try {
+          const host = typeof window !== 'undefined' ? (window.location.host || '') : '';
+          const path = typeof window !== 'undefined' ? (window.location.pathname || '') : '';
+          // Tenta pelo subdomínio: nomedaempresa.f7arena.com
+          const base = 'f7arena.com';
+          if (host && host.endsWith(base)) {
+            const sub = host.slice(0, -base.length).replace(/\.$/, '').toLowerCase();
+            if (sub && sub !== 'www') return sub;
+          }
+          // Tenta pelo path /agendar/:nomeFantasia
+          const match = path.match(/\/agendar\/([^\/?#]+)/i);
+          if (match && match[1]) return decodeURIComponent(match[1]);
+        } catch {}
+        return null;
+      };
+      const formatPhone = (raw) => {
+        try {
+          const digits = String(raw || '').replace(/\D/g, '');
+          if (digits.length >= 11) return `(${digits.slice(0,2)}) ${digits.slice(2,7)}-${digits.slice(7,11)}`;
+          if (digits.length >= 10) return `(${digits.slice(0,2)}) ${digits.slice(2,6)}-${digits.slice(6,10)}`;
+          return raw || '';
+        } catch { return raw || ''; }
+      };
+      const fallbackName = inferCompanyFromLocation();
+      const companyName = this.props.companyName || fallbackName || 'a arena';
+      const companyPhone = formatPhone(this.props.companyPhone || '');
+
+      return (
+        <div className="min-h-screen w-full flex items-center justify-center bg-background text-text-primary p-6">
+          <div className="w-full max-w-xl mx-auto rounded-3xl border border-white/10 bg-surface/80 backdrop-blur-md shadow-2xl p-8 text-center">
+            <div className="flex justify-center mb-4">
+              <IsisAvatar size="xl" />
+            </div>
+            <h1 className="text-3xl md:text-4xl font-extrabold tracking-tight mb-3">⚠️ Ops, ocorreu um erro!</h1>
+            <p className="text-base md:text-lg opacity-90 leading-relaxed mb-3">
+              Pode ser um <span className="font-semibold">problema no seu dispositivo</span> ou na sua <span className="font-semibold">conexão de rede</span>.
+            </p>
+            <p className="text-base md:text-lg opacity-90 leading-relaxed mb-6">
+              <span className="font-semibold">Tente novamente</span>, experimente <span className="font-semibold">outro navegador</span> ou <span className="font-semibold">outra rede</span>.
+            </p>
+            <p className="text-base md:text-lg leading-relaxed mb-6">
+              Se persistir, <span className="font-semibold">entre em contato</span> com <span className="font-semibold">{companyName}</span>
+              {companyPhone ? (<>
+                {' '}pelo número <span className="font-semibold font-mono">{companyPhone}</span>.
+              </>) : '.'}
+            </p>
+            <div className="flex items-center justify-center gap-3">
+              <button
+                onClick={() => { try { window.location.reload(); } catch {} }}
+                className="inline-flex items-center justify-center rounded-xl px-5 py-3 bg-brand text-bg font-semibold shadow-lg shadow-brand/20 hover:shadow-xl hover:shadow-brand/30 transition-all"
+              >
+                🔄 Recarregar página
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
 }
