@@ -47,6 +47,7 @@ function PrivateApp() {
   const location = useLocation();
   const navigate = useNavigate();
   const isAgendaPage = location.pathname === '/agenda';
+  const isIsisAnalyticsPage = location.pathname === '/isis/analytics';
 
   // Hotkeys globais (B e H) - funcionam em qualquer página
   useEffect(() => {
@@ -82,6 +83,16 @@ function PrivateApp() {
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [location, navigate]);
+
+  // Mobile: esconder sidebar automaticamente ao abrir a aba Analítica da Ísis
+  useEffect(() => {
+    try {
+      const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
+      if (isMobile && isIsisAnalyticsPage) {
+        setSidebarVisible(false);
+      }
+    } catch {}
+  }, [isIsisAnalyticsPage]);
 
   return (
     <ModalsProvider>

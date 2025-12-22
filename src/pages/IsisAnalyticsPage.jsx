@@ -1,10 +1,14 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
-import { Loader2, CalendarDays, BarChart3, CalendarCheck, TrendingUp, Layers, ChevronDown, XCircle, Settings } from 'lucide-react';
+import { Loader2, CalendarDays, BarChart3, CalendarCheck, TrendingUp, Layers, ChevronDown, XCircle, Settings, Calendar as CalendarIcon } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { IsisAvatar } from '@/components/isis/IsisAvatar';
 import { ResponsiveContainer, LineChart, Line, Tooltip, XAxis, YAxis, CartesianGrid } from 'recharts';
+import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
+import { Calendar } from '@/components/ui/calendar';
+import { ptBR } from 'date-fns/locale';
+import { Button } from '@/components/ui/button';
 
 export default function IsisAnalyticsPage() {
   const { company } = useAuth();
@@ -12,6 +16,10 @@ export default function IsisAnalyticsPage() {
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [lastAgsLoading, setLastAgsLoading] = useState(false);
+  const [lastAgsError, setLastAgsError] = useState(null);
+  const [lastAgsDateStart, setLastAgsDateStart] = useState('');
+  const [lastAgsDateEnd, setLastAgsDateEnd] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsLoading, setSettingsLoading] = useState(false);
   const [settingsSaving, setSettingsSaving] = useState(false);
@@ -30,6 +38,48 @@ export default function IsisAnalyticsPage() {
     ultimasInteracoes: [],
   });
   const [expanded, setExpanded] = useState({});
+
+  const toYmd = (d) => {
+    if (!d) return '';
+    const dt = (d instanceof Date) ? d : new Date(d);
+    if (isNaN(dt.getTime())) return '';
+    const y = dt.getFullYear();
+    const m = String(dt.getMonth() + 1).padStart(2, '0');
+    const day = String(dt.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  };
+  const ymdToDate = (ymd) => {
+    if (!ymd) return null;
+    const dt = new Date(`${ymd}T00:00:00`);
+    if (isNaN(dt.getTime())) return null;
+    return dt;
+  };
+  const formatBr = (d) => {
+    try {
+      if (!d) return '';
+      const dt = (d instanceof Date) ? d : new Date(d);
+      if (isNaN(dt.getTime())) return '';
+      return dt.toLocaleDateString('pt-BR');
+    } catch {
+      return '';
+    }
+  };
+
+  useEffect(() => {
+    if (!codigoEmpresa) return;
+    // Inicial: últimos 7 dias (inclusive hoje)
+    if (lastAgsDateStart || lastAgsDateEnd) return;
+    const end = new Date();
+    const start = new Date();
+    start.setDate(start.getDate() - 6);
+    const startYmd = toYmd(start);
+    const endYmd = toYmd(end);
+    try { console.log('[IsisAnalytics] Init default range (auto-fill):', { startYmd, endYmd }); } catch {}
+    setLastAgsDateStart(startYmd);
+    setLastAgsDateEnd(endYmd);
+  }, [codigoEmpresa]);
+
+  // Quando as datas mudarem, o efeito de busca usará automaticamente o range efetivo
 
   // Carrega configurações da Ísis ao abrir modal
   useEffect(() => {
@@ -297,16 +347,72 @@ export default function IsisAnalyticsPage() {
           .sort((a,b) => b.count - a.count)
           .slice(0, 5);
 
-        // 4) Últimas interações (fallback: pegar últimos agendamentos criados pela Ísis)
-        const { data: lastAgs } = await supabase
+        if (!mounted) return;
+        setMetrics(prev => ({
+          ...prev,
+          agendamentosIsisTotal: agIsisTotal || 0,
+          agendamentosIsisHoje: agIsisHoje || 0,
+          agendamentosIsis7d: agIsis7d,
+          agendamentosTotal7d: agTotal7d,
+          cancelamentosIsis7d: cancelamentosIsis7d || 0,
+          perDay7d,
+          topQuadras30d,
+          topModalidades30d,
+        }));
+        setLoading(false);
+      } catch (e) {
+        if (!mounted) return;
+        setError(e?.message || 'Erro ao carregar métricas');
+        setLoading(false);
+      }
+    })();
+    return () => { mounted = false; };
+  }, [codigoEmpresa, company?.nome_fantasia, company?.razao_social]);
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      if (!codigoEmpresa) return;
+      try {
+        setLastAgsLoading(true);
+        setLastAgsError(null);
+
+        const startOfDay = (d) => { const x = new Date(d); x.setHours(0,0,0,0); return x; };
+        const endOfDay = (d) => { const x = new Date(d); x.setHours(23,59,59,999); return x; };
+        // Usa as datas atuais dos seletores; se vazio, cai no padrão de últimos 7 dias
+        const today = new Date();
+        const defaultEnd = toYmd(today);
+        const dStart = new Date(); dStart.setDate(dStart.getDate() - 6);
+        const defaultStart = toYmd(dStart);
+
+        const effStart = lastAgsDateStart || defaultStart;
+        const effEnd = lastAgsDateEnd || defaultEnd;
+
+        let q = supabase
           .from('agendamentos')
           .select('id, codigo, inicio, fim, criado_em, status, cliente_id, clientes, quadra_id')
           .eq('codigo_empresa', codigoEmpresa)
           .eq('created_by_isis', true)
-          .order('criado_em', { ascending: false })
-          .limit(10);
+          .order('criado_em', { ascending: false });
 
-        // Enriquecer: nomes de clientes e participantes
+        const hasAnyFilter = !!(effStart || effEnd);
+        if (effStart) {
+          const dt = startOfDay(new Date(effStart));
+          q = q.gte('criado_em', dt.toISOString());
+        }
+        if (effEnd) {
+          const dt = endOfDay(new Date(effEnd));
+          q = q.lte('criado_em', dt.toISOString());
+        }
+        q = q.limit(hasAnyFilter ? 200 : 10);
+        try { console.log('[IsisAnalytics] Fetch lastAgs with range (effective):', { effStart, effEnd, hasAnyFilter, limit: hasAnyFilter ? 200 : 10 }); } catch {}
+        const { data: lastAgs, error: lastErr } = await q;
+        if (lastErr) {
+          try { console.error('[IsisAnalytics] lastAgs query error:', lastErr); } catch {}
+          throw lastErr;
+        }
+        try { console.log('[IsisAnalytics] lastAgs length:', (lastAgs || []).length); } catch {}
+
         const clientIds = Array.from(new Set((lastAgs || []).map(a => a.cliente_id).filter(Boolean)));
         let clientMap = {};
         if (clientIds.length > 0) {
@@ -317,7 +423,6 @@ export default function IsisAnalyticsPage() {
           (clients || []).forEach(c => { clientMap[c.id] = c.nome; });
         }
 
-        // Mapear nomes de quadra para os últimos agendamentos
         const quadraIdsLast = Array.from(new Set((lastAgs || []).map(a => a.quadra_id).filter(Boolean)));
         let quadraMapLast = {};
         if (quadraIdsLast.length > 0) {
@@ -343,31 +448,25 @@ export default function IsisAnalyticsPage() {
         }
 
         if (!mounted) return;
-        setMetrics({
-          agendamentosIsisTotal: agIsisTotal || 0,
-          agendamentosIsisHoje: agIsisHoje || 0,
-          agendamentosIsis7d: agIsis7d,
-          agendamentosTotal7d: agTotal7d,
-          cancelamentosIsis7d: cancelamentosIsis7d || 0,
-          perDay7d,
-          topQuadras30d,
-          topModalidades30d,
+        setExpanded({});
+        setMetrics(prev => ({
+          ...prev,
           ultimasInteracoes: (lastAgs || []).map(a => ({
             ...a,
             cliente_nome: clientMap[a.cliente_id] || null,
             participantes: partsMap[a.id] || [],
             quadra_nome: quadraMapLast[a.quadra_id] || null,
           })),
-        });
-        setLoading(false);
+        }));
+        setLastAgsLoading(false);
       } catch (e) {
         if (!mounted) return;
-        setError(e?.message || 'Erro ao carregar métricas');
-        setLoading(false);
+        setLastAgsError(e?.message || 'Erro ao carregar agendamentos');
+        setLastAgsLoading(false);
       }
     })();
     return () => { mounted = false; };
-  }, [codigoEmpresa, company?.nome_fantasia, company?.razao_social]);
+  }, [codigoEmpresa, lastAgsDateStart, lastAgsDateEnd]);
 
   // Hero section CTA label
   const empresaNome = useMemo(() => (company?.nome_fantasia || company?.razao_social || 'sua arena'), [company]);
@@ -505,8 +604,117 @@ export default function IsisAnalyticsPage() {
         <motion.div variants={itemVariants} className="fx-card">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-sm sm:text-base font-bold text-text-primary">Últimos agendamentos criados pela Ísis</h2>
+            <div className="flex items-center gap-2">
+              <div className="hidden sm:flex items-center gap-2">
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      className="h-9 px-3 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 hover:border-white/20 transition-all duration-200 text-xs font-semibold text-text-primary"
+                      title="Data início (criado em)"
+                    >
+                      <CalendarIcon className="h-4 w-4 text-text-secondary" />
+                      <span>{lastAgsDateStart ? formatBr(ymdToDate(lastAgsDateStart)) : 'Início'}</span>
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0">
+                    <Calendar
+                      mode="single"
+                      selected={ymdToDate(lastAgsDateStart) || undefined}
+                      onSelect={(date) => setLastAgsDateStart(date ? toYmd(date) : '')}
+                      locale={ptBR}
+                      initialFocus
+                    />
+                  </PopoverContent>
+                </Popover>
+
+                <span className="text-xs text-text-secondary select-none">até</span>
+
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      className="h-9 px-3 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 hover:border-white/20 transition-all duration-200 text-xs font-semibold text-text-primary"
+                      title="Data fim (criado em)"
+                    >
+                      <CalendarIcon className="h-4 w-4 text-text-secondary" />
+                      <span>{lastAgsDateEnd ? formatBr(ymdToDate(lastAgsDateEnd)) : 'Fim'}</span>
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0">
+                    <Calendar
+                      mode="single"
+                      selected={ymdToDate(lastAgsDateEnd) || undefined}
+                      onSelect={(date) => setLastAgsDateEnd(date ? toYmd(date) : '')}
+                      locale={ptBR}
+                      initialFocus
+                    />
+                  </PopoverContent>
+                </Popover>
+              </div>
+              {null}
+            </div>
           </div>
-          {metrics.ultimasInteracoes.length === 0 ? (
+          <div className="sm:hidden mb-3 rounded-lg border border-white/10 bg-white/5 p-2">
+            <div className="grid [grid-template-columns:1fr_auto_1fr] gap-2 mb-2">
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="w-full h-9 px-3 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 hover:border-white/20 transition-all duration-200 text-xs font-semibold text-text-primary justify-between"
+                    title="Data início (criado em)"
+                  >
+                    <CalendarIcon className="h-4 w-4 text-text-secondary" />
+                    <span className="truncate">{lastAgsDateStart ? formatBr(ymdToDate(lastAgsDateStart)) : 'Início'}</span>
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0">
+                  <Calendar
+                    mode="single"
+                    selected={ymdToDate(lastAgsDateStart) || undefined}
+                    onSelect={(date) => setLastAgsDateStart(date ? toYmd(date) : '')}
+                    locale={ptBR}
+                    initialFocus
+                  />
+                </PopoverContent>
+              </Popover>
+              <div className="flex items-center justify-center text-xs text-text-secondary select-none">até</div>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="w-full h-9 px-3 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 hover:border-white/20 transition-all duration-200 text-xs font-semibold text-text-primary justify-between"
+                    title="Data fim (criado em)"
+                  >
+                    <CalendarIcon className="h-4 w-4 text-text-secondary" />
+                    <span className="truncate">{lastAgsDateEnd ? formatBr(ymdToDate(lastAgsDateEnd)) : 'Fim'}</span>
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0">
+                  <Calendar
+                    mode="single"
+                    selected={ymdToDate(lastAgsDateEnd) || undefined}
+                    onSelect={(date) => setLastAgsDateEnd(date ? toYmd(date) : '')}
+                    locale={ptBR}
+                    initialFocus
+                  />
+                </PopoverContent>
+              </Popover>
+            </div>
+            {null}
+          </div>
+          {lastAgsLoading ? (
+            <div className="flex items-center gap-2 text-text-muted text-sm py-6">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span>Carregando agendamentos...</span>
+            </div>
+          ) : lastAgsError ? (
+            <div className="text-danger text-sm">{lastAgsError}</div>
+          ) : metrics.ultimasInteracoes.length === 0 ? (
             <div className="text-sm text-text-muted">Nenhum agendamento recente.</div>
           ) : (
             <div className="overflow-x-auto -mx-4 sm:mx-0">

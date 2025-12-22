@@ -4,6 +4,7 @@ import { UserPlus, Check, X, ChevronUp, ChevronDown } from 'lucide-react';
 import { IsisAvatar } from '@/components/isis/IsisAvatar';
 import { supabase } from '@/lib/supabase';
 import { createPortal } from 'react-dom';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 /**
  * Input para adicionar participantes - Estilo Ísis
@@ -16,7 +17,9 @@ export const IsisParticipantesInput = ({
   disabled = false,
   onAdicionarLote,
   selfName: selfNameProp,
-  onFixedRolesDetected
+  onFixedRolesDetected,
+  initialModalidade = '',
+  modalidadeOptions = []
 }) => {
   const [nome, setNome] = useState('');
   const [focused, setFocused] = useState(false);
@@ -34,8 +37,13 @@ export const IsisParticipantesInput = ({
   const [expandedList, setExpandedList] = useState(false);
   const listRef = useRef(null);
   const toolbarRef = useRef(null);
+  // modalidade local
+  const [modalidade, setModalidade] = useState(initialModalidade || '');
+  useEffect(() => {
+    setModalidade(initialModalidade || '');
+  }, [initialModalidade]);
 
-  // Detecta se é mobile
+  
   useEffect(() => {
     const checkMobile = () => {
       setIsMobile(window.innerWidth < 768);
@@ -263,7 +271,7 @@ export const IsisParticipantesInput = ({
       e.preventDefault();
       if (e.shiftKey) {
         // Shift+Enter = Finalizar
-        onFinalizar();
+        onFinalizar && onFinalizar(modalidade);
       } else {
         // Enter = Adicionar
         handleSubmit(e);
@@ -518,6 +526,23 @@ export const IsisParticipantesInput = ({
         >
           Importar lista
         </button>
+        <div className="relative">
+          <Select value={modalidade} onValueChange={setModalidade} disabled={disabled}>
+            <SelectTrigger className="min-w-[160px] bg-surface/70 backdrop-blur-sm border-white/10 text-sm">
+              <SelectValue placeholder="Modalidade" />
+            </SelectTrigger>
+            <SelectContent className="max-h-[300px] z-[70]">
+              {(Array.isArray(modalidadeOptions) ? modalidadeOptions : []).map((opt) => (
+                <SelectItem key={String(opt)} value={String(opt)}>
+                  {String(opt)}
+                </SelectItem>
+              ))}
+              {(!modalidadeOptions || modalidadeOptions.length === 0) && (
+                <SelectItem value="">Selecionar modalidade</SelectItem>
+              )}
+            </SelectContent>
+          </Select>
+        </div>
         <button
           type="button"
           onClick={() => {
@@ -634,7 +659,7 @@ export const IsisParticipantesInput = ({
         {/* Botão Finalizar - Destaque */}
         <motion.button
           type="button"
-          onClick={onFinalizar}
+          onClick={() => onFinalizar && onFinalizar(modalidade)}
           disabled={disabled}
           whileHover={{ scale: disabled ? 1 : 1.05 }}
           whileTap={{ scale: disabled ? 1 : 0.95 }}

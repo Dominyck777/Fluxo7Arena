@@ -2082,13 +2082,19 @@ const IsisBookingPageContent = () => {
   };
   
   // Handler para finalizar lista de participantes
-  const handleFinalizarParticipantes = () => {
+  const handleFinalizarParticipantes = (novaModalidade) => {
     const participantes = selections.participantes || [];
     
     if (participantes.length === 0) {
       addIsisMessage('Você precisa ter pelo menos 1 participante!', 400);
       return;
     }
+    try {
+      const nova = (novaModalidade || '').trim();
+      if (nova && nova !== selections.esporte) {
+        updateSelection('esporte', nova);
+      }
+    } catch {}
     
     setShowInput(false);
     
@@ -2110,8 +2116,14 @@ const IsisBookingPageContent = () => {
     
     // Sempre vai para o resumo (seja edição ou primeira vez)
     setTimeout(() => {
-      setEditingType(null); // Limpa o tipo de edição
-      mostrarResumo();
+      setEditingType(null);
+      try {
+        const nova = (novaModalidade || '').trim();
+        // Passa esporteAtualizado para evitar depender do timing do estado
+        mostrarResumo(null, nova || null);
+      } catch {
+        mostrarResumo();
+      }
     }, 600);
   };
   
@@ -4162,6 +4174,8 @@ ${listaNomes}
           onFinalizar={handleFinalizarParticipantes}
           onAdicionarLote={handleAdicionarParticipantesLote}
           selfName={selections.cliente?.nome}
+          initialModalidade={selections.esporte || ''}
+          modalidadeOptions={Array.isArray(selections.quadra?.modalidades) && selections.quadra.modalidades.length > 0 ? selections.quadra.modalidades : ((selections.esporte ? [selections.esporte] : []))}
           onFixedRolesDetected={(roles) => {
             try {
               const levs = Array.isArray(roles?.levantadores) ? roles.levantadores : [];
