@@ -14,6 +14,11 @@ export const AlertsProvider = ({ children }) => {
   const [showBalloon, setShowBalloon] = useState(false);
   const [loading, setLoading] = useState(false);
   const previousPathnameRef = useRef(location.pathname);
+  const balloonShownOnceRef = useRef(false);
+  const balloonTimerRef = useRef(null);
+  const [eventBalloon, setEventBalloon] = useState(null); // Notificação transitória (ex.: eventos da Ísis)
+  const alertsRef = useRef([]);
+  useEffect(() => { alertsRef.current = alerts; }, [alerts]);
   
   // Função para verificar se há modais abertos (evita recarregar alertas durante interações)
   const hasOpenModals = useCallback(() => {
@@ -236,13 +241,135 @@ export const AlertsProvider = ({ children }) => {
         });
       }
       
-      setAlerts(alertasList);
+      // Preservar alertas transitórios importantes (ex.: eventos da Ísis) ao recarregar
+      const persistedIsisAlerts = (alertsRef.current || []).filter(a => a && a.tipo === 'isis-event');
+      setAlerts([...persistedIsisAlerts, ...alertasList]);
+
+      // Exibir balão inicial com os 3 primeiros alertas apenas uma vez por carregamento
+      // (mostra novamente em recarregamento da página), somente quando a aba estiver visível
+      // e sem outros modais abertos
+      try {
+        const canShow = !balloonShownOnceRef.current && alertasList.length > 0 && typeof document !== 'undefined' && document.visibilityState === 'visible' && !hasOpenModals();
+        if (canShow) {
+          // pequeno atraso para garantir montagem completa do header e ícones
+          setTimeout(() => {
+            // Se já foi marcado como exibido (ex.: o usuário abriu o modal de alertas), não abrir
+            if (balloonShownOnceRef.current) return;
+            // Revalida se há modais abertos no momento exato de abrir
+            if (hasOpenModals()) {
+              // Marca como exibido para não abrir depois que o modal fechar
+              balloonShownOnceRef.current = true;
+              return;
+            }
+            setShowBalloon(true);
+            balloonShownOnceRef.current = true;
+            // auto-fechar após alguns segundos
+            try { if (balloonTimerRef.current) clearTimeout(balloonTimerRef.current); } catch {}
+            balloonTimerRef.current = setTimeout(() => {
+              setShowBalloon(false);
+            }, 5000);
+          }, 350);
+        }
+      } catch {}
     } catch (error) {
       console.error('[AlertsContext] Erro ao carregar alertas:', error);
     } finally {
       setLoading(false);
     }
   }, [userProfile?.codigo_empresa]);
+
+  // Se o usuário abrir o modal de alertas, suprime a abertura do balão de preview nesta carga
+  useEffect(() => {
+    if (showModal) {
+      balloonShownOnceRef.current = true;
+    }
+  }, [showModal]);
+
+  // Cleanup do timer ao desmontar
+  useEffect(() => {
+    return () => {
+      try { if (balloonTimerRef.current) clearTimeout(balloonTimerRef.current); } catch {}
+    };
+  }, []);
+
+  // Fechar e limpar qualquer balão ativo (preview ou evento)
+  const closeBalloon = useCallback(() => {
+    try { if (balloonTimerRef.current) clearTimeout(balloonTimerRef.current); } catch {}
+    setShowBalloon(false);
+    setEventBalloon(null);
+  }, []);
+
+  // Realtime: escuta criação/cancelamento via Ísis e abre um balão de notificação
+  useEffect(() => {
+    if (!userProfile?.codigo_empresa) return;
+    const codigo = userProfile.codigo_empresa;
+
+    const channel = supabase
+      .channel(`isis-events:${codigo}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'agendamentos', filter: `codigo_empresa=eq.${codigo}` }, (payload) => {
+        try {
+          const { eventType, new: novo, old: antigo } = payload || {};
+          const row = novo || antigo;
+          if (!row) return;
+          // Apenas eventos originados pela Ísis
+          const createdByIsis = (novo?.created_by_isis === true) || (antigo?.created_by_isis === true);
+          if (!createdByIsis) return;
+
+          // Não abrir sobre modais existentes para evitar atrito (mesma política do preview)
+          if (hasOpenModals()) return;
+
+          const dtIso = (novo?.inicio || antigo?.inicio);
+          let link = '';
+          try {
+            if (dtIso) {
+              const yyyy = new Date(dtIso);
+              const dateStr = `${yyyy.getFullYear()}-${String(yyyy.getMonth()+1).padStart(2,'0')}-${String(yyyy.getDate()).padStart(2,'0')}`;
+              link = `/agenda?date=${dateStr}`;
+            }
+          } catch {}
+
+          let message = '';
+          if (eventType === 'INSERT') {
+            message = 'Ísis criou um agendamento';
+          } else if (eventType === 'UPDATE' && antigo?.status !== 'canceled' && novo?.status === 'canceled') {
+            message = 'Ísis cancelou um agendamento';
+          } else if (eventType === 'DELETE') {
+            message = 'Ísis cancelou um agendamento';
+          } else {
+            // Ignorar outras atualizações
+            return;
+          }
+
+          setEventBalloon({ message, link });
+          setShowBalloon(true);
+          try { if (balloonTimerRef.current) clearTimeout(balloonTimerRef.current); } catch {}
+          balloonTimerRef.current = setTimeout(() => {
+            closeBalloon();
+          }, 5000);
+
+          // Persistir também nos alertas para consulta posterior via sino
+          try {
+            setAlerts((prev) => {
+              const novoAlerta = {
+                tipo: 'isis-event',
+                icone: eventType === 'INSERT' ? 'CalendarPlus' : 'AlertTriangle',
+                cor: eventType === 'INSERT' ? 'info' : 'warning',
+                mensagem: message,
+                link: '/isis/analytics'
+              };
+              return [novoAlerta, ...(Array.isArray(prev) ? prev : [])];
+            });
+          } catch {}
+        } catch (e) {
+          console.warn('[AlertsContext] erro ao processar evento isis:', e);
+        }
+      })
+      .subscribe();
+
+    return () => {
+      try { supabase.removeChannel(channel); } catch {}
+    };
+  }, [userProfile?.codigo_empresa, hasOpenModals, closeBalloon]);
 
   // Carregar alertas quando o usuário estiver autenticado
   useEffect(() => {
@@ -320,6 +447,9 @@ export const AlertsProvider = ({ children }) => {
       setShowModal,
       showBalloon,
       setShowBalloon,
+      eventBalloon,
+      setEventBalloon,
+      closeBalloon,
       loading,
       loadAlerts
     }}>

@@ -4,6 +4,7 @@ import { Bell, LogOut, Menu, X, Eye, EyeOff, PanelLeft, PanelLeftClose, Lock, Un
 import { IsisAvatar } from '@/components/isis/IsisAvatar';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
+import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useToast } from "@/components/ui/use-toast";
 import { useAuth } from '@/contexts/AuthContext';
@@ -12,7 +13,7 @@ import { useAlerts } from '@/contexts/AlertsContext';
 function Header({ onToggleSidebar, sidebarVisible, sidebarPinned }) {
   const { toast } = useToast();
   const { signOut, userProfile, company, user } = useAuth();
-  const { alerts, showModal, setShowModal } = useAlerts();
+  const { alerts, setAlerts, showModal, setShowModal, showBalloon, setShowBalloon, eventBalloon, closeBalloon } = useAlerts();
   const navigate = useNavigate();
   // Extrair apenas nome e sobrenome (primeiras duas palavras)
   const fullName = userProfile?.nome || 'Usuário';
@@ -261,19 +262,85 @@ function Header({ onToggleSidebar, sidebarVisible, sidebarPinned }) {
             <span className="text-sm font-semibold text-text-primary">Ísis</span>
           </Button>
         )}
-        <Button 
-          variant="ghost" 
-          size="icon" 
-          onClick={() => setShowModal(true)} 
-          className="relative text-text-secondary hover:text-text-primary transition-colors duration-200"
-        >
-          <Bell className="h-5 w-5" />
-          {alerts.length > 0 && (
-            <span className="absolute -top-1 -right-1 bg-danger text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center animate-pulse">
-              {alerts.length}
-            </span>
-          )}
-        </Button>
+        <Popover open={showModal ? false : showBalloon} onOpenChange={setShowBalloon}>
+          <PopoverTrigger asChild>
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              onClick={() => { setShowBalloon(false); setShowModal(true); }} 
+              className="relative text-text-secondary hover:text-text-primary transition-colors duration-200"
+            >
+              <Bell className="h-5 w-5" />
+              {alerts.length > 0 && (
+                <span className="absolute -top-1 -right-1 bg-danger text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center animate-pulse">
+                  {alerts.length}
+                </span>
+              )}
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent align="end" sideOffset={8} className="w-80 p-0 overflow-hidden bg-background border-white/10">
+            {/* Header */}
+            <div className="p-3 border-b border-border flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Bell className="h-4 w-4 text-brand" />
+                <span className="text-sm font-semibold">{eventBalloon ? 'Notificação' : 'Alertas'}</span>
+              </div>
+              <div className="flex items-center gap-1">
+                {!eventBalloon && (
+                  <Button size="sm" variant="ghost" onClick={() => { setShowBalloon(false); setShowModal(true); }}>
+                    Ver todos
+                  </Button>
+                )}
+                <Button size="icon" variant="ghost" onClick={() => { if (eventBalloon) { closeBalloon(); } else { setShowBalloon(false); } }} aria-label="Fechar">
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+            {/* Content */}
+            <div className="p-2">
+              {eventBalloon ? (
+                <div className="flex items-center gap-3 p-2 rounded-md bg-surface-2">
+                  <span className="rounded-full overflow-hidden bg-background">
+                    <IsisAvatar size="xs" />
+                  </span>
+                  <span className="text-sm text-text-secondary flex-1">
+                    {eventBalloon.message}
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="shrink-0"
+                    onClick={() => {
+                      navigate('/isis/analytics');
+                      try { setAlerts((prev) => (Array.isArray(prev) ? prev.filter(a => a?.tipo !== 'isis-event') : [])); } catch {}
+                      closeBalloon();
+                    }}
+                  >
+                    Ver
+                  </Button>
+                </div>
+              ) : alerts.length === 0 ? (
+                <p className="text-sm text-text-muted text-center py-6">Nenhum alerta no momento</p>
+              ) : (
+                <ul className="space-y-1 text-sm">
+                  {alerts.slice(0, 3).map((alert, idx) => (
+                    <AlertItem 
+                      key={idx} 
+                      alert={alert}
+                      onClick={() => {
+                        if (alert.link) navigate(alert.link);
+                        if (alert?.tipo === 'isis-event') {
+                          try { setAlerts((prev) => (Array.isArray(prev) ? prev.filter(a => a?.tipo !== 'isis-event') : [])); } catch {}
+                        }
+                        setShowBalloon(false);
+                      }}
+                    />
+                  ))}
+                </ul>
+              )}
+            </div>
+          </PopoverContent>
+        </Popover>
         <Button variant="ghost" size="icon" onClick={handleLogout} className="text-text-secondary hover:text-brand hover:bg-brand/10 transition-colors duration-200 shrink-0">
           <LogOut className="h-5 w-5" />
         </Button>
@@ -311,6 +378,9 @@ function Header({ onToggleSidebar, sidebarVisible, sidebarPinned }) {
                       if (alert.link) {
                         navigate(alert.link);
                         setShowModal(false);
+                      }
+                      if (alert?.tipo === 'isis-event') {
+                        try { setAlerts((prev) => (Array.isArray(prev) ? prev.filter(a => a?.tipo !== 'isis-event') : [])); } catch {}
                       }
                     }}
                   />
