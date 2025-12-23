@@ -18,6 +18,7 @@ export const AlertsProvider = ({ children }) => {
   const balloonTimerRef = useRef(null);
   const [eventBalloon, setEventBalloon] = useState(null); // Notificação transitória (ex.: eventos da Ísis)
   const alertsRef = useRef([]);
+  const balloonWaitRef = useRef(null);
   useEffect(() => { alertsRef.current = alerts; }, [alerts]);
   
   // Função para verificar se há modais abertos (evita recarregar alertas durante interações)
@@ -251,24 +252,34 @@ export const AlertsProvider = ({ children }) => {
       try {
         const canShow = !balloonShownOnceRef.current && alertasList.length > 0 && typeof document !== 'undefined' && document.visibilityState === 'visible' && !hasOpenModals();
         if (canShow) {
-          // pequeno atraso para garantir montagem completa do header e ícones
-          setTimeout(() => {
-            // Se já foi marcado como exibido (ex.: o usuário abriu o modal de alertas), não abrir
-            if (balloonShownOnceRef.current) return;
-            // Revalida se há modais abertos no momento exato de abrir
-            if (hasOpenModals()) {
-              // Marca como exibido para não abrir depois que o modal fechar
+          const isMobile = (() => { try { return typeof window !== 'undefined' && window.innerWidth < 768; } catch { return false; }})();
+          const mobileSidebarOpen = (() => { try { return !!document.querySelector('button[aria-label="Fechar menu lateral"]'); } catch { return false; }})();
+          if (isMobile && mobileSidebarOpen) {
+            try { if (balloonWaitRef.current) clearInterval(balloonWaitRef.current); } catch {}
+            balloonWaitRef.current = setInterval(() => {
+              try {
+                if (balloonShownOnceRef.current) { clearInterval(balloonWaitRef.current); balloonWaitRef.current = null; return; }
+                const overlayOpen = !!document.querySelector('button[aria-label="Fechar menu lateral"]');
+                if (!overlayOpen && !hasOpenModals()) {
+                  setShowBalloon(true);
+                  balloonShownOnceRef.current = true;
+                  try { if (balloonTimerRef.current) clearTimeout(balloonTimerRef.current); } catch {}
+                  balloonTimerRef.current = setTimeout(() => { setShowBalloon(false); }, 5000);
+                  clearInterval(balloonWaitRef.current);
+                  balloonWaitRef.current = null;
+                }
+              } catch {}
+            }, 250);
+          } else {
+            setTimeout(() => {
+              if (balloonShownOnceRef.current) return;
+              if (hasOpenModals()) { balloonShownOnceRef.current = true; return; }
+              setShowBalloon(true);
               balloonShownOnceRef.current = true;
-              return;
-            }
-            setShowBalloon(true);
-            balloonShownOnceRef.current = true;
-            // auto-fechar após alguns segundos
-            try { if (balloonTimerRef.current) clearTimeout(balloonTimerRef.current); } catch {}
-            balloonTimerRef.current = setTimeout(() => {
-              setShowBalloon(false);
-            }, 5000);
-          }, 350);
+              try { if (balloonTimerRef.current) clearTimeout(balloonTimerRef.current); } catch {}
+              balloonTimerRef.current = setTimeout(() => { setShowBalloon(false); }, 5000);
+            }, 350);
+          }
         }
       } catch {}
     } catch (error) {
@@ -282,6 +293,7 @@ export const AlertsProvider = ({ children }) => {
   useEffect(() => {
     if (showModal) {
       balloonShownOnceRef.current = true;
+      try { if (balloonWaitRef.current) { clearInterval(balloonWaitRef.current); balloonWaitRef.current = null; } } catch {}
     }
   }, [showModal]);
 
@@ -289,6 +301,7 @@ export const AlertsProvider = ({ children }) => {
   useEffect(() => {
     return () => {
       try { if (balloonTimerRef.current) clearTimeout(balloonTimerRef.current); } catch {}
+      try { if (balloonWaitRef.current) clearInterval(balloonWaitRef.current); } catch {}
     };
   }, []);
 
