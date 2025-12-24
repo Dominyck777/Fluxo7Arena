@@ -694,7 +694,21 @@ export default function PaymentModal({
       } : b));
       
       // Alinhar UI local ao que foi salvo (remover definitivamente os ocultos)
-      setLocalParticipantsForm(effectiveParticipants);
+      // Se um input de consumidor está focado, preservar o valor digitado naquele índice
+      let nextParticipants = effectiveParticipants;
+      if (focusedInputIndex !== null) {
+        const editingVal = consumidorInputRefs.current?.[focusedInputIndex]?.value;
+        if (typeof editingVal === 'string') {
+          nextParticipants = [...effectiveParticipants];
+          if (focusedInputIndex >= 0 && focusedInputIndex < nextParticipants.length) {
+            nextParticipants[focusedInputIndex] = {
+              ...nextParticipants[focusedInputIndex],
+              nome: editingVal,
+            };
+          }
+        }
+      }
+      setLocalParticipantsForm(nextParticipants);
       setPaymentHiddenIndexes([]);
       
       // Toast de sucesso (apenas se não for auto-save)
@@ -1251,6 +1265,8 @@ export default function PaymentModal({
     const chips = (form?.selectedClients || []).slice();
     if (chips.length === 0) return;
     if (!localParticipantsForm || localParticipantsForm.length === 0) return;
+    // Evitar reordenar enquanto o usuário está editando um nome de consumidor
+    if (focusedInputIndex !== null) return;
     try {
       // Buckets por cliente_id preservando múltiplas ocorrências
       const buckets = new Map();
@@ -2419,21 +2435,37 @@ export default function PaymentModal({
                                           }
                                         }
                                       }}
-                                      onBlur={async () => {
+                                      onBlur={async (e) => {
                                         // Limpar foco ao sair do input
                                         setFocusedInputIndex(null);
-                                        
-                                        // Se o input está vazio ao sair, restaurar o último nome
-                                        if (!pf.nome && lastConsumidorNames.current[originalIdx]) {
-                                          handleUndoConsumidorName(originalIdx);
+                                        // Usar o valor atual do input para decidir se desfaz ou persiste
+                                        const currentVal = (e.currentTarget?.value || '').trim();
+                                        if (currentVal === '') {
+                                          // Se ficou vazio, restaurar último nome salvo (se houver)
+                                          if (lastConsumidorNames.current[originalIdx]) {
+                                            handleUndoConsumidorName(originalIdx);
+                                          }
+                                        } else {
+                                          // Garantir que o estado local reflita exatamente o valor digitado
+                                          setLocalParticipantsForm(prev => {
+                                            const list = [...prev];
+                                            if (originalIdx >= 0 && originalIdx < list.length) {
+                                              list[originalIdx] = { ...list[originalIdx], nome: currentVal };
+                                            }
+                                            return list;
+                                          });
+                                          // Limpar histórico de undo para este índice
+                                          delete lastConsumidorNames.current[originalIdx];
                                         }
-                                        
                                         try {
                                           if (autoSaveTimeoutRef.current) clearTimeout(autoSaveTimeoutRef.current);
-                                          await handleSavePayments({ autoSave: true });
-                                        } catch (err) {
-                                          console.error('[PaymentModal] Erro ao salvar ao sair do nome consumidor (compacto):', err);
-                                        }
+                                          // Pequeno atraso para permitir flush do setState antes do save
+                                          setTimeout(() => {
+                                            handleSavePayments({ autoSave: true }).catch((err) => {
+                                              console.error('[PaymentModal] Erro ao salvar ao sair do nome consumidor (compacto):', err);
+                                            });
+                                          }, 50);
+                                        } catch {}
                                       }}
                                       placeholder="Nome do cliente..."
                                       className="font-medium text-sm bg-black/40 text-white placeholder:text-white/50 border border-white/15 rounded px-2 py-0.5 pr-11 focus:border-white/30 focus:outline-none focus:ring-1 focus:ring-white/20 w-full"
@@ -2719,21 +2751,37 @@ export default function PaymentModal({
                                           }
                                         }
                                       }}
-                                      onBlur={async () => {
+                                      onBlur={async (e) => {
                                         // Limpar foco ao sair do input
                                         setFocusedInputIndex(null);
-                                        
-                                        // Se o input está vazio ao sair, restaurar o último nome
-                                        if (!pf.nome && lastConsumidorNames.current[originalIdx]) {
-                                          handleUndoConsumidorName(originalIdx);
+                                        // Usar o valor atual do input para decidir se desfaz ou persiste
+                                        const currentVal = (e.currentTarget?.value || '').trim();
+                                        if (currentVal === '') {
+                                          // Se ficou vazio, restaurar último nome salvo (se houver)
+                                          if (lastConsumidorNames.current[originalIdx]) {
+                                            handleUndoConsumidorName(originalIdx);
+                                          }
+                                        } else {
+                                          // Garantir que o estado local reflita exatamente o valor digitado
+                                          setLocalParticipantsForm(prev => {
+                                            const list = [...prev];
+                                            if (originalIdx >= 0 && originalIdx < list.length) {
+                                              list[originalIdx] = { ...list[originalIdx], nome: currentVal };
+                                            }
+                                            return list;
+                                          });
+                                          // Limpar histórico de undo para este índice
+                                          delete lastConsumidorNames.current[originalIdx];
                                         }
-                                        
                                         try {
                                           if (autoSaveTimeoutRef.current) clearTimeout(autoSaveTimeoutRef.current);
-                                          await handleSavePayments({ autoSave: true });
-                                        } catch (err) {
-                                          console.error('[PaymentModal] Erro ao salvar ao sair do nome consumidor (normal):', err);
-                                        }
+                                          // Pequeno atraso para permitir flush do setState antes do save
+                                          setTimeout(() => {
+                                            handleSavePayments({ autoSave: true }).catch((err) => {
+                                              console.error('[PaymentModal] Erro ao salvar ao sair do nome consumidor (normal):', err);
+                                            });
+                                          }, 50);
+                                        } catch {}
                                       }}
                                       placeholder="Nome do cliente..."
                                       className="font-medium text-base bg-black/40 text-white placeholder:text-white/50 border border-white/15 rounded-md px-3 py-1.5 pr-14 focus:border-white/30 focus:outline-none focus:ring-2 focus:ring-white/20 min-w-[200px] max-w-[300px]"

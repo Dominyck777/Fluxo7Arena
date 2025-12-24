@@ -25,6 +25,7 @@ import ClientFormModal from '@/components/clients/ClientFormModal';
 import PaymentModal from '@/components/agenda/PaymentModal';
 import EditParticipantModal from '@/components/agenda/EditParticipantModal';
 import WeeklyGrid from '@/components/agenda/WeeklyGrid';
+import { IsisAvatar } from '@/components/isis/IsisAvatar';
 
 // Grade fixa de 30 em 30 minutos (constantes usadas por toda a página)
 const SLOT_MINUTES = 30;
@@ -438,7 +439,7 @@ function AgendaPage({ sidebarVisible = false }) {
         const dayEnd = addDays(dayStart, 1);
         const { data, error } = await supabase
           .from('agendamentos')
-          .select('id, codigo, inicio, fim, status, modalidade, quadra_id, cliente_id, auto_disabled, clientes')
+          .select('id, codigo, inicio, fim, status, modalidade, quadra_id, cliente_id, auto_disabled, clientes, created_by_isis')
           .eq('codigo_empresa', userProfile.codigo_empresa)
           .gte('inicio', dayStart.toISOString())
           .lt('inicio', dayEnd.toISOString())
@@ -455,6 +456,7 @@ function AgendaPage({ sidebarVisible = false }) {
           court: String(row.quadra_id || ''),
           court_id: row.quadra_id,
           auto_disabled: !!row.auto_disabled,
+          created_by_isis: !!row.created_by_isis,
         }));
         // Injeta apenas se ainda estivermos vazios (evita sobrescrever dados mais completos)
         setBookings(prev => (Array.isArray(prev) && prev.length > 0) ? prev : mapped);
@@ -843,6 +845,7 @@ function AgendaPage({ sidebarVisible = false }) {
       const terminalStatuses = ['canceled', 'finished', 'absent'];
       const activeStatuses = ['scheduled', 'confirmed', 'in_progress'];
       const shouldDisable = terminalStatuses.includes(newStatus);
+      const isCancel = newStatus === 'canceled';
 
       // Verifica se devemos oferecer reativação da automação ao voltar para status ativo
       let reactivate = false;
@@ -856,8 +859,12 @@ function AgendaPage({ sidebarVisible = false }) {
         }
       }
 
+      // Definir autoria do cancelamento quando for cancelado pelo usuário/sistema
+      const canceledFields = isCancel
+        ? { canceled_by: source || 'user', canceled_at: new Date().toISOString() }
+        : {};
       const updatePayload = shouldDisable
-        ? { status: newStatus, auto_disabled: true }
+        ? { status: newStatus, auto_disabled: true, ...canceledFields }
         : (reactivate ? { status: newStatus, auto_disabled: false } : { status: newStatus });
       const { error } = await supabase
         .from('agendamentos')
@@ -1208,6 +1215,7 @@ function AgendaPage({ sidebarVisible = false }) {
           start: new Date(b.start), 
           end: new Date(b.end),
           customer: b.customer || '', // Garantir que customer existe
+          created_by_isis: !!b.created_by_isis,
         }));
         dbg('cache:bookings:hydrate', { count: mapped.length, sample: mapped[0] });
         pulseLog('cache:hydrate', { count: mapped.length });
@@ -1291,7 +1299,7 @@ function AgendaPage({ sidebarVisible = false }) {
     const { data, error } = await supabase
       .from('agendamentos')
       .select(`
-        id, codigo, codigo_empresa, quadra_id, cliente_id, clientes, inicio, fim, modalidade, status, auto_disabled,
+        id, codigo, codigo_empresa, quadra_id, cliente_id, clientes, inicio, fim, modalidade, status, auto_disabled, created_by_isis,
         quadra:quadra_id ( nome )
       `)
       .eq('codigo_empresa', userProfile.codigo_empresa)
@@ -1369,6 +1377,7 @@ function AgendaPage({ sidebarVisible = false }) {
         status: preferLocal ? recent.status : (row.status || 'scheduled'),
         modality: row.modalidade || '',
         auto_disabled: !!row.auto_disabled,
+        created_by_isis: !!row.created_by_isis,
       };
     });
     setBookings(mapped);
@@ -1385,6 +1394,7 @@ function AgendaPage({ sidebarVisible = false }) {
           status: b.status,
           modality: b.modality,
           auto_disabled: b.auto_disabled,
+          created_by_isis: !!b.created_by_isis,
         }));
         localStorage.setItem(bookingsCacheKey, JSON.stringify(serializable));
       }
@@ -5060,6 +5070,17 @@ function AgendaPage({ sidebarVisible = false }) {
                       })()
                     : 'Novo Agendamento'}
                 </span>
+                {editingBooking?.created_by_isis && (
+                  <span
+                    className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full border text-xs bg-fuchsia-600/10 text-fuchsia-400 border-fuchsia-700/30"
+                    title="Criado pela Ísis"
+                  >
+                    <span className="rounded-full overflow-hidden bg-background w-4 h-4 flex items-center justify-center shadow-[0_0_0_2px_rgba(0,0,0,0.25)]">
+                      <IsisAvatar size="xs" className="w-4 h-4" />
+                    </span>
+                    Criado pela Ísis
+                  </span>
+                )}
                 {isAutoSaving && (
                   <span className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full border text-xs bg-blue-600/10 text-blue-400 border-blue-700/30">
                     <svg className="w-3 h-3 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">

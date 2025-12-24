@@ -50,7 +50,10 @@ export default function IsisAnalyticsPage() {
   };
   const ymdToDate = (ymd) => {
     if (!ymd) return null;
-    const dt = new Date(`${ymd}T00:00:00`);
+    const m = /^([0-9]{4})-([0-9]{2})-([0-9]{2})$/.exec(String(ymd));
+    if (!m) return null;
+    const y = parseInt(m[1], 10), mo = parseInt(m[2], 10) - 1, d = parseInt(m[3], 10);
+    const dt = new Date(y, mo, d, 0, 0, 0, 0); // interpreta como meia-noite LOCAL
     if (isNaN(dt.getTime())) return null;
     return dt;
   };
@@ -393,16 +396,23 @@ export default function IsisAnalyticsPage() {
           .select('id, codigo, inicio, fim, criado_em, status, cliente_id, clientes, quadra_id')
           .eq('codigo_empresa', codigoEmpresa)
           .eq('created_by_isis', true)
-          .order('criado_em', { ascending: false });
+          .order('criado_em', { ascending: false })
+          .order('inicio', { ascending: false });
 
         const hasAnyFilter = !!(effStart || effEnd);
-        if (effStart) {
-          const dt = startOfDay(new Date(effStart));
-          q = q.gte('criado_em', dt.toISOString());
-        }
-        if (effEnd) {
-          const dt = endOfDay(new Date(effEnd));
-          q = q.lte('criado_em', dt.toISOString());
+        const startIso = effStart ? startOfDay(ymdToDate(effStart)).toISOString() : null;
+        const endIso = effEnd ? endOfDay(ymdToDate(effEnd)).toISOString() : null;
+        if (startIso || endIso) {
+          const parts = [];
+          const andCriado = [];
+          if (startIso) andCriado.push(`criado_em.gte.${startIso}`);
+          if (endIso) andCriado.push(`criado_em.lte.${endIso}`);
+          if (andCriado.length > 0) parts.push(`and(${andCriado.join(',')})`);
+          const andInicio = ['criado_em.is.null'];
+          if (startIso) andInicio.push(`inicio.gte.${startIso}`);
+          if (endIso) andInicio.push(`inicio.lte.${endIso}`);
+          parts.push(`and(${andInicio.join(',')})`);
+          q = q.or(parts.join(','));
         }
         q = q.limit(hasAnyFilter ? 200 : 10);
         try { console.log('[IsisAnalytics] Fetch lastAgs with range (effective):', { effStart, effEnd, hasAnyFilter, limit: hasAnyFilter ? 200 : 10 }); } catch {}

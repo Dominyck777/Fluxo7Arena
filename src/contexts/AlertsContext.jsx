@@ -19,7 +19,34 @@ export const AlertsProvider = ({ children }) => {
   const [eventBalloon, setEventBalloon] = useState(null); // Notificação transitória (ex.: eventos da Ísis)
   const alertsRef = useRef([]);
   const balloonWaitRef = useRef(null);
+  const previewDisabledRef = useRef(false); // Desativa prévia após usuário abrir o modal
   useEffect(() => { alertsRef.current = alerts; }, [alerts]);
+  
+  // Helpers de persistência (somente alertas da Ísis) por empresa
+  const getIsisStorageKey = useCallback(() => {
+    const codigo = userProfile?.codigo_empresa || 'na';
+    return `alerts:persisted:isis:${codigo}`;
+  }, [userProfile?.codigo_empresa]);
+  
+  const readPersistedIsisAlerts = useCallback(() => {
+    try {
+      const raw = localStorage.getItem(getIsisStorageKey());
+      const arr = raw ? JSON.parse(raw) : [];
+      return Array.isArray(arr) ? arr.filter(a => a && a.tipo === 'isis-event' && a.id) : [];
+    } catch { return []; }
+  }, [getIsisStorageKey]);
+  
+  const writePersistedIsisAlerts = useCallback((list) => {
+    try { localStorage.setItem(getIsisStorageKey(), JSON.stringify(list || [])); } catch {}
+  }, [getIsisStorageKey]);
+  
+  const dismissAlert = useCallback((id) => {
+    if (!id) return;
+    setAlerts(prev => (Array.isArray(prev) ? prev.filter(a => a?.id !== id) : []));
+    const persisted = readPersistedIsisAlerts();
+    const next = persisted.filter(a => a?.id !== id);
+    writePersistedIsisAlerts(next);
+  }, [readPersistedIsisAlerts, writePersistedIsisAlerts]);
   
   // Função para verificar se há modais abertos (evita recarregar alertas durante interações)
   const hasOpenModals = useCallback(() => {
@@ -242,15 +269,15 @@ export const AlertsProvider = ({ children }) => {
         });
       }
       
-      // Preservar alertas transitórios importantes (ex.: eventos da Ísis) ao recarregar
-      const persistedIsisAlerts = (alertsRef.current || []).filter(a => a && a.tipo === 'isis-event');
+      // Carregar alertas da Ísis persistidos (até o usuário clicar) e mesclar
+      const persistedIsisAlerts = readPersistedIsisAlerts();
       setAlerts([...persistedIsisAlerts, ...alertasList]);
 
       // Exibir balão inicial com os 3 primeiros alertas apenas uma vez por carregamento
       // (mostra novamente em recarregamento da página), somente quando a aba estiver visível
       // e sem outros modais abertos
       try {
-        const canShow = !balloonShownOnceRef.current && alertasList.length > 0 && typeof document !== 'undefined' && document.visibilityState === 'visible' && !hasOpenModals();
+        const canShow = !balloonShownOnceRef.current && !previewDisabledRef.current && alertasList.length > 0 && typeof document !== 'undefined' && document.visibilityState === 'visible' && !hasOpenModals();
         if (canShow) {
           const isMobile = (() => { try { return typeof window !== 'undefined' && window.innerWidth < 768; } catch { return false; }})();
           const mobileSidebarOpen = (() => { try { return !!document.querySelector('button[aria-label="Fechar menu lateral"]'); } catch { return false; }})();
@@ -264,7 +291,7 @@ export const AlertsProvider = ({ children }) => {
                   setShowBalloon(true);
                   balloonShownOnceRef.current = true;
                   try { if (balloonTimerRef.current) clearTimeout(balloonTimerRef.current); } catch {}
-                  balloonTimerRef.current = setTimeout(() => { setShowBalloon(false); }, 5000);
+                  balloonTimerRef.current = setTimeout(() => { setShowBalloon(false); }, 3500);
                   clearInterval(balloonWaitRef.current);
                   balloonWaitRef.current = null;
                 }
@@ -277,7 +304,7 @@ export const AlertsProvider = ({ children }) => {
               setShowBalloon(true);
               balloonShownOnceRef.current = true;
               try { if (balloonTimerRef.current) clearTimeout(balloonTimerRef.current); } catch {}
-              balloonTimerRef.current = setTimeout(() => { setShowBalloon(false); }, 5000);
+              balloonTimerRef.current = setTimeout(() => { setShowBalloon(false); }, 3500);
             }, 350);
           }
         }
@@ -292,8 +319,14 @@ export const AlertsProvider = ({ children }) => {
   // Se o usuário abrir o modal de alertas, suprime a abertura do balão de preview nesta carga
   useEffect(() => {
     if (showModal) {
+      // Ao abrir o modal, nunca mais mostrar a prévia neste carregamento
       balloonShownOnceRef.current = true;
+      previewDisabledRef.current = true;
+      setShowBalloon(false);
       try { if (balloonWaitRef.current) { clearInterval(balloonWaitRef.current); balloonWaitRef.current = null; } } catch {}
+    } else {
+      // Ao fechar modal, garantir que o balão permaneça fechado
+      setShowBalloon(false);
     }
   }, [showModal]);
 
@@ -324,9 +357,12 @@ export const AlertsProvider = ({ children }) => {
           const { eventType, new: novo, old: antigo } = payload || {};
           const row = novo || antigo;
           if (!row) return;
-          // Apenas eventos originados pela Ísis
+          // Considerar apenas eventos realmente relacionados à Ísis:
+          // - criação feita pela Ísis (created_by_isis = true)
+          // - cancelamento feito pela Ísis (canceled_by = 'isis')
           const createdByIsis = (novo?.created_by_isis === true) || (antigo?.created_by_isis === true);
-          if (!createdByIsis) return;
+          const canceledByIsis = (novo?.canceled_by === 'isis') || (antigo?.canceled_by === 'isis');
+          if (!createdByIsis && !canceledByIsis) return;
 
           // Não abrir sobre modais existentes para evitar atrito (mesma política do preview)
           if (hasOpenModals()) return;
@@ -343,17 +379,50 @@ export const AlertsProvider = ({ children }) => {
 
           let message = '';
           if (eventType === 'INSERT') {
+            // Mostrar criação apenas se foi criada pela Ísis
+            if (!createdByIsis) return;
             message = 'Ísis criou um agendamento';
-          } else if (eventType === 'UPDATE' && antigo?.status !== 'canceled' && novo?.status === 'canceled') {
-            message = 'Ísis cancelou um agendamento';
+          } else if (eventType === 'UPDATE') {
+            // Mostrar cancelamento pela Ísis somente quando novo.status=canceled E canceled_by='isis'
+            if (antigo?.status !== 'canceled' && novo?.status === 'canceled' && novo?.canceled_by === 'isis') {
+              message = 'Ísis cancelou um agendamento';
+            } else {
+              return; // ignorar demais updates
+            }
           } else if (eventType === 'DELETE') {
-            message = 'Ísis cancelou um agendamento';
+            // Só atribuir à Ísis se o registro antigo indicar canceled_by='isis'
+            if (antigo?.canceled_by === 'isis') {
+              message = 'Ísis cancelou um agendamento';
+            } else {
+              return; // não atribuir cancelamento à Ísis
+            }
           } else {
             // Ignorar outras atualizações
             return;
           }
 
-          setEventBalloon({ message, link });
+          // Criar alerta persistente (com id) e armazenar
+          const id = `isis-${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
+          const novoAlerta = {
+            id,
+            tipo: 'isis-event',
+            icone: 'AlertTriangle',
+            cor: 'warning',
+            mensagem: message,
+            link: '/isis/analytics',
+            createdAt: new Date().toISOString(),
+          };
+          // Atualiza estado e persistência
+          setAlerts((prev) => [novoAlerta, ...(Array.isArray(prev) ? prev : [])]);
+          try {
+            const persisted = readPersistedIsisAlerts();
+            // Deduplicar por id
+            const combined = [novoAlerta, ...persisted.filter(a => a.id !== id)];
+            writePersistedIsisAlerts(combined);
+          } catch {}
+
+          // Balão transitório (inclui id para permitir descartar ao clicar)
+          setEventBalloon({ id, message, link });
           setShowBalloon(true);
           try { if (balloonTimerRef.current) clearTimeout(balloonTimerRef.current); } catch {}
           balloonTimerRef.current = setTimeout(() => {
@@ -363,14 +432,8 @@ export const AlertsProvider = ({ children }) => {
           // Persistir também nos alertas para consulta posterior via sino
           try {
             setAlerts((prev) => {
-              const novoAlerta = {
-                tipo: 'isis-event',
-                icone: eventType === 'INSERT' ? 'CalendarPlus' : 'AlertTriangle',
-                cor: eventType === 'INSERT' ? 'info' : 'warning',
-                mensagem: message,
-                link: '/isis/analytics'
-              };
-              return [novoAlerta, ...(Array.isArray(prev) ? prev : [])];
+              // Já inserido acima (com id). Apenas retorna estado atual (prev)
+              return Array.isArray(prev) ? prev : [];
             });
           } catch {}
         } catch (e) {
@@ -463,6 +526,7 @@ export const AlertsProvider = ({ children }) => {
       eventBalloon,
       setEventBalloon,
       closeBalloon,
+      dismissAlert,
       loading,
       loadAlerts
     }}>

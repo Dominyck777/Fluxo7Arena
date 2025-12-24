@@ -13,7 +13,7 @@ import { useAlerts } from '@/contexts/AlertsContext';
 function Header({ onToggleSidebar, sidebarVisible, sidebarPinned }) {
   const { toast } = useToast();
   const { signOut, userProfile, company, user } = useAuth();
-  const { alerts, setAlerts, showModal, setShowModal, showBalloon, setShowBalloon, eventBalloon, closeBalloon } = useAlerts();
+  const { alerts, setAlerts, showModal, setShowModal, showBalloon, setShowBalloon, eventBalloon, closeBalloon, dismissAlert } = useAlerts();
   const navigate = useNavigate();
   // Extrair apenas nome e sobrenome (primeiras duas palavras)
   const fullName = userProfile?.nome || 'Usuário';
@@ -71,13 +71,20 @@ function Header({ onToggleSidebar, sidebarVisible, sidebarPinned }) {
   const AlertItem = ({ alert, onClick }) => {
     const Icon = getIcon(alert.icone);
     const colorClass = getColorClass(alert.cor);
+    const isIsis = alert?.tipo === 'isis-event';
     
     return (
       <li 
         className="flex items-center gap-2 p-2 rounded-md hover:bg-white/5 transition-colors cursor-pointer group"
         onClick={onClick}
       >
-        <Icon className={`w-4 h-4 flex-shrink-0 ${colorClass}`} />
+        {isIsis ? (
+          <span className="rounded-full overflow-hidden bg-background w-5 h-5 flex items-center justify-center flex-shrink-0 shadow-[0_0_0_2px_rgba(0,0,0,0.25)]">
+            <IsisAvatar size="xs" className="w-5 h-5" />
+          </span>
+        ) : (
+          <Icon className={`w-4 h-4 flex-shrink-0 ${colorClass}`} />
+        )}
         <span className="text-text-secondary group-hover:text-text-primary transition-colors flex-1">
           {alert.mensagem}
         </span>
@@ -312,7 +319,7 @@ function Header({ onToggleSidebar, sidebarVisible, sidebarPinned }) {
                     className="shrink-0"
                     onClick={() => {
                       navigate('/isis/analytics');
-                      try { setAlerts((prev) => (Array.isArray(prev) ? prev.filter(a => a?.tipo !== 'isis-event') : [])); } catch {}
+                      try { if (eventBalloon?.id) dismissAlert(eventBalloon.id); } catch {}
                       closeBalloon();
                     }}
                   >
@@ -329,8 +336,8 @@ function Header({ onToggleSidebar, sidebarVisible, sidebarPinned }) {
                       alert={alert}
                       onClick={() => {
                         if (alert.link) navigate(alert.link);
-                        if (alert?.tipo === 'isis-event') {
-                          try { setAlerts((prev) => (Array.isArray(prev) ? prev.filter(a => a?.tipo !== 'isis-event') : [])); } catch {}
+                        if (alert?.tipo === 'isis-event' && alert?.id) {
+                          try { dismissAlert(alert.id); } catch {}
                         }
                         setShowBalloon(false);
                       }}
@@ -379,8 +386,8 @@ function Header({ onToggleSidebar, sidebarVisible, sidebarPinned }) {
                         navigate(alert.link);
                         setShowModal(false);
                       }
-                      if (alert?.tipo === 'isis-event') {
-                        try { setAlerts((prev) => (Array.isArray(prev) ? prev.filter(a => a?.tipo !== 'isis-event') : [])); } catch {}
+                      if (alert?.tipo === 'isis-event' && alert?.id) {
+                        try { dismissAlert(alert.id); } catch {}
                       }
                     }}
                   />
