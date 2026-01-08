@@ -2656,7 +2656,15 @@ export default function FiscalHubPage(){
             >
               Visualizar
             </Button>
-            <Button size="sm" disabled={selectedIds.length===0 && !selectedId} onClick={handleEmitSelectedNfe}>Emitir NF-e</Button>
+            <Button
+              size="sm"
+              disabled={(selectedIds.length===0 && !selectedId) || nfeToolbarEmitting}
+              onClick={async()=>{ setNfeToolbarEmitting(true); try { await handleEmitSelectedNfe(); } finally { setNfeToolbarEmitting(false); } }}
+            >
+              {nfeToolbarEmitting ? (
+                <span className="inline-flex items-center"><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Emitindo…</span>
+              ) : 'Emitir NF-e'}
+            </Button>
             <Button size="sm" variant="outline" disabled={selectedIds.length===0 && !selectedId} onClick={handleConsultSelectedNfe}>Consultar</Button>
             <Button size="sm" variant="destructive" disabled={selectedIds.length===0 && !selectedId} onClick={handleCancelSelectedNfe}>Cancelar</Button>
             <div className="flex items-center gap-2">
