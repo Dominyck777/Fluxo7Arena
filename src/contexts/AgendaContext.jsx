@@ -71,6 +71,11 @@ export const AgendaProvider = ({ children }) => {
       }
     }, durationMs);
   }, []);
+
+  const unprotectPaymentModal = useCallback(() => {
+    modalProtectionRef.current.isProtected = false;
+    modalProtectionRef.current.protectedUntil = 0;
+  }, []);
   
   // Abrir modal de pagamentos
   const openPaymentModal = useCallback(() => {
@@ -78,8 +83,14 @@ export const AgendaProvider = ({ children }) => {
   }, []);
   
   // Fechar modal de pagamentos (com proteção)
-  const closePaymentModal = useCallback(() => {
+  const closePaymentModal = useCallback((opts = {}) => {
+    const force = opts === true || (opts && opts.force === true);
     const now = Date.now();
+
+    if (force) {
+      setIsPaymentModalOpen(false);
+      return true;
+    }
     
     if (modalProtectionRef.current.isProtected && now < modalProtectionRef.current.protectedUntil) {
       const remainingMs = modalProtectionRef.current.protectedUntil - now;
@@ -205,6 +216,7 @@ export const AgendaProvider = ({ children }) => {
     
     // Proteção
     protectPaymentModal,
+    unprotectPaymentModal,
     
     // Callback de substituição
     onParticipantReplacedRef,

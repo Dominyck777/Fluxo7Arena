@@ -55,6 +55,7 @@ export default function PaymentModal({
     payMethods,
     openEditParticipantModal,
     protectPaymentModal,
+    unprotectPaymentModal,
     onParticipantReplacedRef,
     lastVisibilityChangeTime, // Timestamp de visibilidade
     isModalProtected // Verificar se modal está protegido
@@ -98,6 +99,8 @@ export default function PaymentModal({
   
   // Estado local para participantes (não usar o do contexto diretamente)
   const [localParticipantsForm, setLocalParticipantsForm] = useState([]);
+
+  const closingRef = useRef(false);
   
   // Refs para inputs de Cliente Consumidor (para foco após limpar)
   const consumidorInputRefs = useRef({});
@@ -129,14 +132,9 @@ export default function PaymentModal({
   const addParticipantSearchRef = useRef(null);
   const addParticipantButtonRefs = useRef([]);
   const addParticipantListRef = useRef(null);
-  
-  // Refs para auto-save
-  const autoSaveTimeoutRef = useRef(null);
-  const lastSavedFormRef = useRef(null);
-  const autoSaveEnabledRef = useRef(false);
-  
-  // Estado para indicador visual de auto-save
-  const [isAutoSaving, setIsAutoSaving] = useState(false);
+
+  // Ref de concorrência: garante que apenas um salvamento roda por vez
+  const savingPaymentsRef = useRef(false);
   
   // Ref para detectar remoções (salvar imediatamente ao remover)
   const prevLengthRef = useRef(null);
@@ -161,8 +159,9 @@ export default function PaymentModal({
         if (newName === '' && list[index].nome) {
           lastConsumidorNames.current[index] = list[index].nome;
         }
+
         // Se está restaurando um nome, limpar o histórico de undo
-        else if (newName !== '') {
+        if (newName !== '') {
           delete lastConsumidorNames.current[index];
         }
         
@@ -246,13 +245,6 @@ export default function PaymentModal({
         setParticipantsForm(list);
         return list;
       });
-      
-      // Marcar para auto-save imediato (será feito no useEffect)
-      autoSaveEnabledRef.current = true;
-      if (autoSaveTimeoutRef.current) clearTimeout(autoSaveTimeoutRef.current);
-      autoSaveTimeoutRef.current = setTimeout(() => {
-        console.log('💾 [StatusChange] Salvando mudança de status...');
-      }, 100);
       
       // Recarregar alertas imediatamente após mudança de status
       setTimeout(() => {
@@ -495,6 +487,15 @@ export default function PaymentModal({
   };
   
   const confirmEditingTotal = () => {
+    try {
+      if (localStorage.getItem('debug:agenda') === '1') {
+        console.log('💰 [PaymentModal][TOTAL] confirmEditingTotal', {
+          prev: paymentTotal,
+          next: editingTotalValue,
+          timestamp: new Date().toISOString(),
+        });
+      }
+    } catch {}
     setPaymentTotal(editingTotalValue);
     setIsEditingTotal(false);
   };
@@ -507,8 +508,17 @@ export default function PaymentModal({
   const handleSavePayments = async (options = {}) => {
     const { autoSave = false } = options;
     try {
-      if (isSavingPayments) return;
-      
+      // 🔒 PROTEÇÃO DE CONCORRÊNCIA: evitar salvamentos sobrepostos (auto-save + blur + clique)
+      if (savingPaymentsRef.current || isSavingPayments) {
+        try {
+          if (localStorage.getItem('debug:agenda') === '1') {
+            console.log('⏳ [SAVE-PAYMENTS] Salvamento ignorado (já existe um em andamento)', { autoSave });
+          }
+        } catch {}
+        return;
+      }
+
+      savingPaymentsRef.current = true;
       setIsSavingPayments(true);
       const agendamentoId = editingBooking?.id;
       const codigo = userProfile?.codigo_empresa;
@@ -526,6 +536,29 @@ export default function PaymentModal({
       
       // Usar APENAS participantes visíveis como fonte da verdade (itens ocultos são tratados como removidos)
       const effectiveParticipants = (localParticipantsForm || []).filter((_, idx) => !(paymentHiddenIndexes || []).includes(idx));
+
+      // Se o total estiver em modo edição, salvar o valor atual do input.
+      const totalStrToSave = (isEditingTotal ? editingTotalValue : paymentTotal);
+      try {
+        if (isEditingTotal) {
+          try {
+            if (localStorage.getItem('debug:agenda') === '1') {
+              console.log('💰 [PaymentModal][TOTAL] forcing total from editing state before save', {
+                prev: paymentTotal,
+                editingTotalValue,
+                totalStrToSave,
+                timestamp: new Date().toISOString(),
+              });
+            }
+          } catch {}
+          setPaymentTotal(totalStrToSave);
+          setIsEditingTotal(false);
+        }
+      } catch {}
+
+      // A ordem do usuário é a fonte de verdade.
+      // Representante = primeiro participante (índice 0) para manter consistência com a Agenda.
+      let repIndex = 0;
       
       // Calcular pendentes
       const pendingCount = effectiveParticipants.reduce((acc, p) => {
@@ -543,16 +576,18 @@ export default function PaymentModal({
         }
       } catch {}
       
-      // 🔧 SUBSTITUIÇÃO INTELIGENTE: Manter posição original, apenas trocar dados
+      // 🔧 SUBSTITUIÇÃO INTELIGENTE (NOVA ESTRATÉGIA):
+      // Recriar todos os participantes ativos via soft-delete + insert para evitar 409 na constraint agp_unique_ordem_per_agendamento
       const saveTimestamp = new Date().toISOString();
       try { if (localStorage.getItem('debug:agenda') === '1') console.log(`\n\n========== SALVAMENTO INICIADO ${saveTimestamp} ==========`); } catch {}
-      
-      // Buscar participantes originais do banco para comparar
+
+      // Buscar participantes originais (ativos) apenas para fins de diagnóstico e representante
       const { data: originalParticipants, error: fetchErr } = await supabase
         .from('agendamento_participantes')
         .select('*')
         .eq('codigo_empresa', codigo)
         .eq('agendamento_id', agendamentoId)
+        .is('deleted_at', null)
         .order('ordem', { ascending: true })
         .order('id', { ascending: true });
       
@@ -567,74 +602,36 @@ export default function PaymentModal({
           console.log('[ORDER-SAVE] originalIds:', (originalParticipants || []).map(p => p.cliente_id));
         }
       } catch {}
-      
+
+      // Não recalcular representante aqui: manter sempre o primeiro.
+      repIndex = 0;
+
       effectiveParticipants.forEach((p, i) => {
         console.log(`  #${i + 1} (novo): ${p.nome}`);
       });
-      
-      // 🎯 SEMPRE fazer UPDATE por posição (não deletar)
-      // Atualizar cada participante original com os dados do novo
-      console.log('✅ Fazendo substituição inteligente por posição');
-      
-      for (let i = 0; i < originalParticipants.length; i++) {
-        const original = originalParticipants[i];
-        const novo = effectiveParticipants[i];
-        
-        if (!novo) {
-          console.log(`⚠️ Posição #${i + 1}: Sem participante novo, pulando update`);
-          continue;
-        }
-        
-        const valor = parseBRL(novo.valor_cota);
-        const defaultMethod = getDefaultPayMethod();
-        const finId = novo.finalizadora_id || (defaultMethod?.id ? String(defaultMethod.id) : null);
-        
-        // Atualizar sempre (não verificar se mudou)
-        console.log(`🔄 Atualizando posição #${i + 1}: ${original.nome} → ${novo.nome}`);
-        
-        const { error: updateErr } = await supabase
-          .from('agendamento_participantes')
-          .update({
-            cliente_id: novo.cliente_id,
-            nome: novo.nome,
-            valor_cota: Number.isFinite(valor) ? valor : 0,
-            status_pagamento: novo.status_pagamento || 'Pendente',
-            finalizadora_id: finId,
-            aplicar_taxa: novo.aplicar_taxa || false,
-            ordem: i + 1,
-          })
-          .eq('id', original.id);
-        
-        if (updateErr) {
-          console.error(`❌ Erro ao atualizar posição #${i + 1}:`, updateErr);
-          throw updateErr;
-        }
-      }
-      // Tamanho original no banco (antes de inserir/deletar)
-      const originalLen = originalParticipants.length;
 
-      // Remover participantes excedentes quando a nova lista for menor que a original
-      if (effectiveParticipants.length < originalLen) {
-        const toDelete = originalParticipants.slice(effectiveParticipants.length).map(p => p.id);
-        if (toDelete.length > 0) {
-          console.log('➖ Removendo participantes excedentes:', toDelete.length);
-          const { error: delErr } = await supabase
-            .from('agendamento_participantes')
-            .delete()
-            .in('id', toDelete)
-            .eq('codigo_empresa', codigo)
-            .eq('agendamento_id', agendamentoId);
-          if (delErr) {
-            console.error('❌ Erro ao remover participantes excedentes:', delErr);
-            throw delErr;
-          }
+      console.log('✅ Fazendo recriação completa de participantes (soft-delete + insert)');
+
+      // 1) Soft-delete de todos os participantes ativos atuais
+      try {
+        const { error: softErr } = await supabase
+          .from('agendamento_participantes')
+          .update({ deleted_at: new Date().toISOString(), is_representante: false })
+          .eq('codigo_empresa', codigo)
+          .eq('agendamento_id', agendamentoId)
+          .is('deleted_at', null);
+        if (softErr) {
+          console.error('❌ Erro ao aplicar soft-delete nos participantes atuais:', softErr);
+          throw softErr;
         }
+      } catch (e) {
+        console.error('❌ Falha ao soft-deletar participantes antes de recriar:', e);
+        throw e;
       }
-      
-      // Inserir novos participantes que foram adicionados no PaymentModal
-      if (effectiveParticipants.length > originalLen) {
-        console.log('➕ Inserindo participantes adicionais:', effectiveParticipants.length - originalLen);
-        const rowsToInsert = effectiveParticipants.slice(originalLen).map((novo, idx) => {
+
+      // 2) Inserir nova lista de participantes a partir de effectiveParticipants
+      if (effectiveParticipants.length > 0) {
+        const rowsToInsert = effectiveParticipants.map((novo, idx) => {
           const valor = parseBRL(novo.valor_cota);
           const defaultMethod = getDefaultPayMethod();
           const finId = novo.finalizadora_id || (defaultMethod?.id ? String(defaultMethod.id) : null);
@@ -642,24 +639,27 @@ export default function PaymentModal({
             codigo_empresa: codigo,
             agendamento_id: agendamentoId,
             cliente_id: novo.cliente_id,
-            nome: novo.nome,
+            nome: ((novo?.nome || '').trim() || 'Cliente Consumidor'),
             valor_cota: Number.isFinite(valor) ? valor : 0,
             status_pagamento: novo.status_pagamento || 'Pendente',
             finalizadora_id: finId,
             aplicar_taxa: novo.aplicar_taxa || false,
-            ordem: originalLen + idx + 1,
+            ordem: idx + 1,
+            is_representante: idx === 0,
+            deleted_at: null,
           };
         });
+
         const { error: insertErr } = await supabase
           .from('agendamento_participantes')
           .insert(rowsToInsert);
         if (insertErr) {
-          console.error('❌ Erro ao inserir novos participantes:', insertErr);
+          console.error('❌ Erro ao inserir participantes recriados:', insertErr);
           throw insertErr;
         }
       }
-      
-      console.log('✅ Substituição inteligente concluída');
+
+      console.log('✅ Recriação completa de participantes concluída');
       console.log('========== SALVAMENTO CONCLUÍDO ==========\n\n');
       
       // Atualizar form.selectedClients com base em participantsForm (inclui substituições)
@@ -671,16 +671,47 @@ export default function PaymentModal({
       
       const primary = newSelectedClients[0] || null;
       const clientesArr = newSelectedClients.map(c => c?.nome).filter(Boolean);
+
+      const totalNum = parseBRL(totalStrToSave);
+      const totalToPersist = Number.isFinite(totalNum) ? totalNum : null;
       
       // Atualizar agendamento no banco
-      await supabase
+      try {
+        if (localStorage.getItem('debug:agenda') === '1') {
+          console.log('💾 [PaymentModal][TOTAL] updating agendamentos.valor_total', {
+            agendamentoId,
+            codigo_empresa: codigo,
+            totalStrToSave,
+            totalNum,
+            totalToPersist,
+            timestamp: new Date().toISOString(),
+          });
+        }
+      } catch {}
+
+      const { data: agUpdateData, error: agUpdateError } = await supabase
         .from('agendamentos')
         .update({
           cliente_id: primary?.id ?? null,
           clientes: clientesArr,
+          valor_total: totalToPersist,
         })
         .eq('codigo_empresa', codigo)
-        .eq('id', agendamentoId);
+        .eq('id', agendamentoId)
+        .select('id, valor_total');
+
+      try {
+        if (localStorage.getItem('debug:agenda') === '1') {
+          console.log('💾 [PaymentModal][TOTAL] update agendamentos result', {
+            ok: !agUpdateError,
+            error: agUpdateError ? (agUpdateError.message || agUpdateError) : null,
+            data: agUpdateData,
+            timestamp: new Date().toISOString(),
+          });
+        }
+      } catch {}
+
+      if (agUpdateError) throw agUpdateError;
         
       // Atualizar form.selectedClients (persiste as mudanças)
       setForm(f => ({ ...f, selectedClients: newSelectedClients }));
@@ -691,6 +722,7 @@ export default function PaymentModal({
         customer: primary?.nome || b.customer,
         cliente_id: primary?.id ?? null,
         clientes: clientesArr,
+        valor_total: totalToPersist,
       } : b));
       
       // Alinhar UI local ao que foi salvo (remover definitivamente os ocultos)
@@ -754,13 +786,9 @@ export default function PaymentModal({
         console.log(`   #${idx + 1}: ${p.nome} | Status: ${p.status_pagamento} | Valor: ${p.valor_cota}`);
       });
       
-      // Só fecha o modal se NÃO for auto-save
-      if (!autoSave) {
-        console.log('🔍 [SAVE-PAYMENTS] Fechando modal de pagamentos (não é auto-save)');
-        closePaymentModal();
-        setIsModalOpen(false);
-      } else {
-        console.log('🔍 [SAVE-PAYMENTS] Auto-save concluído - modal permanece aberto');
+      // Não fechar modal aqui: fechamento é coordenado pelo wrapper saveAndClosePaymentModal
+      if (autoSave) {
+        console.log('🔍 [SAVE-PAYMENTS] Salvamento em modo autoSave (sem fechar modal)');
       }
       
     } catch (e) {
@@ -770,10 +798,48 @@ export default function PaymentModal({
         description: 'Tente novamente.', 
         variant: 'destructive' 
       });
+      throw e;
     } finally {
+      savingPaymentsRef.current = false;
       setIsSavingPayments(false);
     }
   };
+
+  const saveAndClosePaymentModal = useCallback(async (reason = 'close') => {
+    try {
+      if (!isPaymentModalOpen) return;
+      if (closingRef.current) return;
+      // Se download modal está aberto, só bloquear fechamento enquanto está gerando.
+      if (isDownloadModalOpen && downloadStatus === 'downloading') return;
+      if (statusConfirmationModal?.isOpen) return;
+      if (isAddParticipantOpen) return;
+      // Proteção deve bloquear apenas fechamento passivo (clique fora).
+      if (isModalProtected && String(reason) === 'interactOutside') return;
+      closingRef.current = true;
+      try {
+        await handleSavePayments({ autoSave: true });
+      } catch (err) {
+        console.error('[PaymentModal] Falha ao salvar ao fechar:', err);
+      } finally {
+        try { unprotectPaymentModal(); } catch {}
+        closePaymentModal({ force: true });
+        try { window.dispatchEvent(new Event('paymentmodal:closed')); } catch {}
+      }
+    } catch {}
+    finally {
+      closingRef.current = false;
+    }
+  }, [
+    isPaymentModalOpen,
+    isDownloadModalOpen,
+    downloadStatus,
+    statusConfirmationModal?.isOpen,
+    isAddParticipantOpen,
+    isModalProtected,
+    handleSavePayments,
+    closePaymentModal,
+    unprotectPaymentModal,
+  ]);
   
   // Atalhos de teclado para modal de pagamentos
   useEffect(() => {
@@ -789,22 +855,8 @@ export default function PaymentModal({
       // ESC para fechar modal
       if (e.key === 'Escape') {
         e.preventDefault();
-        
-        // 🔄 Auto-save ao fechar: SEMPRE salva antes de fechar
-        console.log('💾 [Auto-save Payments] Salvando ao fechar modal (ESC)...');
-        // Cancela timeout pendente
-        if (autoSaveTimeoutRef.current) {
-          clearTimeout(autoSaveTimeoutRef.current);
-        }
-        handleSavePayments({ autoSave: true })
-          .then(() => {
-            console.log('✅ [Auto-save Payments] Salvo ao fechar (ESC)!');
-            closePaymentModal();
-          })
-          .catch((error) => {
-            console.error('❌ [Auto-save Payments] Erro ao salvar ao fechar (ESC):', error);
-            closePaymentModal();
-          });
+
+        saveAndClosePaymentModal('escape-key');
       }
       
       // F8 para dividir igualmente
@@ -856,7 +908,7 @@ export default function PaymentModal({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isPaymentModalOpen, isAddParticipantOpen, isDownloadModalOpen, paymentTotal, participantsCount, splitEqually, aplicarTaxaEmTodos, zeroAllValues, isSavingPayments, handleSavePayments, closePaymentModal, localParticipantsForm, paymentHiddenIndexes, isClienteConsumidor, handleUpdateConsumidorName, getNextDeleteIndex]);
+  }, [isPaymentModalOpen, isAddParticipantOpen, isDownloadModalOpen, paymentTotal, participantsCount, splitEqually, aplicarTaxaEmTodos, zeroAllValues, saveAndClosePaymentModal, localParticipantsForm, paymentHiddenIndexes, isClienteConsumidor, handleUpdateConsumidorName, getNextDeleteIndex]);
   
   // Atualizar nextDeleteIndex sempre que os participantes mudarem
   useEffect(() => {
@@ -895,7 +947,10 @@ export default function PaymentModal({
             };
           });
           
-          setLocalParticipantsForm(sourceData);
+          // Não sobrescrever se o usuário já começou a editar localmente
+          if (!(Array.isArray(localParticipantsForm) && localParticipantsForm.length > 0)) {
+            setLocalParticipantsForm(sourceData);
+          }
           initializedRef.current = Date.now();
         }
       }, 3000);
@@ -931,6 +986,7 @@ export default function PaymentModal({
                 .select('*')
                 .eq('agendamento_id', editingBooking.id)
                 .eq('codigo_empresa', userProfile?.codigo_empresa)
+                .is('deleted_at', null)
                 .order('ordem', { ascending: true })
                 .order('id', { ascending: true });
               
@@ -1003,7 +1059,7 @@ export default function PaymentModal({
             };
           });
           
-          // Reordenar para seguir a ordem dos chips (com suporte a duplicados) e anexar sobras
+          // Reordenar para seguir a ordem dos chips (com suporte a duplicados)
           try {
             const chips = (form?.selectedClients || []).slice();
             if (chips.length > 0 && withCodes.length > 0) {
@@ -1038,23 +1094,9 @@ export default function PaymentModal({
                   });
                 }
               }
-              // Anexar quaisquer sobras do banco não consumidas (por segurança)
-              const usedCounts = new Map(occ);
-              const leftovers = [];
-              buckets.forEach((list, key) => {
-                const usedN = usedCounts.get(key) || 0;
-                for (let i = usedN; i < list.length; i++) leftovers.push(list[i]);
-              });
-              sourceData = reordered.concat(leftovers);
-              // Promover representante (primeiro não-consumidor) para posição 0
-              try {
-                const idxRep = sourceData.findIndex(p => String(p?.nome || '').toLowerCase() !== 'cliente consumidor');
-                if (idxRep > 0) {
-                  const rep = sourceData.splice(idxRep, 1)[0];
-                  sourceData.unshift(rep);
-                  if (localStorage.getItem('debug:agenda') === '1') console.log('[REP] Promovido a representante:', rep?.nome);
-                }
-              } catch {}
+              // NÃO anexar sobras: participantes visíveis devem refletir apenas os chips
+              // Qualquer participante extra será removido na próxima gravação (soft-delete + insert)
+              sourceData = reordered;
               dataSource = dataSource + ' (reordenado pelos chips)';
             }
           } catch (e) {
@@ -1101,8 +1143,13 @@ export default function PaymentModal({
           
           // Só atualizar se tiver dados OU se for novo agendamento
           if (withCodes.length > 0 || !editingBooking?.id) {
-            setLocalParticipantsForm(withCodes);
-            initializedRef.current = Date.now();
+            // Não sobrescrever se o usuário já começou a editar localmente
+            if (Array.isArray(localParticipantsForm) && localParticipantsForm.length > 0) {
+              initializedRef.current = Date.now();
+            } else {
+              setLocalParticipantsForm(withCodes);
+              initializedRef.current = Date.now();
+            }
             
             // 📊 LOG 1: Ao abrir PaymentModal
             try {
@@ -1148,7 +1195,15 @@ export default function PaymentModal({
         clearTimeout(loadingTimeoutRef.current);
       }
     };
-  }, [isPaymentModalOpen, payMethods, getDefaultPayMethod, participantsForm, form?.selectedClients, localCustomers]);
+  }, [isPaymentModalOpen, payMethods, getDefaultPayMethod, participantsForm, form?.selectedClients, localCustomers, localParticipantsForm]);
+
+  // Se o usuário começou a editar antes da inicialização assíncrona, marcar como inicializado para evitar sobrescrita
+  useEffect(() => {
+    if (!isPaymentModalOpen) return;
+    if (!initializedRef.current && Array.isArray(localParticipantsForm) && localParticipantsForm.length > 0) {
+      initializedRef.current = Date.now();
+    }
+  }, [isPaymentModalOpen, localParticipantsForm]);
 
   // Salvar imediatamente quando houver remoção de participante (redução de length)
   useEffect(() => {
@@ -1172,28 +1227,13 @@ export default function PaymentModal({
     prevLengthRef.current = currentLen;
     prevListRef.current = Array.isArray(localParticipantsForm) ? localParticipantsForm : [];
     if (decreased && editingBooking?.id) {
-      // Cancelar debounce pendente e salvar agora
-      if (autoSaveTimeoutRef.current) {
-        clearTimeout(autoSaveTimeoutRef.current);
-        autoSaveTimeoutRef.current = null;
-      }
-      autoSaveEnabledRef.current = true;
-      (async () => {
+      try {
+        const names = removed.map(r => r?.nome).filter(Boolean);
+        console.log('🗑️ [PaymentModal] Participante(s) removido(s):', names);
         try {
-          const names = removed.map(r => r?.nome).filter(Boolean);
-          const count = removed.length;
-          console.log('🗑️ [PaymentModal] Participante(s) removido(s):', names);
-          console.log('💾 [Auto-save imediato] Remoção detectada, salvando agora...');
-          // Sem toast: apenas logs e evento global
-          try {
-            window.dispatchEvent(new CustomEvent('payments:participant-removed', { detail: { agendamentoId: editingBooking?.id, removed } }));
-          } catch {}
-          await handleSavePayments({ autoSave: true });
-          console.log('✅ [Auto-save imediato] Remoção salva');
-        } catch (err) {
-          console.error('❌ [Auto-save imediato] Erro ao salvar após remoção:', err);
-        }
-      })();
+          window.dispatchEvent(new CustomEvent('payments:participant-removed', { detail: { agendamentoId: editingBooking?.id, removed } }));
+        } catch {}
+      } catch {}
     }
   }, [isPaymentModalOpen, localParticipantsForm, editingBooking?.id, handleSavePayments]);
 
@@ -1207,13 +1247,6 @@ export default function PaymentModal({
     prev.len = curLen;
     if (grew && editingBooking?.id) {
       try { console.log('🗑️ [PaymentModal] Índices ocultados (remoção lógica):', paymentHiddenIndexes); } catch {}
-      // Salvar imediatamente considerando apenas visíveis
-      if (autoSaveTimeoutRef.current) {
-        clearTimeout(autoSaveTimeoutRef.current);
-        autoSaveTimeoutRef.current = null;
-      }
-      autoSaveEnabledRef.current = true;
-      handleSavePayments({ autoSave: true }).catch((e) => console.error('❌ [PaymentModal] Erro ao salvar remoção imediata:', e));
     }
   }, [paymentHiddenIndexes, isPaymentModalOpen, editingBooking?.id, handleSavePayments]);
   
@@ -1267,6 +1300,9 @@ export default function PaymentModal({
     if (!localParticipantsForm || localParticipantsForm.length === 0) return;
     // Evitar reordenar enquanto o usuário está editando um nome de consumidor
     if (focusedInputIndex !== null) return;
+    // Se já há pagamentos/valores, não reordenar para manter alinhamento com duplicados
+    const __hasPaymentsLocal = (localParticipantsForm || []).some(pp => (pp?.status_pagamento && pp.status_pagamento !== 'Pendente') || (pp?.valor_cota && pp.valor_cota !== '' && pp.valor_cota !== '0,00'));
+    if (__hasPaymentsLocal) return;
     try {
       // Buckets por cliente_id preservando múltiplas ocorrências
       const buckets = new Map();
@@ -1355,6 +1391,7 @@ export default function PaymentModal({
         setIsAddParticipantOpen(false);
         setAddParticipantSearch('');
         setSelectedParticipants([]);
+        try { unprotectPaymentModal(); } catch {}
       }
       
       // Enter para adicionar participantes (apenas se não estiver em um input)
@@ -1393,6 +1430,7 @@ export default function PaymentModal({
         setIsAddParticipantOpen(false);
         setSelectedParticipants([]);
         setAddParticipantSearch('');
+        try { unprotectPaymentModal(); } catch {}
       }
     };
 
@@ -1403,96 +1441,11 @@ export default function PaymentModal({
   // Coordenação externa: salvar e fechar sob demanda (usado pelo modal de agendamento)
   useEffect(() => {
     const handler = async () => {
-      try {
-        if (!isPaymentModalOpen) return;
-        // Cancelar debounce pendente
-        if (autoSaveTimeoutRef.current) {
-          clearTimeout(autoSaveTimeoutRef.current);
-          autoSaveTimeoutRef.current = null;
-        }
-        // Não duplicar salvamento
-        if (!isSavingPayments) {
-          await handleSavePayments({ autoSave: true });
-        }
-      } catch (err) {
-        console.error('[PaymentModal] save-and-close erro:', err);
-      } finally {
-        closePaymentModal();
-        try { window.dispatchEvent(new Event('paymentmodal:closed')); } catch {}
-      }
+      await saveAndClosePaymentModal('external:save-and-close');
     };
     window.addEventListener('paymentmodal:save-and-close', handler);
     return () => window.removeEventListener('paymentmodal:save-and-close', handler);
-  }, [isPaymentModalOpen, handleSavePayments, closePaymentModal]);
-
-  // ✅ AUTO-SAVE: Salva automaticamente ao detectar mudanças
-  useEffect(() => {
-    if (!isPaymentModalOpen) {
-      console.log('🔍 [AUTO-SAVE] Modal de pagamentos fechado - desabilitando auto-save');
-      console.log('📊 [AUTO-SAVE] Estado final ao fechar:', {
-        localParticipantsForm: localParticipantsForm.map(p => ({
-          nome: p.nome,
-          status: p.status_pagamento,
-          valor: p.valor_cota
-        })),
-        timestamp: new Date().toISOString()
-      });
-      autoSaveEnabledRef.current = false;
-      lastSavedFormRef.current = null;
-      return;
-    }
-    
-    // Aguarda inicialização completa (500ms após abrir)
-    if (!autoSaveEnabledRef.current) {
-      console.log('🔍 [AUTO-SAVE] Inicializando auto-save (aguardando 500ms)');
-      const timeout = setTimeout(() => {
-        autoSaveEnabledRef.current = true;
-        lastSavedFormRef.current = JSON.stringify(localParticipantsForm);
-        console.log('🔍 [AUTO-SAVE] Auto-save habilitado');
-      }, 500);
-      return () => clearTimeout(timeout);
-    }
-    
-    // Serializa form atual para comparar
-    const currentForm = JSON.stringify(localParticipantsForm);
-    
-    // Se não houve mudança real, não faz nada
-    if (currentForm === lastSavedFormRef.current) {
-      return;
-    }
-    
-    console.log('🔍 [AUTO-SAVE] Mudança detectada - agendando salvamento em 1.5s');
-    
-    // Limpa timeout anterior
-    if (autoSaveTimeoutRef.current) {
-      console.log('🔍 [AUTO-SAVE] Cancelando auto-save anterior');
-      clearTimeout(autoSaveTimeoutRef.current);
-    }
-    
-    // Debounce de 1.5 segundos
-    autoSaveTimeoutRef.current = setTimeout(async () => {
-      console.log('🔍 [AUTO-SAVE] Iniciando auto-save AGORA');
-      console.log('📊 [AUTO-SAVE] Participantes a salvar:', localParticipantsForm.length);
-      setIsAutoSaving(true);
-      
-      try {
-        await handleSavePayments({ autoSave: true });
-        lastSavedFormRef.current = currentForm;
-        console.log('✅ [AUTO-SAVE] Salvo com sucesso!');
-      } catch (error) {
-        console.error('❌ [AUTO-SAVE] Erro ao salvar:', error);
-      } finally {
-        setIsAutoSaving(false);
-      }
-    }, 1500);
-    
-    // Cleanup
-    return () => {
-      if (autoSaveTimeoutRef.current) {
-        clearTimeout(autoSaveTimeoutRef.current);
-      }
-    };
-  }, [isPaymentModalOpen, localParticipantsForm, handleSavePayments]);
+  }, [saveAndClosePaymentModal]);
   
   // Limpar URL do blob quando o modal de download fechar
   useEffect(() => {
@@ -1797,18 +1750,18 @@ export default function PaymentModal({
         console.log('🟡 [PaymentModal] onOpenChange chamado:', { open, isDownloadModalOpen });
         if (!open) {
           console.log('🔴 [PaymentModal] Tentando fechar modal de pagamentos');
-          if (isDownloadModalOpen) {
-            console.log('⚠️ [PaymentModal] BLOQUEADO: Modal de download está aberto');
-            return; // Bloqueia fechamento se modal de download estiver aberto
+          // X é fechamento explícito: tentar salvar e fechar.
+          if (isDownloadModalOpen && downloadStatus === 'downloading') {
+            console.log('⚠️ [PaymentModal] BLOQUEADO: Modal de download está gerando');
+            return;
           }
-          console.log('✅ [PaymentModal] Fechando modal de pagamentos');
-          closePaymentModal();
+          saveAndClosePaymentModal('x');
         }
       }}
     >
       <DialogContent
         forceMount
-        className="w-full max-w-[95vw] sm:max-w-[1100px] max-h-[90vh] overflow-y-auto overflow-x-hidden"
+        className="w-full max-w-screen-sm sm:max-w-[1100px] max-h-[90vh] overflow-y-auto overflow-x-hidden mx-auto px-5 sm:px-6 flex flex-col items-center sm:items-stretch"
         onOpenAutoFocus={(e) => e.preventDefault()}
         onInteractOutside={async (e) => {
           const now = Date.now();
@@ -1870,35 +1823,12 @@ export default function PaymentModal({
             return;
           }
           
-          // 🔄 Auto-save ao clicar fora: SEMPRE salva antes de fechar
           e.preventDefault();
-          console.log('💾 [Auto-save Payments] Salvando ao clicar fora do modal...');
-          try {
-            // Cancela timeout pendente
-            if (autoSaveTimeoutRef.current) {
-              console.log('🔍 [Auto-save Payments] Cancelando auto-save pendente antes de salvar ao clicar fora');
-              clearTimeout(autoSaveTimeoutRef.current);
-              autoSaveTimeoutRef.current = null;
-            }
-            
-            // 🛡️ PROTEÇÃO: Se já está salvando, não fazer novo salvamento
-            if (isSavingPayments) {
-              console.log('🛡️ [Auto-save Payments] Já está salvando - ignorando novo salvamento ao clicar fora');
-              closePaymentModal();
-              return;
-            }
-            
-            await handleSavePayments({ autoSave: true });
-            console.log('✅ [Auto-save Payments] Salvo ao clicar fora!');
-          } catch (error) {
-            console.error('❌ [Auto-save Payments] Erro ao salvar ao clicar fora:', error);
-          } finally {
-            closePaymentModal();
-          }
+          await saveAndClosePaymentModal('interactOutside');
         }}
         onEscapeKeyDown={(e) => { 
-          // ESC já é tratado pelo useEffect de atalhos
           e.preventDefault();
+          saveAndClosePaymentModal('escape');
         }}
       >
         {/* Mostrar loading/aviso se finalizadoras ainda não carregaram */}
@@ -1951,23 +1881,14 @@ export default function PaymentModal({
           )
         ) : (
           <>
-        <DialogHeader className="relative pb-4">
+        <DialogHeader className="relative pb-4 w-full max-w-[600px] mx-auto sm:max-w-none sm:mx-0">
           <div className="flex flex-col sm:flex-row items-start justify-between gap-3 sm:gap-4">
             <div className="flex-1 w-full sm:w-auto">
               <div className="flex items-center gap-3">
                 <DialogTitle>Registrar pagamento</DialogTitle>
-                {isAutoSaving && (
-                  <span className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full border text-xs bg-blue-600/10 text-blue-400 border-blue-700/30">
-                    <svg className="w-3 h-3 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                    </svg>
-                    Salvando...
-                  </span>
-                )}
               </div>
-              <DialogDescription>
-                As alterações são salvas automaticamente enquanto você edita.
+              <DialogDescription className="hidden sm:block">
+                As alterações são salvas ao fechar o modal.
               </DialogDescription>
             </div>
             <Button
@@ -1975,7 +1896,7 @@ export default function PaymentModal({
               variant="outline"
               size="sm"
               onClick={baixarRelatorioImagem}
-              className="flex-shrink-0 gap-2 w-full sm:w-auto mt-2 sm:mt-0"
+              className="flex-shrink-0 gap-2 w-full sm:w-auto mt-2 sm:mt-0 sm:mr-12"
               title="Baixar relatório como imagem"
             >
               <Download className="w-4 h-4" />
@@ -1984,7 +1905,7 @@ export default function PaymentModal({
           </div>
         </DialogHeader>
         
-        <div className="space-y-3 sm:space-y-6">
+        <div className="space-y-3 sm:space-y-6 w-full max-w-[600px] mx-auto sm:max-w-none sm:mx-0">
           {/* Total e ações - Versão Mobile */}
           <div className="sm:hidden space-y-2 max-w-md mx-auto">
             {/* Cards compactos lado a lado */}
@@ -2457,15 +2378,6 @@ export default function PaymentModal({
                                           // Limpar histórico de undo para este índice
                                           delete lastConsumidorNames.current[originalIdx];
                                         }
-                                        try {
-                                          if (autoSaveTimeoutRef.current) clearTimeout(autoSaveTimeoutRef.current);
-                                          // Pequeno atraso para permitir flush do setState antes do save
-                                          setTimeout(() => {
-                                            handleSavePayments({ autoSave: true }).catch((err) => {
-                                              console.error('[PaymentModal] Erro ao salvar ao sair do nome consumidor (compacto):', err);
-                                            });
-                                          }, 50);
-                                        } catch {}
                                       }}
                                       placeholder="Nome do cliente..."
                                       className="font-medium text-sm bg-black/40 text-white placeholder:text-white/50 border border-white/15 rounded px-2 py-0.5 pr-11 focus:border-white/30 focus:outline-none focus:ring-1 focus:ring-white/20 w-full"
@@ -2773,25 +2685,16 @@ export default function PaymentModal({
                                           // Limpar histórico de undo para este índice
                                           delete lastConsumidorNames.current[originalIdx];
                                         }
-                                        try {
-                                          if (autoSaveTimeoutRef.current) clearTimeout(autoSaveTimeoutRef.current);
-                                          // Pequeno atraso para permitir flush do setState antes do save
-                                          setTimeout(() => {
-                                            handleSavePayments({ autoSave: true }).catch((err) => {
-                                              console.error('[PaymentModal] Erro ao salvar ao sair do nome consumidor (normal):', err);
-                                            });
-                                          }, 50);
-                                        } catch {}
-                                      }}
-                                      placeholder="Nome do cliente..."
-                                      className="font-medium text-base bg-black/40 text-white placeholder:text-white/50 border border-white/15 rounded-md px-3 py-1.5 pr-14 focus:border-white/30 focus:outline-none focus:ring-2 focus:ring-white/20 min-w-[200px] max-w-[300px]"
-                                      title="Editar nome do Cliente Consumidor (histórico do agendamento)"
-                                    />
-                                    {/* Badge DEL quando há nome, ícone UNDO quando vazio */}
-                                    {pf.nome ? (
-                                      <button
-                                        type="button"
-                                        onClick={() => {
+                                    }}
+                                    placeholder="Nome do cliente..."
+                                    className="font-medium text-base bg-black/40 text-white placeholder:text-white/50 border border-white/15 rounded-md px-3 py-1.5 pr-14 focus:border-white/30 focus:outline-none focus:ring-2 focus:ring-white/20 min-w-[200px] max-w-[300px]"
+                                    title="Editar nome do Cliente Consumidor (histórico do agendamento)"
+                                  />
+                                  {/* Badge DEL quando há nome, ícone UNDO quando vazio */}
+                                  {pf.nome ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
                                           handleUpdateConsumidorName(originalIdx, '');
                                           // Focar no input após limpar
                                           setTimeout(() => {
@@ -3020,20 +2923,7 @@ export default function PaymentModal({
             variant="ghost" 
             className="border border-white/10" 
             onClick={async () => {
-              // 🔄 Auto-save ao fechar: SEMPRE salva antes de fechar
-              console.log('💾 [Auto-save Payments] Salvando ao fechar modal...');
-              try {
-                // Cancela timeout pendente
-                if (autoSaveTimeoutRef.current) {
-                  clearTimeout(autoSaveTimeoutRef.current);
-                }
-                await handleSavePayments({ autoSave: true });
-                console.log('✅ [Auto-save Payments] Salvo ao fechar!');
-              } catch (error) {
-                console.error('❌ [Auto-save Payments] Erro ao salvar ao fechar:', error);
-              }
-              
-              closePaymentModal();
+              await saveAndClosePaymentModal('footer-close');
             }}
           >
             Fechar
@@ -3185,6 +3075,7 @@ export default function PaymentModal({
         if (!open) {
           setSelectedParticipants([]);
           setAddParticipantSearch('');
+          try { unprotectPaymentModal(); } catch {}
         }
         setIsAddParticipantOpen(open);
       }}
@@ -3193,8 +3084,8 @@ export default function PaymentModal({
         className="sm:max-w-[500px]"
         onInteractOutside={(e) => {
           e.preventDefault();
-          protectPaymentModal(2000);
           setIsAddParticipantOpen(false);
+          try { unprotectPaymentModal(); } catch {}
         }}
       >
         <DialogHeader>
@@ -3448,6 +3339,7 @@ export default function PaymentModal({
                 setIsAddParticipantOpen(false);
                 setAddParticipantSearch('');
                 setSelectedParticipants([]);
+                try { unprotectPaymentModal(); } catch {}
               }}
             >
               Cancelar
@@ -3499,6 +3391,7 @@ export default function PaymentModal({
                 setIsAddParticipantOpen(false);
                 setAddParticipantSearch('');
                 setSelectedParticipants([]);
+                try { unprotectPaymentModal(); } catch {}
                 console.log('[AddParticipant] Concluído');
               }}
             >

@@ -345,6 +345,13 @@ export const AlertsProvider = ({ children }) => {
     setEventBalloon(null);
   }, []);
 
+  const clearIsisAlerts = useCallback(() => {
+    // Limpa apenas alertas da Ísis (tipo 'isis-event'), mantendo os demais
+    setAlerts(prev => (Array.isArray(prev) ? prev.filter(a => a?.tipo !== 'isis-event') : []));
+    try { writePersistedIsisAlerts([]); } catch {}
+    try { closeBalloon(); } catch {}
+  }, [writePersistedIsisAlerts, closeBalloon]);
+
   // Realtime: escuta criação/cancelamento via Ísis e abre um balão de notificação
   useEffect(() => {
     if (!userProfile?.codigo_empresa) return;
@@ -527,6 +534,7 @@ export const AlertsProvider = ({ children }) => {
       setEventBalloon,
       closeBalloon,
       dismissAlert,
+      clearIsisAlerts,
       loading,
       loadAlerts
     }}>

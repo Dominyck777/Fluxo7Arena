@@ -9,9 +9,11 @@ import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover
 import { Calendar } from '@/components/ui/calendar';
 import { ptBR } from 'date-fns/locale';
 import { Button } from '@/components/ui/button';
+import { useAlerts } from '@/contexts/AlertsContext';
 
 export default function IsisAnalyticsPage() {
   const { company } = useAuth();
+  const { clearIsisAlerts } = useAlerts();
   const codigoEmpresa = company?.codigo_empresa || company?.codigoEmpresa || null;
 
   const [loading, setLoading] = useState(true);
@@ -67,6 +69,10 @@ export default function IsisAnalyticsPage() {
       return '';
     }
   };
+
+  useEffect(() => {
+    try { clearIsisAlerts?.(); } catch {}
+  }, [clearIsisAlerts]);
 
   useEffect(() => {
     if (!codigoEmpresa) return;

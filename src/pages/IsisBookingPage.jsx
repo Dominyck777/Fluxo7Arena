@@ -153,16 +153,28 @@ const IsisBookingPageContent = () => {
         // 1) Tenta buscar por isis_subdomain configurado em agenda_settings
         let empresaFinal = null;
         let isisDisplayName = null;
+
+        // 1a) Preferir RPC pública (contorna RLS de anon). Se não existir, cai no SELECT abaixo.
         try {
-          const { data: settingsData } = await supabase
-            .from('agenda_settings')
-            .select('empresa_id, isis_subdomain, isis_display_name, empresas(codigo_empresa, nome_fantasia, razao_social, nome, logo_url, telefone, id)')
-            .eq('isis_subdomain', nomeNormalizado)
-            .single();
-          
-          if (settingsData?.empresas) {
-            empresaFinal = settingsData.empresas;
-            isisDisplayName = settingsData.isis_display_name;
+          const { data: rpcData, error: rpcErr } = await supabase.rpc('get_empresa_public_by_isis_subdomain', { p_subdomain: nomeNormalizado });
+          if (!rpcErr && rpcData && rpcData.length > 0) {
+            empresaFinal = rpcData[0];
+            isisDisplayName = rpcData[0]?.isis_display_name || null;
+          }
+        } catch (_) {}
+
+        try {
+          if (!empresaFinal) {
+            const { data: settingsData } = await supabase
+              .from('agenda_settings')
+              .select('empresa_id, isis_subdomain, isis_display_name, empresas(codigo_empresa, nome_fantasia, razao_social, nome, logo_url, telefone, id)')
+              .eq('isis_subdomain', nomeNormalizado)
+              .single();
+            
+            if (settingsData?.empresas) {
+              empresaFinal = settingsData.empresas;
+              isisDisplayName = settingsData.isis_display_name;
+            }
           }
         } catch (e) {
           // Não encontrou via isis_subdomain, tentando fallbacks
@@ -1945,13 +1957,16 @@ const IsisBookingPageContent = () => {
       return;
     }
     
-    // Inicializa lista de participantes com o usuário identificado
-    const participantesIniciais = [{
-      nome: selections.cliente.nome,
-      cliente_id: selections.cliente.id,
-      principal: true
-    }];
-    updateSelection('participantes', participantesIniciais);
+    const participantesAtuais = selections.participantes || [];
+    const jaTemParticipantes = Array.isArray(participantesAtuais) && participantesAtuais.length > 0;
+    if (!jaTemParticipantes) {
+      const participantesIniciais = [{
+        nome: selections.cliente.nome,
+        cliente_id: selections.cliente.id,
+        principal: true
+      }];
+      updateSelection('participantes', participantesIniciais);
+    }
     
     const nomeCurto = getNomeCurto(selections.cliente.nome);
     
@@ -1971,6 +1986,41 @@ const IsisBookingPageContent = () => {
     }, 1400 + 600);
     
     nextStep('participantes');
+  };
+
+  const verificarConflitoAntesDeCriarAgendamento = async () => {
+    const quadraId = selections?.quadra?.id;
+    const dataSel = selections?.data;
+    const horarioSel = selections?.horario;
+    if (!quadraId || !dataSel || !horarioSel?.inicioDate || !horarioSel?.fimDate) {
+      return { ok: true, conflito: false };
+    }
+
+    const resultado = await loadHorariosDisponiveis(quadraId, dataSel, null);
+    if (resultado?.fechada) {
+      return { ok: true, conflito: true, motivo: 'fechada', detalhe: resultado };
+    }
+
+    const slots = Array.isArray(resultado?.slots) ? resultado.slots : [];
+    const inicioDate = horarioSel.inicioDate;
+    const fimDate = horarioSel.fimDate;
+
+    const slotExiste = (inicio, fim) => {
+      const iniMs = inicio.getTime();
+      const fimMs = fim.getTime();
+      return slots.some((s) => (s?.inicioDate?.getTime?.() === iniMs) && (s?.fimDate?.getTime?.() === fimMs));
+    };
+
+    let cursor = new Date(inicioDate);
+    while (cursor.getTime() < fimDate.getTime()) {
+      const prox = addMinutes(cursor, 30);
+      if (!slotExiste(cursor, prox)) {
+        return { ok: true, conflito: true, motivo: 'conflito' };
+      }
+      cursor = prox;
+    }
+
+    return { ok: true, conflito: false };
   };
   
   
@@ -3203,7 +3253,7 @@ ${listaNomes}
         .select(`
           *,
           quadras(id, nome, descricao, modalidades, valor),
-          agendamento_participantes(nome, cliente_id)
+          agendamento_participantes(nome, cliente_id, ordem, is_representante)
         `)
         .eq('id', agendamento.id)
         .single();
@@ -3266,8 +3316,9 @@ ${listaNomes}
           console.debug('[carregarAgendamentoParaEdicao] JOIN sem participantes. Fazendo SELECT direto em agendamento_participantes...');
           const { data: partsDirect, error: partsErr } = await supabase
             .from('agendamento_participantes')
-            .select('nome, cliente_id, codigo_empresa')
-            .eq('agendamento_id', agendamento.id);
+            .select('nome, cliente_id, codigo_empresa, ordem, is_representante')
+            .eq('agendamento_id', agendamento.id)
+            .order('ordem', { ascending: true });
           console.debug('[carregarAgendamentoParaEdicao] SELECT direto participantes:', {
             hasError: !!partsErr,
             error: partsErr?.message,
@@ -3275,39 +3326,33 @@ ${listaNomes}
             count: Array.isArray(partsDirect) ? partsDirect.length : null
           });
           if (Array.isArray(partsDirect) && partsDirect.length > 0) {
-            brutos = partsDirect.map(p => ({ nome: p.nome, cliente_id: p.cliente_id }));
+            brutos = partsDirect.map(p => ({ nome: p.nome, cliente_id: p.cliente_id, ordem: p.ordem, is_representante: p.is_representante }));
           }
         } catch (e) {
           console.debug('[carregarAgendamentoParaEdicao] Falha no SELECT direto participantes:', e?.message || e);
         }
       }
-      let principalParticipante = null;
-      const outrosParticipantes = [];
-
-      brutos.forEach((p) => {
-        const isPrincipal = participanteClienteId && p.cliente_id === participanteClienteId;
-        const item = {
-          nome: p.nome,
-          cliente_id: p.cliente_id,
-          principal: isPrincipal
-        };
-        if (isPrincipal && !principalParticipante) {
-          principalParticipante = item;
-        } else {
-          outrosParticipantes.push(item);
-        }
+      // Ordem-first: respeita 'ordem' do banco; representante preferencial por is_representante e fallback por cliente_id
+      const sorted = [...brutos].sort((a, b) => {
+        const ao = Number(a?.ordem ?? 0);
+        const bo = Number(b?.ordem ?? 0);
+        if (Number.isFinite(ao) && Number.isFinite(bo) && ao !== bo) return ao - bo;
+        return 0;
       });
-
-      const participantes = principalParticipante
-        ? [
-            principalParticipante,
-            ...outrosParticipantes.map(p => ({ ...p, principal: false }))
-          ]
-        : brutos.map((p, index) => ({
-            nome: p.nome,
-            cliente_id: p.cliente_id,
-            principal: index === 0
-          }));
+      const repIdx = (() => {
+        const idxFlag = sorted.findIndex(p => !!p?.is_representante);
+        if (idxFlag >= 0) return idxFlag;
+        if (participanteClienteId) {
+          const idxByCliente = sorted.findIndex(p => p?.cliente_id === participanteClienteId);
+          if (idxByCliente >= 0) return idxByCliente;
+        }
+        return 0;
+      })();
+      const participantes = sorted.map((p, idx) => ({
+        nome: p.nome,
+        cliente_id: p.cliente_id,
+        principal: idx === repIdx,
+      }));
       
       updateSelection('participantes', participantes);
       // Marca que estamos no fluxo de edição de agendamento existente
@@ -3413,23 +3458,98 @@ ${listaNomes}
     }
     
     try {
+      const isDebugCancel = true; // logs sempre ativos ao tentar cancelar
+      console.groupCollapsed('[Isis][Cancel] start');
+      console.log('[Isis][Cancel] agendamentoCriado:', {
+        id: agendamentoCriado?.id,
+        inicio: agendamentoCriado?.inicio,
+        fim: agendamentoCriado?.fim,
+        status: agendamentoCriado?.status,
+        codigo_empresa: agendamentoCriado?.codigo_empresa,
+        empresa_id: agendamentoCriado?.empresa_id,
+        cliente_id: agendamentoCriado?.cliente_id,
+      });
+      console.log('[Isis][Cancel] empresa:', {
+        id: empresa?.id,
+        codigo_empresa: empresa?.codigo_empresa,
+        nome_fantasia: empresa?.nome_fantasia,
+        razao_social: empresa?.razao_social,
+        isis_display_name: empresa?.isis_display_name,
+        isis_cancel_min_hours_before: empresa?.isis_cancel_min_hours_before,
+        telefone: empresa?.telefone,
+      });
+      console.groupEnd();
+
       setIsLoading(true);
       
       // Verifica regra de cancelamento (tempo mínimo antes do agendamento)
-      const { data: settings } = await supabase
-        .from('agenda_settings')
-        .select('isis_cancel_min_hours_before')
-        .eq('empresa_id', empresa?.id)
-        .single();
+      // Importante: em modo público (anon) o SELECT em agenda_settings falha por RLS.
+      // A configuração deve vir já carregada no objeto empresa via RPC pública.
+      let minHours = empresa?.isis_cancel_min_hours_before;
       
-      const minHours = settings?.isis_cancel_min_hours_before;
+      // Fallback: se o objeto empresa não trouxe a regra (cache/build antigo, RPC sem campo, etc),
+      // tenta buscar via RPC pública usando o slug/subdomínio atual.
+      if (minHours === null || minHours === undefined) {
+        try {
+          const slugRaw = (() => {
+            try { return decodeURIComponent(nomeFantasiaEfetivo || ''); } catch { return String(nomeFantasiaEfetivo || ''); }
+          })();
+          const slugNorm = String(slugRaw)
+            .toLowerCase()
+            .replace(/[\s\-_]+/g, '')
+            .trim();
+          if (isDebugCancel) console.log('[Isis][Cancel] minHours missing. Trying RPC fallback with slug:', { slugRaw, slugNorm });
+
+          // 1) por isis_subdomain
+          try {
+            const { data: rpcSubData, error: rpcSubErr } = await supabase.rpc('get_empresa_public_by_isis_subdomain', { p_subdomain: slugNorm });
+            if (isDebugCancel) console.log('[Isis][Cancel] rpc:get_empresa_public_by_isis_subdomain:', { hasError: !!rpcSubErr, error: rpcSubErr?.message, code: rpcSubErr?.code, len: Array.isArray(rpcSubData) ? rpcSubData.length : null });
+            if (!rpcSubErr && Array.isArray(rpcSubData) && rpcSubData[0]) {
+              const v = rpcSubData[0]?.isis_cancel_min_hours_before;
+              if (v !== null && v !== undefined) minHours = v;
+            }
+          } catch (e) {
+            if (isDebugCancel) console.log('[Isis][Cancel] rpc subdomain threw:', e?.message || e);
+          }
+
+          // 2) por slug (nome fantasia)
+          if (minHours === null || minHours === undefined) {
+            try {
+              const { data: rpcSlugData, error: rpcSlugErr } = await supabase.rpc('get_empresa_public_by_slug', { p_slug: slugNorm });
+              if (isDebugCancel) console.log('[Isis][Cancel] rpc:get_empresa_public_by_slug:', { hasError: !!rpcSlugErr, error: rpcSlugErr?.message, code: rpcSlugErr?.code, len: Array.isArray(rpcSlugData) ? rpcSlugData.length : null });
+              if (!rpcSlugErr && Array.isArray(rpcSlugData) && rpcSlugData[0]) {
+                const v = rpcSlugData[0]?.isis_cancel_min_hours_before;
+                if (v !== null && v !== undefined) minHours = v;
+              }
+            } catch (e) {
+              if (isDebugCancel) console.log('[Isis][Cancel] rpc slug threw:', e?.message || e);
+            }
+          }
+        } catch (e) {
+          if (isDebugCancel) console.log('[Isis][Cancel] fallback unexpected error:', e?.message || e);
+        }
+      }
+      if (isDebugCancel) {
+        console.log('[Isis][Cancel] minHours(raw):', minHours, 'type:', typeof minHours);
+      }
       if (minHours !== null && minHours !== undefined) {
         const agendamentoInicio = new Date(agendamentoCriado.inicio);
         const agora = new Date();
         const diffMs = agendamentoInicio - agora;
         const diffHours = diffMs / (1000 * 60 * 60);
+        if (isDebugCancel) {
+          console.log('[Isis][Cancel] timing:', {
+            agendamentoInicio: agendamentoInicio?.toISOString?.() || String(agendamentoInicio),
+            agora: agora?.toISOString?.() || String(agora),
+            diffMs,
+            diffHours,
+          });
+        }
         
         if (diffHours < minHours) {
+          if (isDebugCancel) {
+            console.warn('[Isis][Cancel] BLOCKED by minHours rule:', { diffHours, minHours });
+          }
           setIsLoading(false);
           const telefone = empresa?.telefone || 'a arena';
           const nomeArena = empresa?.isis_display_name || empresa?.nome_fantasia || empresa?.razao_social || 'a arena';
@@ -3454,10 +3574,23 @@ ${listaNomes}
       }
       
       // Atualiza status do agendamento para cancelado (autoria da Ísis)
-      const { error: agendamentoError } = await supabase
+      const cancelPayload = { status: 'canceled', canceled_by: 'isis', canceled_at: new Date().toISOString() };
+      if (isDebugCancel) {
+        console.log('[Isis][Cancel] proceeding to cancel. update payload:', cancelPayload);
+      }
+      const { data: cancelData, error: agendamentoError } = await supabase
         .from('agendamentos')
-        .update({ status: 'canceled', canceled_by: 'isis', canceled_at: new Date().toISOString() })
+        .update(cancelPayload)
         .eq('id', agendamentoCriado.id);
+
+      if (isDebugCancel) {
+        console.log('[Isis][Cancel] supabase update result:', {
+          hasError: !!agendamentoError,
+          error: agendamentoError?.message,
+          code: agendamentoError?.code,
+          data: cancelData,
+        });
+      }
       
       if (agendamentoError) throw agendamentoError;
       
@@ -3772,6 +3905,9 @@ ${listaNomes}
 
       // Array de nomes para campo 'clientes' do agendamento (usando ordem correta)
       const nomesArray = participantesOrdenados.map(p => p.nome);
+
+      // Representante: primeiro participante (principal se existir)
+      const repClienteId = (participantePrincipal?.cliente_id || cliente?.id || null);
       
       // Calcula valor total baseado na duração
       const [h1, m1] = selections.horario.inicio.split(':').map(Number);
@@ -3800,6 +3936,7 @@ ${listaNomes}
         .from('agendamentos')
         .update({
           quadra_id: selections.quadra.id,
+          cliente_id: repClienteId,
           clientes: nomesArray,
           inicio: selections.horario.inicioDate.toISOString(),
           fim: selections.horario.fimDate.toISOString(),
@@ -3825,11 +3962,12 @@ ${listaNomes}
       const participantes = participantesOrdenados.map((p, index) => ({
         agendamento_id: agendamento.id,
         codigo_empresa: codigoEmpresa,
-        cliente_id: p.cliente_id || clienteConsumidor?.id,
+        cliente_id: p.cliente_id || (p.principal ? cliente.id : (clienteConsumidor?.id || null)),
         nome: p.nome,
         valor_cota: 0,
         status_pagamento: 'Pendente',
-        ordem: index + 1
+        ordem: index + 1,
+        is_representante: index === 0
       }));
       
       const { error: participantesError } = await supabase
@@ -3873,6 +4011,29 @@ ${listaNomes}
   const criarAgendamento = async () => {
     try {
       setIsLoading(true);
+
+      const checagem = await verificarConflitoAntesDeCriarAgendamento();
+      if (!checagem?.ok) {
+        throw new Error('Não foi possível validar disponibilidade do horário');
+      }
+      if (checagem?.conflito) {
+        setIsLoading(false);
+        setShowInput(false);
+        try { updateSelection('horario', null); } catch {}
+        try { updateSelection('esporte', null); } catch {}
+        try { setEditingType(null); } catch {}
+
+        if (checagem?.motivo === 'fechada') {
+          addIsisMessage('**Ops!** Parece que este dia ficou **indisponível** agora. 🚫\n\nVamos escolher outra data?', 800);
+        } else {
+          addIsisMessage('**Ops!** Alguém acabou de reservar esse horário antes de você. 😕\n\nVamos escolher outra data?', 800);
+        }
+
+        setTimeout(() => {
+          mostrarSelecaoData();
+        }, 900);
+        return;
+      }
       
       // Usa o cliente identificado
       const cliente = selections.cliente;
@@ -3893,6 +4054,9 @@ ${listaNomes}
       
       // Array de nomes para campo 'clientes' do agendamento - usando ordem correta
       const nomesArrayOrdenado = participantesOrdenados.map(p => p.nome);
+
+      // Representante: primeiro participante (principal se existir)
+      const repClienteId = (participantePrincipal?.cliente_id || cliente?.id || null);
       
       // Calcula valor total baseado na duração
       const [h1, m1] = selections.horario.inicio.split(':').map(Number);
@@ -3954,7 +4118,7 @@ ${listaNomes}
           codigo: proximoCodigo,
           codigo_empresa: codigoEmpresa,
           quadra_id: selections.quadra.id,
-          cliente_id: cliente.id,
+          cliente_id: repClienteId,
           clientes: nomesArrayOrdenado,
           inicio: selections.horario.inicioDate.toISOString(),
           fim: selections.horario.fimDate.toISOString(),
@@ -4028,12 +4192,13 @@ ${listaNomes}
       const participantes = participantesOrdenados.map((p, index) => ({
         codigo_empresa: codigoEmpresa,
         agendamento_id: agendamento.id,
-        // Primeiro participante = cliente identificado, outros = cliente consumidor
-        cliente_id: p.principal ? cliente.id : (clienteConsumidor?.id || null),
+        // Preserva cliente_id quando existir; fallback: principal = cliente logado; demais = consumidor
+        cliente_id: p.cliente_id || (p.principal ? cliente.id : (clienteConsumidor?.id || null)),
         nome: p.nome,
         valor_cota: 0,
         status_pagamento: 'Pendente',
-        ordem: index + 1 // Garante que o primeiro participante tem ordem = 1, segundo = 2, etc.
+        ordem: index + 1, // Garante que o primeiro participante tem ordem = 1, segundo = 2, etc.
+        is_representante: index === 0
       }));
       
       const { error: participantesError } = await supabase

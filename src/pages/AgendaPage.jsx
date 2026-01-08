@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
-import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Plus, Lock, Search, SlidersHorizontal, Clock, CheckCircle, XCircle, CalendarPlus, Users, DollarSign, Repeat, Trash2, GripVertical, Sparkles, Ban, AlertTriangle, ChevronDown, Play, PlayCircle, Flag, UserX, X, Settings, Maximize2, Minimize2, Link as LinkIcon, Copy } from 'lucide-react';
+import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Plus, Lock, Search, SlidersHorizontal, Clock, CheckCircle, XCircle, CalendarPlus, Users, DollarSign, Repeat, Trash2, GripVertical, Sparkles, Ban, AlertTriangle, ChevronDown, Play, PlayCircle, Flag, UserX, X, Settings, Maximize2, Minimize2, Link as LinkIcon, Copy, Loader2 } from 'lucide-react';
 import { useToast } from "@/components/ui/use-toast";
 import { format, addDays, subDays, startOfDay, addHours, getHours, getMinutes, setHours, setMinutes, addMinutes, startOfWeek, isSameDay } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -423,6 +423,14 @@ function AgendaPage({ sidebarVisible = false }) {
     }
   }, [searchParams, setSearchParams]);
   const [bookings, setBookings] = useState([]);
+  const bookingsRef = useRef([]);
+  useEffect(() => { bookingsRef.current = Array.isArray(bookings) ? bookings : []; }, [bookings]);
+  const [isAgendaBootLoading, setIsAgendaBootLoading] = useState(false);
+  const [agendaBootStage, setAgendaBootStage] = useState('');
+  const agendaBootReqIdRef = useRef(0);
+  const agendaBootCompletedKeyRef = useRef('');
+  const agendaBootInFlightRef = useRef(false);
+  const agendaBootStartedAtRef = useRef(0);
   const [isModalOpen, setIsModalOpen] = useState(false);
   // Estados para agendamento fixo/recorrente
   const [isRecorrente, setIsRecorrente] = useState(false);
@@ -439,7 +447,7 @@ function AgendaPage({ sidebarVisible = false }) {
         const dayEnd = addDays(dayStart, 1);
         const { data, error } = await supabase
           .from('agendamentos')
-          .select('id, codigo, inicio, fim, status, modalidade, quadra_id, cliente_id, auto_disabled, clientes, created_by_isis')
+          .select('id, codigo, inicio, fim, status, modalidade, quadra_id, cliente_id, auto_disabled, clientes, valor_total, created_by_isis')
           .eq('codigo_empresa', userProfile.codigo_empresa)
           .gte('inicio', dayStart.toISOString())
           .lt('inicio', dayEnd.toISOString())
@@ -455,6 +463,7 @@ function AgendaPage({ sidebarVisible = false }) {
           customer: Array.isArray(row.clientes) && row.clientes.length > 0 ? row.clientes[0] : '',
           court: String(row.quadra_id || ''),
           court_id: row.quadra_id,
+          valor_total: row.valor_total ?? null,
           auto_disabled: !!row.auto_disabled,
           created_by_isis: !!row.created_by_isis,
         }));
@@ -491,12 +500,12 @@ function AgendaPage({ sidebarVisible = false }) {
               ...prevP,
               cliente_id: p.cliente_id,
               nome: p.nome,
-              codigo: (prevP.codigo !== undefined ? prevP.codigo : (p.codigo ?? null)),
-              valor_cota: typeof p.valor_cota === 'string' ? p.valor_cota : (prevP.valor_cota ?? ''),
-              status_pagamento: p.status_pagamento || prevP.status_pagamento || 'Pendente',
-              finalizadora_id: p.finalizadora_id ?? prevP.finalizadora_id ?? null,
-              aplicar_taxa: p.aplicar_taxa ?? prevP.aplicar_taxa ?? false,
-              ordem: prevP.ordem ?? (idx + 1),
+              codigo: (p.codigo !== undefined ? p.codigo : (prevP.codigo ?? null)),
+              valor_cota: (typeof p.valor_cota === 'string') ? p.valor_cota : (prevP.valor_cota ?? ''),
+              status_pagamento: (p.status_pagamento ?? prevP.status_pagamento ?? 'Pendente'),
+              finalizadora_id: (p.finalizadora_id ?? prevP.finalizadora_id ?? null),
+              aplicar_taxa: (p.aplicar_taxa ?? prevP.aplicar_taxa ?? false),
+              ordem: idx + 1,
             };
           });
           return { ...prev, [agendamentoId]: next };
@@ -560,10 +569,37 @@ function AgendaPage({ sidebarVisible = false }) {
   // Lista de quadras vinda do banco (objetos com nome, modalidades, horario)
   const [dbCourts, setDbCourts] = useState(null);
   const [courtsLoading, setCourtsLoading] = useState(true);
+  const courtsLoadingRef = useRef(true);
+  useEffect(() => { courtsLoadingRef.current = !!courtsLoading; }, [courtsLoading]);
 
   const courtsMap = useMemo(() => Object.fromEntries((dbCourts ?? []).map(c => [c.nome, c])), [dbCourts]);
   const availableCourts = useMemo(() => (dbCourts ?? []).map(c => c.nome), [dbCourts]);
   const [selectedCourts, setSelectedCourts] = useState([]);
+
+  // Reconciliar nome da quadra em bookings quando dbCourts carregar (evita UUID aparecer na UI)
+  useEffect(() => {
+    try {
+      if (courtsLoading) return;
+      const list = dbCourts || [];
+      if (!Array.isArray(list) || list.length === 0) return;
+      if (!Array.isArray(bookings) || bookings.length === 0) return;
+      let changed = false;
+      const next = bookings.map((b) => {
+        if (!b) return b;
+        const cid = b.court_id;
+        if (cid == null) return b;
+        const found = list.find((c) => String(c.id) === String(cid));
+        if (!found?.nome) return b;
+        // Só substituir quando o campo atual não é um nome válido
+        if (b.court !== found.nome && !(availableCourts || []).includes(b.court)) {
+          changed = true;
+          return { ...b, court: found.nome };
+        }
+        return b;
+      });
+      if (changed) setBookings(next);
+    } catch {}
+  }, [courtsLoading, dbCourts, bookings, availableCourts]);
 
   // Chaves de cache por empresa
   const companyCode = userProfile?.codigo_empresa;
@@ -917,6 +953,7 @@ function AgendaPage({ sidebarVisible = false }) {
   // Runner periódico
   const automationRunningRef = useRef(false);
   const nextAutoTimerRef = useRef(null);
+  const autoScheduleDeferredTimerRef = useRef(null);
   const runAutomationRef = useRef(null);
   const initialDataReadyRef = useRef(false);
   const clearNextAutoTimer = useCallback(() => {
@@ -928,9 +965,24 @@ function AgendaPage({ sidebarVisible = false }) {
     // Evita re-renders e timers durante janela crítica ou modal aberto
     const now = Date.now();
     if (now < (returningFromHiddenUntilRef.current || 0)) {
-      console.log('[AutoDiag] scheduleNextAutomation:deferred returning-from-hidden');
-      setTimeout(() => scheduleNextAutomation(), 1500);
+      try {
+        if (localStorage.getItem('debug:agenda') === '1') {
+          console.log('[AutoDiag] scheduleNextAutomation:deferred returning-from-hidden');
+        }
+      } catch {}
+      // Evita criar múltiplos timeouts concorrentes (isso causa spam e comportamento indefinido)
+      if (!autoScheduleDeferredTimerRef.current) {
+        autoScheduleDeferredTimerRef.current = setTimeout(() => {
+          autoScheduleDeferredTimerRef.current = null;
+          try { scheduleNextAutomation(); } catch {}
+        }, 800);
+      }
       return;
+    }
+    // Se saímos da janela crítica, limpa qualquer deferred pendente
+    if (autoScheduleDeferredTimerRef.current) {
+      try { clearTimeout(autoScheduleDeferredTimerRef.current); } catch {}
+      autoScheduleDeferredTimerRef.current = null;
     }
     if (!initialDataReadyRef.current) {
       dbg('scheduleNextAutomation:skipped (initial data not ready)');
@@ -1276,11 +1328,97 @@ function AgendaPage({ sidebarVisible = false }) {
     try {
       const cached = JSON.parse(localStorage.getItem(participantsCacheKey) || '{}');
       if (cached && typeof cached === 'object') {
-        setParticipantsByAgendamento(cached);
+        const normalized = {};
+        for (const [k, v] of Object.entries(cached || {})) {
+          const arr = Array.isArray(v) ? v.slice() : [];
+          arr.sort((a, b) => {
+            const oa = Number.isFinite(Number(a?.ordem)) ? Number(a.ordem) : Number.MAX_SAFE_INTEGER;
+            const ob = Number.isFinite(Number(b?.ordem)) ? Number(b.ordem) : Number.MAX_SAFE_INTEGER;
+            if (oa !== ob) return oa - ob;
+            return String(a?.id || '').localeCompare(String(b?.id || ''));
+          });
+          normalized[k] = arr;
+        }
+        setParticipantsByAgendamento(normalized);
         lastParticipantsDateKeyRef.current = format(currentDate, 'yyyy-MM-dd');
       }
     } catch {}
   }, [participantsCacheKey]);
+
+  const fetchParticipantsBatch = useCallback(async (ids, reqId) => {
+    if (!authReady || !userProfile?.codigo_empresa) return { map: {}, ids: [] };
+    const safeIds = (Array.isArray(ids) ? ids : []).filter(Boolean);
+    if (safeIds.length === 0) return { map: {}, ids: [] };
+    try {
+      if (localStorage.getItem('debug:agenda') === '1') {
+        console.log('[AgendaBoot] fetchParticipantsBatch:start', { reqId, ids: safeIds.length });
+      }
+    } catch {}
+    const { data, error } = await supabase
+      .from('agendamento_participantes')
+      .select('id, agendamento_id, codigo_empresa, cliente_id, nome, valor_cota, status_pagamento, finalizadora_id, aplicar_taxa, ordem, is_representante, deleted_at, cliente:clientes!agendamento_participantes_cliente_id_fkey(nome, codigo)')
+      .in('agendamento_id', safeIds)
+      .is('deleted_at', null)
+      .order('ordem', { ascending: true })
+      .order('id', { ascending: true });
+
+    if (agendaBootReqIdRef.current !== reqId) return { map: {}, ids: safeIds };
+    if (error) throw error;
+
+    const map = {};
+    for (const row of (data || [])) {
+      const k = row.agendamento_id;
+      if (!map[k]) map[k] = [];
+      const nomeResolvido = row.nome || (Array.isArray(row.cliente) ? row.cliente[0]?.nome : row.cliente?.nome) || '';
+      const codigoResolvido = (Array.isArray(row.cliente) ? row.cliente[0]?.codigo : row.cliente?.codigo) || null;
+      map[k].push({ ...row, nome: nomeResolvido, codigo: codigoResolvido });
+    }
+
+    for (const id of safeIds) {
+      const arr = Array.isArray(map[id]) ? map[id].slice() : [];
+      arr.sort((a, b) => {
+        const oa = Number.isFinite(Number(a?.ordem)) ? Number(a.ordem) : Number.MAX_SAFE_INTEGER;
+        const ob = Number.isFinite(Number(b?.ordem)) ? Number(b.ordem) : Number.MAX_SAFE_INTEGER;
+        if (oa !== ob) return oa - ob;
+        return String(a?.id || '').localeCompare(String(b?.id || ''));
+      });
+      map[id] = arr;
+    }
+
+    setParticipantsByAgendamento(prev => {
+      const next = { ...prev };
+      for (const id of safeIds) {
+        next[id] = map[id] || [];
+      }
+      try { if (participantsCacheKey) localStorage.setItem(participantsCacheKey, JSON.stringify(next)); } catch {}
+      return next;
+    });
+
+    setBookings(prev => {
+      const list = (prev || []);
+      let changed = false;
+      const next = list.map(b => {
+        const parts = map[b.id];
+        if (Array.isArray(parts) && parts.length > 0) {
+          const rep = (parts.find(p => p?.is_representante) || parts[0])?.nome || '';
+          if (rep && rep !== b.customer) {
+            changed = true;
+            return { ...b, customer: rep };
+          }
+        }
+        return b;
+      });
+      return changed ? next : prev;
+    });
+
+    try {
+      if (localStorage.getItem('debug:agenda') === '1') {
+        console.log('[AgendaBoot] fetchParticipantsBatch:done', { reqId, rows: (data || []).length });
+      }
+    } catch {}
+
+    return { map, ids: safeIds };
+  }, [authReady, userProfile?.codigo_empresa, participantsCacheKey, setParticipantsByAgendamento, setBookings]);
 
   // Carrega agendamentos do dia atual a partir do banco (extraído para useCallback para reuso)
   const fetchBookings = useCallback(async () => {
@@ -1299,7 +1437,7 @@ function AgendaPage({ sidebarVisible = false }) {
     const { data, error } = await supabase
       .from('agendamentos')
       .select(`
-        id, codigo, codigo_empresa, quadra_id, cliente_id, clientes, inicio, fim, modalidade, status, auto_disabled, created_by_isis,
+        id, codigo, codigo_empresa, quadra_id, cliente_id, clientes, valor_total, inicio, fim, modalidade, status, auto_disabled, created_by_isis,
         quadra:quadra_id ( nome )
       `)
       .eq('codigo_empresa', userProfile.codigo_empresa)
@@ -1317,44 +1455,40 @@ function AgendaPage({ sidebarVisible = false }) {
       }
       return;
     }
-    // Em alguns casos no Vercel o retorno vem 200 mas vazio na primeira batida (RLS/propagação)
+    // Em alguns casos o retorno vem 200 mas vazio na primeira batida (RLS/propagação).
+    // Estratégia: NUNCA sobrescrever com vazio na primeira tentativa; sempre agenda 1 retry.
     if (!data || data.length === 0) {
-      dbg('fetchBookings:empty-first-hit');
-       pulseLog('fetch:empty-first');
-      // Só tentar novamente se temos cache para manter UI preenchida
-      let hasCache = false;
-      try {
-        const cached = bookingsCacheKey ? JSON.parse(localStorage.getItem(bookingsCacheKey) || '[]') : [];
-        hasCache = Array.isArray(cached) && cached.length > 0;
-      } catch {}
+      dbg('fetchBookings:empty-hit');
+      pulseLog('fetch:empty');
       if (!bookingsRetryRef.current) {
         bookingsRetryRef.current = true;
-        if (hasCache) {
-          setTimeout(fetchBookings, 700);
-          return; // não sobrescrever UI com vazio na primeira tentativa
-        }
+        setTimeout(fetchBookings, 700);
+      } else {
+        // segunda tentativa também vazia: liberar novo ciclo futuro
+        bookingsRetryRef.current = false;
       }
+      // Não apagar o que já está em tela (bootstrap/cache)
+      return bookingsRef.current;
     }
-    bookingsRetryRef.current = false; // sucesso (ou segunda tentativa), libera novos retries futuros
+    bookingsRetryRef.current = false; // sucesso
     const nowTs = Date.now();
+    const prevById = (() => {
+      try {
+        const list = Array.isArray(bookingsRef.current) ? bookingsRef.current : [];
+        return new Map(list.map(b => [b.id, b]));
+      } catch {
+        return new Map();
+      }
+    })();
     const mapped = (data || []).map(row => {
       const start = new Date(row.inicio);
       const end = new Date(row.fim);
+      const prev = prevById.get(row.id);
       // Nome da quadra
       const courtName = row.quadra?.[0]?.nome || row.quadra?.nome || Object.values(courtsMap).find(c => c.id === row.quadra_id)?.nome || '';
+      const courtFallback = (row.quadra_id != null) ? String(row.quadra_id) : '';
       
-      // Nome do cliente: SEMPRE buscar dos participantes primeiro (contém histórico editado)
       let customerName = '';
-      
-      // Prioridade 1: buscar dos participantes já carregados (histórico editado)
-      if (participantsByAgendamento[row.id]) {
-        const participants = participantsByAgendamento[row.id];
-        if (Array.isArray(participants) && participants.length > 0) {
-          customerName = participants[0]?.nome || '';
-        }
-      }
-      
-      // Fallback: se não tem participantes carregados, buscar do array clientes (legado)
       if (!customerName && row.clientes) {
         try {
           const clientesArray = typeof row.clientes === 'string' ? JSON.parse(row.clientes) : row.clientes;
@@ -1370,8 +1504,10 @@ function AgendaPage({ sidebarVisible = false }) {
       return {
         id: row.id,
         code: row.codigo,
-        court: courtName,
-        customer: customerName,
+        court: courtName || courtFallback,
+        court_id: row.quadra_id,
+        customer: (prev && prev.customer) ? prev.customer : customerName,
+        valor_total: (row.valor_total !== undefined ? row.valor_total : (prev?.valor_total ?? null)),
         start,
         end,
         status: preferLocal ? recent.status : (row.status || 'scheduled'),
@@ -1380,7 +1516,35 @@ function AgendaPage({ sidebarVisible = false }) {
         created_by_isis: !!row.created_by_isis,
       };
     });
-    setBookings(mapped);
+    setBookings(prev => {
+      const a = Array.isArray(prev) ? prev : [];
+      const b = Array.isArray(mapped) ? mapped : [];
+      if (a.length !== b.length) return mapped;
+      for (let i = 0; i < a.length; i++) {
+        const x = a[i];
+        const y = b[i];
+        if (!x || !y) return mapped;
+        const xStart = x.start instanceof Date ? x.start.getTime() : new Date(x.start).getTime();
+        const xEnd = x.end instanceof Date ? x.end.getTime() : new Date(x.end).getTime();
+        const yStart = y.start instanceof Date ? y.start.getTime() : new Date(y.start).getTime();
+        const yEnd = y.end instanceof Date ? y.end.getTime() : new Date(y.end).getTime();
+        if (
+          x.id !== y.id ||
+          x.status !== y.status ||
+          x.modality !== y.modality ||
+          String(x.court || '') !== String(y.court || '') ||
+          String(x.court_id || '') !== String(y.court_id || '') ||
+          String(x.customer || '') !== String(y.customer || '') ||
+          Number(x.valor_total ?? NaN) !== Number(y.valor_total ?? NaN) ||
+          !!x.auto_disabled !== !!y.auto_disabled ||
+          xStart !== yStart ||
+          xEnd !== yEnd
+        ) {
+          return mapped;
+        }
+      }
+      return prev;
+    });
     // Persistir no cache (serializando datas e garantindo customer)
     try {
       if (bookingsCacheKey) {
@@ -1388,7 +1552,9 @@ function AgendaPage({ sidebarVisible = false }) {
           id: b.id,
           code: b.code,
           court: b.court,
+          court_id: b.court_id,
           customer: b.customer, // Garantir que customer está sendo salvo
+          valor_total: (b.valor_total ?? null),
           start: b.start.toISOString(),
           end: b.end.toISOString(),
           status: b.status,
@@ -1399,7 +1565,135 @@ function AgendaPage({ sidebarVisible = false }) {
         localStorage.setItem(bookingsCacheKey, JSON.stringify(serializable));
       }
     } catch {}
-  }, [authReady, userProfile?.codigo_empresa, currentDate, courtsMap, bookingsCacheKey, toast, dbg, debugOn, participantsByAgendamento]);
+    return mapped;
+  }, [authReady, userProfile?.codigo_empresa, currentDate, courtsMap, bookingsCacheKey, toast, dbg, debugOn, viewMode, isModalOpen]);
+
+  useEffect(() => {
+    const runBoot = async () => {
+      if (!authReady || !userProfile?.codigo_empresa) return;
+      if (!currentDate) return;
+      if (isModalOpen) return;
+
+      const keyDate = viewMode === 'week' ? format(getWeekStart(currentDate), 'yyyy-MM-dd') : format(currentDate, 'yyyy-MM-dd');
+      const bootKey = `${userProfile.codigo_empresa}:${viewMode}:${keyDate}`;
+      if (agendaBootCompletedKeyRef.current === bootKey) return;
+      if (agendaBootInFlightRef.current) return;
+
+      agendaBootInFlightRef.current = true;
+      const reqId = ++agendaBootReqIdRef.current;
+      agendaBootStartedAtRef.current = Date.now();
+      try {
+        if (localStorage.getItem('debug:agenda') === '1') {
+          console.log('[AgendaBoot] start', { reqId, bootKey, ts: new Date().toISOString() });
+        }
+      } catch {}
+      setIsAgendaBootLoading(true);
+      setAgendaBootStage('Carregando quadras…');
+
+      try {
+        if (courtsLoadingRef.current) {
+          const waitStart = Date.now();
+          let warned = false;
+          await new Promise((resolve) => {
+            const t = setInterval(() => {
+              if (agendaBootReqIdRef.current !== reqId) { clearInterval(t); resolve(); return; }
+              if (!courtsLoadingRef.current) { clearInterval(t); resolve(); }
+              if (!warned && (Date.now() - waitStart) > 5000) {
+                warned = true;
+                try {
+                  console.warn('[AgendaBoot] aguardando courtsLoading >5s', { reqId, bootKey });
+                } catch {}
+              }
+              // Failsafe: não prender o boot indefinidamente em courtsLoading
+              if ((Date.now() - waitStart) > 6500) {
+                try { console.warn('[AgendaBoot] timeout aguardando courtsLoading, prosseguindo boot', { reqId, bootKey }); } catch {}
+                clearInterval(t);
+                resolve();
+              }
+            }, 50);
+          });
+        }
+        if (agendaBootReqIdRef.current !== reqId) return;
+
+        setAgendaBootStage('Carregando agendamentos…');
+        try {
+          if (localStorage.getItem('debug:agenda') === '1') {
+            console.log('[AgendaBoot] stage', { reqId, stage: 'bookings' });
+          }
+        } catch {}
+        const bookingsStart = Date.now();
+        let bookingsWarned = false;
+        const bookingsWarnTimer = setInterval(() => {
+          if (bookingsWarned) return;
+          if (agendaBootReqIdRef.current !== reqId) return;
+          if ((Date.now() - bookingsStart) > 5000) {
+            bookingsWarned = true;
+            try { console.warn('[AgendaBoot] aguardando fetchBookings >5s', { reqId, bootKey }); } catch {}
+          }
+        }, 250);
+        let mapped = await fetchBookings();
+        try { clearInterval(bookingsWarnTimer); } catch {}
+        if (agendaBootReqIdRef.current !== reqId) return;
+
+        // Se vier vazio (first-hit), aguardar e tentar mais 1 vez antes de finalizar o boot.
+        let list = Array.isArray(mapped) ? mapped : [];
+        if (list.length === 0) {
+          try {
+            if (localStorage.getItem('debug:agenda') === '1') {
+              console.warn('[AgendaBoot] fetchBookings vazio, tentando novamente…', { reqId, bootKey });
+            }
+          } catch {}
+          await new Promise(r => setTimeout(r, 750));
+          mapped = await fetchBookings();
+          if (agendaBootReqIdRef.current !== reqId) return;
+          list = Array.isArray(mapped) ? mapped : [];
+        }
+        const ids = list.map(b => b.id).filter(Boolean);
+
+        try {
+          if (localStorage.getItem('debug:agenda') === '1') {
+            console.log('[AgendaBoot] bookings loaded', { reqId, count: list.length, idsCount: ids.length });
+          }
+        } catch {}
+
+        setAgendaBootStage('Carregando participantes…');
+        try {
+          if (localStorage.getItem('debug:agenda') === '1') {
+            console.log('[AgendaBoot] stage', { reqId, stage: 'participants' });
+          }
+        } catch {}
+        const partsStart = Date.now();
+        let partsWarned = false;
+        const partsWarnTimer = setInterval(() => {
+          if (partsWarned) return;
+          if (agendaBootReqIdRef.current !== reqId) return;
+          if ((Date.now() - partsStart) > 5000) {
+            partsWarned = true;
+            try { console.warn('[AgendaBoot] aguardando fetchParticipantsBatch >5s', { reqId, bootKey, ids: ids.length }); } catch {}
+          }
+        }, 250);
+        await fetchParticipantsBatch(ids, reqId);
+        try { clearInterval(partsWarnTimer); } catch {}
+        agendaBootCompletedKeyRef.current = bootKey;
+      } catch (e) {
+        try { console.warn('[AgendaBoot] erro ao carregar agenda:', { reqId, bootKey, message: e?.message, e }); } catch {}
+      } finally {
+        agendaBootInFlightRef.current = false;
+        if (agendaBootReqIdRef.current === reqId) {
+          setIsAgendaBootLoading(false);
+          setAgendaBootStage('');
+          try {
+            const ms = Date.now() - (agendaBootStartedAtRef.current || Date.now());
+            if (localStorage.getItem('debug:agenda') === '1') {
+              console.log('[AgendaBoot] done', { reqId, bootKey, ms });
+            }
+          } catch {}
+        }
+      }
+    };
+
+    runBoot();
+  }, [authReady, userProfile?.codigo_empresa, currentDate, viewMode, isModalOpen, courtsLoading, fetchBookings, fetchParticipantsBatch]);
 
   // Log watcher: whenever bookings changes (after set), log a compact summary
   useEffect(() => {
@@ -1556,7 +1850,11 @@ function AgendaPage({ sidebarVisible = false }) {
         const now = Date.now();
         // Skip durante janela crítica ou modal aberto
         if (now < (returningFromHiddenUntilRef.current || 0)) {
-          console.log('[AutoDiag] reconcile:skipped returning-from-hidden');
+          try {
+            if (localStorage.getItem('debug:agenda') === '1') {
+              console.log('[AutoDiag] reconcile:skipped returning-from-hidden');
+            }
+          } catch {}
           return;
         }
         if (isModalOpen) {
@@ -1602,9 +1900,11 @@ function AgendaPage({ sidebarVisible = false }) {
       const reqId = ++participantsReqIdRef.current;
       const { data, error } = await supabase
         .from('agendamento_participantes')
-        .select('id, agendamento_id, codigo_empresa, cliente_id, nome, valor_cota, status_pagamento, finalizadora_id, aplicar_taxa, ordem, cliente:clientes!agendamento_participantes_cliente_id_fkey(nome, codigo)')
+        .select('id, agendamento_id, codigo_empresa, cliente_id, nome, valor_cota, status_pagamento, finalizadora_id, aplicar_taxa, ordem, is_representante, deleted_at, cliente:clientes!agendamento_participantes_cliente_id_fkey(nome, codigo)')
         .in('agendamento_id', ids)
-        .order('ordem', { ascending: true }); // Ordena por campo ordem explícito
+        .is('deleted_at', null)
+        .order('ordem', { ascending: true })
+        .order('id', { ascending: true }); // Critério secundário estável
       // Ignora respostas atrasadas
       if (participantsReqIdRef.current !== reqId) return;
       if (error) {
@@ -1624,6 +1924,17 @@ function AgendaPage({ sidebarVisible = false }) {
 
         map[k].push({ ...row, nome: nomeResolvido, codigo: codigoResolvido });
       }
+
+      for (const id of ids) {
+        const arr = Array.isArray(map[id]) ? map[id].slice() : [];
+        arr.sort((a, b) => {
+          const oa = Number.isFinite(Number(a?.ordem)) ? Number(a.ordem) : Number.MAX_SAFE_INTEGER;
+          const ob = Number.isFinite(Number(b?.ordem)) ? Number(b.ordem) : Number.MAX_SAFE_INTEGER;
+          if (oa !== ob) return oa - ob;
+          return String(a?.id || '').localeCompare(String(b?.id || ''));
+        });
+        map[id] = arr;
+      }
       dbg('Participants:loaded', { bookings: ids.length, rows: (data || []).length }); pulseLog('parts:loaded', { rows: (data||[]).length });
       lastParticipantsDateKeyRef.current = dateKey;
       // Atualiza apenas os IDs consultados, preservando outros e persiste em cache
@@ -1635,6 +1946,23 @@ function AgendaPage({ sidebarVisible = false }) {
         try { if (participantsCacheKey) localStorage.setItem(participantsCacheKey, JSON.stringify(next)); } catch {}
         dbg('Participants:set state for ids', { ids }); pulseLog('parts:set', { idsCount: ids.length });
         return next;
+      });
+
+      setBookings(prev => {
+        const list = (prev || []);
+        let changed = false;
+        const next = list.map(b => {
+          const parts = map[b.id];
+          if (Array.isArray(parts) && parts.length > 0) {
+            const rep = (parts.find(p => p?.is_representante) || parts[0])?.nome || '';
+            if (rep && rep !== b.customer) {
+              changed = true;
+              return { ...b, customer: rep };
+            }
+          }
+          return b;
+        });
+        return changed ? next : prev;
       });
     };
     loadParticipants();
@@ -1833,6 +2161,12 @@ function AgendaPage({ sidebarVisible = false }) {
   useEffect(() => {
     const loadCourts = async () => {
       if (!userProfile?.codigo_empresa) return;
+
+      try {
+        if (localStorage.getItem('debug:agenda') === '1') {
+          console.log('[Agenda][Courts] loadCourts:start', { empresa: userProfile.codigo_empresa, hasCache: !!localStorage.getItem(courtsCacheKey) });
+        }
+      } catch {}
       
       // ✅ CORREÇÃO: Verifica se o cache é da empresa atual, senão limpa
       try {
@@ -1861,7 +2195,7 @@ function AgendaPage({ sidebarVisible = false }) {
         .eq('status', 'Ativa')  // Filtrar apenas quadras ativas
         .order('nome', { ascending: true });
       if (error) {
-        toast({ title: 'Erro ao carregar quadras', description: error.message });
+        console.error('Erro ao buscar quadras:', error);
         // Não sobrescrever cache com vazio. Tenta uma vez novamente após curto atraso.
         if (!courtsRetryRef.current) {
           courtsRetryRef.current = true;
@@ -1869,6 +2203,12 @@ function AgendaPage({ sidebarVisible = false }) {
         } else {
           setCourtsLoading(false);
         }
+
+        try {
+          if (localStorage.getItem('debug:agenda') === '1') {
+            console.warn('[Agenda][Courts] loadCourts:error', { empresa: userProfile.codigo_empresa, message: error?.message, code: error?.code });
+          }
+        } catch {}
         return;
       }
       const rows = data || [];
@@ -1887,6 +2227,12 @@ function AgendaPage({ sidebarVisible = false }) {
       setDbCourts(rows);
       try { localStorage.setItem(courtsCacheKey, JSON.stringify(rows)); } catch {}
       setCourtsLoading(false);
+
+      try {
+        if (localStorage.getItem('debug:agenda') === '1') {
+          console.log('[Agenda][Courts] loadCourts:done', { empresa: userProfile.codigo_empresa, count: Array.isArray(rows) ? rows.length : 0 });
+        }
+      } catch {}
     };
     if (authReady && userProfile?.codigo_empresa) {
       loadCourts();
@@ -2253,17 +2599,9 @@ function AgendaPage({ sidebarVisible = false }) {
     };
 
     const [form, setForm] = useState(() => {
-      // Hidratar seleção logo no primeiro render se estiver dentro da janela pós-concluir
       let initialSelected = [];
       try {
-        const closingAtRaw = sessionStorage.getItem('agenda:customerPicker:closingAt');
-        const closingAt = closingAtRaw ? Number(closingAtRaw) : 0;
-        const within = closingAt && (Date.now() - closingAt < 10000);
-        const rawSel = sessionStorage.getItem(persistLastKey);
-        const persisted = rawSel ? JSON.parse(rawSel) : [];
-        if (within && Array.isArray(persisted) && persisted.length > 0) {
-          initialSelected = persisted;
-        } else if (Array.isArray(chipsSnapshot) && chipsSnapshot.length > 0) {
+        if (Array.isArray(chipsSnapshot) && chipsSnapshot.length > 0) {
           initialSelected = chipsSnapshot;
         } else if (Array.isArray(lastNonEmptySelectionRef.current) && lastNonEmptySelectionRef.current.length > 0) {
           initialSelected = lastNonEmptySelectionRef.current;
@@ -2304,6 +2642,15 @@ function AgendaPage({ sidebarVisible = false }) {
     
     const [isCustomerPickerOpen, setIsCustomerPickerOpen] = useState(false);
     const [customerQuery, setCustomerQuery] = useState('');
+
+    const lastSelectedClientsSetReasonRef = useRef('');
+    const lastSelectedClientsSetStackRef = useRef('');
+    const markSelectedClientsSet = useCallback((reason) => {
+      try {
+        lastSelectedClientsSetReasonRef.current = String(reason || '');
+        lastSelectedClientsSetStackRef.current = new Error('selectedClients:set').stack || '';
+      } catch {}
+    }, []);
     
     // Ao abrir um agendamento existente, aplica a ordem persistida dos participantes (campo 'ordem')
     const appliedFromParticipantsRef = useRef(false);
@@ -2319,12 +2666,11 @@ function AgendaPage({ sidebarVisible = false }) {
         const cur = Array.isArray(form.selectedClients) ? form.selectedClients : [];
         const same = cur.length === chips.length && cur.every((c, i) => c && chips[i] && c.id === chips[i].id);
         if (!same) {
+          try { markSelectedClientsSet('edit:apply-from-participants'); } catch {}
           setForm(f => ({ ...f, selectedClients: chips }));
           try { lastNonEmptySelectionRef.current = chips; } catch {}
           try { setChipsSnapshotSafe(chips); } catch {}
           try { userSelectedOnceRef.current = true; } catch {}
-          // Persiste imediatamente para evitar restaurações tardias com ordem antiga
-          try { sessionStorage.setItem(persistLastKey, JSON.stringify(chips)); } catch {}
           // Curta trava para impedir efeitos concorrentes de limparem os chips logo após abrir
           try { selectionLockUntilRef.current = Date.now() + 1500; } catch {}
           // Log de abertura para comparar ordem aplicada vs carregada
@@ -2337,33 +2683,8 @@ function AgendaPage({ sidebarVisible = false }) {
       } catch {}
     }, [isModalOpen, editingBooking?.id, participantsByAgendamento]);
     
-    // Enforce ordem dos chips = ordem persistida (protege contra efeitos tardios que mudem a ordem)
-    useEffect(() => {
-      try {
-        if (!isModalOpen) return;
-        if (!editingBooking?.id) return;
-        const list = participantsByAgendamento[editingBooking.id] || [];
-        if (!Array.isArray(list) || list.length === 0) return;
-        const desiredIds = list.map(p => p.cliente_id);
-        const cur = Array.isArray(form.selectedClients) ? form.selectedClients : [];
-        if (cur.length === 0) return;
-        // Reordenar cur conforme desiredIds (mantém desconhecidos na cauda)
-        const idPos = new Map(desiredIds.map((id, idx) => [id, idx]));
-        const reordered = [...cur].sort((a, b) => {
-          const pa = idPos.has(a.id) ? idPos.get(a.id) : Number.MAX_SAFE_INTEGER;
-          const pb = idPos.has(b.id) ? idPos.get(b.id) : Number.MAX_SAFE_INTEGER;
-          return pa - pb;
-        });
-        const changed = reordered.length === cur.length && reordered.some((c, i) => c?.id !== cur[i]?.id);
-        if (changed) {
-          console.log('[ORDER:ENFORCE] Ajustando chips ->', reordered.map(c => c.nome));
-          setForm(f => ({ ...f, selectedClients: reordered }));
-          try { lastNonEmptySelectionRef.current = reordered; } catch {}
-          try { setChipsSnapshotSafe(reordered); } catch {}
-          try { sessionStorage.setItem(persistLastKey, JSON.stringify(reordered)); } catch {}
-        }
-      } catch {}
-    }, [isModalOpen, editingBooking?.id, participantsByAgendamento, form.selectedClients]);
+    // Importante: NÃO reordenar automaticamente os chips.
+    // A ordem deve ser sempre a escolhida pelo usuário.
     
     // Log qualquer mudança relevante nos chips para depurar ordem
     useEffect(() => {
@@ -2371,8 +2692,23 @@ function AgendaPage({ sidebarVisible = false }) {
         if (!isModalOpen) return;
         const arr = Array.isArray(form.selectedClients) ? form.selectedClients : [];
         if (arr.length > 0) console.log('[ORDER:CHIPS] atual:', arr.map(c => c.nome));
+        if (editingBooking?.id) {
+          const ref = Array.isArray(participantsByAgendamento?.[editingBooking.id]) ? participantsByAgendamento[editingBooking.id] : [];
+          const refIds = ref.map((p) => String(p?.cliente_id ?? ''));
+          const curIds = arr.map((c) => String(c?.id ?? ''));
+          const mismatch = refIds.length > 0 && (refIds.join('|') !== curIds.join('|'));
+          if (mismatch) {
+            console.warn('[ORDER:CHIPS][MISMATCH]', {
+              bookingId: editingBooking.id,
+              ref: ref.map(p => ({ ordem: p?.ordem, nome: p?.nome, id: p?.cliente_id })),
+              cur: arr.map((c, idx) => ({ idx: idx + 1, nome: c?.nome, id: c?.id })),
+              lastReason: lastSelectedClientsSetReasonRef.current,
+            });
+            try { console.warn(lastSelectedClientsSetStackRef.current); } catch {}
+          }
+        }
       } catch {}
-    }, [isModalOpen, form.selectedClients]);
+    }, [isModalOpen, form.selectedClients, editingBooking?.id, participantsByAgendamento]);
     const [focusedCustomerIndex, setFocusedCustomerIndex] = useState(0);
     // Janela de bloqueio para ignorar fechamentos logo após retornar à aba
     const pickerBlockUntilRef = useRef(0);
@@ -2441,26 +2777,6 @@ function AgendaPage({ sidebarVisible = false }) {
     const lastNonEmptySelectionRef = useRef([]);
     // Track last action that changed selectedClients (for diagnostics)
     const lastSelActionRef = useRef('init');
-    const persistLastKey = useMemo(() => {
-      try {
-        const emp = userProfile?.codigo_empresa || 'no-company';
-        return `agenda:lastSelection:${emp}`;
-      } catch { return 'agenda:lastSelection:no-company'; }
-    }, [userProfile?.codigo_empresa]);
-    const persistLastNonEmpty = useCallback((arr) => {
-      try { sessionStorage.setItem(persistLastKey, JSON.stringify(arr || [])); } catch {}
-    }, [persistLastKey]);
-    const hydrateLastNonEmpty = useCallback(() => {
-      try {
-        const raw = sessionStorage.getItem(persistLastKey);
-        if (raw) {
-          const parsed = JSON.parse(raw);
-          if (Array.isArray(parsed)) {
-            lastNonEmptySelectionRef.current = parsed;
-          }
-        }
-      } catch {}
-    }, [persistLastKey]);
     // Marca se o usuário limpou intencionalmente todas as seleções durante o picker
     const clearedByUserRef = useRef(false);
     // Snapshot da seleção para manter os chips estáveis mesmo entre re-renders/efeitos concorrentes
@@ -2502,12 +2818,7 @@ function AgendaPage({ sidebarVisible = false }) {
     // Saving flags
     const [isSavingPayments, setIsSavingPayments] = useState(false);
     const [isSavingBooking, setIsSavingBooking] = useState(false);
-    const [isAutoSaving, setIsAutoSaving] = useState(false);
     
-    // Refs para auto-save
-    const autoSaveTimeoutRef = useRef(null);
-    const lastSavedFormRef = useRef(null);
-    const autoSaveEnabledRef = useRef(false); // Só ativa após inicialização completa
 
     // Carrega finalizadoras quando o modal de pagamentos abre
     useEffect(() => {
@@ -2580,35 +2891,19 @@ function AgendaPage({ sidebarVisible = false }) {
             }
           }
         } catch {}
-        // Em modo edição, reordenar segundo a 'ordem' persistida dos participantes (representante primeiro)
-        try {
-          if (editingBooking?.id) {
-            const list = participantsByAgendamento[editingBooking.id] || [];
-            if (Array.isArray(list) && list.length > 0) {
-              const desiredIds = list.map(p => p.cliente_id);
-              const idPos = new Map(desiredIds.map((id, idx) => [id, idx]));
-              finalArr = [...finalArr].sort((a, b) => {
-                const pa = idPos.has(a.id) ? idPos.get(a.id) : Number.MAX_SAFE_INTEGER;
-                const pb = idPos.has(b.id) ? idPos.get(b.id) : Number.MAX_SAFE_INTEGER;
-                return pa - pb;
-              });
-              console.log('[ORDER:APPLY] Ajustado por ordem persistida ->', finalArr.map(c => c.nome));
-            }
-          }
-        } catch {}
         // Removed verbose applySelectedClients log
+        try { markSelectedClientsSet(`applySelectedClients:${reason}`); } catch {}
         setForm((f) => ({ ...f, selectedClients: finalArr }));
         if (Array.isArray(finalArr) && finalArr.length > 0) {
           lastNonEmptySelectionRef.current = finalArr;
           setChipsSnapshotSafe(finalArr);
-          try { sessionStorage.setItem(persistLastKey, JSON.stringify(finalArr)); } catch {}
           clearedByUserRef.current = false;
         }
         try { lastSelActionRef.current = reason; } catch {}
       } catch (e) {
         // Removed verbose applySelectedClients:error log
       }
-    }, [effectiveCustomerPickerOpen, setForm, setChipsSnapshotSafe, persistLastKey]);
+    }, [effectiveCustomerPickerOpen, setForm, setChipsSnapshotSafe]);
     // Pagamentos: busca por participante
     const [paymentSearch, setPaymentSearch] = useState('');
     const paymentSearchRef = useRef(null);
@@ -2720,122 +3015,14 @@ function AgendaPage({ sidebarVisible = false }) {
       const arr = Array.isArray(form.selectedClients) ? form.selectedClients : [];
       if (arr.length > 0) {
         lastNonEmptySelectionRef.current = arr;
-        persistLastNonEmpty(arr);
         setChipsSnapshotSafe(arr);
       }
-    }, [form.selectedClients, persistLastNonEmpty]);
-
-    // Persistir imediatamente alterações nos chips (adicionar/remover) no modal de edição
-    const prevChipsSnapRef = useRef('');
-    const chipsSavingRef = useRef(false);
-    useEffect(() => {
-      try {
-        if (!isModalOpen) return;
-        if (!editingBooking?.id) return; // somente no modo edição
-        const sel = Array.isArray(form.selectedClients) ? form.selectedClients : [];
-        const snap = JSON.stringify(sel.map(c => ({ id: c?.id, nome: c?.nome || null, codigo: c?.codigo ?? null })));
-        if (snap === prevChipsSnapRef.current) return; // sem mudança real
-        prevChipsSnapRef.current = snap;
-        (async () => {
-          if (chipsSavingRef.current) return;
-          chipsSavingRef.current = true;
-          try {
-            const agendamentoId = editingBooking.id;
-            const codigo = userProfile?.codigo_empresa;
-            if (!agendamentoId || !codigo) return;
-            // Proteção: não persistir se a seleção está vazia (evita zerar participantes ao abrir)
-            if (sel.length === 0) {
-              console.log('🛡️ [EDIT-MODAL] seleção vazia detectada (skip persist)');
-              return;
-            }
-            // Evitar salvar se seleção atual é igual ao que já está no banco (ordem e ids)
-            try {
-              const loaded = Array.isArray(participantsByAgendamento?.[agendamentoId]) ? participantsByAgendamento[agendamentoId] : [];
-              const sameLen = loaded.length === sel.length;
-              const sameSeq = sameLen && loaded.every((p, i) => String(p?.cliente_id) === String(sel[i]?.id));
-              if (sameSeq) {
-                console.log('🛡️ [EDIT-MODAL] seleção igual ao banco (skip persist)');
-                return;
-              }
-            } catch {}
-            console.log('💾 [EDIT-MODAL] Mudança em selectedClients detectada. Salvando participantes...');
-            // Buscar participantes atuais para preservar dados por posição quando possível
-            const { data: currentParticipants } = await supabase
-              .from('agendamento_participantes')
-              .select('*')
-              .eq('codigo_empresa', codigo)
-              .eq('agendamento_id', agendamentoId)
-              .order('ordem', { ascending: true })
-              .order('id', { ascending: true });
-            const currentArray = currentParticipants || [];
-            // Deletar todos e recriar conforme os chips atuais
-            await supabase
-              .from('agendamento_participantes')
-              .delete()
-              .eq('codigo_empresa', codigo)
-              .eq('agendamento_id', agendamentoId);
-            if (sel.length > 0) {
-              const rows = sel.map((c, index) => {
-                const existing = currentArray[index];
-                const preserve = existing && existing.cliente_id === c.id;
-                return {
-                  codigo_empresa: codigo,
-                  agendamento_id: agendamentoId,
-                  cliente_id: c.id,
-                  nome: c.nome,
-                  ordem: index + 1,
-                  valor_cota: preserve ? (existing.valor_cota ?? 0) : 0,
-                  status_pagamento: preserve ? (existing.status_pagamento ?? 'Pendente') : 'Pendente',
-                  finalizadora_id: preserve ? (existing.finalizadora_id ?? null) : null,
-                  aplicar_taxa: preserve ? (existing.aplicar_taxa ?? false) : false,
-                };
-              });
-              await supabase
-                .from('agendamento_participantes')
-                .insert(rows);
-            }
-            // Atualizar agendamentos (cliente primário e lista de clientes)
-            const primary = sel[0] || null;
-            const clientesArr = sel.map(c => c?.nome).filter(Boolean);
-            await supabase
-              .from('agendamentos')
-              .update({ cliente_id: primary?.id ?? null, clientes: clientesArr })
-              .eq('codigo_empresa', codigo)
-              .eq('id', agendamentoId);
-            // Atualizações locais imediatas
-            setBookings(prev => prev.map(b => b.id === agendamentoId ? { ...b, customer: primary?.nome || b.customer, cliente_id: primary?.id ?? null, clientes: clientesArr } : b));
-            const updatedParticipants = sel.map((c, index) => {
-              const existing = currentArray[index];
-              const preserve = existing && existing.cliente_id === c.id;
-              return {
-                cliente_id: c.id,
-                nome: c.nome,
-                codigo: c.codigo ?? null,
-                valor_cota: preserve ? (existing.valor_cota ?? 0) : 0,
-                status_pagamento: preserve ? (existing.status_pagamento ?? 'Pendente') : 'Pendente',
-                finalizadora_id: preserve ? (existing.finalizadora_id ?? null) : null,
-                aplicar_taxa: preserve ? (existing.aplicar_taxa ?? false) : false,
-                ordem: index + 1,
-              };
-            });
-            setParticipantsByAgendamento(prev => ({ ...prev, [agendamentoId]: updatedParticipants }));
-            setParticipantsForm(updatedParticipants);
-            console.log('✅ [EDIT-MODAL] Participantes salvos imediatamente');
-          } catch (err) {
-            console.error('❌ [EDIT-MODAL] Falha ao salvar mudança de chips:', err);
-          } finally {
-            chipsSavingRef.current = false;
-          }
-        })();
-      } catch {}
-    }, [isModalOpen, editingBooking?.id, form.selectedClients]);
+    }, [form.selectedClients]);
 
     // Ao fechar o picker, se a seleção ficou vazia de forma inesperada, restaura
     useEffect(() => {
       // [DEBUG-PaymentModal] silenciado
       if (!isModalOpen) return;
-      // hydrate last non-empty selection from sessionStorage on open
-      hydrateLastNonEmpty();
       if (effectiveCustomerPickerOpen) return;
       // Apenas considera restauração quando o usuário não deseja o picker aberto
       if (customerPickerDesiredOpenRef.current) return;
@@ -2843,11 +3030,7 @@ function AgendaPage({ sidebarVisible = false }) {
       const last = (() => {
         const mem = Array.isArray(lastNonEmptySelectionRef.current) ? lastNonEmptySelectionRef.current : [];
         if (mem && mem.length > 0) return mem;
-        try {
-          const raw = sessionStorage.getItem(persistLastKey);
-          const parsed = raw ? JSON.parse(raw) : [];
-          return Array.isArray(parsed) ? parsed : [];
-        } catch { return []; }
+        return [];
       })();
       if (arr.length === 0 && last.length > 0 && !clearedByUserRef.current) {
         // Restaura de forma silenciosa; evita perder seleção feita pelo usuário
@@ -2855,7 +3038,7 @@ function AgendaPage({ sidebarVisible = false }) {
         // Limpa o flag de clique fora para não reentrar
         closedByOutsideRef.current = false;
       }
-    }, [effectiveCustomerPickerOpen, isModalOpen, hydrateLastNonEmpty, persistLastKey]);
+    }, [effectiveCustomerPickerOpen, isModalOpen]);
 
     // Diagnostics: log any change to selectedClients and attempt delayed restore if it becomes empty unexpectedly
     const lastLoggedAtRef = useRef(0);
@@ -2892,7 +3075,6 @@ function AgendaPage({ sidebarVisible = false }) {
           } catch {}
           // attempt immediate restore and after short delays using refs to avoid stale closures
           setChipsSnapshotSafe(last);
-          try { sessionStorage.setItem(persistLastKey, JSON.stringify(last)); } catch {}
           setForm(f => ({ ...f, selectedClients: [...last] }));
           // microtask
           try { Promise.resolve().then(() => { setForm(f => ({ ...f, selectedClients: [...lastNonEmptySelectionRef.current] })); }); } catch {}
@@ -2934,7 +3116,6 @@ function AgendaPage({ sidebarVisible = false }) {
         if (isModalOpen && !effectiveCustomerPickerOpen && (guardActive || lockActive) && cur.length === 0 && last.length > 0 && !clearedByUserRef.current) {
           // [CustomerPicker] silenciado
           setChipsSnapshot(last);
-          try { sessionStorage.setItem(persistLastKey, JSON.stringify(last)); } catch {}
           setForm(f => ({ ...f, selectedClients: [...last] }));
           // rAF + timeouts extras
           try { requestAnimationFrame(() => setForm(f => ({ ...f, selectedClients: [...(lastNonEmptySelectionRef.current || [])] }))); } catch {}
@@ -2952,20 +3133,6 @@ function AgendaPage({ sidebarVisible = false }) {
       if (now < (returningFromHiddenUntilRef.current || 0)) return;
       if (!isModalOpen) return;
       if (effectiveCustomerPickerOpen) return;
-      if (now >= (selectionLockUntilRef.current || 0)) return;
-      const cur = Array.isArray(form.selectedClients) ? form.selectedClients : [];
-      const last = Array.isArray(lastNonEmptySelectionRef.current) ? lastNonEmptySelectionRef.current : [];
-      if (cur.length === 0 && last.length > 0) {
-        setChipsSnapshot(last);
-        try { sessionStorage.setItem(persistLastKey, JSON.stringify(last)); } catch {}
-        setForm(f => ({ ...f, selectedClients: [...last] }));
-        // reforços adicionais
-        Promise.resolve().then(() => setForm(f => ({ ...f, selectedClients: [...(lastNonEmptySelectionRef.current || [])] })));
-        setTimeout(() => setForm(f => ({ ...f, selectedClients: [...(lastNonEmptySelectionRef.current || [])] })), 24);
-        setTimeout(() => setForm(f => ({ ...f, selectedClients: [...(lastNonEmptySelectionRef.current || [])] })), 80);
-        setTimeout(() => setForm(f => ({ ...f, selectedClients: [...(lastNonEmptySelectionRef.current || [])] })), 240);
-        // [CustomerPicker] silenciado
-      }
     }, [form.selectedClients, isModalOpen, effectiveCustomerPickerOpen]);
     // (removed erroneous stray return block)
     // Ocultar participantes apenas na UI de Pagamentos (não altera o agendamento até salvar pagamentos)
@@ -2991,13 +3158,22 @@ function AgendaPage({ sidebarVisible = false }) {
       const current = paymentSelectedId;
       const valid = current && sel.some(c => c && c.id === current);
       if (sel.length > 0 && !valid) {
-        // Força o representante para o primeiro selecionado
-        setPaymentSelectedId(sel[0]?.id || null);
+        let next = sel[0]?.id || null;
+        try {
+          if (editingBooking?.id) {
+            const list = participantsByAgendamento?.[editingBooking.id] || [];
+            const rep = Array.isArray(list) ? list.find(p => p?.is_representante === true) : null;
+            if (rep?.cliente_id && sel.some(c => String(c?.id) === String(rep.cliente_id))) {
+              next = rep.cliente_id;
+            }
+          }
+        } catch {}
+        setPaymentSelectedId(next);
       } else if (sel.length === 0 && current) {
         // Sem clientes selecionados, limpa representante
         setPaymentSelectedId(null);
       }
-    }, [form.selectedClients, isModalOpen, editingBooking]);
+    }, [form.selectedClients, isModalOpen, editingBooking, participantsByAgendamento]);
     // Evita que a auto-correção de horários rode imediatamente após aplicar um prefill
     const suppressAutoAdjustRef = useRef(false);
     // Garante que a inicialização do formulário ocorra apenas uma vez por abertura do modal
@@ -3083,6 +3259,12 @@ function AgendaPage({ sidebarVisible = false }) {
       
       return formClients;
     }, [form.selectedClients, chipsSnapshot, localCustomers]);
+
+    const participantsLoadingForPicker = !!(
+      isModalOpen &&
+      editingBooking?.id &&
+      !(Array.isArray(participantsByAgendamento?.[editingBooking.id]) && participantsByAgendamento[editingBooking.id].length > 0)
+    );
     // console cleaned: removed "[CustomerPicker][chips render]" logs
 
     // Debug: loga quando a lista efetiva muda, para diagnosticar chips
@@ -3159,136 +3341,12 @@ function AgendaPage({ sidebarVisible = false }) {
       // [DEBUG-PaymentModal] silenciado
       if (isModalOpen && !wasOpenRef.current) {
         wasOpenRef.current = true;
-        // Define/Reutiliza um sessionId para esta abertura do modal (sobrevive a remount)
-        try {
-          const prevPickerSid = sessionStorage.getItem('agenda:customerPicker:sessionId') || '';
-          const prevClosingAtRaw = sessionStorage.getItem('agenda:customerPicker:closingAt');
-          const prevClosingAt = prevClosingAtRaw ? Number(prevClosingAtRaw) : 0;
-          const prevWithin = prevClosingAt && (Date.now() - prevClosingAt < 10000); // 10s
-          if (prevPickerSid && prevWithin) {
-            modalSessionIdRef.current = prevPickerSid;
-            // try { console.warn('[CustomerPicker][SESSION:reuse]', { id: mountIdRef.current, modalSid: modalSessionIdRef.current, withinMs: Date.now() - prevClosingAt }); } catch {}
-          } else if (!modalSessionIdRef.current) {
-            modalSessionIdRef.current = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-            // try { console.warn('[CustomerPicker][SESSION:new]', { id: mountIdRef.current, modalSid: modalSessionIdRef.current }); } catch {}
-          }
-          sessionStorage.setItem('agenda:modal:sessionId', modalSessionIdRef.current);
-        } catch {}
-        // Apenas quando não está editando (novo agendamento), independentemente de haver prefill
-        if (!editingBooking) {
-          // Antes de qualquer clear: tentar restaurar se acabamos de concluir o picker nesta MESMA sessão
-          try {
-            const closingAtRaw = sessionStorage.getItem('agenda:customerPicker:closingAt');
-            const closingAt = closingAtRaw ? Number(closingAtRaw) : 0;
-            const within = closingAt && (Date.now() - closingAt < 10000);
-            const closingSessionId = sessionStorage.getItem('agenda:customerPicker:sessionId') || '';
-            const modalSessionId = sessionStorage.getItem('agenda:modal:sessionId') || '';
-            const rawSel = sessionStorage.getItem(persistLastKey);
-            const persisted = rawSel ? JSON.parse(rawSel) : [];
-            if (within && Array.isArray(persisted) && persisted.length > 0 && closingSessionId && modalSessionId && closingSessionId === modalSessionId) {
-              // [CustomerPicker] silenciado
-              try { userSelectedOnceRef.current = true; } catch {}
-              setForm(f => ({ ...f, selectedClients: persisted }));
-              lastNonEmptySelectionRef.current = persisted;
-              setChipsSnapshotSafe(persisted);
-              try { clearedByUserRef.current = false; } catch {}
-              // reforços para resistir a efeitos tardios
-              try { Promise.resolve().then(() => setForm(f => ({ ...f, selectedClients: [...(lastNonEmptySelectionRef.current || [])] }))); } catch {}
-              try { requestAnimationFrame(() => setForm(f => ({ ...f, selectedClients: [...(lastNonEmptySelectionRef.current || [])] }))); } catch {}
-              setTimeout(() => setForm(f => ({ ...f, selectedClients: [...(lastNonEmptySelectionRef.current || [])] })), 24);
-              setTimeout(() => setForm(f => ({ ...f, selectedClients: [...(lastNonEmptySelectionRef.current || [])] })), 96);
-              // não limpar marcadores aqui; serão limpos no close do modal
-              return;
-            }
-            // Fallback: se dentro da janela e há persisted, mas IDs não batem, ainda assim restaurar para evitar perda
-            if (within && Array.isArray(persisted) && persisted.length > 0) {
-              // [CustomerPicker] silenciado
-              try { userSelectedOnceRef.current = true; } catch {}
-              setForm(f => ({ ...f, selectedClients: persisted }));
-              lastNonEmptySelectionRef.current = persisted;
-              setChipsSnapshotSafe(persisted);
-              try { clearedByUserRef.current = false; } catch {}
-              try { Promise.resolve().then(() => setForm(f => ({ ...f, selectedClients: [...(lastNonEmptySelectionRef.current || [])] }))); } catch {}
-              try { requestAnimationFrame(() => setForm(f => ({ ...f, selectedClients: [...(lastNonEmptySelectionRef.current || [])] }))); } catch {}
-              setTimeout(() => setForm(f => ({ ...f, selectedClients: [...(lastNonEmptySelectionRef.current || [])] })), 24);
-              setTimeout(() => setForm(f => ({ ...f, selectedClients: [...(lastNonEmptySelectionRef.current || [])] })), 96);
-              return;
-            }
-            // try { console.warn('[CustomerPicker][RESTORE:init-open:skip]', { id: mountIdRef.current, within, closingSessionId, modalSessionId, idsMatch: closingSessionId && modalSessionId && (closingSessionId === modalSessionId), persistedLen: Array.isArray(persisted)?persisted.length:NaN }); } catch {}
-          } catch {}
-          // Se estamos em janela de proteção pós-concluir, não executar o clear neste ciclo
-          try {
-            if (Date.now() < (preventClearsUntilRef.current || 0)) {
-              // console.warn('[CustomerPicker][INIT:clear:blocked:post-conclude]', { id: mountIdRef.current });
-              return;
-            }
-          } catch {}
-          try { customerPickerDesiredOpenRef.current = false; localStorage.removeItem('agenda:customerPicker:desiredAt'); } catch {}
-          // Init de NOVO: somente zera se não houver seleção persistida recente
-          try {
-            const rawSel = sessionStorage.getItem(persistLastKey);
-            const persisted = rawSel ? JSON.parse(rawSel) : [];
-            const last = Array.isArray(lastNonEmptySelectionRef.current) ? lastNonEmptySelectionRef.current : [];
-            if ((Array.isArray(persisted) && persisted.length > 0) || (Array.isArray(last) && last.length > 0)) {
-              // console.warn('[CustomerPicker][INIT:clear:new-open:skipped:have-last]', { id: mountIdRef.current, persistedLen: Array.isArray(persisted)?persisted.length:0, lastLen: last.length });
-            } else {
-              // console.warn('[CustomerPicker][INIT:clear:new-open]', { id: mountIdRef.current });
-              try { lastNonEmptySelectionRef.current = []; } catch {}
-              try { setChipsSnapshot([]); } catch {}
-              try { clearedByUserRef.current = false; } catch {}
-              setForm(f => ({ ...f, selectedClients: [] }));
-            }
-          } catch {
-            // try { console.warn('[CustomerPicker][INIT:clear:new-open]', { id: mountIdRef.current, err: 'check-failed' }); } catch {}
-            try { lastNonEmptySelectionRef.current = []; } catch {}
-            try { setChipsSnapshot([]); } catch {}
-            try { clearedByUserRef.current = false; } catch {}
-            setForm(f => ({ ...f, selectedClients: [] }));
-          }
-        }
+        // (cache/restauração via sessionStorage removidos)
       } else if (!isModalOpen && wasOpenRef.current) {
       }
       if (!editingBooking) {
         if (newModeInitRef.current) return; // já limpou para este ciclo de "novo"
         newModeInitRef.current = true;
-        // Também tenta restaurar dentro da mesma sessão ao transicionar para novo dentro do modal
-        try {
-          const closingAtRaw = sessionStorage.getItem('agenda:customerPicker:closingAt');
-          const closingAt = closingAtRaw ? Number(closingAtRaw) : 0;
-          const within = closingAt && (Date.now() - closingAt < 5000);
-          const closingSessionId = sessionStorage.getItem('agenda:customerPicker:sessionId') || '';
-          const modalSessionId = sessionStorage.getItem('agenda:modal:sessionId') || '';
-          const rawSel = sessionStorage.getItem(persistLastKey);
-          const persisted = rawSel ? JSON.parse(rawSel) : [];
-          if (within && Array.isArray(persisted) && persisted.length > 0 && closingSessionId && modalSessionId && closingSessionId === modalSessionId) {
-            // try { console.warn('[CustomerPicker][RESTORE:new-mode]', { id: mountIdRef.current, withinMs: Date.now() - closingAt, idsMatch: true, closingSessionId, modalSessionId, persistedLen: persisted.length }); } catch {}
-            try { userSelectedOnceRef.current = true; } catch {}
-            setForm(f => ({ ...f, selectedClients: persisted }));
-            lastNonEmptySelectionRef.current = persisted;
-            setChipsSnapshotSafe(persisted);
-            try { clearedByUserRef.current = false; } catch {}
-            try { Promise.resolve().then(() => setForm(f => ({ ...f, selectedClients: [...(lastNonEmptySelectionRef.current || [])] }))); } catch {}
-            try { requestAnimationFrame(() => setForm(f => ({ ...f, selectedClients: [...(lastNonEmptySelectionRef.current || [])] }))); } catch {}
-            setTimeout(() => setForm(f => ({ ...f, selectedClients: [...(lastNonEmptySelectionRef.current || [])] })), 24);
-            setTimeout(() => setForm(f => ({ ...f, selectedClients: [...(lastNonEmptySelectionRef.current || [])] })), 96);
-            return;
-          }
-          // Fallback: dentro da janela com persisted, restaura mesmo que IDs não batam (evita perda)
-          if (within && Array.isArray(persisted) && persisted.length > 0) {
-            // try { console.warn('[CustomerPicker][RESTORE:new-mode:FALLBACK]', { id: mountIdRef.current, withinMs: Date.now() - closingAt, idsMatch: false, closingSessionId, modalSessionId, persistedLen: persisted.length }); } catch {}
-            try { userSelectedOnceRef.current = true; } catch {}
-            setForm(f => ({ ...f, selectedClients: persisted }));
-            lastNonEmptySelectionRef.current = persisted;
-            setChipsSnapshotSafe(persisted);
-            try { clearedByUserRef.current = false; } catch {}
-            try { Promise.resolve().then(() => setForm(f => ({ ...f, selectedClients: [...(lastNonEmptySelectionRef.current || [])] }))); } catch {}
-            try { requestAnimationFrame(() => setForm(f => ({ ...f, selectedClients: [...(lastNonEmptySelectionRef.current || [])] }))); } catch {}
-            setTimeout(() => setForm(f => ({ ...f, selectedClients: [...(lastNonEmptySelectionRef.current || [])] })), 24);
-            setTimeout(() => setForm(f => ({ ...f, selectedClients: [...(lastNonEmptySelectionRef.current || [])] })), 96);
-            return;
-          }
-          // try { console.warn('[CustomerPicker][RESTORE:new-mode:skip]', { id: mountIdRef.current, within, closingSessionId, modalSessionId, idsMatch: closingSessionId && modalSessionId && (closingSessionId === modalSessionId), persistedLen: Array.isArray(persisted)?persisted.length:NaN }); } catch {}
-        } catch {}
         // Se estamos em janela de proteção pós-concluir, não executar o clear agora
         try {
           if (Date.now() < (preventClearsUntilRef.current || 0)) {
@@ -3299,23 +3357,10 @@ function AgendaPage({ sidebarVisible = false }) {
         try { customerPickerDesiredOpenRef.current = false; localStorage.removeItem('agenda:customerPicker:desiredAt'); } catch {}
         try { clearedByUserRef.current = false; } catch {}
         try {
-          const rawSel = sessionStorage.getItem(persistLastKey);
-          const persisted = rawSel ? JSON.parse(rawSel) : [];
-          const last = Array.isArray(lastNonEmptySelectionRef.current) ? lastNonEmptySelectionRef.current : [];
-          if ((Array.isArray(persisted) && persisted.length > 0) || (Array.isArray(last) && last.length > 0)) {
-            // console.warn('[CustomerPicker][INIT:clear:new-mode:skipped:have-last]', { id: mountIdRef.current, persistedLen: Array.isArray(persisted)?persisted.length:0, lastLen: last.length });
-          } else {
-            // console.warn('[CustomerPicker][INIT:clear:new-mode]', { id: mountIdRef.current });
-            try { lastNonEmptySelectionRef.current = []; } catch {}
-            try { setChipsSnapshot([]); } catch {}
-            setForm(f => ({ ...f, selectedClients: [] }));
-          }
-        } catch {
-          // try { console.warn('[CustomerPicker][INIT:clear:new-mode]', { id: mountIdRef.current, err: 'check-failed' }); } catch {}
           try { lastNonEmptySelectionRef.current = []; } catch {}
           try { setChipsSnapshot([]); } catch {}
           setForm(f => ({ ...f, selectedClients: [] }));
-        }
+        } catch {}
       } else {
         // Entrou em modo edição; libera reset quando voltar para novo
         newModeInitRef.current = false;
@@ -3331,13 +3376,7 @@ function AgendaPage({ sidebarVisible = false }) {
         newModeInitRef.current = false; 
         // Ao fechar o modal, limpa quaisquer marcadores e sessionId
         try {
-          sessionStorage.removeItem('agenda:customerPicker:closing');
-          sessionStorage.removeItem('agenda:customerPicker:closingAt');
-          sessionStorage.removeItem('agenda:customerPicker:sessionId');
-          sessionStorage.removeItem('agenda:modal:sessionId');
           modalSessionIdRef.current = '';
-          // Limpa seleção persistida e snapshots para que próximo agendamento inicie vazio
-          sessionStorage.removeItem(persistLastKey);
           try { lastNonEmptySelectionRef.current = []; } catch {}
           try { setChipsSnapshot([]); } catch {}
           try { userSelectedOnceRef.current = false; } catch {}
@@ -3370,22 +3409,10 @@ function AgendaPage({ sidebarVisible = false }) {
         try { customerPickerDesiredOpenRef.current = false; localStorage.removeItem('agenda:customerPicker:desiredAt'); } catch {}
         try { clearedByUserRef.current = false; } catch {}
         try {
-          const rawSel = sessionStorage.getItem(persistLastKey);
-          const persisted = rawSel ? JSON.parse(rawSel) : [];
-          const last = Array.isArray(lastNonEmptySelectionRef.current) ? lastNonEmptySelectionRef.current : [];
-          if ((Array.isArray(persisted) && persisted.length > 0) || (Array.isArray(last) && last.length > 0)) {
-            // console.warn('[CustomerPicker][INIT:clear:new-mode:effect2:skipped:have-last]', { id: mountIdRef.current, persistedLen: Array.isArray(persisted)?persisted.length:0, lastLen: last.length });
-          } else {
-            // console.warn('[CustomerPicker][INIT:clear:new-mode:effect2]', { id: mountIdRef.current });
-            try { lastNonEmptySelectionRef.current = []; } catch {}
-            try { setChipsSnapshot([]); } catch {}
-            setForm(f => ({ ...f, selectedClients: [] }));
-          }
-        } catch {
           try { lastNonEmptySelectionRef.current = []; } catch {}
           try { setChipsSnapshot([]); } catch {}
           setForm(f => ({ ...f, selectedClients: [] }));
-        }
+        } catch {}
       } else {
         // Entrou em modo edição; libera reset quando voltar para novo
         newModeInitRef.current = false;
@@ -3460,76 +3487,41 @@ function AgendaPage({ sidebarVisible = false }) {
           console.log(`   #${idx + 1}: ${p.nome} | Status: ${p.status_pagamento} | Valor: ${p.valor_cota}`);
         });
         
-        // Para agendamentos existentes, reordena participantes para manter ordem original (representante primeiro)
-        // MAS: Não reordena se estamos vindo do modal de pagamentos (substituição de participantes)
-        // ⚠️ FIX: Usar selNowSnapshot (cópia imutável) em vez de selNow
-        // selNow é referência a form.selectedClients que pode ser modificado pelo PaymentModal
+        // A ordem do usuário é SEMPRE a fonte de verdade.
+        // Não reordenar por referência (banco/cache), senão o usuário perde a ordem escolhida.
         let selNowFinal = selNowSnapshot;
-        let houveMudancaDeParticipantes = false; // ⚠️ FIX: Inicializar fora do if para evitar undefined
+
+        // Detectar mudança de participantes OU de ordem comparando com a ordem persistida.
+        // Importante: não usar .sort() aqui, senão mudança de ordem passa despercebida.
+        let houveMudancaDeParticipantes = false;
+        let houveMudancaDeOrdem = false;
         if (editingBooking?.id) {
-          // 🔧 NÃO reordenar se os nomes mudaram (indicativo de substituição no modal de pagamentos)
-          // Comparar nomes atuais com os participantes do banco
-          const nomesAtuais = selNowSnapshot.map(p => p.nome).sort().join('|');
-          
-          // 🔑 FIX: Usar participantes do banco em vez de editingBooking.clientes (que pode estar undefined)
-          let nomesOriginais = '';
           const participantesDoAgendamento = participantsByAgendamento[editingBooking.id] || [];
-          if (participantesDoAgendamento.length > 0) {
-            nomesOriginais = participantesDoAgendamento.map(p => p.nome).sort().join('|');
-          }
-          
-          houveMudancaDeParticipantes = nomesAtuais !== nomesOriginais;
-          
-          // 🔍 DEBUG: Log para entender por que houveMudancaDeParticipantes é true
-          console.log('🔍 [DEBUG] Comparação de nomes:');
-          console.log('   nomesAtuais:', nomesAtuais);
-          console.log('   nomesOriginais:', nomesOriginais);
-          console.log('   editingBooking.clientes:', editingBooking.clientes);
-          console.log('   houveMudancaDeParticipantes:', houveMudancaDeParticipantes);
-          
-          if (!houveMudancaDeParticipantes) {
-            // Prioriza o campo 'clientes' do agendamento (salvo pela Isis) sobre os participantes carregados
-            let ordemReferencia = [];
-            
-            // Tenta usar o campo 'clientes' do agendamento primeiro (mais confiável)
-            if (editingBooking.clientes) {
-              try {
-                // Pode ser array ou string JSON
-                ordemReferencia = Array.isArray(editingBooking.clientes) 
-                  ? editingBooking.clientes 
-                  : JSON.parse(editingBooking.clientes);
-              } catch {
-                // Se falhar o parse, usa participantes carregados
-                const loadedParts = participantsByAgendamento[editingBooking.id] || [];
-                ordemReferencia = loadedParts.map(p => p.nome);
-              }
-            } else {
-              // Fallback: usa participantes carregados
-              const loadedParts = participantsByAgendamento[editingBooking.id] || [];
-              ordemReferencia = loadedParts.map(p => p.nome);
-            }
-            
-            if (ordemReferencia.length > 0) {
-              selNowFinal = [...selNow].sort((a, b) => {
-                const indexA = ordemReferencia.findIndex(nome => nome === a.nome);
-                const indexB = ordemReferencia.findIndex(nome => nome === b.nome);
-                
-                // Se ambos existem na ordem original, manter essa ordem
-                if (indexA !== -1 && indexB !== -1) {
-                  return indexA - indexB;
-                }
-                // Se apenas A existe na ordem original, A vem primeiro
-                if (indexA !== -1) return -1;
-                // Se apenas B existe na ordem original, B vem primeiro  
-                if (indexB !== -1) return 1;
-                // Se nenhum existe na ordem original, manter ordem atual
-                return 0;
-              });
-              
-            }
-          }
+          const refIds = participantesDoAgendamento.map(p => String(p?.cliente_id ?? ''));
+          const curIds = selNowSnapshot.map(c => String(c?.id ?? ''));
+          const refKey = refIds.join('|');
+          const curKey = curIds.join('|');
+          houveMudancaDeOrdem = refKey !== curKey;
+
+          // Mudança de conjunto (multiset): compara lista ordenada de ids (não nomes)
+          // (usa sort apenas para detectar mudança de conjunto, não de ordem)
+          const refSetKey = [...refIds].sort().join('|');
+          const curSetKey = [...curIds].sort().join('|');
+          houveMudancaDeParticipantes = refSetKey !== curSetKey;
+
+          console.log('🔍 [DEBUG] Comparação de ordem:');
+          console.log('   ordemAtual:', curKey);
+          console.log('   ordemBanco:', refKey);
+          console.log('   mudouOrdem:', houveMudancaDeOrdem);
+          console.log('   mudouParticipantes:', houveMudancaDeParticipantes);
         }
+
+        const mudouParticipantesOuOrdem = houveMudancaDeParticipantes || houveMudancaDeOrdem;
         
+        // Regra do representante: respeitar EXATAMENTE a ordem escolhida pelo usuário.
+        // Representante = primeiro da lista (mesmo se for consumidor final).
+        let repIdx = 0;
+        if (!Number.isFinite(repIdx) || repIdx < 0 || repIdx >= (selNowFinal || []).length) repIdx = 0;
         const primaryClient = selNowFinal[0];
         const clientesArr = selNowFinal.map(getCustomerName).filter(Boolean);
 
@@ -3593,55 +3585,236 @@ function AgendaPage({ sidebarVisible = false }) {
             .select('*')
             .eq('codigo_empresa', userProfile.codigo_empresa)
             .eq('agendamento_id', editingBooking.id)
+            .is('deleted_at', null)
             .order('ordem', { ascending: true })
             .order('id', { ascending: true }); // Critério secundário estável
           
           // ⚠️ IMPORTANTE: Não usar Map por cliente_id pois sobrescreve duplicados!
           // Usar array indexado para preservar cada participante individualmente
           const currentArray = currentParticipants || [];
+
+          // Detectar se já existem pagamentos para este agendamento
+          const hasPayments = (currentArray || []).some((p) => {
+            const v = Number(p?.valor_cota) || 0;
+            const st = p?.status_pagamento || 'Pendente';
+            return v > 0 || st === 'Pago';
+          });
           
           // ⚠️ FIX: Usar a variável já calculada (não recalcular)
           console.log('🔍 [SAVE-BOOKING] houveMudancaDeParticipantes:', houveMudancaDeParticipantes);
           console.log('🔍 [SAVE-BOOKING] currentArray.length:', currentArray.length);
           console.log('🔍 [SAVE-BOOKING] selNowFinal.length:', selNowFinal.length);
+          console.log('🔍 [SAVE-BOOKING] hasPayments:', hasPayments);
           
-          if (houveMudancaDeParticipantes) {
-            // Remove e recria participantes somente quando houve mudança (substituição)
-            // ⚠️ PROTEÇÃO: Não deletar se selNowFinal está vazio (evita perda de dados)
+          if (mudouParticipantesOuOrdem) {
+            // ⚠️ PROTEÇÃO: não persistir participantes se selNowFinal está vazio (evita perda total)
             if (!selNowFinal || selNowFinal.length === 0) {
               console.error('🚨 [SAVE-BOOKING] PROTEÇÃO ACIONADA: Não vou deletar participantes com selNowFinal vazio!');
               console.error('🚨 [SAVE-BOOKING] Isso evita perda de dados. Verifique por que selNowFinal está vazio.');
+            } else if (hasPayments) {
+              // ✅ Com pagamentos: permitir reordenação/remoção preservando dados de pagamento
+              try {
+                const idsToFree = (currentArray || []).map((p) => p?.id).filter(Boolean);
+                if (idsToFree.length > 0) {
+                  const { error: freeErr } = await supabase
+                    .from('agendamento_participantes')
+                    .update({ ordem: null, is_representante: false })
+                    .in('id', idsToFree)
+                    .eq('codigo_empresa', userProfile.codigo_empresa)
+                    .eq('agendamento_id', editingBooking.id)
+                    .is('deleted_at', null);
+                  if (freeErr) console.error('Erro ao liberar ordens antes do update (com pagamentos):', freeErr);
+                }
+              } catch (e) {
+                console.error('Erro inesperado ao liberar ordens antes do update (com pagamentos):', e);
+              }
+
+              // Match por ocorrência (suporta duplicados)
+              const buckets = new Map();
+              try {
+                (currentArray || []).forEach((p) => {
+                  const k = String(p?.cliente_id ?? '');
+                  const list = buckets.get(k) || [];
+                  list.push(p);
+                  buckets.set(k, list);
+                });
+              } catch {}
+              const used = new Map();
+              const matchedIds = new Set();
+
+              for (let i = 0; i < selNowFinal.length; i++) {
+                const c = selNowFinal[i];
+                if (!c?.id) continue;
+                const k = String(c.id);
+                const idxUsed = used.get(k) || 0;
+                const list = buckets.get(k) || [];
+                const existing = list[idxUsed] || null;
+                used.set(k, idxUsed + 1);
+
+                if (existing?.id) {
+                  matchedIds.add(existing.id);
+                  const payload = {
+                    cliente_id: c.id,
+                    nome: existing.nome ?? c.nome,
+                    ordem: i + 1,
+                    is_representante: i === repIdx,
+                    deleted_at: null,
+                  };
+                  const { error: updErr } = await supabase
+                    .from('agendamento_participantes')
+                    .update(payload)
+                    .eq('id', existing.id)
+                    .eq('codigo_empresa', userProfile.codigo_empresa)
+                    .eq('agendamento_id', editingBooking.id);
+                  if (updErr) console.error('Erro ao atualizar participante (com pagamentos):', updErr);
+                } else {
+                  // Novo participante: insere com pagamentos default
+                  const row = {
+                    codigo_empresa: userProfile.codigo_empresa,
+                    agendamento_id: editingBooking.id,
+                    cliente_id: c.id,
+                    nome: c.nome,
+                    ordem: i + 1,
+                    valor_cota: 0,
+                    status_pagamento: 'Pendente',
+                    finalizadora_id: null,
+                    aplicar_taxa: false,
+                    pago_em: null,
+                    is_representante: i === repIdx,
+                    deleted_at: null,
+                  };
+                  const { error: insErr } = await supabase
+                    .from('agendamento_participantes')
+                    .insert([row]);
+                  if (insErr) console.error('Erro ao inserir participante (com pagamentos):', insErr);
+                }
+              }
+
+              // Soft-delete dos participantes não mais presentes
+              try {
+                const toSoftDelete = (currentArray || [])
+                  .filter((p) => p?.id && !matchedIds.has(p.id))
+                  .map((p) => p.id);
+                if (toSoftDelete.length > 0) {
+                  const { error: delErr } = await supabase
+                    .from('agendamento_participantes')
+                    .update({ deleted_at: new Date().toISOString(), is_representante: false })
+                    .in('id', toSoftDelete)
+                    .eq('codigo_empresa', userProfile.codigo_empresa)
+                    .eq('agendamento_id', editingBooking.id);
+                  if (delErr) console.error('Erro ao remover participantes (com pagamentos):', delErr);
+                }
+              } catch {}
             } else {
-              console.log('🔄 [SAVE-BOOKING] Deletando e recriando participantes...');
-              const { error: deleteError } = await supabase
-                .from('agendamento_participantes')
-                .delete()
-                .eq('codigo_empresa', userProfile.codigo_empresa)
-                .eq('agendamento_id', editingBooking.id);
-              if (deleteError) console.error('Erro ao deletar participantes:', deleteError);
-            }
-            
-            if (selNowFinal && selNowFinal.length > 0) {
-              const participantesRows = selNowFinal.map((c, index) => {
-                const existing = currentArray[index];
-                const shouldPreserve = existing && existing.cliente_id === c.id;
-                return {
+              // Sem pagamentos: pode substituir (zera dados quando troca cliente na posição)
+              const minLen = Math.min(currentArray.length, selNowFinal.length);
+
+              // 0) Libera ordens atuais antes de reatribuir para evitar colisão com agp_unique_ordem_per_agendamento
+              // (ordem precisa ser única por agendamento para linhas ativas)
+              try {
+                const idsToFree = (currentArray || []).map((p) => p?.id).filter(Boolean);
+                if (idsToFree.length > 0) {
+                  const { error: freeErr } = await supabase
+                    .from('agendamento_participantes')
+                    .update({ ordem: null, is_representante: false })
+                    .in('id', idsToFree)
+                    .eq('codigo_empresa', userProfile.codigo_empresa)
+                    .eq('agendamento_id', editingBooking.id)
+                    .is('deleted_at', null);
+                  if (freeErr) console.error('Erro ao liberar ordens antes do update:', freeErr);
+                }
+              } catch (e) {
+                console.error('Erro inesperado ao liberar ordens antes do update:', e);
+              }
+
+              // 2 fases para representante: evitar violar a constraint agp_one_representante_per_agendamento
+              try {
+                await supabase
+                  .from('agendamento_participantes')
+                  .update({ is_representante: false })
+                  .eq('codigo_empresa', userProfile.codigo_empresa)
+                  .eq('agendamento_id', editingBooking.id)
+                  .is('deleted_at', null);
+              } catch {}
+
+              for (let i = 0; i < minLen; i++) {
+                const existing = currentArray[i];
+                const c = selNowFinal[i];
+                if (!existing?.id || !c?.id) continue;
+                const preserve = String(existing.cliente_id) === String(c.id);
+                const payload = {
+                  cliente_id: c.id,
+                  nome: c.nome,
+                  ordem: i + 1,
+                  is_representante: false,
+                  deleted_at: null,
+                };
+                if (!preserve) {
+                  payload.valor_cota = 0;
+                  payload.status_pagamento = 'Pendente';
+                  payload.finalizadora_id = null;
+                  payload.aplicar_taxa = false;
+                  payload.pago_em = null;
+                }
+                const { error: updErr } = await supabase
+                  .from('agendamento_participantes')
+                  .update(payload)
+                  .eq('id', existing.id)
+                  .eq('codigo_empresa', userProfile.codigo_empresa)
+                  .eq('agendamento_id', editingBooking.id);
+                if (updErr) console.error('Erro ao atualizar participante:', updErr);
+              }
+
+              if (selNowFinal.length < currentArray.length) {
+                const toSoftDelete = currentArray.slice(selNowFinal.length).map((p) => p?.id).filter(Boolean);
+                if (toSoftDelete.length > 0) {
+                  const { error: delErr } = await supabase
+                    .from('agendamento_participantes')
+                    .update({ deleted_at: new Date().toISOString(), is_representante: false })
+                    .in('id', toSoftDelete)
+                    .eq('codigo_empresa', userProfile.codigo_empresa)
+                    .eq('agendamento_id', editingBooking.id);
+                  if (delErr) console.error('Erro ao remover participantes:', delErr);
+                }
+              }
+
+              if (selNowFinal.length > currentArray.length) {
+                const start = currentArray.length;
+                const rows = selNowFinal.slice(start).map((c, idx) => ({
                   codigo_empresa: userProfile.codigo_empresa,
                   agendamento_id: editingBooking.id,
                   cliente_id: c.id,
                   nome: c.nome,
-                  ordem: index + 1,
-                  valor_cota: shouldPreserve ? (existing.valor_cota ?? 0) : 0,
-                  status_pagamento: shouldPreserve ? (existing.status_pagamento ?? 'Pendente') : 'Pendente',
-                  finalizadora_id: shouldPreserve ? (existing.finalizadora_id ?? null) : null,
-                  aplicar_taxa: shouldPreserve ? (existing.aplicar_taxa ?? false) : false,
-                  pago_em: shouldPreserve ? (existing.pago_em ?? null) : null,
-                };
-              });
-              const { error: insertError } = await supabase
-                .from('agendamento_participantes')
-                .insert(participantesRows);
-              if (insertError) console.error('Erro ao inserir participantes:', insertError);
+                  ordem: start + idx + 1,
+                  valor_cota: 0,
+                  status_pagamento: 'Pendente',
+                  finalizadora_id: null,
+                  aplicar_taxa: false,
+                  pago_em: null,
+                  is_representante: false,
+                  deleted_at: null,
+                }));
+                if (rows.length > 0) {
+                  const { error: insErr } = await supabase
+                    .from('agendamento_participantes')
+                    .insert(rows);
+                  if (insErr) console.error('Erro ao inserir participantes:', insErr);
+                }
+              }
+
+              try {
+                const repOrd = repIdx + 1;
+                if (Number.isFinite(repOrd) && repOrd > 0) {
+                  const { error: repErr } = await supabase
+                    .from('agendamento_participantes')
+                    .update({ is_representante: true })
+                    .eq('codigo_empresa', userProfile.codigo_empresa)
+                    .eq('agendamento_id', editingBooking.id)
+                    .eq('ordem', repOrd)
+                    .is('deleted_at', null);
+                  if (repErr) console.error('Erro ao marcar representante:', repErr);
+                }
+              } catch {}
             }
           }
           // Atualiza estado local (sem mexer em status quando ele mudou; será tratado abaixo)
@@ -3672,78 +3845,110 @@ function AgendaPage({ sidebarVisible = false }) {
           completedSaveRef.current = true;
           pendingSaveRef.current = false;
           
-          // 🔄 Atualiza cache de participantes para refletir mudanças imediatamente
-          // ⚠️ FIX: Usar cliente_id como chave em vez de índice para preservar dados de pagamento
-          // Isso evita desalinhamento quando há reordenação de participantes
-          const updatedParticipants = selNow.map((c, index) => {
-            // 🔑 Buscar pelo cliente_id (chave) em vez de índice
-            // Isso preserva dados de pagamento mesmo se a ordem mudar
-            const existing = currentArray.find(p => p.cliente_id === c.id);
-            const shouldPreserve = !!existing;
-            
-            return {
-              cliente_id: c.id,
-              nome: c.nome,
-              codigo: c.codigo || null,
-              valor_cota: shouldPreserve ? (existing.valor_cota ?? 0) : 0,
-              status_pagamento: shouldPreserve ? (existing.status_pagamento ?? 'Pendente') : 'Pendente',
-              finalizadora_id: shouldPreserve ? (existing.finalizadora_id ?? null) : null,
-              aplicar_taxa: shouldPreserve ? (existing.aplicar_taxa ?? false) : false,
-              ordem: index + 1, // Campo ordem baseado na posição (1, 2, 3...)
-            };
-          });
-          setParticipantsByAgendamento(prev => ({
-            ...prev,
-            [editingBooking.id]: updatedParticipants
-          }));
-          
-          // 🛡️ FIX: Não sobrescrever participantsForm se não houve mudança de participantes
-          // Isso evita que dados de pagamento salvos pelo PaymentModal sejam perdidos
-          console.log('🛡️ [FIX] houveMudancaDeParticipantes =', houveMudancaDeParticipantes);
-          if (!houveMudancaDeParticipantes) {
-            // Sem mudança de participantes: preservar dados atuais do contexto
-            // Apenas atualizar se houver dados novos do banco
-            console.log('🛡️ [FIX] Sem mudança de participantes - preservando dados de pagamento do contexto');
-            setParticipantsForm(prev => {
-              // Mesclar dados atuais com dados do banco usando cliente_id como chave
-              const merged = (prev || []).map(p => {
-                const fromBank = updatedParticipants.find(up => up.cliente_id === p.cliente_id);
-                if (!fromBank) return p; // Manter dados atuais se não encontrar no banco
-                
-                // Mesclar: priorizar dados do contexto (PaymentModal) sobre dados do banco
-                return {
-                  cliente_id: p.cliente_id,
-                  nome: p.nome || fromBank.nome,
-                  codigo: p.codigo ?? fromBank.codigo,
-                  valor_cota: p.valor_cota || fromBank.valor_cota, // Manter valor do contexto
-                  status_pagamento: p.status_pagamento || fromBank.status_pagamento, // Manter status do contexto
-                  finalizadora_id: p.finalizadora_id ?? fromBank.finalizadora_id,
-                  aplicar_taxa: p.aplicar_taxa ?? fromBank.aplicar_taxa,
-                };
+          if (!hasPayments || mudouParticipantesOuOrdem) {
+            // 🔄 Atualiza cache de participantes para refletir mudanças imediatamente
+            // ⚠️ IMPORTANTE: suportar duplicados (ex: múltiplos "Cliente Consumidor").
+            // Portanto, preservação deve ser por ocorrência (buckets), não por find(cliente_id).
+
+            const buckets = new Map();
+            try {
+              (currentArray || []).forEach((p) => {
+                const k = String(p?.cliente_id ?? '');
+                const list = buckets.get(k) || [];
+                list.push(p);
+                buckets.set(k, list);
               });
-              console.log('✅ [FIX] Dados de pagamento preservados:', merged);
-              return merged.length > 0 ? merged : updatedParticipants;
+            } catch {}
+            const used = new Map();
+
+            const updatedParticipants = selNowFinal.map((c, index) => {
+              const k = String(c?.id ?? '');
+              const idxUsed = used.get(k) || 0;
+              const list = buckets.get(k) || [];
+              const existing = list[idxUsed] || null;
+              used.set(k, idxUsed + 1);
+              const shouldPreserve = !!existing;
+
+              return {
+                cliente_id: c.id,
+                nome: c.nome,
+                codigo: c.codigo || null,
+                valor_cota: shouldPreserve ? (existing.valor_cota ?? 0) : 0,
+                status_pagamento: shouldPreserve ? (existing.status_pagamento ?? 'Pendente') : 'Pendente',
+                finalizadora_id: shouldPreserve ? (existing.finalizadora_id ?? null) : null,
+                aplicar_taxa: shouldPreserve ? (existing.aplicar_taxa ?? false) : false,
+                ordem: index + 1, // Campo ordem baseado na posição (1, 2, 3...)
+                is_representante: index === repIdx,
+                deleted_at: null,
+              };
             });
-          } else {
-            // Com mudança de participantes: reconstruir do zero
-            console.log('🔄 [FIX] Mudança de participantes detectada - reconstruindo participantsForm');
-            setParticipantsForm(updatedParticipants.map(p => ({
-              cliente_id: p.cliente_id,
-              nome: p.nome,
-              codigo: p.codigo,
-              valor_cota: p.valor_cota ? maskBRL(String(Number(p.valor_cota).toFixed(2))) : '',
-              status_pagamento: p.status_pagamento,
-              finalizadora_id: p.finalizadora_id ? String(p.finalizadora_id) : (payMethods?.[0]?.id ? String(payMethods[0].id) : null),
-              aplicar_taxa: p.aplicar_taxa,
-            })));
+            setParticipantsByAgendamento(prev => ({
+              ...prev,
+              [editingBooking.id]: updatedParticipants
+            }));
+            
+            // 🛡️ FIX: Não sobrescrever participantsForm se não houve mudança de participantes
+            // Isso evita que dados de pagamento salvos pelo PaymentModal sejam perdidos
+            console.log('🛡️ [FIX] houveMudancaDeParticipantes =', houveMudancaDeParticipantes);
+            if (!houveMudancaDeParticipantes) {
+              // Sem mudança de participantes: preservar dados atuais do contexto
+              // Apenas atualizar se houver dados novos do banco
+              console.log('🛡️ [FIX] Sem mudança de participantes - preservando dados de pagamento do contexto');
+              setParticipantsForm(prev => {
+                // Reordenar e mesclar por ocorrência para suportar duplicados
+                const prevList = Array.isArray(prev) ? prev : [];
+                const prevBuckets = new Map();
+                try {
+                  prevList.forEach((p) => {
+                    const k = String(p?.cliente_id ?? '');
+                    const list = prevBuckets.get(k) || [];
+                    list.push(p);
+                    prevBuckets.set(k, list);
+                  });
+                } catch {}
+                const prevUsed = new Map();
+
+                const merged = updatedParticipants.map((p) => {
+                  const k = String(p?.cliente_id ?? '');
+                  const idx = prevUsed.get(k) || 0;
+                  const list = prevBuckets.get(k) || [];
+                  const fromCtx = list[idx] || null;
+                  prevUsed.set(k, idx + 1);
+                  if (!fromCtx) return p;
+                  return {
+                    cliente_id: p.cliente_id,
+                    nome: fromCtx.nome || p.nome,
+                    codigo: fromCtx.codigo ?? p.codigo,
+                    valor_cota: fromCtx.valor_cota || p.valor_cota,
+                    status_pagamento: fromCtx.status_pagamento || p.status_pagamento,
+                    finalizadora_id: fromCtx.finalizadora_id ?? p.finalizadora_id,
+                    aplicar_taxa: fromCtx.aplicar_taxa ?? p.aplicar_taxa,
+                  };
+                });
+                console.log('✅ [FIX] Dados de pagamento preservados:', merged);
+                return merged.length > 0 ? merged : updatedParticipants;
+              });
+            } else {
+              // Com mudança de participantes: reconstruir do zero
+              console.log('🔄 [FIX] Mudança de participantes detectada - reconstruindo participantsForm');
+              setParticipantsForm(updatedParticipants.map(p => ({
+                cliente_id: p.cliente_id,
+                nome: p.nome,
+                codigo: p.codigo,
+                valor_cota: p.valor_cota ? maskBRL(String(Number(p.valor_cota).toFixed(2))) : '',
+                status_pagamento: p.status_pagamento,
+                finalizadora_id: p.finalizadora_id ? String(p.finalizadora_id) : (payMethods?.[0]?.id ? String(payMethods[0].id) : null),
+                aplicar_taxa: p.aplicar_taxa,
+              })));
+            }
+            
+            // 📊 LOG 3 FINAL: Resultado após atualizar participantsForm
+            console.log('📊 [LOG 3 - RESULTADO FINAL] participantsForm após atualização:');
+            console.log('   Total:', updatedParticipants.length);
+            updatedParticipants.forEach((p, idx) => {
+              console.log(`   #${idx + 1}: ${p.nome} | Status: ${p.status_pagamento} | Valor: ${p.valor_cota}`);
+            });
           }
-          
-          // 📊 LOG 3 FINAL: Resultado após atualizar participantsForm
-          console.log('📊 [LOG 3 - RESULTADO FINAL] participantsForm após atualização:');
-          console.log('   Total:', updatedParticipants.length);
-          updatedParticipants.forEach((p, idx) => {
-            console.log(`   #${idx + 1}: ${p.nome} | Status: ${p.status_pagamento} | Valor: ${p.valor_cota}`);
-          });
           
           // Recarregar alertas após salvar agendamento (não bloqueia auto-save)
           loadAlerts().catch(err => {
@@ -3755,7 +3960,6 @@ function AgendaPage({ sidebarVisible = false }) {
             // Clear customer selection caches to avoid carryover into next new booking
             try { lastNonEmptySelectionRef.current = []; } catch {}
             try { setChipsSnapshot([]); } catch {}
-            try { sessionStorage.removeItem(persistLastKey); } catch {}
             setIsModalOpen(false);
           }
           return;
@@ -3929,6 +4133,8 @@ function AgendaPage({ sidebarVisible = false }) {
               valor_cota: 0,
               status_pagamento: 'Pendente',
               ordem: index + 1, // Campo ordem baseado na posição (1, 2, 3...)
+              is_representante: index === 0,
+              deleted_at: null,
             }));
             
             if (rows.length > 0) {
@@ -3962,7 +4168,6 @@ function AgendaPage({ sidebarVisible = false }) {
         // Clear customer selection caches to avoid carryover into next new booking
         try { lastNonEmptySelectionRef.current = []; } catch {}
         try { setChipsSnapshot([]); } catch {}
-        try { sessionStorage.removeItem(persistLastKey); } catch {}
         setIsModalOpen(false);
       } catch (e) {
         // Evita ruído excessivo no console
@@ -3973,116 +4178,38 @@ function AgendaPage({ sidebarVisible = false }) {
       }
     }, [isSavingBooking, courtsMap, form, editingBooking, userProfile, isRangeFree, setBookings, toast, setIsModalOpen, updateBookingStatus]);
 
+    const saveAndCloseBookingModal = useCallback(async () => {
+      if (!editingBooking?.id) {
+        setIsModalOpen(false);
+        setEditingBooking(null);
+        setPrefill(null);
+        participantsPrefillOnceRef.current = false;
+        setIsRecorrente(false);
+        setQuantidadeSemanas(4);
+        return;
+      }
+
+      try {
+        await saveBookingOnce({ autoSave: true });
+      } catch (error) {
+        console.error('❌ [Close] Erro ao salvar ao fechar modal:', error);
+      } finally {
+        try { lastNonEmptySelectionRef.current = []; } catch {}
+        try { setChipsSnapshot([]); } catch {}
+        setIsModalOpen(false);
+        setEditingBooking(null);
+        setPrefill(null);
+        participantsPrefillOnceRef.current = false;
+        setIsRecorrente(false);
+        setQuantidadeSemanas(4);
+      }
+    }, [editingBooking?.id, saveBookingOnce, setChipsSnapshot, setEditingBooking, setIsModalOpen, setPrefill]);
+
     // Ao voltar para a aba, se houver salvamento pendente e não concluído, reexecuta automaticamente
     // Auto-retry ao voltar de outra aba: desativado para evitar pulsos
     // useEffect(() => {}, [isModalOpen, isSavingBooking, saveBookingOnce]);
   
-  // ✅ AUTO-SAVE: Salva automaticamente ao detectar mudanças no modo de edição
-  useEffect(() => {
-    // Só aplica auto-save no modo de EDIÇÃO (não em criação)
-    if (!editingBooking?.id) {
-      autoSaveEnabledRef.current = false;
-      lastSavedFormRef.current = null;
-      return;
-    }
-    
-    // Aguarda inicialização completa do form (sincroniza com initializedRef)
-    if (!initializedRef.current || !autoSaveEnabledRef.current) {
-      // Ativa auto-save após 500ms da inicialização para evitar saves prematuros
-      const timeout = setTimeout(() => {
-        if (initializedRef.current) {
-          autoSaveEnabledRef.current = true;
-          lastSavedFormRef.current = JSON.stringify({
-            court: form.court,
-            startMinutes: form.startMinutes,
-            endMinutes: form.endMinutes,
-            modality: form.modality,
-            status: form.status,
-            selectedClients: form.selectedClients,
-          });
-        }
-      }, 500);
-      return () => clearTimeout(timeout);
-    }
-    
-    // Serializa form atual para comparar
-    const currentForm = JSON.stringify({
-      court: form.court,
-      startMinutes: form.startMinutes,
-      endMinutes: form.endMinutes,
-      modality: form.modality,
-      status: form.status,
-      selectedClients: form.selectedClients,
-    });
-    
-    // Se não houve mudança real, não faz nada
-    if (currentForm === lastSavedFormRef.current) {
-      return;
-    }
-    
-    // Limpa timeout anterior
-    if (autoSaveTimeoutRef.current) {
-      clearTimeout(autoSaveTimeoutRef.current);
-    }
-    
-    // Debounce de 1.5 segundos
-    autoSaveTimeoutRef.current = setTimeout(async () => {
-      // Validações básicas antes de salvar
-      const court = courtsMap[form.court];
-      if (!court) return; // Sem quadra válida
-      
-      const s = form.startMinutes, e = form.endMinutes;
-      if (!(Number.isFinite(s) && Number.isFinite(e) && e > s)) return; // Horário inválido
-      
-      const free = isRangeFree(s, e);
-      if (!free) return; // Conflito de horário
-      
-      // Detecta se houve mudança nos participantes
-      const oldClients = lastSavedFormRef.current ? JSON.parse(lastSavedFormRef.current).selectedClients : [];
-      const newClients = form.selectedClients || [];
-      const clientsChanged = JSON.stringify(oldClients) !== JSON.stringify(newClients);
-      
-      // Salva automaticamente
-      if (clientsChanged) {
-        console.log('🔄 [Auto-save] Salvando alterações (participantes modificados)...');
-      } else {
-        console.log('🔄 [Auto-save] Salvando alterações...');
-      }
-      setIsAutoSaving(true);
-      
-      try {
-        await saveBookingOnce({ autoSave: true });
-        lastSavedFormRef.current = currentForm;
-        if (clientsChanged) {
-          console.log('✅ [Auto-save] Participantes salvos no banco! Disponíveis no modal de pagamentos.');
-        } else {
-          console.log('✅ [Auto-save] Salvo com sucesso!');
-        }
-      } catch (error) {
-        console.error('❌ [Auto-save] Erro ao salvar:', error);
-      } finally {
-        setIsAutoSaving(false);
-      }
-    }, 1500);
-    
-    // Cleanup
-    return () => {
-      if (autoSaveTimeoutRef.current) {
-        clearTimeout(autoSaveTimeoutRef.current);
-      }
-    };
-  }, [
-    editingBooking?.id,
-    form.court,
-    form.startMinutes,
-    form.endMinutes,
-    form.modality,
-    form.status,
-    form.selectedClients,
-    courtsMap,
-    isRangeFree,
-    saveBookingOnce,
-  ]);
+  // Auto-save removido: salvar apenas ao fechar o modal (Fechar / X / clique fora)
   
   useEffect(() => {
     const loadClients = async () => {
@@ -4160,6 +4287,18 @@ function AgendaPage({ sidebarVisible = false }) {
     // Atualiza o total automaticamente conforme quadra/duração mudam
     useEffect(() => {
       // [DEBUG-PaymentModal] silenciado
+      // Em modo edição, o valor total deve vir do banco (agendamentos.valor_total)
+      // e nunca ser sobrescrito automaticamente por cálculo de quadra/duração.
+      try {
+        if (editingBooking?.id) {
+          const vRaw = editingBooking?.valor_total;
+          const vNum = Number(vRaw);
+          if (vRaw !== null && vRaw !== undefined && vRaw !== '' && Number.isFinite(vNum)) {
+            setPaymentTotal(maskBRL(String(vNum.toFixed(2))));
+            return;
+          }
+        }
+      } catch {}
       const court = courtsMap[form.court];
       if (!court) return;
       const perHalfHour = Number(court.valor || 0);
@@ -4182,6 +4321,18 @@ function AgendaPage({ sidebarVisible = false }) {
       if (editingBooking) {
         const startM = getHours(editingBooking.start) * 60 + getMinutes(editingBooking.start);
         const endM = getHours(editingBooking.end) * 60 + getMinutes(editingBooking.end);
+        // Garantir que a quadra no formulário seja sempre o NOME (e não UUID)
+        const resolvedCourtName = (() => {
+          try {
+            if ((availableCourts || []).includes(editingBooking.court)) return editingBooking.court;
+            const cid = editingBooking.court_id;
+            if (cid != null) {
+              const found = (dbCourts || []).find((c) => String(c.id) === String(cid));
+              if (found?.nome) return found.nome;
+            }
+          } catch {}
+          return (availableCourts || [])[0] || '';
+        })();
         // Extrai participantes carregados para este agendamento
         const loadedParts = participantsByAgendamento[editingBooking.id] || [];
         const selectedFromParts = loadedParts
@@ -4189,11 +4340,12 @@ function AgendaPage({ sidebarVisible = false }) {
           .map(p => ({ id: p.cliente_id, nome: p.nome, codigo: p.codigo || null }));
           // Removido filtro de deduplicação para permitir clientes duplicados
         // Garante modalidade válida para a quadra do agendamento
-        const allowedForEdit = courtsMap[editingBooking.court]?.modalidades || modalities;
+        const allowedForEdit = courtsMap[resolvedCourtName]?.modalidades || modalities;
         const safeModality = allowedForEdit.includes(editingBooking.modality) ? editingBooking.modality : (allowedForEdit[0] || '');
+        try { markSelectedClientsSet('edit:init-from-cache'); } catch {}
         setForm({
           selectedClients: selectedFromParts,
-          court: editingBooking.court,
+          court: resolvedCourtName,
           modality: safeModality,
           status: editingBooking.status,
           date: startOfDay(editingBooking.start),
@@ -4213,7 +4365,7 @@ function AgendaPage({ sidebarVisible = false }) {
               return maskBRL(String((Number.isFinite(num) ? num : 0).toFixed(2)));
             })(),
             status_pagamento: p.status_pagamento || 'Pendente',
-            finalizadora_id: p.finalizadora_id ? String(p.finalizadora_id) : null,
+            finalizadora_id: p.finalizadora_id || null, // ✅ CORREÇÃO: Preserva a finalizadora salva
             aplicar_taxa: p.aplicar_taxa || false,
           }))
         );
@@ -4224,63 +4376,20 @@ function AgendaPage({ sidebarVisible = false }) {
           try {
             const { data, error } = await supabase
               .from('agendamento_participantes')
-              .select(`cliente_id, nome, valor_cota, status_pagamento, finalizadora_id, aplicar_taxa, cliente:clientes!agendamento_participantes_cliente_id_fkey ( nome, codigo )`)
+              .select(`cliente_id, nome, valor_cota, status_pagamento, finalizadora_id, aplicar_taxa, ordem, is_representante, deleted_at, cliente:clientes!agendamento_participantes_cliente_id_fkey ( nome, codigo )`)
               .eq('codigo_empresa', userProfile.codigo_empresa)
               .eq('agendamento_id', editingBooking.id)
+              .is('deleted_at', null)
               .order('ordem', { ascending: true })
               .order('id', { ascending: true }); // Critério secundário estável
             if (!error && Array.isArray(data)) {
-              // Reordenar pelo order dos chips, se houver, senão por booking.clientes
-              const chips = (form?.selectedClients || []).slice();
-              let ordered = data.slice();
-              if (chips.length > 0) {
-                const buckets = new Map();
-                data.forEach((p) => {
-                  const list = buckets.get(p.cliente_id) || [];
-                  list.push(p);
-                  buckets.set(p.cliente_id, list);
-                });
-                const occ = new Map();
-                const reordered = [];
-                for (const c of chips) {
-                  const used = occ.get(c.id) || 0;
-                  const list = buckets.get(c.id) || [];
-                  const pick = list[used];
-                  if (pick) {
-                    reordered.push(pick);
-                    occ.set(c.id, used + 1);
-                  }
-                }
-                if (reordered.length === chips.length) ordered = reordered;
-              } else if (Array.isArray(editingBooking?.clientes) && editingBooking.clientes.length > 0) {
-                const nameBuckets = new Map();
-                data.forEach((p) => {
-                  const nm = p.nome || p.cliente?.nome || '';
-                  const list = nameBuckets.get(nm) || [];
-                  list.push(p);
-                  nameBuckets.set(nm, list);
-                });
-                const occ = new Map();
-                const reordered = [];
-                for (const nm of editingBooking.clientes) {
-                  const used = occ.get(nm) || 0;
-                  const list = nameBuckets.get(nm) || [];
-                  const pick = list[used];
-                  if (pick) {
-                    reordered.push(pick);
-                    occ.set(nm, used + 1);
-                  }
-                }
-                if (reordered.length === data.length) ordered = reordered;
-              }
+              // Sempre confiar na ordem do banco (ordem ASC). Não tentar reconciliar com chips,
+              // pois isso pode causar corrida e sobrescrever a ordem escolhida/persistida.
+              const ordered = data.slice();
 
-              // Promover representante (primeiro não-consumidor) para posição 0
+              // Representante/seleção default: sempre o primeiro
               try {
-                const idxRep = ordered.findIndex(p => String(p?.nome || '').toLowerCase() !== 'cliente consumidor');
-                if (idxRep > 0) {
-                  const rep = ordered.splice(idxRep, 1)[0];
-                  ordered.unshift(rep);
-                }
+                setPaymentSelectedId(String(ordered[0]?.cliente_id || '') || null);
               } catch {}
 
               const sel = ordered
@@ -4290,7 +4399,14 @@ function AgendaPage({ sidebarVisible = false }) {
                   nome: p.nome || p.cliente?.nome || '', 
                   codigo: p.cliente?.codigo || null 
                 }));
-              setForm(f => ({ ...f, selectedClients: sel }));
+              setForm(f => {
+                try { markSelectedClientsSet('edit:background-refresh'); } catch {}
+                const cur = Array.isArray(f.selectedClients) ? f.selectedClients : [];
+                // ⚠️ Nunca sobrescrever uma seleção já aplicada no modo edição.
+                // Isso evita swaps de ordem por updates tardios (refresh/background).
+                if (cur.length > 0) return f;
+                return ({ ...f, selectedClients: sel });
+              });
               setParticipantsForm(ordered.map(p => ({
                 cliente_id: p.cliente_id,
                 nome: p.nome || p.cliente?.nome || '',
@@ -4303,7 +4419,7 @@ function AgendaPage({ sidebarVisible = false }) {
                 finalizadora_id: p.finalizadora_id ? String(p.finalizadora_id) : null,
                 aplicar_taxa: p.aplicar_taxa || false,
               })));
-              setPaymentSelectedId(sel[0]?.id || null);
+              // paymentSelectedId já é o primeiro
             }
           } catch (e) {
             // eslint-disable-next-line no-console
@@ -4313,15 +4429,7 @@ function AgendaPage({ sidebarVisible = false }) {
         // Marca como inicializado após preencher o formulário de edição
         initializedRef.current = true;
         
-        // 🔄 Inicializa snapshot para detecção de mudanças ao fechar
-        lastSavedFormRef.current = JSON.stringify({
-          court: editingBooking.court,
-          startMinutes: startM,
-          endMinutes: endM,
-          modality: safeModality,
-          status: editingBooking.status,
-          selectedClients: selectedFromParts,
-        });
+        // (auto-save removido)
       } else if (prefill) {
         // Sanitize: garante que a quadra do prefill pertença às quadras disponíveis da empresa atual
         const safeCourt = (availableCourts || []).includes(prefill.court)
@@ -4398,63 +4506,12 @@ function AgendaPage({ sidebarVisible = false }) {
       if (!isModalOpen || !editingBooking) return;
       if (participantsPrefillOnceRef.current) return;
       
-      // 🛡️ PROTEÇÃO: Não sobrescreve se auto-save está ativo (usuário já fez mudanças)
-      if (autoSaveEnabledRef.current) return;
-      
       const loadedParts = participantsByAgendamento[editingBooking.id] || [];
       if (!loadedParts.length) return;
-      // Reordenar loadedParts pela ordem conhecida: chips se existirem; senão pelo campo editingBooking.clientes
-      let orderedLoaded = loadedParts.slice();
-      const chipsNow = (form?.selectedClients || []).slice();
-      if (chipsNow.length > 0) {
-        const buckets = new Map();
-        loadedParts.forEach((p) => {
-          const list = buckets.get(p.cliente_id) || [];
-          list.push(p);
-          buckets.set(p.cliente_id, list);
-        });
-        const occ = new Map();
-        const reordered = [];
-        for (const c of chipsNow) {
-          const used = occ.get(c.id) || 0;
-          const list = buckets.get(c.id) || [];
-          const pick = list[used];
-          if (pick) {
-            reordered.push(pick);
-            occ.set(c.id, used + 1);
-          }
-        }
-        if (reordered.length === chipsNow.length) orderedLoaded = reordered;
-      } else if (Array.isArray(editingBooking?.clientes) && editingBooking.clientes.length > 0) {
-        const nameBuckets = new Map();
-        loadedParts.forEach((p) => {
-          const nm = p.nome || '';
-          const list = nameBuckets.get(nm) || [];
-          list.push(p);
-          nameBuckets.set(nm, list);
-        });
-        const occ = new Map();
-        const reordered = [];
-        for (const nm of editingBooking.clientes) {
-          const used = occ.get(nm) || 0;
-          const list = nameBuckets.get(nm) || [];
-          const pick = list[used];
-          if (pick) {
-            reordered.push(pick);
-            occ.set(nm, used + 1);
-          }
-        }
-        if (reordered.length === loadedParts.length) orderedLoaded = reordered;
-      }
+      // Sempre confiar na ordem do cache/banco (participantsByAgendamento já vem ordenado por ordem/id)
+      const orderedLoaded = loadedParts.slice();
 
-      // Promover representante (primeiro não-consumidor) para posição 0
-      try {
-        const idxRep = orderedLoaded.findIndex(p => String(p?.nome || '').toLowerCase() !== 'cliente consumidor');
-        if (idxRep > 0) {
-          const rep = orderedLoaded.splice(idxRep, 1)[0];
-          orderedLoaded.unshift(rep);
-        }
-      } catch {}
+      try { setPaymentSelectedId(String(orderedLoaded[0]?.cliente_id || '') || null); } catch {}
 
       const selectedFromParts = orderedLoaded
         .filter(p => p && p.cliente_id)
@@ -4469,7 +4526,14 @@ function AgendaPage({ sidebarVisible = false }) {
             console.log('[ORDER-AGENDA] selectedFromPartsIds:', selectedFromParts.map(s => s.id));
           }
         } catch {}
-        setForm(f => ({ ...f, selectedClients: selectedFromParts }));
+        setForm(f => {
+          try { markSelectedClientsSet('edit:prefill-tardy'); } catch {}
+          const cur = Array.isArray(f.selectedClients) ? f.selectedClients : [];
+          // ⚠️ Nunca sobrescrever uma seleção já aplicada no modo edição.
+          // Essa lógica existe apenas para preencher quando ainda está vazio.
+          if (cur.length > 0) return f;
+          return ({ ...f, selectedClients: selectedFromParts });
+        });
         setParticipantsForm(
           orderedLoaded.map(p => ({
             cliente_id: p.cliente_id,
@@ -4484,10 +4548,32 @@ function AgendaPage({ sidebarVisible = false }) {
             aplicar_taxa: p.aplicar_taxa || false,
           }))
         );
-        setPaymentSelectedId(selectedFromParts[0]?.id || null);
+        // paymentSelectedId já é o primeiro
         participantsPrefillOnceRef.current = true;
       }
     }, [isModalOpen, editingBooking, participantsByAgendamento]);
+
+    const handleOpenPaymentModalWithSave = useCallback(async () => {
+      try {
+        if (isPaymentModalOpen) return;
+        if (!editingBooking?.id) {
+          openPaymentModal();
+          return;
+        }
+        if (isSavingBooking) return;
+        try {
+          // Força uma nova avaliação de sucesso deste save
+          try { pendingSaveRef.current = false; } catch {}
+          try { completedSaveRef.current = false; } catch {}
+          await saveBookingOnce({ autoSave: true });
+          // aguarda microtask para dar chance dos setStates (participantsForm/participantsByAgendamento) serem aplicados
+          await Promise.resolve();
+        } catch {}
+        if (completedSaveRef.current) {
+          openPaymentModal();
+        }
+      } catch {}
+    }, [isPaymentModalOpen, editingBooking?.id, isSavingBooking, saveBookingOnce, openPaymentModal]);
 
     // Atalhos de teclado para modal de agendamento
     useEffect(() => {
@@ -4498,41 +4584,9 @@ function AgendaPage({ sidebarVisible = false }) {
         // NÃO processar atalhos se modal de pagamentos estiver aberto
         if (isPaymentModalOpen) return;
         
-        // ESC para fechar modal
-        if (e.key === 'Escape') {
-          e.preventDefault();
-          
-          // 🔄 Auto-save ao fechar: SEMPRE salva antes de fechar no modo de edição
-          if (editingBooking?.id) {
-            console.log('💾 [Auto-save] Salvando ao fechar modal (ESC)...');
-            // Cancela timeout pendente
-            if (autoSaveTimeoutRef.current) {
-              clearTimeout(autoSaveTimeoutRef.current);
-            }
-            saveBookingOnce({ autoSave: true })
-              .then(() => {
-                console.log('✅ [Auto-save] Salvo ao fechar (ESC)!');
-                setIsModalOpen(false);
-              })
-              .catch((error) => {
-                console.error('❌ [Auto-save] Erro ao salvar ao fechar (ESC):', error);
-                setIsModalOpen(false);
-              });
-            return; // Não fecha imediatamente
-          }
-          
-          setIsModalOpen(false);
-        }
+        // ESC para fechar modal é tratado pelo Dialog (X / clique fora / onOpenChange)
         
-        // Enter para salvar (apenas se não estiver em um input de texto ou textarea)
-        if (e.key === 'Enter' && !['INPUT', 'TEXTAREA'].includes(e.target.tagName)) {
-          e.preventDefault();
-          if (!pendingSaveRef.current && !completedSaveRef.current) {
-            pendingSaveRef.current = true;
-            completedSaveRef.current = false;
-            saveBookingOnce().catch(() => {});
-          }
-        }
+        // Salvamento manual: não salvar via Enter; salvar apenas ao fechar (Fechar / X / clique fora)
         
         // Atalhos apenas para modo de edição
         if (!editingBooking) return;
@@ -4546,13 +4600,13 @@ function AgendaPage({ sidebarVisible = false }) {
         // F4 para abrir modal de pagamentos
         if (e.key === 'F4') {
           e.preventDefault();
-          openPaymentModal();
+          handleOpenPaymentModalWithSave();
         }
       };
 
       window.addEventListener('keydown', handleKeyDown);
       return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [isModalOpen, editingBooking, isPaymentModalOpen, openPaymentModal, setIsCancelConfirmOpen, saveBookingOnce, pendingSaveRef, completedSaveRef, setIsModalOpen, form]);
+    }, [isModalOpen, editingBooking, isPaymentModalOpen, handleOpenPaymentModalWithSave, setIsCancelConfirmOpen, saveBookingOnce, pendingSaveRef, completedSaveRef, setIsModalOpen, form]);
 
     // Limites da quadra selecionada
     const courtBounds = useMemo(() => {
@@ -4566,7 +4620,7 @@ function AgendaPage({ sidebarVisible = false }) {
     }, [courtsMap, form.court, dayStartHour, dayEndHourExclusive]);
 
     // Intervalos ocupados no dia/quadra selecionados (em minutos desde 00:00)
-    const dayIntervals = useMemo(() => {
+    const getDayIntervalsForCourt = useCallback((startMin, endMin) => {
       const dayStr = format(form.date, 'yyyy-MM-dd');
       const toMinutes = (d) => {
         const h = getHours(d);
@@ -4575,11 +4629,27 @@ function AgendaPage({ sidebarVisible = false }) {
         if (h === 0 && m === 0) return 1440;
         return h * 60 + m;
       };
+      const courtId = courtsMap?.[form.court]?.id;
       return bookings
-        .filter(b => b.court === form.court && format(b.start, 'yyyy-MM-dd') === dayStr && b.status !== 'canceled' && (!editingBooking || b.id !== editingBooking.id))
+        .filter(b => {
+          const byName = b.court === form.court;
+          const byId = courtId != null && String(b.court_id || '') === String(courtId);
+          return (byName || byId)
+            && format(b.start, 'yyyy-MM-dd') === dayStr
+            && b.status !== 'canceled'
+            && (!editingBooking || b.id !== editingBooking.id);
+        })
         .map(b => [toMinutes(b.start), toMinutes(b.end)])
         .sort((a, b) => a[0] - b[0]);
     }, [bookings, form.court, form.date, editingBooking]);
+
+    const dayIntervals = useMemo(() => {
+      try {
+        return getDayIntervalsForCourt();
+      } catch {
+        return [];
+      }
+    }, [getDayIntervalsForCourt]);
 
     const overlaps = (a0, a1, b0, b1) => a0 < b1 && b0 < a1;
     function isRangeFree(s, e) {
@@ -4839,20 +4909,6 @@ function AgendaPage({ sidebarVisible = false }) {
       try { customerPickerDesiredOpenRef.current = false; localStorage.removeItem('agenda:customerPicker:desiredAt'); } catch {}
       try { customerPickerIntentRef.current = 'close'; } catch {}
       try { setIsCustomerPickerOpen(false); setEffectiveCustomerPickerOpen(false); } catch {}
-      
-      // Salva imediatamente ao fechar o picker de clientes (modo edição)
-      if (editingBooking?.id && autoSaveEnabledRef.current) {
-        try {
-          if (autoSaveTimeoutRef.current) {
-            clearTimeout(autoSaveTimeoutRef.current);
-          }
-          console.log('💾 [CustomerPicker] Salvando participantes ao fechar...');
-          await saveBookingOnce({ autoSave: true });
-          console.log('✅ [CustomerPicker] Participantes salvos!');
-        } catch (error) {
-          console.error('❌ [CustomerPicker] Erro ao salvar:', error);
-        }
-      }
     }, [editingBooking?.id, saveBookingOnce]);
 
     // ... (rest of the code remains the same)
@@ -4981,16 +5037,9 @@ function AgendaPage({ sidebarVisible = false }) {
               } catch {}
             }
 
-            // Agora fechar o modal de agendamento
-            setIsModalOpen(false);
-            setEditingBooking(null);
-            setPrefill(null);
-            participantsPrefillOnceRef.current = false;
+            // Fechamento por X (DialogClose): salvar antes de fechar no modo de edição
+            await saveAndCloseBookingModal();
             console.log('🔍 [FLUXO CRÍTICO] Modal de agendamento fechado');
-            
-            // Resetar estado de agendamento recorrente
-            setIsRecorrente(false);
-            setQuantidadeSemanas(4);
           } else {
             setIsModalOpen(true);
           }
@@ -5027,22 +5076,10 @@ function AgendaPage({ sidebarVisible = false }) {
                 return;
               }
               
-              // 🔄 Auto-save ao clicar fora: SEMPRE salva antes de fechar em modo de edição
+              // Ao clicar fora: salvar antes de fechar (modo edição)
               if (editingBooking?.id) {
                 e.preventDefault();
-                console.log('💾 [Auto-save] Salvando ao clicar fora do modal...');
-                try {
-                  // Cancela timeout pendente
-                  if (autoSaveTimeoutRef.current) {
-                    clearTimeout(autoSaveTimeoutRef.current);
-                  }
-                  await saveBookingOnce({ autoSave: true });
-                  console.log('✅ [Auto-save] Salvo ao clicar fora!');
-                } catch (error) {
-                  console.error('❌ [Auto-save] Erro ao salvar ao clicar fora:', error);
-                } finally {
-                  setIsModalOpen(false);
-                }
+                await saveAndCloseBookingModal();
                 return;
               }
             } catch {}
@@ -5081,15 +5118,6 @@ function AgendaPage({ sidebarVisible = false }) {
                     Criado pela Ísis
                   </span>
                 )}
-                {isAutoSaving && (
-                  <span className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full border text-xs bg-blue-600/10 text-blue-400 border-blue-700/30">
-                    <svg className="w-3 h-3 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                    </svg>
-                    Salvando...
-                  </span>
-                )}
               </div>
               {editingBooking && (
                 (() => {
@@ -5115,7 +5143,7 @@ function AgendaPage({ sidebarVisible = false }) {
                 })()
               )}
               <span
-                className="inline-flex items-center gap-2 px-3 py-1 rounded-md border text-sm bg-white/5 border-white/10 text-text-primary"
+                className="inline-flex items-center gap-2 px-3 py-1 rounded-md border text-sm bg-white/5 border-white/10 text-text-primary mr-12 max-w-full"
                 title="Data do agendamento"
               >
                 <CalendarIcon className="w-4 h-4 opacity-80" />
@@ -5186,17 +5214,14 @@ function AgendaPage({ sidebarVisible = false }) {
                       } else {
                         customerPickerDesiredOpenRef.current = false;
                         try { localStorage.removeItem('agenda:customerPicker:desiredAt'); } catch {}
-                        // Before actually closing, preserve current selection (even if empty)
+                        // Ao fechar o picker: manter apenas em memória (sem cache)
                         try {
                           const cur = Array.isArray(selectedClientsRef.current) ? [...selectedClientsRef.current] : [];
-                          // Respeita seleção vazia se usuário removeu todos os clientes
                           if (cur.length > 0) {
                             lastSelActionRef.current = 'onOpenChange:close:preserve';
-                            try { sessionStorage.setItem(persistLastKey, JSON.stringify(cur)); } catch {}
                             setChipsSnapshotSafe(cur);
                             applySelectedClients('onOpenChange:close:preserve', cur);
                           } else if (!clearedByUserRef.current) {
-                            // Só aplica seleção vazia se não foi limpeza intencional
                             lastSelActionRef.current = 'onOpenChange:close:empty';
                             applySelectedClients('onOpenChange:close:empty', []);
                           }
@@ -5279,7 +5304,6 @@ function AgendaPage({ sidebarVisible = false }) {
                           if (cur.length > 0) {
                             lastSelActionRef.current = 'outside:close:snapshot';
                             lastNonEmptySelectionRef.current = cur;
-                            try { sessionStorage.setItem(persistLastKey, JSON.stringify(cur)); } catch {}
                             setChipsSnapshotSafe(cur);
                             // Garante que o form persista a seleção atual
                             applySelectedClients('outside:close:apply', cur);
@@ -5290,7 +5314,6 @@ function AgendaPage({ sidebarVisible = false }) {
                             // CORREÇÃO: Limpa lastNonEmptySelectionRef quando usuário limpou intencionalmente
                             if (clearedByUserRef.current) {
                               lastNonEmptySelectionRef.current = [];
-                              try { sessionStorage.removeItem(persistLastKey); } catch {}
                               console.warn('[CustomerPicker][outside:close:empty:cleared]', { ts: new Date().toISOString() });
                             }
                             applySelectedClients('outside:close:empty', []);
@@ -5318,22 +5341,6 @@ function AgendaPage({ sidebarVisible = false }) {
                         customerPickerDesiredOpenRef.current = false; try { localStorage.removeItem('agenda:customerPicker:desiredAt'); } catch {}
                         setIsCustomerPickerOpen(false);
                         setEffectiveCustomerPickerOpen(false);
-                        
-                        // Salva imediatamente ao clicar fora (modo edição)
-                        if (editingBooking?.id && autoSaveEnabledRef.current) {
-                          (async () => {
-                            try {
-                              if (autoSaveTimeoutRef.current) {
-                                clearTimeout(autoSaveTimeoutRef.current);
-                              }
-                              console.log('💾 [CustomerPicker] Salvando participantes (clique fora)...');
-                              await saveBookingOnce({ autoSave: true });
-                              console.log('✅ [CustomerPicker] Participantes salvos!');
-                            } catch (error) {
-                              console.error('❌ [CustomerPicker] Erro ao salvar:', error);
-                            }
-                          })();
-                        }
                       }}
                       onFocusOutside={(e) => {
                         pickerLog('focusOutside');
@@ -5609,32 +5616,6 @@ function AgendaPage({ sidebarVisible = false }) {
                               try { preventClearsUntilRef.current = Date.now() + 5000; } catch {}
                               try { customerPickerIntentRef.current = 'close'; } catch {}
                               try { customerPickerDesiredOpenRef.current = false; localStorage.removeItem('agenda:customerPicker:desiredAt'); } catch {}
-                              // Marca fechamento em curso (sobrevive a remount) e persiste seleção atual
-                              try {
-                                sessionStorage.setItem('agenda:customerPicker:closing', '1');
-                                sessionStorage.setItem('agenda:customerPicker:closingAt', String(Date.now()));
-                                const modalSessionId = modalSessionIdRef.current || sessionStorage.getItem('agenda:modal:sessionId') || '';
-                                if (modalSessionId) sessionStorage.setItem('agenda:customerPicker:sessionId', modalSessionId);
-                                const cur = Array.isArray(selectedClientsRef.current) ? selectedClientsRef.current : [];
-                                if (cur.length > 0) {
-                                  sessionStorage.setItem(persistLastKey, JSON.stringify(cur));
-                                }
-                                // LOG: mousedown conclude
-                                try {
-                                  const dump = {
-                                    ts: new Date().toISOString(),
-                                    hook: 'conclude:mousedown',
-                                    modalSessionId,
-                                    closingAt: sessionStorage.getItem('agenda:customerPicker:closingAt'),
-                                    selLen: Array.isArray(cur) ? cur.length : NaN,
-                                    formLen: Array.isArray(form?.selectedClients) ? form.selectedClients.length : NaN,
-                                    lockUntil: selectionLockUntilRef.current,
-                                    suppressUntil: suppressPickerCloseRef.current,
-                                    isPickerOpen: !!effectiveCustomerPickerOpen,
-                                    isModalOpen: !!isModalOpen,
-                                  };
-                                } catch {}
-                              } catch {}
                               // Evita que o mousedown seja interpretado como outside imediatamente
                               e.stopPropagation();
                             }}
@@ -5655,7 +5636,6 @@ function AgendaPage({ sidebarVisible = false }) {
                                 if (currentSel.length > 0) {
                                   lastSelActionRef.current = 'conclude:close:snapshot';
                                   lastNonEmptySelectionRef.current = currentSel;
-                                  sessionStorage.setItem(persistLastKey, JSON.stringify(currentSel));
                                 }
                               } catch {}
                               // Atualizar chipsSnapshot e garantir que o form reflita a seleção atual
@@ -5682,22 +5662,6 @@ function AgendaPage({ sidebarVisible = false }) {
                                 setEffectiveCustomerPickerOpen(false);
                               }, 120);
                               // Janela de supressão imediata também aqui
-                              
-                              // Salva imediatamente ao clicar em Concluir (modo edição)
-                              if (editingBooking?.id && autoSaveEnabledRef.current) {
-                                (async () => {
-                                  try {
-                                    if (autoSaveTimeoutRef.current) {
-                                      clearTimeout(autoSaveTimeoutRef.current);
-                                    }
-                                    console.log('💾 [CustomerPicker] Salvando participantes (Concluir)...');
-                                    await saveBookingOnce({ autoSave: true });
-                                    console.log('✅ [CustomerPicker] Participantes salvos!');
-                                  } catch (error) {
-                                    console.error('❌ [CustomerPicker] Erro ao salvar:', error);
-                                  }
-                                })();
-                              }
                               try { suppressPickerCloseRef.current = Date.now() + 2500; } catch {}
                               try {
                                 const dump = {
@@ -5713,8 +5677,8 @@ function AgendaPage({ sidebarVisible = false }) {
                                   suppressUntil: suppressPickerCloseRef.current,
                                   selectionLockUntil: selectionLockUntilRef.current,
                                   restoreGuardUntil: restoreGuardUntilRef.current,
-                                  modalSessionId: (modalSessionIdRef.current || sessionStorage.getItem('agenda:modal:sessionId') || ''),
-                                  closingAt: sessionStorage.getItem('agenda:customerPicker:closingAt'),
+                                  modalSessionId: (modalSessionIdRef.current || ''),
+                                  closingAt: null,
                                   pickerOpen: !!effectiveCustomerPickerOpen,
                                   modalOpen: !!isModalOpen,
                                 };
@@ -5735,16 +5699,12 @@ function AgendaPage({ sidebarVisible = false }) {
                   <Button
                     type="button"
                     onClick={() => {
-                      // PROTEÇÃO: Salva seleção atual antes de abrir modal de cadastro
+                      // Manter seleção apenas em memória ao abrir modal de cadastro
                       try {
                         const current = Array.isArray(selectedClientsRef.current) ? selectedClientsRef.current : [];
                         if (current.length > 0) {
                           lastNonEmptySelectionRef.current = current;
-                          sessionStorage.setItem(persistLastKey, JSON.stringify(current));
                           setChipsSnapshotSafe(current);
-                          console.warn('[CustomerPicker][+Novo:save-selection]', { 
-                            savedCount: current.length 
-                          });
                         }
                       } catch {}
                       
@@ -5757,7 +5717,12 @@ function AgendaPage({ sidebarVisible = false }) {
                     + Novo
                   </Button>
                 </div>
-                {chipsClients.length > 0 ? (
+                {participantsLoadingForPicker ? (
+                  <div className="flex items-center gap-2 mt-2 text-xs text-text-muted">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Carregando participantes...
+                  </div>
+                ) : chipsClients.length > 0 ? (
                   <div className="flex flex-wrap gap-2 mt-2">
                     {chipsClients.map((c, chipIdx) => {
                       const nameKey = String(c?.nome || '').toLowerCase();
@@ -5780,11 +5745,6 @@ function AgendaPage({ sidebarVisible = false }) {
                               // CORREÇÃO: Sempre atualiza lastNonEmptySelectionRef, mesmo se vazio
                               try { 
                                 lastNonEmptySelectionRef.current = next; 
-                                // Se ficou vazio, também limpa do sessionStorage
-                                if (next.length === 0) {
-                                  sessionStorage.removeItem(persistLastKey);
-                                  console.warn('[CustomerPicker][chip:remove:cleared-all]', { ts: new Date().toISOString() });
-                                }
                               } catch {}
                               try { selectedClientsRef.current = next; } catch {}
                               applySelectedClients('chips:remove', next);
@@ -6065,7 +6025,7 @@ function AgendaPage({ sidebarVisible = false }) {
                       type="button"
                       variant="secondary"
                       className="bg-teal-600 hover:bg-teal-500 text-white border-teal-700 w-full sm:w-auto justify-center"
-                      onClick={() => { /* [DEBUG-PaymentModal] silenciado */ openPaymentModal(); }}
+                      onClick={() => { /* [DEBUG-PaymentModal] silenciado */ handleOpenPaymentModalWithSave(); }}
                     >
                       <DollarSign className="w-4 h-4 mr-2 opacity-90" /> 
                       <span className="hidden sm:inline">Gerenciar Pagamentos</span>
@@ -6111,22 +6071,7 @@ function AgendaPage({ sidebarVisible = false }) {
                   variant="ghost" 
                   className="border border-white/10 flex-1 sm:flex-none" 
                   onClick={async () => {
-                    // 🔄 Auto-save ao fechar: SEMPRE salva antes de fechar no modo de edição
-                    if (editingBooking?.id) {
-                      console.log('💾 [Auto-save] Salvando ao fechar modal...');
-                      try {
-                        // Cancela timeout pendente
-                        if (autoSaveTimeoutRef.current) {
-                          clearTimeout(autoSaveTimeoutRef.current);
-                        }
-                        await saveBookingOnce({ autoSave: true });
-                        console.log('✅ [Auto-save] Salvo ao fechar!');
-                      } catch (error) {
-                        console.error('❌ [Auto-save] Erro ao salvar ao fechar:', error);
-                      }
-                    }
-                    
-                    setIsModalOpen(false);
+                    await saveAndCloseBookingModal();
                   }}
                 >
                   Fechar
@@ -6350,7 +6295,6 @@ function AgendaPage({ sidebarVisible = false }) {
                   try { selectedClientsRef.current = newSelection; } catch {}
                   try { lastNonEmptySelectionRef.current = newSelection; } catch {}
                   try { setChipsSnapshotSafe(newSelection); } catch {}
-                  try { sessionStorage.setItem(persistLastKey, JSON.stringify(newSelection)); } catch {}
                   
                   // Marca que NÃO foi limpeza intencional do usuário
                   try { clearedByUserRef.current = false; } catch {}
@@ -6370,10 +6314,16 @@ function AgendaPage({ sidebarVisible = false }) {
                 Promise.resolve().then(() => {
                   try {
                     const current = Array.isArray(selectedClientsRef.current) ? selectedClientsRef.current : [];
-                    if (current.length > 0) {
-                      setForm(f => ({ ...f, selectedClients: [...current] }));
-                      console.warn('[CustomerPicker][onSaved:REASSERT]', { count: current.length });
-                    }
+                    setForm((f) => {
+                      const prev = Array.isArray(f.selectedClients) ? f.selectedClients : [];
+                      // Nunca sobrescrever uma seleção já existente (pode estar na ordem correta do banco/usuário)
+                      if (prev.length > 0) return f;
+                      if (current.length > 0) {
+                        console.warn('[CustomerPicker][onSaved:REASSERT]', { count: current.length });
+                        return { ...f, selectedClients: [...current] };
+                      }
+                      return f;
+                    });
                   } catch {}
                 });
                 
@@ -6898,11 +6848,6 @@ function AgendaPage({ sidebarVisible = false }) {
                     // Limpa estado antes de abrir novo agendamento
                     setEditingBooking(null);
                     setPrefill(null);
-                    // Limpa sessionStorage que pode ter dados antigos
-                    try {
-                      sessionStorage.removeItem('agenda:customerPicker:closing');
-                      sessionStorage.removeItem('agenda:customerPicker:closingAt');
-                    } catch {}
                     openBookingModal();
                   }} 
                   aria-label="Novo agendamento" 
@@ -7244,6 +7189,21 @@ function AgendaPage({ sidebarVisible = false }) {
           </div>
         )}
 
+        {isAgendaBootLoading ? (
+          <div className="mt-4 rounded-xl border border-border bg-surface/70 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-surface/60">
+            <div className="flex items-center justify-center gap-4 px-6 py-8">
+              <div className="h-10 w-10 shrink-0 rounded-full border-2 border-border/60 border-t-brand animate-spin" />
+              <div className="min-w-0">
+                <div className="text-sm font-semibold text-text-primary">Carregando agenda…</div>
+                <div className="text-xs text-text-muted truncate">{agendaBootStage || 'Aguarde um instante'}</div>
+                <div className="mt-3 h-1.5 w-56 max-w-[70vw] rounded-full bg-border/40 overflow-hidden">
+                  <div className="h-full w-1/2 bg-gradient-to-r from-brand/30 via-brand to-brand/30 animate-pulse" />
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : (
+        <>
         {/* Calendar Grid - Visão Semanal */}
         {selectedCourts.length > 0 && viewMode === 'week' && (() => {
           // Filtrar agendamentos da semana pela quadra ativa
@@ -7278,10 +7238,15 @@ function AgendaPage({ sidebarVisible = false }) {
                   const startMinutes = slotDate.getHours() * 60 + slotDate.getMinutes();
                   const chosenCourt = court || activeCourtFilter || selectedCourts[0];
                   const dayKey = format(slotDate, 'yyyy-MM-dd');
+                  const chosenCourtId = courtsMap?.[chosenCourt]?.id;
                   const nextStart = (() => {
                     try {
                       return (bookings || [])
-                        .filter(b => b.court === chosenCourt && format(b.start, 'yyyy-MM-dd') === dayKey && b.status !== 'canceled')
+                        .filter(b => {
+                          const byName = b.court === chosenCourt;
+                          const byId = chosenCourtId != null && String(b.court_id || '') === String(chosenCourtId);
+                          return (byName || byId) && format(b.start, 'yyyy-MM-dd') === dayKey && b.status !== 'canceled';
+                        })
                         .map(b => getHours(b.start) * 60 + getMinutes(b.start))
                         .filter(m => m > startMinutes)
                         .sort((a,b) => a - b)[0];
@@ -7314,11 +7279,6 @@ function AgendaPage({ sidebarVisible = false }) {
                   console.log('onSlotClick in AgendaPage - BEFORE setPrefill', { slotDate, court, activeCourtFilter, selectedCourts, startMinutes, endMinutes, prefillData });
                   setPrefill(prefillData);
                   console.log('onSlotClick in AgendaPage - AFTER setPrefill (state not updated yet)');
-                  // Limpa sessionStorage que pode ter dados antigos
-                  try {
-                    sessionStorage.removeItem('agenda:customerPicker:closing');
-                    sessionStorage.removeItem('agenda:customerPicker:closingAt');
-                  } catch {}
                   openBookingModal();
                 }}
                 statusConfig={statusConfig}
@@ -7468,7 +7428,7 @@ function AgendaPage({ sidebarVisible = false }) {
                         <span className="font-semibold text-xs text-text-muted">pendente{dayStats.totalPendingPayments !== 1 ? 's' : ''}</span>
                       </div>
                     )}
-                    {agendaPublicUrl && (
+                    {agendaPublicUrl && !isMobile && (
                       <button
                         type="button"
                         onClick={async () => {
@@ -7612,8 +7572,13 @@ function AgendaPage({ sidebarVisible = false }) {
                     return h * 60 + m;
                   };
                   const dayStr = format(currentDate, 'yyyy-MM-dd');
+                  const courtId = courtsMap?.[court]?.id;
                   const intervals = bookings
-                    .filter(b => b.court === court && format(b.start, 'yyyy-MM-dd') === dayStr && b.status !== 'canceled')
+                    .filter(b => {
+                      const byName = b.court === court;
+                      const byId = courtId != null && String(b.court_id || '') === String(courtId);
+                      return (byName || byId) && format(b.start, 'yyyy-MM-dd') === dayStr && b.status !== 'canceled';
+                    })
                     .map(b => [toMinutes(b.start), toMinutes(b.end)])
                     .sort((a,b) => a[0]-b[0]);
                   const free = [];
@@ -7674,8 +7639,13 @@ function AgendaPage({ sidebarVisible = false }) {
 
                           // Busca o próximo agendamento (início) após o clique para esta quadra e dia
                           const nextStart = (() => {
+                            const courtId = courtsMap?.[court]?.id;
                             const starts = bookings
-                              .filter(b => b.court === court && format(b.start, 'yyyy-MM-dd') === dayStr)
+                              .filter(b => {
+                                const byName = b.court === court;
+                                const byId = courtId != null && String(b.court_id || '') === String(courtId);
+                                return (byName || byId) && format(b.start, 'yyyy-MM-dd') === dayStr;
+                              })
                               .map(b => getHours(b.start) * 60 + getMinutes(b.start))
                               .filter(m => m > clickedStart)
                               .sort((a,b) => a - b);
@@ -7711,9 +7681,6 @@ function AgendaPage({ sidebarVisible = false }) {
                           try {
                             lastNonEmptySelectionRef.current = [];
                             setChipsSnapshot([]);
-                            sessionStorage.removeItem(persistLastKey);
-                            sessionStorage.removeItem('agenda:customerPicker:closing');
-                            sessionStorage.removeItem('agenda:customerPicker:closingAt');
                           } catch {}
                           openBookingModal();
                         }}
@@ -7743,6 +7710,8 @@ function AgendaPage({ sidebarVisible = false }) {
             </>
           );
         })()}
+        </>
+        )}
       </motion.div>
       
       {/* AddBookingModal - chamado como função */}

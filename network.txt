@@ -1,0 +1,100 @@
+Request URL
+https://dlfryxtyxqoacuunswuc.supabase.co/rest/v1/rpc/get_empresa_public_by_slug
+Request Method
+POST
+Status Code
+200 OK
+Remote Address
+172.64.149.246:443
+Referrer Policy
+strict-origin-when-cross-origin
+access-control-allow-origin
+https://quadraprime.f7arena.com
+access-control-expose-headers
+Content-Encoding, Content-Location, Content-Range, Content-Type, Date, Location, Server, Transfer-Encoding, Range-Unit
+alt-svc
+h3=":443"; ma=86400
+cf-cache-status
+DYNAMIC
+cf-ray
+9ba58632ff5c02ec-GRU
+content-length
+2
+content-profile
+public
+content-range
+*/*
+content-type
+application/json; charset=utf-8
+date
+Wed, 07 Jan 2026 18:30:04 GMT
+priority
+u=1,i
+sb-gateway-version
+1
+sb-project-ref
+dlfryxtyxqoacuunswuc
+sb-request-id
+019b99b9-1be8-7bb3-9d25-7f0eb23607f8
+server
+cloudflare
+server-timing
+cfExtPri
+set-cookie
+__cf_bm=LNKqNycLufJEy_YjVqrm2UekwVQPFApiZBDnxYCjLG0-1767810604-1.0.1.1-FRxosMhzeocLjtpOW39fNGcFplH8z800faqkERbWVTEZvOeOD6Hh4KaeLyl1YxgdlvOika4o7n6fqP.I92VRiTrMbQmtMitMGLe6a6.PJP0; path=/; expires=Wed, 07-Jan-26 19:00:04 GMT; domain=.supabase.co; HttpOnly; Secure; SameSite=None
+strict-transport-security
+max-age=31536000; includeSubDomains; preload
+vary
+Accept-Encoding
+x-content-type-options
+nosniff
+x-envoy-attempt-count
+1
+x-envoy-upstream-service-time
+2
+:authority
+dlfryxtyxqoacuunswuc.supabase.co
+:method
+POST
+:path
+/rest/v1/rpc/get_empresa_public_by_slug
+:scheme
+https
+accept
+*/*
+accept-encoding
+gzip, deflate, br, zstd
+accept-language
+pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7
+apikey
+eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRsZnJ5eHR5eHFvYWN1dW5zd3VjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTU4ODg0MzcsImV4cCI6MjA3MTQ2NDQzN30.AizQBbCE1p_xfAQ9T0Eha1anGzcFETcc__8AV4iaQTY
+authorization
+Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRsZnJ5eHR5eHFvYWN1dW5zd3VjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTU4ODg0MzcsImV4cCI6MjA3MTQ2NDQzN30.AizQBbCE1p_xfAQ9T0Eha1anGzcFETcc__8AV4iaQTY
+content-length
+24
+content-profile
+public
+content-type
+application/json
+origin
+https://quadraprime.f7arena.com
+priority
+u=1, i
+referer
+https://quadraprime.f7arena.com/
+sec-ch-ua
+"Google Chrome";v="143", "Chromium";v="143", "Not A(Brand";v="24"
+sec-ch-ua-mobile
+?0
+sec-ch-ua-platform
+"Windows"
+sec-fetch-dest
+empty
+sec-fetch-mode
+cors
+sec-fetch-site
+cross-site
+user-agent
+Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36
+x-client-info
+fluxo7arena-web

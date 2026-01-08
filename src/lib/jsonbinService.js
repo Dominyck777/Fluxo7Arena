@@ -3,7 +3,7 @@
  * Gerencia feedbacks da ISIS e outros dados
  */
 
-import { supabaseIsis } from '@/lib/supabase-isis'
+
 // Credenciais fixas que funcionam
 const JSONBIN_BIN_ID = '690605e5ae596e708f3c7bc5';
 const JSONBIN_API_KEY = '$2a$10$/XmOGvx8./SZzV3qMzQ5i.6FjBjS4toNbeaEFzX2D8QPUddyM6VR2';
