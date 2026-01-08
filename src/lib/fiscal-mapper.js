@@ -1,9 +1,233 @@
 import { supabase } from '@/lib/supabase';
 
 function onlyDigits(v) { return String(v || '').replace(/\D/g, ''); }
+
+// Helpers for manual forms
+function parseDecBR(v){
+  if (v == null) return 0;
+  let s = String(v).trim();
+  if (!s) return 0;
+  // remove mascara BR (1.234,56)
+  if (s.includes(',') && s.includes('.')) s = s.replace(/\./g,'').replace(',','.');
+  else if (s.includes(',')) s = s.replace(',','.');
+  const n = Number(s);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function buildItensFromManual(form){
+  const itens = Array.isArray(form?.itens) ? form.itens : [];
+  return itens.map((it, idx) => {
+    const q = parseDecBR(it.quantidade);
+    const unit = parseDecBR(it.preco_unitario);
+    const vDescPercent = parseDecBR(it.desconto_percent);
+    const vDescValor = parseDecBR(it.desconto_valor);
+    const acres = parseDecBR(it.acrescimos_valor);
+    const frete = parseDecBR(it.frete_valor);
+    const seguro = parseDecBR(it.seguro_valor);
+    const bruto = q * unit;
+    const vDesc = vDescPercent ? (bruto * vDescPercent / 100) : vDescValor;
+    const vTotal = Math.max(0, bruto - vDesc + acres + frete + seguro);
+
+    const imp = it.impostos || {};
+    const ic = imp.icms || {};
+    const pis = imp.pis || {};
+    const cof = imp.cofins || {};
+
+    const data = {
+      numero_item: idx + 1,
+      codigo_produto: it.codigo || (idx+1),
+      descricao: it.descricao || `Item ${idx+1}`,
+      cfop: Number(it.cfop || 5102),
+      unidade_comercial: it.unidade || 'UN',
+      quantidade_comercial: q,
+      valor_unitario_comercial: to2(unit),
+      codigo_ncm: onlyDigits(it.ncm).slice(0,8) || '',
+      valor_desconto: vDesc ? to2(vDesc) : '',
+      valor_frete: frete ? to2(frete) : '',
+      valor_seguro: seguro ? to2(seguro) : '',
+      valor_outras_despesas: acres ? to2(acres) : '',
+      valor_total: to2(vTotal),
+      valor_total_sem_desconto: to2(bruto),
+      icms_orig: Number(imp.origem || 0),
+    };
+    if (ic.csosn) data.icms_csosn = Number(ic.csosn);
+    if (ic.cst) data.icms_cst = Number(ic.cst);
+    if (pis.cst) data.pis_situacao_tributaria = pis.cst;
+    if (cof.cst) data.cofins_situacao_tributaria = cof.cst;
+    if (pis.aliquota){
+      const aliq = parseDecBR(pis.aliquota);
+      data.base_calculo_pis = to2(vTotal);
+      data.aliquota_pis = to4(aliq/100);
+      data.valor_pis = to2(vTotal * aliq/100);
+    }
+    if (cof.aliquota){
+      const aliq = parseDecBR(cof.aliquota);
+      data.base_calculo_cofins = to2(vTotal);
+      data.aliquota_cofins = to4(aliq/100);
+      data.valor_cofins = to2(vTotal * aliq/100);
+    }
+    return data;
+  });
+}
+
+export function generateNfcePayloadFromManual({ form, finalizadoras = [] }){
+  const itens = buildItensFromManual(form);
+  const soma = itens.reduce((s,i)=> s + Number(i.valor_total || 0), 0);
+  const vFrete = parseDecBR(form?.totais?.frete);
+  const vOutras = parseDecBR(form?.totais?.outras_despesas);
+  const vDescGeral = parseDecBR(form?.totais?.desconto_geral);
+  const valor_total = soma - vDescGeral + vFrete + vOutras;
+
+  // Pagamentos
+  const pagamentos = Array.isArray(form?.pagamentos) ? form.pagamentos : [];
+  const totalPago = pagamentos.reduce((s,p)=> s + parseDecBR(p.valor), 0);
+  const valor_troco = Math.max(0, totalPago - valor_total);
+
+  // Meio de pagamento: usar primeira finalizadora (ou 90 sem pagamento)
+  const meio_pagamento = (()=>{
+    if (!pagamentos.length) return '90';
+    const p = pagamentos[0];
+    const fin = finalizadoras.find(f => String(f.id) === String(p.finalizadora_id));
+    return fin?.codigo_sefaz || '99';
+  })();
+
+  return {
+    tipo_operacao: form?.tipo_nota === 'entrada' ? 0 : 1,
+    natureza_operacao: form?.natOp || 'Venda de mercadoria',
+    forma_pagamento: 0,
+    meio_pagamento,
+    data_emissao: form?.data_emissao ? new Date(form.data_emissao+'T00:00:00').toLocaleDateString('pt-BR') : new Date().toLocaleDateString('pt-BR'),
+    data_saida_entrada: form?.data_saida ? new Date(form.data_saida+'T00:00:00').toLocaleDateString('pt-BR') : new Date().toLocaleDateString('pt-BR'),
+    hora_saida_entrada: new Date().toTimeString().slice(0,8),
+    finalidade_emissao: Number(form?.finNFe || 1),
+    modalidade_frete: form?.transporte?.tipo_frete || '9',
+
+    valor_frete: vFrete ? to2(vFrete) : '0',
+    valor_seguro: '0',
+    valor_ipi: '0',
+    valor_total: to2(valor_total),
+    valor_total_sem_desconto: to2(soma),
+    valor_troco: valor_troco ? to2(valor_troco) : '',
+
+    // Destinatário (opcional na NFC-e)
+    ...(form?.cpf_cnpj ? {
+      nome_destinatario: form?.nome || '',
+      cnpj_destinatario: onlyDigits(form?.cpf_cnpj),
+      inscricao_estadual_destinatario: form?.ie_isento ? 'ISENTO' : (form?.inscricao_estadual || ''),
+      email_destinatario: form?.email || '',
+      telefone_destinatario: onlyDigits(form?.telefone || ''),
+      logradouro_destinatario: form?.logradouro || '',
+      numero_destinatario: form?.numero || '',
+      complemento_destinatario: '',
+      bairro_destinatario: form?.bairro || '',
+      municipio_destinatario: form?.cidade || '',
+      codigo_cidade: form?.codigo_municipio_ibge || '',
+      uf_destinatario: form?.uf || '',
+      pais_destinatario: 'Brasil',
+      cep_destinatario: onlyDigits(form?.cep || ''),
+      indicador_ie_destinatario: Number(form?.indIEDest || 9),
+    } : {}),
+
+    Itens: [ itens ],
+  };
+}
+
+export function generateNfePayloadFromManual({ form }){
+  const itens = buildItensFromManual(form);
+  const soma = itens.reduce((s,i)=> s + Number(i.valor_total || 0), 0);
+  const vFrete = parseDecBR(form?.totais?.frete);
+  const vOutras = parseDecBR(form?.totais?.outras_despesas);
+  const vDescGeral = parseDecBR(form?.totais?.desconto_geral);
+  const valor_total = soma - vDescGeral + vFrete + vOutras;
+
+  return {
+    tipo_operacao: form?.tipo_nota === 'entrada' ? 0 : 1,
+    natureza_operacao: form?.natOp || 'Venda de mercadoria',
+    forma_pagamento: 0,
+    meio_pagamento: '01',
+    data_emissao: form?.data_emissao ? new Date(form.data_emissao+'T00:00:00').toLocaleDateString('pt-BR') : new Date().toLocaleDateString('pt-BR'),
+    data_saida_entrada: form?.data_saida ? new Date(form.data_saida+'T00:00:00').toLocaleDateString('pt-BR') : new Date().toLocaleDateString('pt-BR'),
+    hora_saida_entrada: new Date().toTimeString().slice(0,8),
+    finalidade_emissao: Number(form?.finNFe || 1),
+    modalidade_frete: Number(form?.transporte?.tipo_frete ?? 9),
+
+    valor_frete: vFrete ? to2(vFrete) : '0',
+    valor_seguro: '0',
+    valor_ipi: '0',
+    valor_total: to2(valor_total),
+    valor_total_sem_desconto: to2(soma),
+
+    // Totais ICMS em nível de documento (exemplo do provedor)
+    icms_base_calculo: '0',
+    icms_valor_total: '0',
+    icms_base_calculo_st: '0',
+    icms_valor_total_st: '0',
+    icms_modalidade_base_calculo: 0,
+    icms_valor: '0',
+
+    informacoes_adicionais_contribuinte: (form?.adicionais?.obs_gerais || ''),
+    nome_transportadora: form?.transporte?.transportadora || '',
+    cnpj_transportadora: '',
+    endereco_transportadora: '',
+    municipio_transportadora: '',
+    uf_transportadora: '',
+    inscricao_estadual_transportadora: '',
+
+    // Destinatário obrigatório na NF-e
+    nome_destinatario: form?.nome || '',
+    cnpj_destinatario: onlyDigits(form?.cpf_cnpj || ''),
+    inscricao_estadual_destinatario: form?.ie_isento ? 'ISENTO' : (form?.inscricao_estadual || ''),
+    email_destinatario: form?.email || '',
+    telefone_destinatario: onlyDigits(form?.telefone || ''),
+    logradouro_destinatario: form?.logradouro || '',
+    numero_destinatario: form?.numero || '',
+    complemento_destinatario: '',
+    bairro_destinatario: form?.bairro || '',
+    municipio_destinatario: form?.cidade || '',
+    uf_destinatario: form?.uf || '',
+    pais_destinatario: 'Brasil',
+    cep_destinatario: onlyDigits(form?.cep || ''),
+    indicador_ie_destinatario: Number(form?.indIEDest ?? 1),
+
+    Itens: itens.map(it => [it]),
+  };
+}
+
 function to2(n) { const x = Number(n ?? 0); return Number.isFinite(x) ? x.toFixed(2) : '0.00'; }
 function to4(n) { const x = Number(n ?? 0); return Number.isFinite(x) ? x.toFixed(4) : '0.0000'; }
 function asText(v) { return v == null ? '' : String(v); }
+
+// Distribui o desconto geral entre os itens proporcionalmente ao valor_total de cada item
+function distributeGlobalDiscount(itens, descontoGeral){
+  const d = Number(descontoGeral || 0);
+  if (!Array.isArray(itens) || itens.length === 0 || d <= 0) return itens;
+  const totals = itens.map(i => Number(i.valor_total || 0));
+  const base = totals.reduce((s,v)=> s + (Number.isFinite(v) ? v : 0), 0);
+  if (!(base > 0)) return itens;
+  const rawShares = totals.map(v => (d * (v / base)));
+  const rounded = rawShares.map(x => Number(to2(x)));
+  let sumRounded = rounded.reduce((s,v)=> s + v, 0);
+  let diff = Number(to2(d - sumRounded));
+  if (Math.abs(diff) >= 0.01) {
+    // Ajusta diferença no último item
+    const lastIdx = itens.length - 1;
+    rounded[lastIdx] = Number(to2(rounded[lastIdx] + diff));
+    sumRounded = rounded.reduce((s,v)=> s + v, 0);
+    diff = Number(to2(d - sumRounded));
+  }
+  return itens.map((it, idx) => {
+    const addDesc = rounded[idx] || 0;
+    const prevDesc = Number(it.valor_desconto || 0) || 0;
+    const prevTotal = Number(it.valor_total || 0) || 0;
+    const nextDesc = Math.max(0, prevDesc + addDesc);
+    const nextTotal = Math.max(0, prevTotal - addDesc);
+    return {
+      ...it,
+      valor_desconto: nextDesc ? to2(nextDesc) : '',
+      valor_total: to2(nextTotal),
+    };
+  });
+}
 
 function computeFormaPagamento(pagamentos) {
   if (!pagamentos?.length) return 0; // à vista por padrão
@@ -131,6 +355,7 @@ export async function generateNfcePayloadPreview({ comandaId, codigoEmpresa }) {
     data_saida_entrada: new Date(comanda.fechado_em || Date.now()).toLocaleDateString('pt-BR'),
     hora_saida_entrada: new Date(comanda.fechado_em || Date.now()).toTimeString().slice(0,8),
     finalidade_emissao: 1,
+    modalidade_frete: '9',
 
     // Totais
     valor_frete: '0',
@@ -158,7 +383,7 @@ export async function generateNfcePayloadPreview({ comandaId, codigoEmpresa }) {
       indicador_ie_destinatario: dest.indicador_ie_destinatario,
     } : {}),
 
-    Itens: itens.map((it, idx) => {
+    Itens: [ itens.map((it, idx) => {
       const p = produtosMap.get(it.produto_id) || {};
       const q = Number(it.quantidade || 0);
       const unit = Number(it.preco_unitario || 0);
@@ -204,7 +429,7 @@ export async function generateNfcePayloadPreview({ comandaId, codigoEmpresa }) {
       };
 
       return itemJson;
-    }),
+    }) ],
   };
 
   // Checklist do que pode faltar
@@ -219,7 +444,8 @@ export async function generateNfcePayloadPreview({ comandaId, codigoEmpresa }) {
 
   itens.forEach((it) => {
     const p = produtosMap.get(it.produto_id) || {};
-    if (!p.ncm) missing.push(`Produto ${p.name || p.id}: NCM`);
+    const ncmDigits = onlyDigits(p.ncm || '').slice(0,8);
+    if (!ncmDigits || /^0+$/.test(ncmDigits)) missing.push(`Produto ${p.name || p.id}: NCM válido`);
     if (!p.cfop_interno && !p.cfop) missing.push(`Produto ${p.name || p.id}: CFOP interno`);
   });
 

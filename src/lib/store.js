@@ -727,6 +727,63 @@ export async function listarComandasAbertas({ codigoEmpresa } = {}) {
   }
 }
 
+// Inativa uma mesa (soft delete via status). Bloqueia se houver comanda aberta e protege a mesa do balcão (numero=0)
+export async function inativarMesa({ mesaId, codigoEmpresa } = {}) {
+  if (!mesaId) throw new Error('mesaId é obrigatório')
+  const codigo = codigoEmpresa || getCachedCompanyCode()
+  // 1) Verificar comandas abertas/aguardando pagamento vinculadas à mesa
+  let q = supabase
+    .from('comandas')
+    .select('id,status,fechado_em')
+    .eq('mesa_id', mesaId)
+    .is('fechado_em', null)
+    .in('status', ['open','awaiting-payment'])
+  if (codigo) q = q.eq('codigo_empresa', codigo)
+  const { data: abertas, error: errOpen } = await q
+  if (errOpen) throw errOpen
+  if (Array.isArray(abertas) && abertas.length > 0) {
+    throw new Error('Não é possível inativar: existe comanda aberta vinculada a esta mesa.')
+  }
+  // 2) Bloquear mesa especial do balcão (numero = 0)
+  let qMesa = supabase.from('mesas').select('id, numero, status').eq('id', mesaId).limit(1)
+  if (codigo) qMesa = qMesa.eq('codigo_empresa', codigo)
+  const { data: found, error: errFind } = await qMesa
+  if (errFind) throw errFind
+  const mesa = found?.[0]
+  if (mesa && Number(mesa.numero) === 0) {
+    throw new Error('A mesa especial do balcão não pode ser inativada.')
+  }
+  // 3) Atualizar status para 'inactive'
+  let up = supabase.from('mesas').update({ status: 'inactive' }).eq('id', mesaId)
+  if (codigo) up = up.eq('codigo_empresa', codigo)
+  const { error: errUpd } = await up
+  if (errUpd) throw errUpd
+  return true
+}
+
+export async function listarTodasMesas(codigoEmpresa) {
+  const codigo = codigoEmpresa || getCachedCompanyCode()
+  let q = supabase
+    .from('mesas')
+    .select('id, numero, nome, status')
+    .order('numero', { ascending: true })
+    .limit(500)
+  if (codigo) q = q.eq('codigo_empresa', codigo)
+  const { data, error } = await q
+  if (error) throw error
+  return data || []
+}
+
+export async function reativarMesa({ mesaId, codigoEmpresa } = {}) {
+  if (!mesaId) throw new Error('mesaId é obrigatório')
+  const codigo = codigoEmpresa || getCachedCompanyCode()
+  let up = supabase.from('mesas').update({ status: 'available' }).eq('id', mesaId)
+  if (codigo) up = up.eq('codigo_empresa', codigo)
+  const { error } = await up
+  if (error) throw error
+  return true
+}
+
 // Carrega itens de várias comandas e retorna um mapa { comanda_id: total }
 export async function listarTotaisPorComanda(comandaIds = [], codigoEmpresa) {
   if (!comandaIds || comandaIds.length === 0) return {}
@@ -754,7 +811,12 @@ export async function listMesas(codigoEmpresa) {
     const timeoutPromise = new Promise((_, reject) => 
       setTimeout(() => reject(new Error('listMesas timeout após 30s')), 30000)
     )
-    let query = supabase.from('mesas').select('id, numero, nome, status').order('numero', { ascending: true }).limit(200)
+    let query = supabase
+      .from('mesas')
+      .select('id, numero, nome, status')
+      .neq('status', 'inactive')
+      .order('numero', { ascending: true })
+      .limit(200)
     if (codigo) query = query.eq('codigo_empresa', codigo)
     const { data, error } = await Promise.race([query, timeoutPromise])
     if (error) throw error

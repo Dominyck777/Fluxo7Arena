@@ -11,21 +11,24 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { useToast } from '@/components/ui/use-toast';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/dropdown-menu';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
-import { generateNfcePayloadPreview } from '@/lib/fiscal-mapper';
+import { generateNfcePayloadPreview, generateNfcePayloadFromManual, generateNfePayloadFromManual } from '@/lib/fiscal-mapper';
 import { listarTotaisPorComanda, listMesas, listarClientesPorComandas, listarFinalizadorasPorComandas, listarItensDaComanda, listarClientes, listarFinalizadoras } from '@/lib/store';
-import { enviarNfce, consultarEmissaoNfce, cancelarNfce, getTransmiteNotaConfigFromEmpresa } from '@/lib/transmitenota';
-import { Settings, Search, Trash2, X, FileText } from 'lucide-react';
+import { enviarNfce, consultarEmissaoNfce, cancelarNfce, consultarPdfNfce, consultarXmlNfce, getTransmiteNotaConfigFromEmpresa, enviarNfe, consultarEmissaoNfe, cancelarNfe, consultarPdfNfe, consultarXmlNfe } from '@/lib/transmitenota';
+import { Settings, Search, Trash2, X, FileText, CheckCircle2, AlertTriangle, Copy, Download, Pencil, Loader2 } from 'lucide-react';
 import { gerarXMLNFe, gerarXMLNFeFromData } from '@/lib/nfe';
 import { listProducts } from '@/lib/products';
 import cfopList from '@/data/cfop.json';
 import { listSuppliers } from '@/lib/suppliers';
-import { FORCE_MAINTENANCE } from '@/lib/maintenanceConfig';
+import ComprasPage from '@/pages/ComprasPage';
 
 function fmtMoney(v) { const n = Number(v||0); return n.toLocaleString('pt-BR',{minimumFractionDigits:2, maximumFractionDigits:2}); }
 function fmtDate(iso){ if(!iso) return '—'; try{ const d=new Date(iso); return d.toLocaleString('pt-BR'); }catch{return '—';} }
 function fmtDoc(doc){ const d=String(doc||'').replace(/\D/g,''); if(d.length===11){ return d.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/,'$1.$2.$3-$4'); } if(d.length===14){ return d.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/,'$1.$2.$3/$4-$5'); } return doc||''; }
+const isEmpty = (v) => v === undefined || v === null || String(v).trim() === '';
 
 // Date selector with black/yellow calendar styling (uses Portal to avoid clipping)
 function DateInput({ label, value, onChange }){
@@ -44,11 +47,6 @@ function DateInput({ label, value, onChange }){
     setPos({ top, left });
   }, []);
 
-  React.useEffect(()=>{
-    const onDoc = (e)=>{ if (open && wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false); };
-    window.addEventListener('mousedown', onDoc);
-    return () => window.removeEventListener('mousedown', onDoc);
-  },[open]);
   React.useEffect(()=>{
     if (!open) return;
     updatePos();
@@ -97,7 +95,10 @@ export default function FiscalHubPage(){
   const navigate = useNavigate();
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [nfeRows, setNfeRows] = useState([]);
+  const [nfeLoading, setNfeLoading] = useState(false);
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all'); // all | pendente | processando | autorizada | rejeitada | cancelada
   // Default período: mês corrente (01 até último dia)
   const pad = (n) => String(n).padStart(2, '0');
@@ -111,6 +112,330 @@ export default function FiscalHubPage(){
   const [focusPendRej, setFocusPendRej] = useState(false);
   const [selectedId, setSelectedId] = useState(null);
   const [tab, setTab] = useState('nfce');
+  const role = (userProfile && (userProfile.cargo || userProfile.papel)) || 'user';
+  const canEmit = true; // DEV: liberar ações
+  const canConsult = true; // DEV: liberar ações
+  const canCancel = true; // DEV: liberar ações
+  const [sortBy, setSortBy] = useState('aberto_em');
+  const [sortDir, setSortDir] = useState('desc');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
+  const [selectedIds, setSelectedIds] = useState([]);
+  const isSelected = (id) => selectedIds.includes(id);
+  const toggleRow = (id, checked) => {
+    setSelectedIds(prev => (checked ? Array.from(new Set([...(prev||[]), id])) : (prev||[]).filter(x => x !== id)));
+    setSelectedId(prevSel => (checked ? id : (prevSel === id ? null : prevSel)));
+  };
+
+  const handleEditSelectedNfeDraft = async () => {
+    try {
+      const all = nfeRows || [];
+      const pickId = selectedId || (selectedIds && selectedIds[0]);
+      if (!pickId) { toast({ title: 'Nenhuma NF-e selecionada', variant: 'warning' }); return; }
+      const row = all.find(r => r.id === pickId);
+      if (!row) { toast({ title: 'NF-e não encontrada na lista', variant: 'warning' }); return; }
+      const s = String(row.status || 'rascunho').toLowerCase();
+      if (s !== 'rascunho') { toast({ title: 'Não é rascunho', description: 'Selecione uma NF-e com status rascunho para editar.', variant: 'warning' }); return; }
+      await handleEditDraft(row);
+    } catch (e) {
+      toast({ title: 'Falha ao abrir rascunho', description: e?.message || String(e), variant: 'destructive' });
+    }
+  };
+
+  const handleConsultRow = async (r) => {
+    try {
+      if (!empresaInfo) { toast({ title: 'Empresa não carregada', variant: 'warning' }); return; }
+      const { baseUrl, cnpj } = getTransmiteNotaConfigFromEmpresa(empresaInfo);
+      if (!cnpj) { toast({ title: 'CNPJ ausente', description: 'Preencha o CNPJ na Configuração Fiscal', variant: 'warning' }); return; }
+      const chave = r.xml_chave || '';
+      let dados;
+      if (chave) dados = { chave_nota: chave, chave };
+      else if (r.numero && r.serie) dados = { numero: r.numero, serie: r.serie };
+      else { toast({ title: 'Sem referência para consultar', description: 'Preencha número/série ou emita para obter a chave', variant: 'warning' }); return; }
+      toast({ title: 'Consultando status...', description: `NF-e ${r.numero || '—'}/${r.serie || '—'}` });
+      let res = null;
+      let st = '';
+      let msg = '';
+      let autorizada = false;
+      let xmlUrl = r.xml_url || null;
+      let pdfUrl = r.pdf_url || null;
+      let chaveResp = r.xml_chave || null;
+      let numeroResp = r.numero || null;
+      let serieResp = r.serie || null;
+      try {
+        res = await consultarEmissaoNfe({ baseUrl, cnpj, dados });
+        st = String(res?.status || res?.cStat || '');
+        msg = res?.xMotivo || res?.mensagem || res?.message || 'Retorno da consulta';
+        autorizada = (st === '100' || /autorizad/i.test(msg));
+        xmlUrl = res?.url_xml || res?.xml_url || xmlUrl;
+        pdfUrl = res?.url_pdf || res?.pdf_url || pdfUrl;
+        chaveResp = res?.chave_nota || res?.chave || res?.Chave || chaveResp;
+        numeroResp = res?.numero || res?.Numero || numeroResp;
+        serieResp = res?.serie || res?.Serie || serieResp;
+      } catch (e) {
+        msg = e?.message || String(e);
+      }
+      // Fallback: tentar PDF/XML quando consulta não autoriza ou não retorna URLs
+      if (!autorizada || (!pdfUrl && !xmlUrl)) {
+        try {
+          const rpdf = await consultarPdfNfe({ baseUrl, cnpj, dados: dados });
+          pdfUrl = rpdf?.url_pdf || rpdf?.pdf_url || pdfUrl;
+          chaveResp = rpdf?.chave || rpdf?.Chave || chaveResp;
+        } catch {}
+        try {
+          const rxml = await consultarXmlNfe({ baseUrl, cnpj, dados: dados });
+          xmlUrl = rxml?.url_xml || rxml?.xml_url || xmlUrl;
+          chaveResp = chaveResp || rxml?.chave || rxml?.Chave || chaveResp;
+        } catch {}
+        if (pdfUrl || xmlUrl) autorizada = true;
+      }
+      const newStatus = autorizada ? 'autorizada' : (/rejeit/i.test(msg) ? 'rejeitada' : (st || r.status || 'pendente'));
+      await supabase.from('notas_fiscais').update({ status: newStatus, xml_url: xmlUrl, pdf_url: pdfUrl, xml_chave: chaveResp, numero: numeroResp, serie: serieResp }).eq('id', r.id).eq('codigo_empresa', codigoEmpresa);
+      await loadNfeRows();
+      toast({ title: autorizada ? 'Autorizada' : `Status ${st || ''}`.trim(), description: msg || 'Consulta concluída', variant: autorizada ? 'success' : 'default' });
+    } catch (e) {
+      toast({ title: 'Falha ao consultar', description: e?.message || String(e), variant: 'destructive' });
+    }
+  };
+
+  const handleCancelNfeRow = async (r) => {
+    try {
+      if (!r) return;
+      const motivo = (cancelNfeMotivo || '').trim();
+      if (!motivo) { toast({ title: 'Informe o motivo do cancelamento', variant: 'warning' }); return; }
+      if (!empresaInfo) { toast({ title: 'Empresa não carregada', variant: 'warning' }); return; }
+      const { baseUrl, cnpj } = getTransmiteNotaConfigFromEmpresa(empresaInfo);
+      if (!cnpj) { toast({ title: 'CNPJ ausente', description: 'Preencha o CNPJ na Configuração Fiscal', variant: 'warning' }); return; }
+      const dados = r.xml_chave ? { chave_nota: r.xml_chave, chave: r.xml_chave, motivo } : { numero: r.numero, serie: r.serie, motivo };
+      await cancelarNfe({ baseUrl, cnpj, dados });
+      await supabase.from('notas_fiscais').update({ status: 'cancelada' }).eq('id', r.id).eq('codigo_empresa', codigoEmpresa);
+      await loadNfeRows();
+      toast({ title: 'NF-e cancelada' });
+      setCancelNfeRow(null);
+      setCancelNfeMotivo('');
+    } catch (e) {
+      toast({ title: 'Falha ao cancelar', description: e?.message || String(e), variant: 'destructive' });
+    }
+  };
+
+  const handleConsultSelectedNfe = async () => {
+    try {
+      const all = nfeRows || [];
+      const pickId = selectedId || (selectedIds && selectedIds[0]);
+      if (!pickId) { toast({ title: 'Nenhuma NF-e selecionada', variant: 'warning' }); return; }
+      const row = all.find(r => r.id === pickId);
+      if (!row) { toast({ title: 'NF-e não encontrada na lista', variant: 'warning' }); return; }
+      await handleConsultRow(row);
+    } catch (e) {
+      toast({ title: 'Falha ao consultar NF-e', description: e?.message || String(e), variant: 'destructive' });
+    }
+  };
+
+  const handleCancelSelectedNfe = async () => {
+    try {
+      const all = nfeRows || [];
+      const pickId = selectedId || (selectedIds && selectedIds[0]);
+      if (!pickId) { toast({ title: 'Nenhuma NF-e selecionada', variant: 'warning' }); return; }
+      const row = all.find(r => r.id === pickId);
+      if (!row) { toast({ title: 'NF-e não encontrada na lista', variant: 'warning' }); return; }
+      setCancelNfeRow(row);
+      setCancelNfeMotivo('');
+    } catch (e) {
+      toast({ title: 'Falha ao cancelar NF-e', description: e?.message || String(e), variant: 'destructive' });
+    }
+  };
+
+  const handleEmitSelectedNfe = async () => {
+    try {
+      const all = nfeRows || [];
+      const pickId = selectedId || (selectedIds && selectedIds[0]);
+      if (!pickId) { toast({ title: 'Nenhuma NF-e selecionada', variant: 'warning' }); return; }
+      const row = all.find(r => r.id === pickId);
+      if (!row) { toast({ title: 'NF-e não encontrada na lista', variant: 'warning' }); return; }
+      const form = row?.draft_data;
+      if (!form || !Array.isArray(form.itens) || form.itens.length === 0) {
+        setCurrentDraftId(row.id);
+        if (row.draft_data) setManualForm(row.draft_data);
+        setManualOpen(true);
+        toast({ title: 'Rascunho incompleto', description: 'Abra o rascunho para revisar e emitir.', variant: 'warning' });
+        return;
+      }
+      await emitirNota(form, row.id);
+    } catch (e) {
+      toast({ title: 'Falha ao emitir NF-e', description: e?.message || String(e), variant: 'destructive' });
+    }
+  };
+
+  const handleEditDraft = async (row) => {
+    try {
+      if (!row || !row.id) return;
+      setCurrentDraftId(row.id);
+      setManualTab('cliente');
+      if (row.draft_data) {
+        setManualForm(row.draft_data);
+        setManualOpen(true);
+        return;
+      }
+      if (row.origem === 'comanda' && row.comanda_id) {
+        try { await openManualFromComanda(row.comanda_id); } catch {}
+      }
+      setManualOpen(true);
+    } catch {}
+  };
+
+  const saveDraft = async () => {
+    if (!currentDraftId || !codigoEmpresa) { toast({ title: 'Rascunho não iniciado', variant: 'warning' }); return; }
+    try {
+      setManualSaving(true);
+      const itens = (manualForm.itens||[]).map(x=>{
+        const pu = parseDec(x.preco_unitario)||0; const q = parseDec(x.quantidade)||1; const bruto = pu*q;
+        const descP = parseDec(x.desconto_percent)||0; const descV = parseDec(x.desconto_valor)||0; const acres = parseDec(x.acrescimos_valor)||0;
+        const desconto = descP ? (bruto*descP/100) : descV; const totalItem = bruto - desconto + acres; return { preco_total: totalItem };
+      });
+      const totalItens = itens.reduce((s,i)=> s + (Number(i.preco_total)||0), 0);
+      const total = totalItens - (parseDec(manualForm.totais?.desconto_geral)||0) + (parseDec(manualForm.totais?.frete)||0) + (parseDec(manualForm.totais?.outras_despesas)||0);
+      const dest = {
+        tipo_pessoa: manualForm.tipo_pessoa,
+        cpf_cnpj: manualForm.cpf_cnpj,
+        nome: manualForm.nome,
+        email: manualForm.email,
+        telefone: manualForm.telefone,
+        inscricao_estadual: manualForm.ie_isento ? 'ISENTO' : manualForm.inscricao_estadual,
+        logradouro: manualForm.logradouro,
+        numero: manualForm.numero,
+        bairro: manualForm.bairro,
+        cidade: manualForm.cidade,
+        uf: manualForm.uf,
+        cep: manualForm.cep,
+        codigo_municipio_ibge: manualForm.codigo_municipio_ibge,
+      };
+      await supabase
+        .from('notas_fiscais')
+        .update({
+          draft_data: manualForm,
+          valor_total: Number.isFinite(total) ? total : null,
+          destinatario: dest,
+          numero: manualForm.nNF ? Number(manualForm.nNF) : null,
+          serie: manualForm.serie ? Number(manualForm.serie) : null,
+        })
+        .eq('id', currentDraftId)
+        .eq('codigo_empresa', codigoEmpresa);
+      await loadNfeRows();
+      toast({ title: 'Rascunho salvo' });
+      setManualOpen(false);
+    } catch (e) { toast({ title: 'Falha ao salvar rascunho', description: e?.message || String(e), variant: 'destructive' }); }
+    finally { setManualSaving(false); }
+  };
+
+  const createDraftFromComanda = async (comandaId) => {
+    if (!comandaId || !codigoEmpresa) return null;
+    try {
+      const row = (rows||[]).find(r => r.id === comandaId);
+      const total = Number(row?.total || row?.total_com_desconto || 0) || 0;
+      const { data, error } = await supabase.from('notas_fiscais').insert({
+        codigo_empresa: codigoEmpresa,
+        origem: 'comanda',
+        comanda_id: comandaId,
+        modelo: '55',
+        numero: null,
+        serie: null,
+        status: 'rascunho',
+        xml_url: null,
+        pdf_url: null,
+        valor_total: total,
+        destinatario: null,
+      }).select('id').single();
+      if (error) throw error;
+      await loadNfeRows();
+      const id = data?.id || null;
+      if (id) setCurrentDraftId(id);
+      return id;
+    } catch (e) {
+      toast({ title: 'Falha ao criar rascunho', description: e?.message || String(e), variant: 'destructive' });
+      return null;
+    }
+  };
+
+  const createManualDraft = async () => {
+    if (!codigoEmpresa) return null;
+    try {
+      const { data, error } = await supabase.from('notas_fiscais').insert({
+        codigo_empresa: codigoEmpresa,
+        origem: 'manual',
+        comanda_id: null,
+        modelo: '55',
+        numero: null,
+        serie: null,
+        status: 'rascunho',
+        xml_url: null,
+        pdf_url: null,
+        valor_total: null,
+        destinatario: null,
+      }).select('id').single();
+      if (error) throw error;
+      await loadNfeRows();
+      const id = data?.id || null;
+      if (id) setCurrentDraftId(id);
+      // Resetar formulário manual para um rascunho novo em branco
+      setManualForm({
+        natOp: 'VENDA', serie: '1', nNF: '', indFinal: '1', indPres: '1', idDest: '1',
+        modelo: '55',
+        finNFe: '1',
+        data_emissao: todayStr,
+        data_saida: todayStr,
+        tipo_nota: 'saida',
+        baixar_estoque: true,
+        destacar_st: false,
+        cfop_padrao: '5102',
+        indIntermed: '0',
+        intermediador_cnpj: '',
+        intermediador_id: '',
+        parte_tipo: 'cliente',
+        party_id: '',
+        party_codigo: '',
+        tipo_pessoa: 'PJ', cpf_cnpj: '', nome: '', email: '', telefone: '',
+        inscricao_estadual: '', ie_isento: false,
+        indIEDest: '9',
+        logradouro: '', numero: '', bairro: '', cidade: '', uf: '', cep: '', codigo_municipio_ibge: '',
+        itens: [ {
+          descricao: '', codigo: '', cod_barras: '', ncm: '', cest: '', cfop: '5102', unidade: 'UN',
+          quantidade: '1', preco_unitario: '0.00', desconto_valor: '0.00', desconto_percent: '', acrescimos_valor: '0.00', frete_valor: '0.00', seguro_valor: '0.00', obs: '',
+          dest_icms: false, dest_icms_info: false, benef_fiscal: false,
+          impostos: {
+            origem: '',
+            icms: { cst: '', csosn: '', base: '', aliquota: '', valor: '', desonerado_valor:'', desoneracao_motivo:'', operacao_valor:'', aliq_diferimento:'', valor_diferido:'', reducao_percent:'', reducao_motivo:'', ad_rem:'', ad_rem_retencao:'', monofasico_bc:'', monofasico_valor:'', mono_retencao_bc:'', mono_retencao_valor:'', mono_cobrado_ant_bc:'', mono_cobrado_ant_valor:'', proprio_devido_valor:'' },
+            icmsst: { base: '', aliquota: '', valor: '' },
+            fcp: { base:'', aliquota:'', valor:'' },
+            fcpst: { base:'', aliquota:'', valor:'' },
+            pis: { cst: '', aliquota: '', valor: '' },
+            cofins: { cst: '', aliquota: '', valor: '' },
+            ipi: { cst: '', aliquota: '', valor: '', tipo_calculo: 'nenhum', valor_unit: '' },
+            combustivel: { uf:'', perc_origem_uf:'', indicador_importacao:'' },
+            cide: { base:'', aliq:'', valor:'' },
+            iss: { aliquota: '', valor: '' },
+          },
+        } ],
+        totais: { desconto_geral: '0.00', frete: '0.00', outras_despesas: '0.00' },
+        pagamentos: [ { tipo: 'Dinheiro', bandeira: '', cnpj_credenciadora: '', autorizacao: '', valor: '', parcelas: '', troco: '' } ],
+        transporte: { tipo_frete: '9', transportadora: '', placa: '', volumes: '', peso_liquido: '', peso_bruto: '' },
+        adicionais: { obs_gerais: '', info_fisco: '', info_cliente: '', referencia_doc: '' },
+      });
+      setManualXml('');
+      setManualOpen(true);
+      return id;
+    } catch (e) {
+      toast({ title: 'Falha ao criar rascunho manual', description: e?.message || String(e), variant: 'destructive' });
+      return null;
+    }
+  };
+  const [openDetails, setOpenDetails] = useState([]);
+  const isOpenDetails = (id) => openDetails.includes(id);
+  const toggleDetails = (id) => setOpenDetails(prev => prev.includes(id) ? prev.filter(x=>x!==id) : [...prev, id]);
+
+  useEffect(() => {
+    const id = setTimeout(() => setDebouncedSearch(search), 300);
+    return () => clearTimeout(id);
+  }, [search]);
 
   // Maintenance overlay (specific for Central Fiscal)
   const [maintActive, setMaintActive] = useState(false);
@@ -121,7 +446,7 @@ export default function FiscalHubPage(){
       const isActiveLS = localStorage.getItem('maintenance:active') === 'true';
       const end = localStorage.getItem('maintenance:end');
       const expired = end ? (new Date() > new Date(end)) : false;
-      const activeNow = (Boolean(FORCE_MAINTENANCE) || env || isActiveLS) && !expired;
+      const activeNow = (false || env || isActiveLS) && !expired;
       const bypass = (() => {
         try {
           const ls = localStorage.getItem('maintenance:bypass') === '1';
@@ -130,11 +455,11 @@ export default function FiscalHubPage(){
           return ls || ss || ck;
         } catch { return false; }
       })();
-      setMaintActive(activeNow);
-      setMaintBypass(bypass);
+      setMaintActive(false);
+      setMaintBypass(true);
     } catch {
-      setMaintActive(Boolean(FORCE_MAINTENANCE));
-      setMaintBypass(false);
+      setMaintActive(false);
+      setMaintBypass(true);
     }
   }, []);
 
@@ -142,6 +467,11 @@ export default function FiscalHubPage(){
   const [preLoading, setPreLoading] = useState(false);
   const [prePayload, setPrePayload] = useState(null);
   const [preMissing, setPreMissing] = useState([]);
+  const [preShowPayload, setPreShowPayload] = useState(false);
+  const [preComandaId, setPreComandaId] = useState(null);
+  const [preEmpresaCfgOk, setPreEmpresaCfgOk] = useState(false);
+  const [preEligible, setPreEligible] = useState(false);
+  const [preMissingCache, setPreMissingCache] = useState({});
   const [empresaMissing, setEmpresaMissing] = useState([]);
 
   const [nfeOpen, setNfeOpen] = useState(false);
@@ -153,11 +483,11 @@ export default function FiscalHubPage(){
 
   const [manualOpen, setManualOpen] = useState(false);
   const [manualXml, setManualXml] = useState('');
-  const [manualSaving, setManualSaving] = useState(false);
   const today = new Date();
   const todayStr = `${today.getFullYear()}-${pad(today.getMonth()+1)}-${pad(today.getDate())}`;
   const [manualForm, setManualForm] = useState({
-    natOp: 'VENDA', serie: '1', nNF: '', indFinal: '1', indPres: '1', idDest: '',
+    natOp: 'VENDA', serie: '1', nNF: '', indFinal: '1', indPres: '1', idDest: '1',
+    modelo: '55',
     finNFe: '1', // 1-Normal, 2-Complementar, 3-Ajuste, 4-Devolução
     data_emissao: todayStr,
     data_saida: todayStr,
@@ -173,6 +503,7 @@ export default function FiscalHubPage(){
     party_codigo: '',
     tipo_pessoa: 'PJ', cpf_cnpj: '', nome: '', email: '', telefone: '',
     inscricao_estadual: '', ie_isento: false,
+    indIEDest: '9',
     logradouro: '', numero: '', bairro: '', cidade: '', uf: '', cep: '', codigo_municipio_ibge: '',
     itens: [ {
       descricao: '', codigo: '', cod_barras: '', ncm: '', cest: '', cfop: '5102', unidade: 'UN',
@@ -193,21 +524,77 @@ export default function FiscalHubPage(){
       },
     } ],
     totais: { desconto_geral: '0.00', frete: '0.00', outras_despesas: '0.00' },
-    pagamentos: [ { tipo: 'Dinheiro', bandeira: '', cnpj_credenciadora: '', valor: '', parcelas: '', troco: '' } ],
-    transporte: { tipo_frete: '', transportadora: '', placa: '', volumes: '', peso_liquido: '', peso_bruto: '' },
+    pagamentos: [ { tipo: 'Dinheiro', bandeira: '', cnpj_credenciadora: '', autorizacao: '', valor: '', parcelas: '', troco: '' } ],
+    transporte: { tipo_frete: '9', transportadora: '', placa: '', volumes: '', peso_liquido: '', peso_bruto: '' },
     adicionais: { obs_gerais: '', info_fisco: '', info_cliente: '', referencia_doc: '' },
   });
+  const [currentDraftId, setCurrentDraftId] = useState(null);
+  const [manualSaving, setManualSaving] = useState(false);
+  const [manualEmitting, setManualEmitting] = useState(false);
+  const [comandaPickerOpen, setComandaPickerOpen] = useState(false);
+  const [comandaPickerSelectedId, setComandaPickerSelectedId] = useState(null);
+  const [comandaPickerFilter, setComandaPickerFilter] = useState('');
+  const [comandaPickerLoading, setComandaPickerLoading] = useState(false);
+  const [nfeToolbarEmitting, setNfeToolbarEmitting] = useState(false);
+  const [nfceConfirmEmitting, setNfceConfirmEmitting] = useState(false);
+  const manualTabFlags = useMemo(() => {
+    const f = manualForm || {};
+    const itens = f.itens || [];
+    const pagamentos = f.pagamentos || [];
+    const isNFCe = String(f.modelo) === '65';
+
+    const identOkBasic = !!(f.modelo && f.serie && f.natOp && f.data_emissao && f.tipo_nota && f.finNFe);
+    const produtosTemItens = Array.isArray(itens) && itens.length > 0;
+    const produtosImpostosOk = produtosTemItens && itens.every(it => {
+      const imp = it.impostos || {}; const ic = imp.icms || {}; const pis = imp.pis || {}; const cof = imp.cofins || {};
+      const okICMS = !!(imp.origem && (ic.cst || ic.csosn));
+      const okPIS = !!(pis.aliquota !== undefined && String(pis.aliquota).trim() !== '');
+      const okCOFINS = !!(cof.aliquota !== undefined && String(cof.aliquota).trim() !== '');
+      return okICMS && okPIS && okCOFINS;
+    });
+    const produtosOkBasic = produtosTemItens && produtosImpostosOk;
+    const transpOkBasic = !!(f.transporte && f.transporte.tipo_frete);
+
+    let pagamentosOkBasic = true;
+    if (isNFCe) {
+      const totalProdutos = itens.reduce((s,it)=>{
+        const pu = parseDec(it.preco_unitario)||0; const q = parseDec(it.quantidade)||1; const bruto = pu*q;
+        const descP = parseDec(it.desconto_percent)||0; const descV = parseDec(it.desconto_valor)||0; const desconto = descP ? (bruto*descP/100) : descV; const acres = parseDec(it.acrescimos_valor)||0;
+        const totalItem = Math.max(0, bruto - desconto + acres); return s + totalItem;
+      },0);
+      const descontoGeral = parseDec(f.totais?.desconto_geral)||0;
+      const frete = parseDec(f.totais?.frete)||0;
+      const outras = parseDec(f.totais?.outras_despesas)||0;
+      const totalNota = totalProdutos - descontoGeral + frete + outras;
+      const totalPago = pagamentos.reduce((s,p)=> s + (parseDec(p.valor)||0), 0);
+      pagamentosOkBasic = pagamentos.length > 0 && (totalPago + 0.009) >= totalNota;
+    }
+
+    return {
+      identOk: identOkBasic,
+      produtosOk: produtosOkBasic,
+      pagamentosOk: pagamentosOkBasic,
+      totaisOk: true,
+      transpOk: transpOkBasic,
+    };
+  }, [manualForm]);
   const [manualTab, setManualTab] = useState('cliente');
+  const [manualStep, setManualStep] = useState('ident');
   const [manualCepLoading, setManualCepLoading] = useState(false);
   const [empresaUF, setEmpresaUF] = useState('');
+  const [empresaInfo, setEmpresaInfo] = useState(null);
   const [products, setProducts] = useState([]);
   const [productFilter, setProductFilter] = useState('');
   const [pickerIndex, setPickerIndex] = useState(null); // legacy (não usado mais para inline)
   const [productPickerOpen, setProductPickerOpen] = useState(false);
   const [productPickerTarget, setProductPickerTarget] = useState(null);
+  const [deleteDraftId, setDeleteDraftId] = useState(null);
+  const [cancelNfeRow, setCancelNfeRow] = useState(null);
+  const [cancelNfeMotivo, setCancelNfeMotivo] = useState('');
   const [partyPickerOpen, setPartyPickerOpen] = useState(false);
   const [partyQuickOpen, setPartyQuickOpen] = useState(false);
   const [partyQuery, setPartyQuery] = useState('');
+  const [partyCodeInput, setPartyCodeInput] = useState('');
   const [partyList, setPartyList] = useState([]);
   const [partyModalTipo, setPartyModalTipo] = useState('cliente'); // 'cliente' | 'fornecedor'
   const [payMethods, setPayMethods] = useState([]);
@@ -216,18 +603,156 @@ export default function FiscalHubPage(){
   const [xmlPreviewOpen, setXmlPreviewOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [importComandaId, setImportComandaId] = useState('');
+  const [cancelNfceId, setCancelNfceId] = useState(null);
+  const [cancelNfceMotivo, setCancelNfceMotivo] = useState('');
   const [autoApplyCfop, setAutoApplyCfop] = useState(true);
+  const [emitConfirmOpen, setEmitConfirmOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
+
+  const exportZipFiscal = async ({ tipo, scope, includePdf }) => {
+    try {
+      if (!empresaInfo) { toast({ title: 'Empresa não carregada', variant: 'warning' }); return; }
+      const cfg = getTransmiteNotaConfigFromEmpresa(empresaInfo);
+      const ambiente = (cfg?.ambiente || 'homologacao');
+      const cnpj = cfg?.cnpj || '';
+      if (!cnpj) { toast({ title: 'CNPJ ausente', description: 'Preencha o CNPJ na Configuração Fiscal', variant: 'warning' }); return; }
+      setExporting(true);
+
+      let items = [];
+      if (tipo === 'nfce') {
+        let base = [];
+        if (scope === 'selected') {
+          const set = new Set(selectedIds);
+          if (selectedId) set.add(selectedId);
+          base = (rows||[]).filter(r => set.has(r.id));
+        } else {
+          base = (filtered||[]);
+        }
+        items = base.map(r => ({ tipo: 'nfce', chave: r.xml_chave, numero: r.nf_numero, serie: r.nf_serie, searchkey: r.xml_protocolo }));
+      } else if (tipo === 'nfe') {
+        let base = [];
+        if (scope === 'selected') {
+          const set = new Set(selectedIds);
+          if (selectedId) set.add(selectedId);
+          base = (nfeRows||[]).filter(r => set.has(r.id));
+        } else {
+          base = (nfeSorted||[]);
+        }
+        items = base.map(r => ({ tipo: 'nfe', chave: r.xml_chave, numero: r.numero, serie: r.serie }));
+      }
+      items = items.filter(it => (it.chave || (it.numero && it.serie) || it.searchkey));
+      if (!items.length) { toast({ title: 'Nada para exportar', description: 'Nenhum documento elegível encontrado.', variant: 'warning' }); return; }
+
+      const safe = (s) => String(s||'').replace(/[^0-9A-Za-z_-]/g,'');
+      const zipName = `${tipo}-${scope}-${safe(from)}_a_${safe(to)}${includePdf?'-xml-pdf':'-xml'}.zip`;
+
+      const fnUrl = `${supabase.supabaseUrl}/functions/v1/emissor`;
+      const resp = await fetch(fnUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${supabase.supabaseKey}`,
+          'apikey': supabase.supabaseKey,
+          'Accept': 'application/zip',
+        },
+        body: JSON.stringify({ acao: 'export_zip', ambiente, cnpj, dados: { items, includePdf, zipName } }),
+      });
+      if (!resp.ok) {
+        const t = await resp.text();
+        throw new Error(t || 'Falha ao gerar ZIP');
+      }
+      const buf = await resp.arrayBuffer();
+      const blob = new Blob([buf], { type: 'application/zip' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = zipName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast({ title: 'Exportação iniciada', description: `${items.length} documentos adicionados ao ZIP` });
+    } catch (e) {
+      toast({ title: 'Falha na exportação', description: e?.message || String(e), variant: 'destructive' });
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const onlyDigits = (v) => String(v||'').replace(/\D/g, '');
   const parseDec = (v) => {
-    const s = String(v ?? '').replace(/\./g,'').replace(',', '.');
+    if (v == null) return 0;
+    let s = String(v).trim();
+    if (!s) return 0;
+    const hasComma = s.includes(',');
+    const hasDot = s.includes('.');
+    if (hasComma && hasDot) {
+      // Formato tipo 1.234,56 -> remove pontos de milhar e usa vírgula como decimal
+      s = s.replace(/\./g, '').replace(',', '.');
+    } else if (hasComma) {
+      // Formato brasileiro simples 123,45 -> troca vírgula por ponto
+      s = s.replace(',', '.');
+    } else {
+      // Só dígitos e/ou ponto -> já está em formato numérico padrão
+      // não remover os pontos para não mudar escala (25.00 deve continuar 25)
+    }
     const n = Number(s);
     return Number.isFinite(n) ? n : 0;
+  };
+
+  const spreadGlobalDiscountOnForm = (form) => {
+    try {
+      const descG = parseDec(form?.totais?.desconto_geral) || 0;
+      const it = Array.isArray(form?.itens) ? form.itens : [];
+      if (!descG || !it.length) return form;
+      const bases = it.map((x) => {
+        const q = parseDec(x.quantidade);
+        const unit = parseDec(x.preco_unitario);
+        const bruto = q * unit;
+        const dperc = parseDec(x.desconto_percent);
+        const dval = parseDec(x.desconto_valor);
+        const acres = parseDec(x.acrescimos_valor);
+        const frete = parseDec(x.frete_valor);
+        const seguro = parseDec(x.seguro_valor);
+        const vDescLocal = dperc ? (bruto * dperc / 100) : dval;
+        return Math.max(0, bruto - vDescLocal + acres + frete + seguro);
+      });
+      const base = bases.reduce((s,v)=> s + v, 0);
+      if (!(base > 0)) return form;
+      const shares = bases.map(v => (descG * (v / base)));
+      const rounded = shares.map(x => Number((x).toFixed(2)));
+      let sum = rounded.reduce((s,v)=> s + v, 0);
+      let diff = Number((descG - sum).toFixed(2));
+      if (Math.abs(diff) >= 0.01) {
+        const last = rounded.length - 1;
+        rounded[last] = Number((rounded[last] + diff).toFixed(2));
+        sum = rounded.reduce((s,v)=> s + v, 0);
+      }
+      const itensAdj = it.map((x, idx) => {
+        const dperc = parseDec(x.desconto_percent);
+        const unit = parseDec(x.preco_unitario);
+        const q = parseDec(x.quantidade);
+        const bruto = q * unit;
+        const dvalExist = dperc ? (bruto * dperc / 100) : parseDec(x.desconto_valor);
+        const novoDescVal = Number((dvalExist + (rounded[idx] || 0)).toFixed(2));
+        return {
+          ...x,
+          desconto_percent: '',
+          desconto_valor: novoDescVal.toFixed(2),
+        };
+      });
+      return { ...form, itens: itensAdj, totais: { ...(form?.totais || {}), desconto_geral: '0.00' } };
+    } catch { return form; }
   };
 
   // Ajusta baixar_estoque conforme tipo da nota (Saída:true, Entrada:false)
   useEffect(() => {
     setManualForm(f => ({ ...f, baixar_estoque: f.tipo_nota !== 'entrada' }));
+  }, [manualForm.tipo_nota]);
+
+  // Ajusta o tipo de parte sugerido conforme operação (Saída: cliente, Entrada: fornecedor)
+  useEffect(() => {
+    setPartyModalTipo(manualForm.tipo_nota === 'entrada' ? 'fornecedor' : 'cliente');
   }, [manualForm.tipo_nota]);
 
   useEffect(() => {
@@ -256,36 +781,368 @@ export default function FiscalHubPage(){
   const handleItemClick = (idx) => (e) => {
     const tag = String(e?.target?.tagName || '').toLowerCase();
     if (['input','select','button','svg','path','textarea'].includes(tag)) return;
-    setExpandedItem(expandedItem===idx? null : idx);
+    setExpandedItem(prev => (prev === idx ? null : idx));
+    setManualTab('impostos');
   };
-  const moneyMaskBR = (value) => {
-    const digits = String(value||'').replace(/\D/g,'');
-    if (!digits) return '';
-    const int = digits.slice(0, Math.max(1, digits.length-2));
-    const dec = digits.slice(-2).padStart(2,'0');
-    const intFmt = Number(int).toLocaleString('pt-BR');
-    return `${intFmt},${dec}`;
+  const moneyMaskBR = (raw) => {
+    const digits = String(raw || '').replace(/\D/g, '');
+    const cents = digits ? Number(digits) / 100 : 0;
+    return new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(cents);
   };
 
-  const importFromComanda = async () => {
+  const emitirNota = async (formOverride = null, draftIdOverride = null) => {
     try {
-      if (!importComandaId) { toast({ title: 'Selecione uma comanda para importar', variant: 'warning' }); return; }
-      const itens = await listarItensDaComanda({ comandaId: importComandaId, codigoEmpresa });
+      const isEventLike = formOverride && typeof formOverride === 'object' && (('nativeEvent' in formOverride) || ('preventDefault' in formOverride) || ('target' in formOverride));
+      const form = (!formOverride || isEventLike) ? manualForm : formOverride;
+      const itens = form.itens || [];
+      try { console.log('[FiscalHub][emitirNota] start', { modelo: form.modelo, itensLen: Array.isArray(itens)?itens.length:0 }); } catch {}
+      if (!Array.isArray(itens) || itens.length === 0) { try { console.warn('[FiscalHub][emitirNota] itens ausentes', { form }); } catch {} toast({ title: 'Sem itens', variant: 'warning' }); return; }
+      if (!empresaInfo) { toast({ title: 'Empresa não carregada', variant: 'warning' }); return; }
+
+      const { baseUrl, cnpj } = getTransmiteNotaConfigFromEmpresa(empresaInfo);
+      if (!cnpj) { toast({ title: 'CNPJ ausente', description: 'Preencha o CNPJ na Configuração Fiscal', variant: 'warning' }); return; }
+
+      const isNFCe = String(form.modelo) === '65';
+      const formAdj = spreadGlobalDiscountOnForm(form);
+      let Dados = isNFCe
+        ? generateNfcePayloadFromManual({ form: formAdj, finalizadoras: payMethods || [] })
+        : generateNfePayloadFromManual({ form: formAdj });
+      try { console.log('[FiscalHub][emitirNota] payload gerado (antes do preflight)', { isNFCe, Dados }); } catch {}
+      // Mantém Itens em array simples durante as validações; será envelopado em [[...]] antes do envio
+      if (!isNFCe) {
+        if (!Dados || typeof Dados !== 'object') Dados = {};
+        if (!('forma_pagamento' in Dados)) Dados.forma_pagamento = 0;
+        if (!('meio_pagamento' in Dados) || !Dados.meio_pagamento) {
+          let mp = '99';
+          const p = Array.isArray(formAdj?.pagamentos) ? formAdj.pagamentos[0] : null;
+          if (p?.finalizadora_id && Array.isArray(payMethods) && payMethods.length) {
+            const fin = payMethods.find(f => String(f.id) === String(p.finalizadora_id));
+            if (fin?.codigo_sefaz) mp = String(fin.codigo_sefaz).padStart(2,'0');
+          }
+          Dados.meio_pagamento = mp;
+        } else {
+          Dados.meio_pagamento = String(Dados.meio_pagamento).padStart(2,'0');
+        }
+        if (!Dados.natureza_operacao || String(Dados.natureza_operacao).trim().length < 15) {
+          Dados.natureza_operacao = 'Venda de mercadoria';
+        }
+        try {
+          const itens = Array.isArray(Dados.Itens) ? Dados.Itens : [];
+          const somaSemDesc = itens.reduce((s,i)=> s + (Number(i?.valor_total_sem_desconto)||0), 0);
+          if (somaSemDesc > 0) Dados.valor_total_sem_desconto = (somaSemDesc).toFixed(2);
+        } catch {}
+        // Normalizar numero_destinatario: alguns provedores não aceitam 'SN'/'S/N' vazio
+        if ('numero_destinatario' in Dados) {
+          const nd = String(Dados.numero_destinatario || '').trim();
+          if (!nd || /^s\/?n$/i.test(nd)) Dados.numero_destinatario = '0';
+        }
+        // Garantir Série e Número: reservar automaticamente se não informado
+        let serieNum = Number(formAdj?.serie || 1) || 1;
+        if (!formAdj?.nNF) {
+          try {
+            try { await supabase.from('auditoria_fiscal').insert({ codigo_empresa: codigoEmpresa, acao: 'reservar_numero', modelo: '55', status: 'start', mensagem: `serie=${serieNum}` }); } catch {}
+            const { data: nr, error: nrErr } = await supabase.rpc('reservar_numero_fiscal', { p_modelo: '55', p_serie: serieNum, p_codigo_empresa: codigoEmpresa });
+            if (nrErr) throw nrErr;
+            const numeroReservado = Number(nr);
+            setManualForm(f => ({ ...f, nNF: String(numeroReservado), serie: String(serieNum) }));
+            Dados.Numero = numeroReservado;
+            Dados.Serie = serieNum;
+            try { await supabase.from('auditoria_fiscal').insert({ codigo_empresa: codigoEmpresa, acao: 'reservar_numero', modelo: '55', status: 'success', mensagem: `numero=${numeroReservado}` }); } catch {}
+          } catch (e) {
+            try { await supabase.from('auditoria_fiscal').insert({ codigo_empresa: codigoEmpresa, acao: 'reservar_numero', modelo: '55', status: 'error', mensagem: e?.message || String(e) }); } catch {}
+            toast({ title: 'Falha ao reservar numeração NF-e', description: e?.message || String(e), variant: 'destructive' });
+            return;
+          }
+        } else {
+          Dados.Numero = Number(formAdj.nNF);
+          Dados.Serie = serieNum;
+        }
+        // Ajustar indicador_ie_destinatario conforme doc/IE
+        try {
+          const doc = String(formAdj?.cpf_cnpj || '').replace(/\D/g, '');
+          const ieStr = String(formAdj?.inscricao_estadual || '').trim();
+          if (doc.length === 14) {
+            if (formAdj?.ie_isento) Dados.indicador_ie_destinatario = 2;
+            else if (ieStr && ieStr.toUpperCase() !== 'ISENTO') Dados.indicador_ie_destinatario = 1;
+            else Dados.indicador_ie_destinatario = 9;
+          } else {
+            Dados.indicador_ie_destinatario = 9;
+          }
+        } catch {}
+
+        // Pré-validações bloqueantes para NF-e
+        const errs = [];
+        const onlyDigits = (s)=> String(s||'').replace(/\D/g,'');
+        const doc = onlyDigits(formAdj?.cpf_cnpj);
+        if (!doc) errs.push('Informe CPF/CNPJ do destinatário');
+        if (!formAdj?.nome) errs.push('Informe o nome/razão social do destinatário');
+        if (!formAdj?.logradouro) errs.push('Informe o logradouro do destinatário');
+        // numero: vamos normalizar para '0' quando vazio/SN, então não bloquear
+        if (!formAdj?.bairro) errs.push('Informe o bairro do destinatário');
+        if (!formAdj?.cidade) errs.push('Informe a cidade do destinatário');
+        if (!formAdj?.uf) errs.push('Informe a UF do destinatário');
+        if (!formAdj?.cep) errs.push('Informe o CEP do destinatário');
+        if (!formAdj?.codigo_municipio_ibge) errs.push('Informe o código IBGE do município do destinatário');
+        if (doc.length === 14) {
+          const ieStr = String(formAdj?.inscricao_estadual || '').trim();
+          if (!formAdj?.ie_isento && (!ieStr || ieStr.toUpperCase()==='ISENTO')) errs.push('Informe a IE do destinatário ou marque ISENTO');
+        }
+        const itensChk = Array.isArray(formAdj?.itens) ? formAdj.itens : [];
+        if (!itensChk.length) errs.push('Adicione ao menos 1 item');
+        itensChk.forEach((it, idx) => {
+          const ncm = String(it?.ncm||'').trim();
+          const qtd = Number((it?.quantidade||'').toString().replace(',', '.'));
+          const preco = String(it?.preco_unitario||'').trim();
+          const cfop = String(it?.cfop||'').trim();
+          const ic = (it?.impostos||{}).icms||{}; const pis = (it?.impostos||{}).pis||{}; const cof = (it?.impostos||{}).cofins||{};
+          if (!ncm || /^0+$/.test(ncm)) errs.push(`Item ${idx+1}: NCM inválido`);
+          if (!cfop) errs.push(`Item ${idx+1}: CFOP obrigatório`);
+          if (!qtd || qtd<=0) errs.push(`Item ${idx+1}: quantidade inválida`);
+          if (preco === '' || preco == null) errs.push(`Item ${idx+1}: preço unitário obrigatório`);
+          if (!(ic.cst || ic.csosn)) errs.push(`Item ${idx+1}: preencha ICMS (CST/CSOSN)`);
+          const cstPis = String(pis.cst||'').trim();
+          const cstCof = String(cof.cst||'').trim();
+          if (cstPis === '01' && String(pis.aliquota||'').trim()==='') errs.push(`Item ${idx+1}: preencha alíquota de PIS (CST 01)`);
+          if (cstCof === '01' && String(cof.aliquota||'').trim()==='') errs.push(`Item ${idx+1}: preencha alíquota de COFINS (CST 01)`);
+        });
+        // Ajuste de consistência PIS/COFINS no payload (se CST=01 e aliquota<=0, trocar para 07 e limpar bases/valores)
+        try {
+          if (Array.isArray(Dados?.Itens)) {
+            if (Array.isArray(Dados.Itens[0])) {
+              Dados.Itens[0] = Dados.Itens[0].map((it) => {
+                const out = { ...it };
+                const ap = Number(String(out.aliquota_pis||'').replace(',', '.')) || 0;
+                const ac = Number(String(out.aliquota_cofins||'').replace(',', '.')) || 0;
+                if (String(out.pis_situacao_tributaria||'').trim()==='01' && ap<=0) {
+                  out.pis_situacao_tributaria = '07';
+                  out.base_calculo_pis = '';
+                  out.aliquota_pis = '';
+                  out.valor_pis = '';
+                }
+                if (String(out.cofins_situacao_tributaria||'').trim()==='01' && ac<=0) {
+                  out.cofins_situacao_tributaria = '07';
+                  out.base_calculo_cofins = '';
+                  out.aliquota_cofins = '';
+                  out.valor_cofins = '';
+                }
+                return out;
+              });
+            } else {
+              Dados.Itens = Dados.Itens.map((it) => {
+                const out = { ...it };
+                const ap = Number(String(out.aliquota_pis||'').replace(',', '.')) || 0;
+                const ac = Number(String(out.aliquota_cofins||'').replace(',', '.')) || 0;
+                if (String(out.pis_situacao_tributaria||'').trim()==='01' && ap<=0) {
+                  out.pis_situacao_tributaria = '07';
+                  out.base_calculo_pis = '';
+                  out.aliquota_pis = '';
+                  out.valor_pis = '';
+                }
+                if (String(out.cofins_situacao_tributaria||'').trim()==='01' && ac<=0) {
+                  out.cofins_situacao_tributaria = '07';
+                  out.base_calculo_cofins = '';
+                  out.aliquota_cofins = '';
+                  out.valor_cofins = '';
+                }
+                return out;
+              });
+            }
+          }
+        } catch {}
+        if (errs.length) {
+          toast({ title: 'Faltam dados para emitir NF-e', description: errs.slice(0,6).join(' • ')+(errs.length>6?` • (+${errs.length-6} itens)`:''), variant: 'destructive' });
+          return;
+        }
+      }
+
+      // marca como processando
+      const draftId = draftIdOverride ?? currentDraftId;
+      if (draftId && codigoEmpresa) {
+        try { await supabase.from('notas_fiscais').update({ status: 'processando' }).eq('id', draftId).eq('codigo_empresa', codigoEmpresa); } catch {}
+      }
+
+      toast({ title: 'Enviando nota...', description: `Modelo ${form.modelo}` });
+      try {
+        if (isNFCe && Array.isArray(Dados?.Itens) && !Array.isArray(Dados.Itens[0])) {
+          Dados.Itens = [Dados.Itens];
+        }
+        console.log('[FiscalHub][emitirNota] payload final (antes do envio)', { Dados });
+      } catch {}
+
+      let resp;
+      let envioErro = null;
+      try {
+        if (isNFCe) resp = await enviarNfce({ baseUrl, cnpj, dados: Dados });
+        else resp = await enviarNfe({ baseUrl, cnpj, dados: Dados });
+      } catch (err) {
+        envioErro = err;
+      }
+      try { console.log('[FiscalHub][emitirNota] resposta envio', { ok: !envioErro, resp, envioErro }); } catch {}
+
+      // Se a API respondeu 200 com erro de negócio (e.g., { status: 'Erro', codigo, campo, descricao })
+      if (!envioErro && resp && (typeof resp?.status === 'string') && /erro/i.test(resp.status)) {
+        const cod = resp?.codigo || resp?.Codigo || '';
+        const campo = resp?.campo || resp?.Campo || '';
+        const descr = resp?.descricao || resp?.Descricao || resp?.mensagem || resp?.message || 'Falha na emissão';
+        const msgErr = [campo, descr].filter(Boolean).join(' • ');
+        toast({ title: `Erro na emissão${cod ? ` ${cod}` : ''}`, description: msgErr, variant: 'destructive' });
+        const draftId = draftIdOverride ?? currentDraftId;
+        if (draftId && codigoEmpresa) {
+          try { await supabase.from('notas_fiscais').update({ status: 'erro' }).eq('id', draftId).eq('codigo_empresa', codigoEmpresa); await loadNfeRows(); } catch {}
+        }
+        return;
+      }
+
+      if (envioErro) {
+        // Para NFC-e, ocultar toast de erro e seguir com fallback silencioso
+        if (!isNFCe) {
+          const http = envioErro?.status ? `HTTP ${envioErro.status}` : 'Erro de transporte';
+          const descr = (typeof envioErro?.response === 'string' && envioErro.response) || envioErro?.response?.message || envioErro?.message || 'Tentando consultar status…';
+          toast({ title: 'Envio com erro', description: `${http}. ${descr}`.trim(), variant: 'warning' });
+        }
+      } else {
+        toast({ title: 'Envio solicitado', description: 'Consultando status...' });
+      }
+
+      const chave = resp?.chave_nota || resp?.chave || resp?.Chave || '';
+      let consulta = null;
+      const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+      for (let i = 0; i < 5; i++) {
+        const dadosConsulta = chave ? { chave_nota: chave, chave } : { numero: formAdj?.nNF, serie: formAdj?.serie };
+        try {
+          if (isNFCe) consulta = await consultarEmissaoNfce({ baseUrl, cnpj, dados: dadosConsulta });
+          else consulta = await consultarEmissaoNfe({ baseUrl, cnpj, dados: dadosConsulta });
+        } catch {}
+        const stPeek = String(consulta?.status || consulta?.cStat || '');
+        const msgPeek = consulta?.xMotivo || consulta?.mensagem || consulta?.message || '';
+        if (stPeek === '100' || /autorizad/i.test(msgPeek)) break;
+        await sleep(2000);
+      }
+
+      // Se ainda não autorizado ou sem URLs, tentar endpoints diretos de PDF/XML
+      let xmlUrl = consulta?.url_xml || consulta?.xml_url || resp?.url_xml || null;
+      let pdfUrl = consulta?.url_pdf || consulta?.pdf_url || resp?.url_pdf || null;
+      let chaveResp = chave || consulta?.chave_nota || consulta?.chave || consulta?.Chave || '';
+      if (!pdfUrl || !xmlUrl) {
+        const dadosFallback = chaveResp ? { chave_nota: chaveResp, chave: chaveResp } : { numero: formAdj?.nNF, serie: formAdj?.serie };
+        try {
+          if (isNFCe) {
+            const rpdf = await consultarPdfNfce({ baseUrl, cnpj, dados: dadosFallback });
+            pdfUrl = pdfUrl || rpdf?.url_pdf || rpdf?.pdf_url || null;
+            chaveResp = chaveResp || rpdf?.chave || rpdf?.Chave || '';
+          } else {
+            const rpdf = await consultarPdfNfe({ baseUrl, cnpj, dados: dadosFallback });
+            pdfUrl = pdfUrl || rpdf?.url_pdf || rpdf?.pdf_url || null;
+            chaveResp = chaveResp || rpdf?.chave || rpdf?.Chave || '';
+          }
+        } catch {}
+        try {
+          if (isNFCe) {
+            const rxml = await consultarXmlNfce({ baseUrl, cnpj, dados: dadosFallback });
+            xmlUrl = xmlUrl || rxml?.url_xml || rxml?.xml_url || null;
+            chaveResp = chaveResp || rxml?.chave || rxml?.Chave || '';
+          } else {
+            const rxml = await consultarXmlNfe({ baseUrl, cnpj, dados: dadosFallback });
+            xmlUrl = xmlUrl || rxml?.url_xml || rxml?.xml_url || null;
+            chaveResp = chaveResp || rxml?.chave || rxml?.Chave || '';
+          }
+        } catch {}
+      }
+
+      const st = String(consulta?.status || consulta?.cStat || '');
+      const msg = consulta?.xMotivo || consulta?.mensagem || consulta?.message || 'Status retornado';
+      const autorizada = (st === '100' || /autorizad/i.test(msg));
+      if (autorizada) {
+        toast({ title: 'Autorizada', description: msg, variant: 'success' });
+      } else if (st) {
+        toast({ title: `Status: ${st}`, description: msg, variant: 'warning' });
+      } else {
+        toast({ title: 'Consulta retornada', description: msg });
+      }
+
+      // persistir no rascunho
+      if (draftId && codigoEmpresa) {
+        try {
+          const newStatus = autorizada || (pdfUrl || xmlUrl) ? 'autorizada' : (/rejeit/i.test(msg) ? 'rejeitada' : (envioErro ? 'processando' : 'pendente'));
+          await supabase.from('notas_fiscais').update({
+            status: newStatus,
+            xml_chave: (chaveResp || chave || null),
+            xml_url: xmlUrl || null,
+            pdf_url: pdfUrl || null,
+            numero: form?.nNF ? Number(form.nNF) : null,
+            serie: form?.serie ? Number(form.serie) : null,
+          }).eq('id', draftId).eq('codigo_empresa', codigoEmpresa);
+          await loadNfeRows();
+        } catch {}
+      }
+    } catch (e) {
+      toast({ title: 'Falha na emissão', description: e?.message || String(e), variant: 'destructive' });
+    }
+  };
+
+  const applyProductByCode = (idx, rawCode) => {
+    const code = String(rawCode || '').trim().toLowerCase();
+    if (!code) return;
+    const prod = (products || []).find(p => String(p.code || '').trim().toLowerCase() === code);
+    if (prod && idx != null) {
+      applyProductToItem(idx, prod);
+    }
+  };
+
+  const importFromComanda = async (overrideId) => {
+    try {
+      const cid = overrideId || importComandaId;
+      if (!cid) { toast({ title: 'Selecione uma comanda para importar', variant: 'warning' }); return; }
+      const itens = await listarItensDaComanda({ comandaId: cid, codigoEmpresa });
+      if (!itens || !itens.length) {
+        toast({ title: 'Nenhum item encontrado nesta comanda', variant: 'warning' });
+        return;
+      }
+      console.log('[FiscalHub][NF-e manual] Itens da comanda para importação:', { comandaId: cid, itens });
+      const prodIds = Array.from(new Set((itens || []).map(it => it.produto_id).filter(Boolean)));
+      let prods = [];
+      if (prodIds.length) {
+        try {
+          let q = supabase.from('produtos').select('id, nome, codigo_produto, unidade, ncm, cest, cfop_interno, cfop_externo, cst_icms_interno, csosn_interno, aliquota_icms_interno, cst_pis_saida, aliquota_pis_percent, aliquota_cofins_percent, cst_ipi, aliquota_ipi_percent').in('id', prodIds);
+          if (codigoEmpresa) q = q.eq('codigo_empresa', codigoEmpresa);
+          const { data } = await q;
+          prods = data || [];
+        } catch {
+          prods = [];
+        }
+      }
+      console.log('[FiscalHub][NF-e manual] Produtos carregados para os itens da comanda:', { prodIds, prods });
+      const mapProd = new Map((prods || []).map(p => [p.id, p]));
       const mapped = (itens || []).map((it) => {
-        const p = (products || []).find(pp => String(pp.id) === String(it.produto_id));
-        const cfop = p?.cfopInterno || p?.cfopExterno || autoChooseCfop(manualForm.uf);
-        const unidade = (p?.unit || 'UN').toString().toUpperCase();
+        const p = mapProd.get(it.produto_id) || null;
+        const cfop = (p?.cfop_interno || p?.cfop_externo) || autoChooseCfop(manualForm.uf);
+        const unidade = (p?.unidade || 'UN').toString().toUpperCase();
         const preco = Number(it.preco_unitario || 0) || 0;
-        const pisCst = (p?.cstPisSaida) || ((p?.aliqPisPercent ?? null) != null ? '01' : '');
-        const cofinsCst = ((p?.aliqCofinsPercent ?? null) != null ? '01' : '');
+        const pisAliq = p?.aliquota_pis_percent;
+        const cofinsAliq = p?.aliquota_cofins_percent;
+        const pisCst = (p?.cst_pis_saida) || ((pisAliq ?? null) != null ? '01' : '');
+        const cofinsCst = ((cofinsAliq ?? null) != null ? '01' : '');
+        const qtd = Number(it.quantidade || 1) || 1;
+        const bruto = preco * qtd;
+        const autoBaseStr = bruto > 0 ? bruto.toFixed(2) : '';
+        const calcValor = (aliq) => {
+          const a = Number(aliq ?? 0);
+          if (!a || !bruto) return '';
+          const v = bruto * (a / 100);
+          return v.toFixed(2);
+        };
+        const icmsVal = calcValor(p?.aliquota_icms_interno);
+        const pisVal = calcValor(pisAliq);
+        const cofinsVal = calcValor(cofinsAliq);
+        const ipiVal = calcValor(p?.aliquota_ipi_percent);
         return {
-          descricao: it.descricao || p?.name || 'Item',
-          codigo: p?.code || '',
+          descricao: it.descricao || p?.nome || 'Item',
+          codigo: p?.codigo_produto || '',
           ncm: p?.ncm || '',
           cest: p?.cest || '',
           cfop: cfop || '5102',
           unidade,
-          quantidade: String(Number(it.quantidade || 1)),
+          quantidade: String(qtd),
           preco_unitario: preco.toFixed(2),
           desconto_valor: '0.00',
           desconto_percent: '',
@@ -293,15 +1150,16 @@ export default function FiscalHubPage(){
           obs: '',
           impostos: {
             origem: '',
-            icms: { cst: p?.cstIcmsInterno || '', csosn: p?.csosnInterno || '', base: '', aliquota: p?.aliqIcmsInterno != null ? String(p.aliqIcmsInterno) : '', valor: '' },
+            icms: { cst: p?.cst_icms_interno || '', csosn: p?.csosn_interno || '', base: autoBaseStr, aliquota: p?.aliquota_icms_interno != null ? String(p.aliquota_icms_interno) : '', valor: icmsVal },
             icmsst: { base: '', aliquota: '', valor: '' },
-            pis: { cst: pisCst, aliquota: p?.aliqPisPercent != null ? String(p.aliqPisPercent) : '', valor: '' },
-            cofins: { cst: cofinsCst, aliquota: p?.aliqCofinsPercent != null ? String(p.aliqCofinsPercent) : '', valor: '' },
-            ipi: { cst: p?.cstIpi || '', aliquota: p?.aliqIpiPercent != null ? String(p.aliqIpiPercent) : '', valor: '' },
+            pis: { cst: pisCst, aliquota: pisAliq != null ? String(pisAliq) : '', valor: pisVal },
+            cofins: { cst: cofinsCst, aliquota: cofinsAliq != null ? String(cofinsAliq) : '', valor: cofinsVal },
+            ipi: { cst: p?.cst_ipi || '', aliquota: p?.aliquota_ipi_percent != null ? String(p.aliquota_ipi_percent) : '', valor: ipiVal },
             iss: { aliquota: '', valor: '' },
           },
         };
       });
+      console.log('[FiscalHub][NF-e manual] Itens mapeados para o construtor manual:', mapped);
       if (!mapped.length) { toast({ title: 'Nenhum item encontrado nesta comanda', variant: 'warning' }); return; }
       setManualForm(f => ({ ...f, itens: mapped }));
       setImportOpen(false);
@@ -309,6 +1167,92 @@ export default function FiscalHubPage(){
     } catch (e) {
       toast({ title: 'Falha ao importar itens', description: e?.message || 'Tente novamente', variant: 'destructive' });
     }
+  };
+
+  const openManualFromComanda = async (id) => {
+    console.log('[FiscalHub][NF-e manual] openManualFromComanda called with id:', id);
+    if (!id) { toast({ title: 'Selecione uma comanda', variant: 'warning' }); return; }
+    const row = (rows || []).find(r => r.id === id);
+    console.log('[FiscalHub][NF-e manual] Comanda selecionada para NF-e:', row);
+    setManualTab('cliente');
+    setManualOpen(true);
+    setManualForm(() => {
+      const today = new Date();
+      const todayStrLocal = `${today.getFullYear()}-${pad(today.getMonth()+1)}-${pad(today.getDate())}`;
+      const total = Number(row?.total || 0) || 0;
+      const finName = (row?.finalizadorasStr || '').trim();
+      const finMatch = (payMethods || []).find(m => {
+        const nome = (m?.nome || '').trim().toLowerCase();
+        const target = finName.toLowerCase();
+        if (!nome || !target) return false;
+        return target === nome || target.startsWith(nome) || nome.startsWith(target);
+      });
+      return {
+        natOp: 'VENDA', serie: '1', nNF: '', indFinal: '1', indPres: '1', idDest: '1',
+        modelo: '55',
+        finNFe: '1',
+        data_emissao: todayStrLocal,
+        data_saida: todayStrLocal,
+        tipo_nota: 'saida',
+        baixar_estoque: true,
+        destacar_st: false,
+        cfop_padrao: '5102',
+        indIntermed: '0',
+        intermediador_cnpj: '',
+        intermediador_id: '',
+        parte_tipo: 'cliente',
+        party_id: '',
+        party_codigo: '',
+        tipo_pessoa: 'PJ', cpf_cnpj: '', nome: '', email: '', telefone: '',
+        inscricao_estadual: '', ie_isento: false,
+        indIEDest: '9',
+        logradouro: '', numero: '', bairro: '', cidade: '', uf: '', cep: '', codigo_municipio_ibge: '',
+        itens: [ {
+          descricao: '', codigo: '', cod_barras: '', ncm: '', cest: '', cfop: '5102', unidade: 'UN',
+          quantidade: '1', preco_unitario: '0.00', desconto_valor: '0.00', desconto_percent: '', acrescimos_valor: '0.00', frete_valor: '0.00', seguro_valor: '0.00', obs: '',
+          dest_icms: false, dest_icms_info: false, benef_fiscal: false,
+          impostos: {
+            origem: '',
+            icms: { cst: '', csosn: '', base: '', aliquota: '', valor: '', desonerado_valor:'', desoneracao_motivo:'', operacao_valor:'', aliq_diferimento:'', valor_diferido:'', reducao_percent:'', reducao_motivo:'', ad_rem:'', ad_rem_retencao:'', monofasico_bc:'', monofasico_valor:'', mono_retencao_bc:'', mono_retencao_valor:'', mono_cobrado_ant_bc:'', mono_cobrado_ant_valor:'', proprio_devido_valor:'' },
+            icmsst: { base: '', aliquota: '', valor: '' },
+            fcp: { base:'', aliquota:'', valor:'' },
+            fcpst: { base:'', aliquota:'', valor:'' },
+            pis: { cst: '', aliquota: '', valor: '' },
+            cofins: { cst: '', aliquota: '', valor: '' },
+            ipi: { cst: '', aliquota: '', valor: '', tipo_calculo: 'nenhum', valor_unit: '' },
+            combustivel: { uf:'', perc_origem_uf:'', indicador_importacao:'' },
+            cide: { base:'', aliq:'', valor:'' },
+            iss: { aliquota: '', valor: '' },
+          },
+        } ],
+        totais: { desconto_geral: '0.00', frete: '0.00', outras_despesas: '0.00' },
+        pagamentos: [ { finalizadora_id: finMatch?.id || '', tipo: finMatch?.nome || row?.finalizadorasStr || 'Dinheiro', bandeira: '', cnpj_credenciadora: '', autorizacao: '', valor: moneyMaskBR(total.toFixed(2)), parcelas: '', troco: '' } ],
+        transporte: { tipo_frete: '9', transportadora: '', placa: '', volumes: '', peso_liquido: '', peso_bruto: '' },
+        adicionais: { obs_gerais: '', info_fisco: '', info_cliente: '', referencia_doc: '' },
+      };
+    });
+    // Tentar pré-preencher o destinatário a partir do cliente principal da comanda
+    try {
+      const mainClientName = (row?.clientesStr || '').split(',')[0].trim();
+      if (mainClientName && codigoEmpresa) {
+        const { data } = await supabase
+          .from('clientes')
+          .select('*')
+          .eq('codigo_empresa', codigoEmpresa)
+          .ilike('nome', mainClientName)
+          .limit(1)
+          .single();
+        if (data) {
+          console.log('[FiscalHub][NF-e manual] Cliente principal encontrado para pré-preenchimento do destinatário:', data);
+          applyParty(data);
+        }
+      }
+    } catch (e) {
+      console.warn('[FiscalHub][NF-e manual] Falha ao pré-preencher destinatário a partir da comanda:', e);
+    }
+    setImportComandaId(String(id));
+    console.log('[FiscalHub][NF-e manual] Preparando importação de itens da comanda para NF-e, comandaId=', String(id));
+    try { await importFromComanda(String(id)); } catch (e) { console.error('[FiscalHub][NF-e manual] Erro ao importar itens da comanda para NF-e:', e); }
   };
 
   // CFOP catálogo (completo - JSON)
@@ -331,6 +1275,37 @@ export default function FiscalHubPage(){
     return () => { ignore = true; };
   }, [codigoEmpresa]);
 
+  // Carregar dados básicos da empresa para exibir como emitente na NF-e manual
+  useEffect(() => {
+    let cancelled = false;
+    async function run() {
+      if (!codigoEmpresa) return;
+      try {
+        const { data } = await supabase
+          .from('empresas')
+          .select('razao_social, nome_fantasia, cnpj, inscricao_estadual, regime_tributario, endereco, logradouro, numero, bairro, cidade, uf, cep, codigo_municipio_ibge, nfe_serie, nfce_serie, ambiente, transmitenota_apikey, transmitenota_base_url, transmitenota_apikey_hml, transmitenota_base_url_hml, transmitenota_apikey_prod, transmitenota_base_url_prod')
+          .eq('codigo_empresa', codigoEmpresa)
+          .single();
+        if (!cancelled) setEmpresaInfo(data || null);
+      } catch {
+        if (!cancelled) setEmpresaInfo(null);
+      }
+    }
+    run();
+    return () => { cancelled = true; };
+  }, [codigoEmpresa]);
+
+  // Ajustar série padrão conforme modelo selecionado e cadastro da empresa
+  useEffect(() => {
+    if (!empresaInfo) return;
+    setManualForm(f => {
+      const serieEmpresa = f.modelo === '65' ? (empresaInfo.nfce_serie || f.serie) : (empresaInfo.nfe_serie || f.serie);
+      const target = String(serieEmpresa || f.serie || '1');
+      if (String(f.serie || '') === target) return f;
+      return { ...f, serie: target };
+    });
+  }, [empresaInfo, manualForm.modelo]);
+
   // Carregar catálogo de produtos ao abrir o modal manual
   useEffect(() => {
     let active = true;
@@ -345,8 +1320,13 @@ export default function FiscalHubPage(){
 
   const filteredProducts = useMemo(() => {
     const t = (productFilter||'').trim().toLowerCase();
-    if (!t) return products.slice(0, 100);
-    return products.filter(p => (p.name||'').toLowerCase().includes(t) || (p.code||'').toLowerCase().includes(t)).slice(0, 100);
+    const base = (products||[]).slice().sort((a,b)=>{
+      const ca = Number(String(a.code||0).replace(/\D/g,''))||0;
+      const cb = Number(String(b.code||0).replace(/\D/g,''))||0;
+      return ca - cb;
+    });
+    if (!t) return base.slice(0, 100);
+    return base.filter(p => (p.name||'').toLowerCase().includes(t) || (p.code||'').toLowerCase().includes(t)).slice(0, 100);
   }, [products, productFilter]);
 
   const autoChooseCfop = (destUF, tipo = manualForm.tipo_nota) => {
@@ -417,25 +1397,33 @@ export default function FiscalHubPage(){
   useEffect(() => {
     let alive = true;
     async function loadParties(){
-      if (!partyPickerOpen) return;
+      if ((!partyPickerOpen && !manualOpen) || !codigoEmpresa) return;
       try {
-        if (partyModalTipo === 'fornecedor') {
-          const data = await listSuppliers(codigoEmpresa);
-          if (alive) setPartyList(data || []);
-        } else {
-          const data = await listarClientes({ searchTerm: partyQuery, limit: 50, codigoEmpresa });
-          if (alive) setPartyList(data || []);
-        }
+        const [clientes, fornecedores] = await Promise.all([
+          listarClientes({ searchTerm: null, limit: 200, codigoEmpresa }),
+          listSuppliers(codigoEmpresa),
+        ]);
+        const all = [...(clientes || []), ...(fornecedores || [])];
+        if (alive) setPartyList(all);
       } catch { if (alive) setPartyList([]); }
     }
     loadParties();
     return () => { alive = false; };
-  }, [partyPickerOpen, partyQuery, partyModalTipo, codigoEmpresa]);
+  }, [partyPickerOpen, manualOpen, codigoEmpresa]);
+
+  useEffect(() => {
+    if (partyPickerOpen) setPartyQuery('');
+  }, [partyPickerOpen]);
 
   const filteredPartyList = useMemo(() => {
     const t = (partyQuery||'').trim().toLowerCase();
-    if (!t) return partyList || [];
-    return (partyList||[]).filter(p => {
+    const base = (partyList||[]).slice().sort((a,b) => {
+      const ca = Number(String(a.codigo || a.codigo_cliente || a.codigo_fornecedor || a.code || 0).replace(/\D/g,''))||0;
+      const cb = Number(String(b.codigo || b.codigo_cliente || b.codigo_fornecedor || b.code || 0).replace(/\D/g,''))||0;
+      return ca - cb;
+    });
+    if (!t) return base;
+    return base.filter(p => {
       const code = String(p.codigo || p.codigo_cliente || p.codigo_fornecedor || p.code || '').toLowerCase();
       const nome = String(p.nome || p.razao_social || p.apelido || '').toLowerCase();
       const doc = String(p.cnpj || p.cpf || '').toLowerCase();
@@ -459,7 +1447,7 @@ export default function FiscalHubPage(){
     const isPJ = (p.tipo_pessoa || 'PJ') === 'PJ' || !!p.cnpj;
     setManualForm(f => ({
       ...f,
-      parte_tipo: partyModalTipo,
+      parte_tipo: (p.is_fornecedor ? 'fornecedor' : 'cliente'),
       party_id: p.id || '',
       party_codigo: String(p.codigo || p.codigo_cliente || p.codigo_fornecedor || p.code || ''),
       tipo_pessoa: isPJ ? 'PJ' : 'PF',
@@ -479,11 +1467,11 @@ export default function FiscalHubPage(){
     }));
     setPartyPickerOpen(false);
   };
-  // Carregar finalizadoras quando abrir a aba Pagamento
+  // Carregar finalizadoras quando abrir a aba Pagamentos da NF-e manual
   useEffect(() => {
     let alive = true;
     async function loadFins(){
-      if (!manualOpen || manualTab !== 'pagamento') return;
+      if (!manualOpen || manualStep !== 'pagamentos') return;
       try {
         const fins = await listarFinalizadoras({ somenteAtivas: true, codigoEmpresa });
         if (alive) setPayMethods(Array.isArray(fins) ? fins : []);
@@ -491,7 +1479,7 @@ export default function FiscalHubPage(){
     }
     loadFins();
     return () => { alive = false; };
-  }, [manualOpen, manualTab, codigoEmpresa]);
+  }, [manualOpen, manualStep, codigoEmpresa]);
   const isEmail = (s) => /.+@.+\..+/.test(String(s||''));
   const lookupCep = async (cepRaw) => {
     const cep = onlyDigits(cepRaw);
@@ -595,6 +1583,28 @@ export default function FiscalHubPage(){
 
   useEffect(() => { load(); }, [codigoEmpresa, from, to]);
 
+  const loadNfeRows = async () => {
+    if (!codigoEmpresa) return;
+    setNfeLoading(true);
+    try {
+      let q = supabase
+        .from('notas_fiscais')
+        .select('*')
+        .eq('codigo_empresa', codigoEmpresa)
+        .eq('modelo', '55')
+        .order('id', { ascending: false });
+      const { data, error } = await q;
+      if (error) throw error;
+      setNfeRows(data || []);
+    } catch (e) {
+      toast({ title: 'Erro ao carregar NF-e', description: e.message, variant: 'destructive' });
+    } finally {
+      setNfeLoading(false);
+    }
+  };
+
+  useEffect(() => { loadNfeRows(); }, [codigoEmpresa]);
+
   // Load minimal empresa config to show missing banner
   useEffect(() => {
     let ignore = false;
@@ -617,12 +1627,6 @@ export default function FiscalHubPage(){
         if (!data?.nfce_serie) miss.push('Série NFC-e');
         const amb = String(data?.ambiente || 'homologacao');
         if (amb === 'producao' && !data?.nfce_itoken) miss.push('CSC/IToken');
-        // Verificação por ambiente para Transmite Nota
-        const needProd = amb === 'producao';
-        const apiOk = needProd ? !!data?.transmitenota_apikey_prod || !!data?.transmitenota_apikey : !!data?.transmitenota_apikey_hml || !!data?.transmitenota_apikey;
-        const urlOk = needProd ? !!data?.transmitenota_base_url_prod || !!data?.transmitenota_base_url : !!data?.transmitenota_base_url_hml || !!data?.transmitenota_base_url;
-        if (!apiOk) miss.push(needProd ? 'ApiKey (PROD)' : 'ApiKey (HML)');
-        if (!urlOk) miss.push(needProd ? 'Base URL (PROD)' : 'Base URL (HML)');
         setEmpresaMissing(miss);
       } catch {}
     }
@@ -641,7 +1645,7 @@ export default function FiscalHubPage(){
   }, [codigoEmpresa, from, to]);
 
   const filtered = useMemo(() => {
-    const t = (search||'').trim().toLowerCase();
+    const t = (debouncedSearch||'').trim().toLowerCase();
     const statusOk = (r) => {
       const s = r.nf_status || 'pendente';
       if (focusPendRej) return (s === 'pendente' || s === 'rejeitada');
@@ -650,18 +1654,206 @@ export default function FiscalHubPage(){
     };
     return (rows||[]).filter(r => statusOk(r)).filter(r => {
       if (!t) return true;
-      return (r.xml_chave||'').toLowerCase().includes(t) || String(r.nf_numero||'').includes(t);
+      const mesa = String(r.mesaNumero||'');
+      const clientes = String(r.clientesStr||'');
+      const fins = String(r.finalizadorasStr||'');
+      return (r.xml_chave||'').toLowerCase().includes(t)
+        || String(r.nf_numero||'').includes(t)
+        || mesa.toLowerCase().includes(t)
+        || clientes.toLowerCase().includes(t)
+        || fins.toLowerCase().includes(t);
     });
-  }, [rows, search, statusFilter, focusPendRej]);
+  }, [rows, debouncedSearch, statusFilter, focusPendRej]);
+
+  const nfeFiltered = useMemo(() => {
+    const t = (debouncedSearch||'').trim().toLowerCase();
+    return (nfeRows||[]).filter(r => {
+      const rawStatus = (r.status || 'pendente').toLowerCase();
+      if (focusPendRej) {
+        if (!['pendente','rejeitada','rascunho'].includes(rawStatus)) return false;
+      }
+      if (statusFilter !== 'all') {
+        if (statusFilter === 'pendente') {
+          if (!['pendente','rascunho'].includes(rawStatus)) return false;
+        } else if (statusFilter === 'processando') {
+          if (rawStatus !== 'processando') return false;
+        } else if (statusFilter === 'autorizada') {
+          if (!['autorizada','emitida'].includes(rawStatus)) return false;
+        } else if (statusFilter === 'rejeitada') {
+          if (rawStatus !== 'rejeitada') return false;
+        } else if (statusFilter === 'cancelada') {
+          if (rawStatus !== 'cancelada') return false;
+        }
+      }
+
+      if (from || to) {
+        const dateStr = r.data_emissao || r.criado_em || r.created_at || null;
+        if (dateStr) {
+          const d = new Date(dateStr);
+          if (from) {
+            const f = new Date(from + 'T00:00:00');
+            if (d < f) return false;
+          }
+          if (to) {
+            const tt = new Date(to + 'T23:59:59.999');
+            if (d > tt) return false;
+          }
+        }
+      }
+
+      if (!t) return true;
+      const numero = String(r.numero ?? '').toLowerCase();
+      const serie = String(r.serie ?? '').toLowerCase();
+      const destinatarioNome = String(r.destinatario?.nome || '').toLowerCase();
+      const origemDesc = r.origem === 'comanda' ? `comanda ${r.comanda_id ?? ''}` : 'manual';
+      const origem = origemDesc.toLowerCase();
+      return numero.includes(t)
+        || serie.includes(t)
+        || destinatarioNome.includes(t)
+        || origem.includes(t);
+    });
+  }, [nfeRows, debouncedSearch, statusFilter, focusPendRej, from, to]);
+
+  const sorted = useMemo(() => {
+    const a = [...(filtered||[])];
+    const dir = sortDir === 'asc' ? 1 : -1;
+    return a.sort((x,y) => {
+      const sx = (v) => (v==null? '' : String(v).toLowerCase());
+      const nx = (v) => (v==null? 0 : Number(v)||0);
+      if (sortBy === 'aberto_em') return ((new Date(x.aberto_em)).getTime() - (new Date(y.aberto_em)).getTime()) * dir;
+      if (sortBy === 'nf_status') return (sx(x.nf_status).localeCompare(sx(y.nf_status))) * dir;
+      if (sortBy === 'mesa') return (nx(x.mesaNumero) - nx(y.mesaNumero)) * dir;
+      if (sortBy === 'nf_numero') return (nx(x.nf_numero) - nx(y.nf_numero)) * dir;
+      if (sortBy === 'total') return ((Number(x.total||x.total_com_desconto||0)) - (Number(y.total||y.total_com_desconto||0))) * dir;
+      return 0;
+    });
+  }, [filtered, sortBy, sortDir]);
+
+  const nfeSorted = useMemo(() => {
+    const a = [...(nfeFiltered||[])];
+    return a.sort((x,y) => {
+      const dx = x.data_emissao || x.criado_em || x.created_at || null;
+      const dy = y.data_emissao || y.criado_em || y.created_at || null;
+      const nx = dx ? new Date(dx).getTime() : 0;
+      const ny = dy ? new Date(dy).getTime() : 0;
+      return ny - nx;
+    });
+  }, [nfeFiltered]);
+
+  const totalPages = Math.max(1, Math.ceil((sorted||[]).length / pageSize));
+  useEffect(() => { if (page > totalPages) setPage(totalPages); }, [totalPages]);
+  const paged = useMemo(() => {
+    const start = (page - 1) * pageSize;
+    return (sorted||[]).slice(start, start + pageSize);
+  }, [sorted, page, pageSize]);
+
+  const nfePaged = useMemo(() => {
+    const start = (page - 1) * pageSize;
+    return (nfeSorted||[]).slice(start, start + pageSize);
+  }, [nfeSorted, page, pageSize]);
+  const allPageSelected = useMemo(() => {
+    if (!paged || paged.length === 0) return false;
+    return paged.every(r => selectedIds.includes(r.id));
+  }, [paged, selectedIds]);
+  const toggleAllPage = (checked) => {
+    setSelectedIds(prev => {
+      if (checked) {
+        const add = (paged||[]).map(r => r.id);
+        return Array.from(new Set([...(prev||[]), ...add]));
+      }
+      const idsOnPage = new Set((paged||[]).map(r => r.id));
+      return (prev||[]).filter(id => !idsOnPage.has(id));
+    });
+  };
+  const onRowClick = (id) => {
+    // Clique na linha: apenas focar a linha e abrir/fechar detalhes
+    setSelectedId(id);
+    setOpenDetails(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  };
+  const selectedRows = useMemo(() => (rows||[]).filter(r => selectedIds.includes(r.id)), [rows, selectedIds]);
+  const eligibleEmitIds = useMemo(() => selectedRows.filter(r => ['pendente','rejeitada'].includes(r.nf_status||'pendente')).map(r=>r.id), [selectedRows]);
+  const eligibleConsultIds = useMemo(
+    () => selectedRows
+      .filter(r => ['processando','rejeitada','pendente','erro'].includes(String(r.nf_status||'').toLowerCase()))
+      .map(r=>r.id),
+    [selectedRows]
+  );
+  const eligibleCancelIds = useMemo(() => selectedRows.filter(r => (r.nf_status||'')==='autorizada').map(r=>r.id), [selectedRows]);
+
+  const handleEmitBulk = async () => {
+    if (!eligibleEmitIds.length) { toast({ title: 'Nenhum elegível', description: 'Selecione notas pendentes/rejeitadas para emitir.', variant: 'destructive' }); return; }
+    const skipped = selectedIds.length - eligibleEmitIds.length;
+    const msg = `Emitindo ${eligibleEmitIds.length} NFC-e elegíveis${skipped>0?` (ignorando ${skipped} não elegíveis)`:''}...`;
+    toast({ title: 'Emissão de NFC-e', description: msg });
+    for (const id of eligibleEmitIds) {
+      // eslint-disable-next-line no-await-in-loop
+      await handleEmit(id);
+    }
+  };
+  const handleConsultBulk = async () => {
+    if (!eligibleConsultIds.length) { toast({ title: 'Nenhum elegível', description: 'Selecione notas para consultar.', variant: 'destructive' }); return; }
+    const skipped = selectedIds.length - eligibleConsultIds.length;
+    const msg = `Consultando ${eligibleConsultIds.length} NFC-e${skipped>0?` (ignorando ${skipped})`:''}...`;
+    toast({ title: 'Consulta de NFC-e', description: msg });
+    for (const id of eligibleConsultIds) {
+      // eslint-disable-next-line no-await-in-loop
+      await handleConsult(id);
+    }
+  };
+  const handleCancelBulk = async () => {
+    if (!eligibleCancelIds.length) { toast({ title: 'Nenhum elegível', description: 'Selecione NFC-e autorizadas para cancelar.', variant: 'destructive' }); return; }
+    // Por enquanto, cancelar uma NFC-e por vez usando o diálogo de motivo
+    const firstId = eligibleCancelIds[0];
+    setCancelNfceId(firstId);
+    setCancelNfceMotivo('');
+  };
+
+  const exportCsv = () => {
+    const delimiter = ';'; // pt-BR Excel geralmente espera ponto e vírgula
+    const escapeCell = (v) => {
+      let s = String(v ?? '');
+      s = s.replaceAll('"','""');
+      s = s.replaceAll(';','|'); // evita quebrar colunas
+      return `"${s}"`;
+    };
+    const headers = ['ComandaID','Mesa','Clientes','Finalizadoras','StatusNF','Numero','Serie','Chave','AutorizadoEm','CanceladoEm','Total'];
+    const lines = [headers.join(delimiter)];
+    (filtered||[]).forEach(r => {
+      const row = [
+        r.id,
+        r.mesaNumero ?? '',
+        (r.clientesStr||''),
+        (r.finalizadorasStr||''),
+        r.nf_status ?? '',
+        r.nf_numero ?? '',
+        r.nf_serie ?? '',
+        r.xml_chave ?? '',
+        r.nf_autorizado_em ?? '',
+        r.nf_cancelado_em ?? '',
+        String(r.total ?? '')
+      ];
+      lines.push(row.map(escapeCell).join(delimiter));
+    });
+    const blob = new Blob(["\uFEFF" + lines.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `central-fiscal-${new Date().toISOString().slice(0,10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
 
   const statusBadge = (s) => {
     const v = (s || 'pendente').toLowerCase();
     const map = {
+      rascunho: 'bg-gray-500/15 text-gray-300 border border-gray-400/30',
       pendente: 'bg-amber-500/15 text-amber-400 border border-amber-400/30',
       processando: 'bg-blue-500/15 text-blue-400 border border-blue-400/30',
       autorizada: 'bg-emerald-500/15 text-emerald-400 border border-emerald-400/30',
       rejeitada: 'bg-red-500/15 text-red-400 border border-red-400/30',
-      cancelada: 'bg-gray-500/15 text-gray-400 border border-gray-400/30',
+      cancelada: 'bg-violet-500/15 text-violet-400 border border-violet-400/30',
     };
     return map[v] || map.pendente;
   };
@@ -669,10 +1861,18 @@ export default function FiscalHubPage(){
   const openPreview = async (comandaId) => {
     try {
       setPreLoading(true);
+      setPreComandaId(comandaId);
       const emp = codigoEmpresa || getEmpresaCodigoFromCache();
-      const { payload, missing } = await generateNfcePayloadPreview({ comandaId, codigoEmpresa: emp });
+      const { empresa, payload, missing } = await generateNfcePayloadPreview({ comandaId, codigoEmpresa: emp });
       setPrePayload(payload);
       setPreMissing(missing || []);
+      try {
+        const cfg = getTransmiteNotaConfigFromEmpresa(empresa||{});
+        const ok = !!cfg && (cfg.cnpj||'').length===14 && !!cfg.apiKey && !!cfg.baseUrl;
+        setPreEmpresaCfgOk(ok);
+        setPreEligible(ok && (!missing || missing.length===0));
+      } catch { setPreEmpresaCfgOk(false); setPreEligible(false); }
+      setPreMissingCache(prev => ({ ...prev, [comandaId]: (missing||[]).length }));
       setPreOpen(true);
     } catch (e) {
       toast({ title: 'Falha ao gerar prévia', description: e.message, variant: 'destructive' });
@@ -703,10 +1903,30 @@ export default function FiscalHubPage(){
     if (!nfeComandaId) return;
     try {
       setNfeGenerating(true);
-      const xml = await gerarXMLNFe({ comandaId: nfeComandaId, codigoEmpresa, modelo: '55', overrides: nfeForm });
+      // Reservar numeração NF-e (modelo 55) usando série atual do formulário/empresa
+      const serieNum = Number(nfeForm.serie || 1) || 1;
+      let numeroReservado = null;
+      try {
+        try { await supabase.from('auditoria_fiscal').insert({ codigo_empresa: codigoEmpresa, acao: 'reservar_numero', modelo: '55', comanda_id: nfeComandaId, status: 'start', mensagem: `serie=${serieNum}` }); } catch {}
+        const { data: nr, error: nrErr } = await supabase.rpc('reservar_numero_fiscal', { p_modelo: '55', p_serie: serieNum, p_codigo_empresa: codigoEmpresa });
+        if (nrErr) throw nrErr;
+        numeroReservado = Number(nr);
+        try { await supabase.from('auditoria_fiscal').insert({ codigo_empresa: codigoEmpresa, acao: 'reservar_numero', modelo: '55', comanda_id: nfeComandaId, status: 'success', mensagem: `numero=${numeroReservado}` }); } catch {}
+      } catch (e) {
+        try { await supabase.from('auditoria_fiscal').insert({ codigo_empresa: codigoEmpresa, acao: 'reservar_numero', modelo: '55', comanda_id: nfeComandaId, status: 'error', mensagem: e?.message || String(e) }); } catch {}
+        toast({ title: 'Falha ao reservar numeração NF-e', description: e?.message || String(e), variant: 'destructive' });
+        setNfeGenerating(false);
+        return;
+      }
+      setNfeForm(f => ({ ...f, nNF: String(numeroReservado), serie: String(serieNum) }));
+      const overrides = { ...nfeForm, nNF: String(numeroReservado), serie: String(serieNum), idDest: (nfeForm.idDest==='auto' || !nfeForm.idDest) ? undefined : nfeForm.idDest };
+      try { await supabase.from('auditoria_fiscal').insert({ codigo_empresa: codigoEmpresa, acao: 'gerar_xml', modelo: '55', comanda_id: nfeComandaId, status: 'start', request: overrides }); } catch {}
+      const xml = await gerarXMLNFe({ comandaId: nfeComandaId, codigoEmpresa, modelo: '55', overrides });
       setNfeXml(xml);
+      try { await supabase.from('auditoria_fiscal').insert({ codigo_empresa: codigoEmpresa, acao: 'gerar_xml', modelo: '55', comanda_id: nfeComandaId, status: 'success' }); } catch {}
       toast({ title: 'XML NF-e gerado' });
     } catch (e) {
+      try { await supabase.from('auditoria_fiscal').insert({ codigo_empresa: codigoEmpresa, acao: 'gerar_xml', modelo: '55', comanda_id: nfeComandaId, status: 'error', mensagem: e?.message || String(e) }); } catch {}
       toast({ title: 'Falha ao gerar XML', description: e.message, variant: 'destructive' });
     } finally { setNfeGenerating(false); }
   };
@@ -715,6 +1935,7 @@ export default function FiscalHubPage(){
     if (!nfeXml || !nfeComandaId) return;
     try {
       setNfeSaving(true);
+      try { await supabase.from('auditoria_fiscal').insert({ codigo_empresa: codigoEmpresa, acao: 'salvar_xml', modelo: '55', comanda_id: nfeComandaId, status: 'start' }); } catch {}
       const path = `nfe/${codigoEmpresa}/${nfeComandaId}-${Date.now()}.xml`;
       const blob = new Blob([nfeXml], { type: 'text/xml;charset=utf-8' });
       const { error: upErr } = await supabase.storage.from('fiscal').upload(path, blob, { contentType: 'text/xml' });
@@ -743,9 +1964,11 @@ export default function FiscalHubPage(){
           destinatario: null,
         });
       } catch {}
+      try { await supabase.from('auditoria_fiscal').insert({ codigo_empresa: codigoEmpresa, acao: 'salvar_xml', modelo: '55', comanda_id: nfeComandaId, status: 'success' }); } catch {}
       toast({ title: 'XML salvo', description: url ? 'Link público gerado.' : 'Arquivo salvo no Storage.' });
       await load();
     } catch (e) {
+      try { await supabase.from('auditoria_fiscal').insert({ codigo_empresa: codigoEmpresa, acao: 'salvar_xml', modelo: '55', comanda_id: nfeComandaId, status: 'error', mensagem: e?.message || String(e) }); } catch {}
       toast({ title: 'Falha ao salvar XML', description: e.message, variant: 'destructive' });
     } finally { setNfeSaving(false); }
   };
@@ -758,21 +1981,109 @@ export default function FiscalHubPage(){
         toast({ title: 'Pendências para emissão', description: missing.join(', '), variant: 'destructive' });
         return;
       }
+      // Se a comanda estiver em estado fiscal quebrado (erro/rejeitada sem chave/número/série), limpa antes de tentar emitir de novo
+      try {
+        const row = rows.find(r => r.id === id);
+        const brokenStatus = row && (row.nf_status === 'erro' || row.nf_status === 'rejeitada');
+        const noKey = !row?.xml_chave;
+        const noNumber = !row?.nf_numero;
+        const noSerie = !row?.nf_serie;
+        if (row && brokenStatus && noKey && noNumber && noSerie) {
+          await updateComanda(id, {
+            nf_status: null,
+            nf_modelo: null,
+            nf_serie: null,
+            nf_numero: null,
+            nf_protocolo: null,
+            xml_chave: null,
+            nf_xml_url: null,
+            nf_pdf_url: null,
+            xml_protocolo: null,
+          });
+        }
+      } catch {}
+      try { await supabase.from('auditoria_fiscal').insert({ codigo_empresa: codigoEmpresa, acao: 'emitir', modelo: '65', comanda_id: id, status: 'start', request: payload?.Dados || null }); } catch {}
       const cfg = getTransmiteNotaConfigFromEmpresa(empresa);
       if (!cfg.cnpj || cfg.cnpj.length !== 14) {
         toast({ title: 'CNPJ inválido', description: 'CNPJ da empresa está ausente ou inválido (14 dígitos).', variant: 'destructive' });
         return;
       }
-      if (!cfg.apiKey || !cfg.baseUrl) {
-        toast({ title: 'Configuração fiscal incompleta', description: 'Preencha Base URL e ApiKey do ambiente atual nas Configurações.', variant: 'destructive' });
+      // Reserva de numeração (modelo 65 NFC-e)
+      const serieNum = Number(empresa?.nfce_serie || empresa?.nfe_serie || 1) || 1;
+      let reservado = null;
+      try {
+        const { data: nr, error: nrErr } = await supabase.rpc('reservar_numero_fiscal', { p_modelo: '65', p_serie: serieNum, p_codigo_empresa: codigoEmpresa });
+        if (nrErr) throw nrErr;
+        reservado = Number(nr);
+      } catch (nrE) {
+        toast({ title: 'Falha ao reservar numeração', description: nrE?.message || String(nrE), variant: 'destructive' });
         return;
       }
+      // Persistir na comanda e injetar no payload
+      await updateComanda(id, { nf_numero: reservado, nf_serie: serieNum });
+      try {
+        if (payload && payload.Dados) {
+          payload.Dados.Numero = reservado;
+          payload.Dados.Serie = serieNum;
+        }
+      } catch {}
       await updateComanda(id, { nf_status: 'processando' });
       let resp;
       try {
-        resp = await enviarNfce({ baseUrl: cfg.baseUrl, apiKey: cfg.apiKey, cnpj: cfg.cnpj, dados: payload.Dados });
+        resp = await enviarNfce({ baseUrl: cfg.baseUrl, cnpj: cfg.cnpj, dados: payload.Dados });
+        console.log('[FiscalHub][NFC-e emitir] resposta completa:', resp);
       } catch (err) {
-        await updateComanda(id, { nf_status: 'rejeitada' });
+        console.error('[FiscalHub][NFC-e emitir] erro ao enviar NFC-e:', err);
+        // Não assumir rejeição fiscal; pode ter sido erro de transporte. Marcar como 'processando' até confirmar.
+        await updateComanda(id, { nf_status: 'processando' });
+        try { await supabase.from('auditoria_fiscal').insert({ codigo_empresa: codigoEmpresa, acao: 'emitir', modelo: '65', comanda_id: id, status: 'error', mensagem: err?.message || String(err) }); } catch {}
+        // Fallback: consultar imediatamente, preferindo SearchKey (xml_protocolo). Se ausente, consultar por número/série para obtê-la, e depois buscar PDF/XML usando SearchKey.
+        try {
+          const row = rows.find(r => r.id === id) || {};
+          let searchKey = row.xml_protocolo || null;
+          let consulta = null;
+          if (searchKey) {
+            consulta = await consultarEmissaoNfce({ baseUrl: cfg.baseUrl, cnpj: cfg.cnpj, dados: { searchkey: searchKey, SearchKey: searchKey } });
+          } else {
+            const numeroF = row.nf_numero || reservado;
+            const serieF = row.nf_serie || serieNum;
+            const dc = numeroF && serieF ? { numero: numeroF, Numero: numeroF, serie: serieF, Serie: serieF } : (row.xml_chave ? { chave: row.xml_chave, Chave: row.xml_chave } : {});
+            consulta = await consultarEmissaoNfce({ baseUrl: cfg.baseUrl, cnpj: cfg.cnpj, dados: dc });
+            const sk = consulta?.searchkey || consulta?.SearchKey || consulta?.searchKey || null;
+            if (sk) { searchKey = sk; await updateComanda(id, { xml_protocolo: sk }); }
+          }
+          const rawStatus = String(consulta?.status || consulta?.Status || consulta?.cStat || '').toLowerCase();
+          const authorized = !!(consulta?.autorizada || consulta?.Autorizada || consulta?.sucesso || consulta?.Sucesso || rawStatus === '100');
+          if (authorized) {
+            const chaveFb = consulta?.chave || consulta?.Chave || row.xml_chave || null;
+            const pdfFb = consulta?.pdf_url || consulta?.PdfUrl || null;
+            const xmlFb = consulta?.xml_url || consulta?.XmlUrl || null;
+            const numeroFb = consulta?.numero || consulta?.Numero || row.nf_numero || null;
+            const serieFb = consulta?.serie || consulta?.Serie || row.nf_serie || null;
+            await updateComanda(id, { nf_status: 'autorizada', xml_chave: chaveFb, nf_pdf_url: pdfFb, nf_xml_url: xmlFb, nf_numero: numeroFb, nf_serie: serieFb });
+            try { await supabase.from('auditoria_fiscal').insert({ codigo_empresa: codigoEmpresa, acao: 'consultar', modelo: '65', comanda_id: id, status: 'success', response: consulta || null }); } catch {}
+            toast({ title: 'NFC-e autorizada', description: 'Documento autorizado após fallback de consulta.', variant: 'success' });
+            await load();
+            return; // evitar lançar erro
+          }
+          // Fallback 2: tentar PDF/XML com SearchKey se disponível; caso contrário, por número/série
+          const numeroF = row.nf_numero || reservado;
+          const serieF = row.nf_serie || serieNum;
+          let pdf = null, xml = null, chave = row.xml_chave || null;
+          if (searchKey) {
+            try { const rpdf = await consultarPdfNfce({ baseUrl: cfg.baseUrl, cnpj: cfg.cnpj, dados: { searchkey: searchKey, SearchKey: searchKey } }); console.log('[FiscalHub][NFC-e emitir->PDF fallback] resp:', rpdf); pdf = rpdf?.pdf_url || rpdf?.PdfUrl || null; chave = rpdf?.chave || rpdf?.Chave || chave; } catch {}
+            try { const rxml = await consultarXmlNfce({ baseUrl: cfg.baseUrl, cnpj: cfg.cnpj, dados: { searchkey: searchKey, SearchKey: searchKey } }); console.log('[FiscalHub][NFC-e emitir->XML fallback] resp:', rxml); xml = rxml?.xml_url || rxml?.XmlUrl || null; chave = chave || rxml?.chave || rxml?.Chave || chave; } catch {}
+          } else {
+            try { const rpdf = await consultarPdfNfce({ baseUrl: cfg.baseUrl, cnpj: cfg.cnpj, dados: { numero: numeroF, Numero: numeroF, serie: serieF, Serie: serieF } }); console.log('[FiscalHub][NFC-e emitir->PDF fallback] resp:', rpdf); pdf = rpdf?.pdf_url || rpdf?.PdfUrl || null; chave = rpdf?.chave || rpdf?.Chave || chave; } catch {}
+            try { const rxml = await consultarXmlNfce({ baseUrl: cfg.baseUrl, cnpj: cfg.cnpj, dados: { numero: numeroF, Numero: numeroF, serie: serieF, Serie: serieF } }); console.log('[FiscalHub][NFC-e emitir->XML fallback] resp:', rxml); xml = rxml?.xml_url || rxml?.XmlUrl || null; chave = chave || rxml?.chave || rxml?.Chave || chave; } catch {}
+          }
+          if (pdf || xml || chave) {
+            await updateComanda(id, { nf_status: (pdf||xml) ? 'autorizada' : 'processando', nf_pdf_url: pdf || row.nf_pdf_url, nf_xml_url: xml || row.nf_xml_url, xml_chave: chave || row.xml_chave, nf_numero: numeroF, nf_serie: serieF });
+            if (pdf) { toast({ title: 'NFC-e autorizada', description: 'DANFE encontrada (fallback).', variant: 'success' }); window.open(pdf, '_blank'); }
+            await load();
+            return; // evitar lançar erro
+          }
+        } catch {}
         throw err;
       }
       const chave = resp?.chave || resp?.Chave || resp?.chaveAcesso || null;
@@ -781,8 +2092,10 @@ export default function FiscalHubPage(){
       const pdf = resp?.pdf_url || resp?.PdfUrl || null;
       const xml = resp?.xml_url || resp?.XmlUrl || null;
       const protocolo = resp?.protocolo || resp?.Protocolo || null;
+      const searchKeyResp = resp?.searchkey || resp?.SearchKey || resp?.searchKey || null;
       const authorized = !!(resp?.autorizada || resp?.Autorizada || resp?.sucesso || resp?.Sucesso || chave);
-      await updateComanda(id, { nf_status: authorized ? 'autorizada' : 'processando', xml_chave: chave, nf_numero: numero, nf_serie: serie, nf_pdf_url: pdf, nf_xml_url: xml, xml_protocolo: protocolo });
+      await updateComanda(id, { nf_status: authorized ? 'autorizada' : 'processando', xml_chave: chave, nf_numero: numero, nf_serie: serie, nf_pdf_url: pdf, nf_xml_url: xml, xml_protocolo: protocolo || searchKeyResp });
+      try { await supabase.from('auditoria_fiscal').insert({ codigo_empresa: codigoEmpresa, acao: 'emitir', modelo: '65', comanda_id: id, status: 'success', response: resp || null }); } catch {}
       toast({ title: authorized ? 'NFC-e autorizada' : 'Emissão enviada', description: authorized ? 'Documento autorizado.' : 'Aguardando autorização.' });
       await load();
     } catch (e) {
@@ -797,32 +2110,114 @@ export default function FiscalHubPage(){
       if (!row) return;
       const { empresa } = await generateNfcePayloadPreview({ comandaId: id, codigoEmpresa });
       const cfg = getTransmiteNotaConfigFromEmpresa(empresa);
-      const dados = row.xml_chave ? { chave: row.xml_chave } : { numero: row.nf_numero, serie: row.nf_serie };
-      const resp = await consultarEmissaoNfce({ baseUrl: cfg.baseUrl, apiKey: cfg.apiKey, cnpj: cfg.cnpj, dados });
-      const status = resp?.status || resp?.Status || (resp?.autorizada ? 'autorizada' : row.nf_status);
-      const pdf = resp?.pdf_url || resp?.PdfUrl || row.nf_pdf_url;
-      const xml = resp?.xml_url || resp?.XmlUrl || row.nf_xml_url;
-      const chave = resp?.chave || resp?.Chave || row.xml_chave;
-      const numero = resp?.numero || resp?.Numero || row.nf_numero;
-      const serie = resp?.serie || resp?.Serie || row.nf_serie;
-      await updateComanda(id, { nf_status: status, nf_pdf_url: pdf, nf_xml_url: xml, xml_chave: chave, nf_numero: numero, nf_serie: serie });
-      toast({ title: 'Consulta concluída' });
+      try { await supabase.from('auditoria_fiscal').insert({ codigo_empresa: codigoEmpresa, acao: 'consultar', modelo: '65', comanda_id: id, status: 'start', request: row.xml_protocolo ? { searchkey: row.xml_protocolo } : { numero: row.nf_numero, serie: row.nf_serie } }); } catch {}
+
+      let resp = null;
+      let authorized = false;
+      let rawStatus = '';
+      let msg = 'Consulta retornada';
+      let pdf = row.nf_pdf_url;
+      let xml = row.nf_xml_url;
+      let chave = row.xml_chave;
+      let numero = row.nf_numero;
+      let serie = row.nf_serie;
+      const hasSearchKey = !!row.xml_protocolo; // usamos xml_protocolo para armazenar searchkey quando disponível
+
+      // 1) Se já temos SearchKey, usar nfce_consultar corretamente
+      if (hasSearchKey) {
+        try {
+          resp = await consultarEmissaoNfce({ baseUrl: cfg.baseUrl, cnpj: cfg.cnpj, dados: { SearchKey: row.xml_protocolo, searchkey: row.xml_protocolo } });
+          console.log('[FiscalHub][NFC-e consulta] resposta completa:', resp);
+          rawStatus = String(resp?.status || resp?.Status || resp?.cStat || '').toLowerCase();
+          msg = resp?.xMotivo || resp?.mensagem || resp?.message || msg;
+          authorized = !!(resp?.autorizada || resp?.Autorizada || resp?.sucesso || resp?.Sucesso || rawStatus === '100');
+          pdf = resp?.pdf_url || resp?.PdfUrl || pdf;
+          xml = resp?.xml_url || resp?.XmlUrl || xml;
+          chave = resp?.chave || resp?.Chave || chave;
+          numero = resp?.numero || resp?.Numero || numero;
+          serie = resp?.serie || resp?.Serie || serie;
+        } catch (e) {
+          console.warn('[FiscalHub][NFC-e consulta] consulta por SearchKey falhou, tentando PDF/XML direto', e);
+        }
+      }
+
+      // 2) Se ainda sem PDF/XML, ir direto para PDF/XML por numero/serie (sem nfce_consultar)
+      if (!pdf && !xml) {
+        const baseDados = hasSearchKey
+          ? { searchkey: (row.xml_protocolo || ''), SearchKey: (row.xml_protocolo || '') }
+          : { numero, Numero: numero, serie, Serie: serie };
+        try {
+          const rpdf = await consultarPdfNfce({ baseUrl: cfg.baseUrl, cnpj: cfg.cnpj, dados: baseDados });
+          console.log('[FiscalHub][NFC-e consulta] PDF resp:', rpdf);
+          pdf = rpdf?.pdf_url || rpdf?.PdfUrl || pdf;
+          chave = rpdf?.chave || rpdf?.Chave || chave;
+        } catch (e) { console.warn('[FiscalHub][NFC-e consulta] PDF erro:', e); }
+        try {
+          const rxml = await consultarXmlNfce({ baseUrl: cfg.baseUrl, cnpj: cfg.cnpj, dados: baseDados });
+          console.log('[FiscalHub][NFC-e consulta] XML resp:', rxml);
+          xml = rxml?.xml_url || rxml?.XmlUrl || xml;
+          chave = chave || rxml?.chave || rxml?.Chave || chave;
+        } catch (e) { console.warn('[FiscalHub][NFC-e consulta] XML erro:', e); }
+        authorized = !!(pdf || xml || authorized);
+        rawStatus = authorized ? '100' : (row.nf_status || 'pendente');
+        msg = authorized ? 'Documento localizado' : msg;
+      }
+
+      let finalStatus = row.nf_status || 'processando';
+      if (authorized) finalStatus = 'autorizada';
+      else if (rawStatus && rawStatus.includes && rawStatus.includes('rejeit')) finalStatus = 'rejeitada';
+      else if (rawStatus === 'erro') finalStatus = row.nf_status || 'pendente'; // não degradar para rejeitada sem evidência
+      else if (typeof rawStatus === 'string' && rawStatus) finalStatus = rawStatus;
+
+      await updateComanda(id, { nf_status: finalStatus, nf_pdf_url: pdf, nf_xml_url: xml, xml_chave: chave, nf_numero: numero, nf_serie: serie });
+      try { await supabase.from('auditoria_fiscal').insert({ codigo_empresa: codigoEmpresa, acao: 'consultar', modelo: '65', comanda_id: id, status: 'success', response: resp || null }); } catch {}
+      toast({ title: authorized ? 'NFC-e autorizada' : `Status: ${rawStatus || finalStatus}`, description: msg, variant: authorized ? 'success' : 'warning' });
       await load();
     } catch (e) { toast({ title: 'Falha ao consultar', description: e.message, variant: 'destructive' }); }
     finally { setLoading(false); }
   };
 
-  const handleCancel = async (id) => {
+  const handleCancel = async (id, motivoText) => {
     try {
-      const motivo = window.prompt('Informe o motivo do cancelamento:');
-      if (!motivo) return;
+      const motivo = (motivoText || '').trim();
+      if (!motivo) { toast({ title: 'Informe o motivo do cancelamento', variant: 'warning' }); return; }
       setLoading(true);
       const { empresa } = await generateNfcePayloadPreview({ comandaId: id, codigoEmpresa });
       const cfg = getTransmiteNotaConfigFromEmpresa(empresa);
       const row = rows.find(r => r.id === id);
-      const dados = row.xml_chave ? { chave: row.xml_chave, motivo } : { numero: row.nf_numero, serie: row.nf_serie, motivo };
-      await cancelarNfce({ baseUrl: cfg.baseUrl, apiKey: cfg.apiKey, cnpj: cfg.cnpj, dados });
+      const baseDados = row && row.xml_chave
+        ? { chave: row.xml_chave, motivo }
+        : { numero: row?.nf_numero, serie: row?.nf_serie, motivo };
+      try { await supabase.from('auditoria_fiscal').insert({ codigo_empresa: codigoEmpresa, acao: 'cancelar', modelo: '65', comanda_id: id, status: 'start', request: baseDados }); } catch {}
+
+      let resp = await cancelarNfce({ baseUrl: cfg.baseUrl, apiKey: cfg.apiKey, cnpj: cfg.cnpj, dados: baseDados });
+
+      // Se provedor pedir SearchKey (erro 1301 / campo searchkey) e tivermos xml_protocolo, tentar novamente usando searchkey
+      try {
+        const isErroNegocio = resp && typeof resp.status === 'string' && /erro/i.test(resp.status);
+        const cod = resp?.codigo || resp?.Codigo || '';
+        const campo = (resp?.campo || resp?.Campo || '').toString().toLowerCase();
+        const precisaSK = isErroNegocio && (cod === '1301' || campo === 'searchkey');
+        if (precisaSK && row?.xml_protocolo) {
+          const dadosSK = { searchkey: row.xml_protocolo, SearchKey: row.xml_protocolo, motivo };
+          try { await supabase.from('auditoria_fiscal').insert({ codigo_empresa: codigoEmpresa, acao: 'cancelar', modelo: '65', comanda_id: id, status: 'retry_searchkey', request: dadosSK }); } catch {}
+          resp = await cancelarNfce({ baseUrl: cfg.baseUrl, apiKey: cfg.apiKey, cnpj: cfg.cnpj, dados: dadosSK });
+        }
+      } catch {}
+
+      const isErroFinal = resp && typeof resp.status === 'string' && /erro/i.test(resp.status);
+      if (isErroFinal) {
+        const cod = resp?.codigo || resp?.Codigo || '';
+        const campo = resp?.campo || resp?.Campo || '';
+        const descr = resp?.descricao || resp?.Descricao || resp?.mensagem || resp?.message || 'Falha ao cancelar NFC-e';
+        const msgErr = [campo, descr].filter(Boolean).join(' • ');
+        toast({ title: `Erro ao cancelar${cod ? ` ${cod}` : ''}`, description: msgErr, variant: 'destructive' });
+        try { await supabase.from('auditoria_fiscal').insert({ codigo_empresa: codigoEmpresa, acao: 'cancelar', modelo: '65', comanda_id: id, status: 'business_error', response: resp || null }); } catch {}
+        return;
+      }
+
       await updateComanda(id, { nf_status: 'cancelada' });
+      try { await supabase.from('auditoria_fiscal').insert({ codigo_empresa: codigoEmpresa, acao: 'cancelar', modelo: '65', comanda_id: id, status: 'success', response: resp || null }); } catch {}
       toast({ title: 'NFC-e cancelada' });
       await load();
     } catch (e) { toast({ title: 'Falha ao cancelar', description: e.message, variant: 'destructive' }); }
@@ -832,7 +2227,7 @@ export default function FiscalHubPage(){
   return (
     <div className="relative p-4">
       <Helmet><title>Central Fiscal</title></Helmet>
-      {true && (
+      {false && (
         <div className="absolute inset-0 z-[10] flex justify-center items-start pt-10 pb-8 pointer-events-auto">
           {/* Fundo escurecido e borrado, semelhante ao overlay da Ísis */}
           <div className="absolute inset-0 bg-black/85 backdrop-blur-md" />
@@ -873,19 +2268,138 @@ export default function FiscalHubPage(){
           </div>
         </div>
       )}
-      <div className="flex items-center justify-between mb-3">
-        <h1 className="text-xl font-semibold">Central Fiscal</h1>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="rounded-full"
-          onClick={() => navigate('/configuracao-fiscal')}
-          title="Configuração Fiscal"
-        >
-          <Settings className="w-4 h-4" />
-        </Button>
-      </div>
+      <Tabs value={tab} onValueChange={setTab} className="w-full">
+
+        <div className="flex flex-col gap-2 mb-4">
+          <div className="flex items-center justify-between gap-4 flex-wrap">
+            <div>
+              <h1 className="text-xl font-semibold">Central Fiscal</h1>
+              <p className="text-xs text-text-secondary mt-1 hidden sm:block">
+                Acompanhe NFC-e e NF-e, pendências e cancelamentos em um só lugar.
+              </p>
+            </div>
+            <div className="flex items-center gap-3 flex-wrap justify-end">
+              <TabsList className="hidden sm:inline-flex rounded-full bg-surface-2 px-1 py-0.5">
+                <TabsTrigger value="nfce">NFC-e</TabsTrigger>
+                <TabsTrigger value="nfe">NF-e Saída</TabsTrigger>
+                <TabsTrigger value="compras">NF-e Entrada (Compras)</TabsTrigger>
+              </TabsList>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="rounded-full"
+                  onClick={exportCsv}
+                  title="Exportar CSV das comandas/NF"
+                >
+                  Exportar CSV
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="rounded-full"
+                  onClick={() => navigate('/configuracao-fiscal')}
+                  title="Configuração Fiscal da Empresa"
+                >
+                  <Settings className="w-4 h-4" />
+                </Button>
+              </div>
+            </div>
+          </div>
+
+          {/* Tabs para telas pequenas */}
+          <TabsList className="sm:hidden w-full justify-start rounded-lg bg-surface-2 px-1 py-1 overflow-x-auto">
+            <TabsTrigger value="nfce" className="flex-1 min-w-[90px]">NFC-e</TabsTrigger>
+            <TabsTrigger value="nfe" className="flex-1 min-w-[100px]">NF-e Saída</TabsTrigger>
+            <TabsTrigger value="compras" className="flex-1 min-w-[130px]">NF-e Entrada</TabsTrigger>
+          </TabsList>
+
+          {/* Filtros globais (afetam NFC-e e NF-e Saída, baseados nas comandas) */}
+          <div className="bg-surface-2/60 border border-border/70 rounded-xl px-3 py-3 flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-2 min-w-[220px]">
+              <Label className="text-xs text-text-secondary">Buscar</Label>
+              <Input value={search} onChange={(e)=>setSearch(e.target.value)} placeholder="Chave, número, cliente..." className="w-[200px] sm:w-60 h-8 text-xs" />
+            </div>
+            <div className="flex items-center gap-2">
+              <Label className="text-xs text-text-secondary">Status</Label>
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger className="w-[150px] h-8 rounded-full text-xs">
+                  <SelectValue placeholder="Selecionar status" />
+                </SelectTrigger>
+                <SelectContent className="rounded-xl text-xs">
+                  <SelectItem value="all">Todos</SelectItem>
+                  <SelectItem value="pendente">Pendente</SelectItem>
+                  <SelectItem value="processando">Em andamento</SelectItem>
+                  <SelectItem value="autorizada">Autorizada</SelectItem>
+                  <SelectItem value="rejeitada">Rejeitada</SelectItem>
+                  <SelectItem value="cancelada">Cancelada</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex items-center gap-2">
+              <Label className="text-xs text-text-secondary">Período</Label>
+              <div className="inline-flex items-center gap-2">
+                <Popover modal={true}>
+                  <PopoverTrigger asChild>
+                    <button
+                      type="button"
+                      className="h-7 px-2 rounded-md bg-surface border border-border text-xs inline-flex items-center gap-1"
+                    >
+                      <span>
+                        {from ? new Date(from + 'T00:00:00').toLocaleDateString('pt-BR') : 'Início'}
+                      </span>
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-2 z-50" align="start">
+                    <Calendar
+                      mode="single"
+                      selected={from ? new Date(from + 'T00:00:00') : undefined}
+                      onSelect={(d) => {
+                        if (!d) return;
+                        const y = d.getFullYear();
+                        const m = pad(d.getMonth() + 1);
+                        const dy = pad(d.getDate());
+                        setFrom(`${y}-${m}-${dy}`);
+                      }}
+                    />
+                  </PopoverContent>
+                </Popover>
+                <span className="text-text-secondary text-xs">até</span>
+                <Popover modal={true}>
+                  <PopoverTrigger asChild>
+                    <button
+                      type="button"
+                      className="h-7 px-2 rounded-md bg-surface border border-border text-xs inline-flex items-center gap-1"
+                    >
+                      <span>
+                        {to ? new Date(to + 'T00:00:00').toLocaleDateString('pt-BR') : 'Fim'}
+                      </span>
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-2 z-50" align="start">
+                    <Calendar
+                      mode="single"
+                      selected={to ? new Date(to + 'T00:00:00') : undefined}
+                      onSelect={(d) => {
+                        if (!d) return;
+                        const y = d.getFullYear();
+                        const m = pad(d.getMonth() + 1);
+                        const dy = pad(d.getDate());
+                        setTo(`${y}-${m}-${dy}`);
+                      }}
+                    />
+                  </PopoverContent>
+                </Popover>
+              </div>
+            </div>
+            <div className="inline-flex items-center gap-2 text-xs ml-auto">
+              <Checkbox checked={focusPendRej} onCheckedChange={setFocusPendRej} className="rounded-full border-warning data-[state=checked]:bg-warning" />
+              <span>Somente pendentes/rejeitadas</span>
+            </div>
+          </div>
+        </div>
 
       {empresaMissing.length > 0 && (
         <div className="mb-4 p-3 rounded-md border border-warning/40 bg-warning/10 text-warning">
@@ -901,204 +2415,606 @@ export default function FiscalHubPage(){
         </div>
       )}
 
-      <Tabs value={tab} onValueChange={setTab} className="w-full">
-        <TabsList className="mb-3">
-          <TabsTrigger value="nfce">NFC-e</TabsTrigger>
-          <TabsTrigger value="nfe">NF-e</TabsTrigger>
-        </TabsList>
-
         <TabsContent value="nfce">
-          <div className="flex items-center gap-3 mb-3 flex-wrap">
-            <div className="flex items-center gap-2">
-              <Label className="text-sm">Buscar</Label>
-              <Input value={search} onChange={(e)=>setSearch(e.target.value)} placeholder="Chave, número..." className="w-60" />
-            </div>
-            <Label className="text-sm ml-1">Status</Label>
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-[170px] rounded-full">
-                <SelectValue placeholder="Selecionar status" />
-              </SelectTrigger>
-              <SelectContent className="rounded-xl">
-                <SelectItem value="all">Todos</SelectItem>
-                <SelectItem value="pendente">Pendente</SelectItem>
-                <SelectItem value="processando">Em andamento</SelectItem>
-                <SelectItem value="autorizada">Autorizada</SelectItem>
-                <SelectItem value="rejeitada">Rejeitada</SelectItem>
-                <SelectItem value="cancelada">Cancelada</SelectItem>
-              </SelectContent>
-            </Select>
-            <Label className="text-sm ml-2">Período</Label>
-            <div className="inline-flex items-center gap-2">
-              <DateInput label="Período inicial" value={from} onChange={setFrom} />
-              <span className="text-text-secondary">até</span>
-              <DateInput label="Período final" value={to} onChange={setTo} />
-            </div>
-            <div className="inline-flex items-center gap-2 ml-2 text-sm">
-              <Checkbox checked={focusPendRej} onCheckedChange={setFocusPendRej} className="rounded-full border-warning data-[state=checked]:bg-warning" />
-              <span>Somente pendentes/rejeitadas</span>
-            </div>
-          </div>
 
-          <div className="flex items-center gap-2 mb-2">
-            <Button size="sm" variant="outline" disabled={!selectedId} onClick={() => (async () => {
-              const row = rows.find(r => r.id === selectedId);
+          <div className="flex items-center gap-2 mb-2 flex-nowrap whitespace-nowrap relative z-10">
+            <div className="ml-auto flex items-center gap-2 text-xs text-text-secondary">
+              <span>Selecionadas: <strong className="text-text-primary">{selectedIds.length}</strong></span>
+              <Button size="sm" variant="outline" onClick={()=>setSelectedIds([])} disabled={selectedIds.length===0}>Limpar</Button>
+              <Button size="sm" variant="outline" onClick={()=>setSelectedIds(Array.from(new Set((filtered||[]).map(r=>r.id))))} disabled={(filtered||[]).length===0}>Selecionar filtrados</Button>
+            </div>
+            <Button size="sm" variant="outline" disabled={!canConsult || (selectedIds.length===0 && !selectedId)} onClick={() => (async () => {
+              const pickId = selectedId || selectedIds[0];
+              const row = rows.find(r => r.id === pickId);
               if (!row) return;
               if (row.nf_pdf_url) { window.open(row.nf_pdf_url, '_blank'); return; }
               try {
                 setLoading(true);
                 const { empresa } = await generateNfcePayloadPreview({ comandaId: row.id, codigoEmpresa });
                 const cfg = getTransmiteNotaConfigFromEmpresa(empresa);
-                const dados = row.xml_chave ? { chave: row.xml_chave } : { numero: row.nf_numero, serie: row.nf_serie };
-                const resp = await consultarEmissaoNfce({ baseUrl: cfg.baseUrl, apiKey: cfg.apiKey, cnpj: cfg.cnpj, dados });
-                const pdf = resp?.pdf_url || resp?.PdfUrl;
-                if (pdf) { await supabase.from('comandas').update({ nf_pdf_url: pdf }).eq('id', row.id).eq('codigo_empresa', codigoEmpresa); window.open(pdf, '_blank'); }
+                let pdf = null, xml = null, chave = row.xml_chave || null; let authorized = false;
+
+                // 1) Se tivermos SearchKey salva (xml_protocolo), tentar consulta completa por ela
+                if (row.xml_protocolo) {
+                  try {
+                    const resp = await consultarEmissaoNfce({ baseUrl: cfg.baseUrl, cnpj: cfg.cnpj, dados: { SearchKey: row.xml_protocolo, searchkey: row.xml_protocolo } });
+                    console.log('[FiscalHub][NFC-e visualizar->consulta] resposta completa:', resp);
+                    const rawStatus = String(resp?.status || resp?.Status || resp?.cStat || '').toLowerCase();
+                    authorized = !!(resp?.autorizada || resp?.Autorizada || resp?.sucesso || resp?.Sucesso || rawStatus === '100');
+                    pdf = resp?.pdf_url || resp?.PdfUrl || null;
+                    xml = resp?.xml_url || resp?.XmlUrl || null;
+                    chave = resp?.chave || resp?.Chave || chave;
+                  } catch (e) {
+                    console.warn('[FiscalHub][NFC-e visualizar] consulta por SearchKey falhou, tentando PDF/XML direto', e);
+                  }
+                }
+
+                // 2) Se ainda não temos PDF/XML, buscar direto por número/série
+                if (!pdf && !xml) {
+                  const baseDados = { numero: row.nf_numero, Numero: row.nf_numero, serie: row.nf_serie, Serie: row.nf_serie };
+                  try {
+                    const rpdf = await consultarPdfNfce({ baseUrl: cfg.baseUrl, cnpj: cfg.cnpj, dados: baseDados });
+                    pdf = rpdf?.pdf_url || rpdf?.PdfUrl || pdf;
+                    chave = rpdf?.chave || rpdf?.Chave || chave;
+                  } catch {}
+                  try {
+                    const rxml = await consultarXmlNfce({ baseUrl: cfg.baseUrl, cnpj: cfg.cnpj, dados: baseDados });
+                    xml = rxml?.xml_url || rxml?.XmlUrl || xml;
+                    chave = chave || rxml?.chave || rxml?.Chave || chave;
+                  } catch {}
+                  authorized = !!(pdf || xml || authorized);
+                }
+                if (pdf || xml || authorized || chave) {
+                  await supabase.from('comandas').update({
+                    nf_pdf_url: pdf || row.nf_pdf_url,
+                    nf_xml_url: xml || row.nf_xml_url,
+                    xml_chave: chave || row.xml_chave,
+                    nf_status: authorized ? 'autorizada' : (row.nf_status || null),
+                  }).eq('id', row.id).eq('codigo_empresa', codigoEmpresa);
+                }
+                if (pdf) { window.open(pdf, '_blank'); }
                 else { toast({ title: 'Sem PDF disponível', description: 'Documento ainda não possui DANFE.', variant: 'destructive' }); }
                 await load();
               } catch (e) { toast({ title: 'Falha ao visualizar', description: e.message, variant: 'destructive' }); }
               finally { setLoading(false); }
             })()}>Visualizar</Button>
-            <Button size="sm" disabled={!selectedId || !(['pendente','rejeitada'].includes((rows.find(r=>r.id===selectedId)?.nf_status)||'pendente'))} onClick={() => handleEmit(selectedId)}>Emitir</Button>
-            <Button size="sm" variant="outline" disabled={!selectedId || (rows.find(r=>r.id===selectedId)?.nf_status)!=='processando'} onClick={() => handleConsult(selectedId)}>Consultar</Button>
-            <Button size="sm" variant="destructive" disabled={!selectedId || (rows.find(r=>r.id===selectedId)?.nf_status)!=='autorizada'} onClick={() => handleCancel(selectedId)}>Cancelar</Button>
+            <Button
+              size="sm"
+              disabled={!canEmit || selectedIds.length===0}
+              onClick={() => {
+                if (!eligibleEmitIds.length) {
+                  toast({ title: 'Nenhum elegível', description: 'Selecione notas pendentes/rejeitadas para emitir.', variant: 'destructive' });
+                  return;
+                }
+                setEmitConfirmOpen(true);
+              }}
+            >
+              Emitir ({eligibleEmitIds.length||0})
+            </Button>
+            <Button size="sm" variant="outline" disabled={!canConsult || selectedIds.length===0} onClick={handleConsultBulk}>Consultar ({eligibleConsultIds.length||0})</Button>
+            <Button size="sm" variant="destructive" disabled={!canCancel || selectedIds.length===0} onClick={handleCancelBulk}>Cancelar ({eligibleCancelIds.length||0})</Button>
+            <Button size="sm" variant="outline" onClick={exportCsv}>Exportar CSV</Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button size="sm" variant="outline" disabled={exporting}>Ações</Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem disabled={(selectedIds.length===0 && !selectedId)} onClick={()=>exportZipFiscal({ tipo: 'nfce', scope: 'selected', includePdf: false })}>
+                  <Download className="h-4 w-4 mr-2" /> Baixar XML (selecionados)
+                </DropdownMenuItem>
+                <DropdownMenuItem disabled={(selectedIds.length===0 && !selectedId)} onClick={()=>exportZipFiscal({ tipo: 'nfce', scope: 'selected', includePdf: true })}>
+                  <Download className="h-4 w-4 mr-2" /> Baixar XML + PDF (selecionados)
+                </DropdownMenuItem>
+                <DropdownMenuItem disabled={(filtered||[]).length===0} onClick={()=>exportZipFiscal({ tipo: 'nfce', scope: 'filtered', includePdf: false })}>
+                  <Download className="h-4 w-4 mr-2" /> Baixar XML (filtrados)
+                </DropdownMenuItem>
+                <DropdownMenuItem disabled={(filtered||[]).length===0} onClick={()=>exportZipFiscal({ tipo: 'nfce', scope: 'filtered', includePdf: true })}>
+                  <Download className="h-4 w-4 mr-2" /> Baixar XML + PDF (filtrados)
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
 
           <div className="bg-surface rounded border border-border overflow-x-auto">
             <table className="min-w-full text-sm">
               <thead className="bg-surface-2 text-text-secondary">
                 <tr>
-                  <th className="text-left px-3 py-2">Abertura</th>
-                  <th className="text-left px-3 py-2">Status</th>
+                  <th className="w-8 px-3 py-2">
+                    <Checkbox checked={allPageSelected} onCheckedChange={(v)=>toggleAllPage(Boolean(v))} />
+                  </th>
+                  <th className="text-left px-3 py-2 cursor-pointer select-none" onClick={()=>{ setSortDir(sortBy==='aberto_em' && sortDir==='asc'?'desc':'asc'); setSortBy('aberto_em'); }}>Abertura {sortBy==='aberto_em' ? (sortDir==='asc'?'▲':'▼') : ''}</th>
+                  <th className="text-left px-3 py-2 cursor-pointer select-none" onClick={()=>{ setSortDir(sortBy==='nf_status' && sortDir==='asc'?'desc':'asc'); setSortBy('nf_status'); }}>Status {sortBy==='nf_status' ? (sortDir==='asc'?'▲':'▼') : ''}</th>
+                  <th className="hidden text-left px-3 py-2 cursor-pointer select-none" onClick={()=>{ setSortDir(sortBy==='mesa' && sortDir==='asc'?'desc':'asc'); setSortBy('mesa'); }}>Mesa {sortBy==='mesa' ? (sortDir==='asc'?'▲':'▼') : ''}</th>
+                  <th className="text-left px-3 py-2">Clientes</th>
+                  <th className="text-left px-3 py-2">Finalizadoras</th>
+                  <th className="text-left px-3 py-2">Número/Série</th>
                   <th className="text-left px-3 py-2">Chave</th>
-                  <th className="text-right px-3 py-2">Total</th>
-                  <th className="text-right px-3 py-2">Ações</th>
+                  <th className="text-right px-3 py-2 cursor-pointer select-none" onClick={()=>{ setSortDir(sortBy==='total' && sortDir==='asc'?'desc':'asc'); setSortBy('total'); }}>Total {sortBy==='total' ? (sortDir==='asc'?'▲':'▼') : ''}</th>
                 </tr>
               </thead>
               <tbody>
-                {(!filtered || filtered.length===0) && (
-                  <tr><td colSpan={6} className="px-3 py-4 text-center text-text-muted">{loading ? 'Carregando...' : 'Nada por aqui'}</td></tr>
+                {(!paged || paged.length===0) && (
+                  <tr><td colSpan={10} className="px-3 py-4 text-center text-text-muted">{loading ? 'Carregando...' : 'Nada por aqui'}</td></tr>
                 )}
-                {filtered.map(r => {
+                {paged.map(r => {
                   const s = r.nf_status || 'pendente';
                   return (
-                    <tr key={r.id} className={`border-t border-border/60 transition-colors ${selectedId===r.id ? 'bg-surface-2 ring-2 ring-[#FF7A1A]/60 rounded-md' : 'hover:bg-surface-2/50'}`} onClick={() => setSelectedId(r.id)}>
+                    <React.Fragment key={r.id}>
+                    <tr className={`border-t border-border/60 transition-colors ${selectedId===r.id ? 'bg-surface-2 ring-2 ring-[#FF7A1A]/60 rounded-md' : 'hover:bg-surface-2/50'}`} onClick={() => onRowClick(r.id)}>
+                      <td className="px-3 py-2" onClick={(e)=>e.stopPropagation()}>
+                        <Checkbox checked={isSelected(r.id)} onCheckedChange={(v)=>toggleRow(r.id, Boolean(v))} />
+                      </td>
                       <td className="px-3 py-2 whitespace-nowrap">{fmtDate(r.aberto_em)}</td>
                       <td className="px-3 py-2 whitespace-nowrap">
                         <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] ${statusBadge(s)}`}>{s}</span>
                       </td>
-                      <td className="px-3 py-2 break-all max-w-[380px]">{r.xml_chave || '—'}</td>
-                      <td className="px-3 py-2 text-right whitespace-nowrap">R$ {fmtMoney(r.total || r.total_com_desconto)}</td>
-                      <td className="px-3 py-2 text-right whitespace-nowrap flex gap-2 justify-end">
-                        {(s==='pendente' || s==='rejeitada') && (
-                          <>
-                            <Button size="sm" variant="outline" onClick={()=>openPreview(r.id)}>Pré-Emissão</Button>
-                            <Button size="sm" onClick={()=>handleEmit(r.id)}>Emitir</Button>
-                          </>
-                        )}
-                        {s==='processando' && (
-                          <Button size="sm" variant="outline" onClick={()=>handleConsult(r.id)}>Consultar</Button>
-                        )}
-                        {s==='autorizada' && (
-                          <Button size="sm" variant="destructive" onClick={()=>handleCancel(r.id)}>Cancelar</Button>
-                        )}
-                        {r.nf_pdf_url && (
-                          <a className="inline-flex" href={r.nf_pdf_url} target="_blank" rel="noreferrer">
-                            <Button size="sm" variant="outline">DANFE</Button>
-                          </a>
-                        )}
-                        {r.nf_xml_url && (
-                          <a className="inline-flex" href={r.nf_xml_url} target="_blank" rel="noreferrer">
-                            <Button size="sm" variant="outline">XML</Button>
-                          </a>
-                        )}
+                      <td className="hidden px-3 py-2 whitespace-nowrap">{r.mesaNumero ? `Mesa ${r.mesaNumero}` : 'Balcão'}</td>
+                      <td className="px-3 py-2 whitespace-nowrap max-w-[240px] truncate" title={r.clientesStr||''}>{r.clientesStr || '—'}</td>
+                      <td className="px-3 py-2 whitespace-nowrap max-w-[240px] truncate" title={r.finalizadorasStr||''}>{r.finalizadorasStr || '—'}</td>
+                      <td className="px-3 py-2 whitespace-nowrap">{(r.nf_numero ?? '—')}/{(r.nf_serie ?? '—')}</td>
+                      <td className="px-3 py-2 whitespace-nowrap max-w-[220px] truncate" title={r.xml_chave || ''}>
+                        {r.xml_chave
+                          ? `${String(r.xml_chave).slice(0, 8)}...${String(r.xml_chave).slice(-4)}`
+                          : '—'}
                       </td>
+                      <td className="px-3 py-2 text-right whitespace-nowrap">R$ {fmtMoney(r.total || r.total_com_desconto)}</td>
                     </tr>
+                    {isOpenDetails(r.id) && (
+                      <tr>
+                        <td colSpan={10} className="px-3 py-3 bg-surface-2/40 border-t border-border">
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+                            <div className="space-y-1">
+                              <div><span className="text-text-secondary">Mesa: </span><span className="text-text-primary">{r.mesaNumero ? `Mesa ${r.mesaNumero}` : 'Balcão'}</span></div>
+                              <div><span className="text-text-secondary">Clientes: </span><span className="text-text-primary">{r.clientesStr || '—'}</span></div>
+                              <div><span className="text-text-secondary">Finalizadoras: </span><span className="text-text-primary">{r.finalizadorasStr || '—'}</span></div>
+                            </div>
+                            <div className="space-y-1">
+                              <div><span className="text-text-secondary">Número/Série: </span><span className="text-text-primary">{(r.nf_numero ?? '—')}/{(r.nf_serie ?? '—')}</span></div>
+                              <div className="flex items-center gap-2">
+                                <span className="text-text-secondary">Chave: </span>
+                                <span className="text-text-primary" title={r.xml_chave || ''}>{r.xml_chave || '—'}</span>
+                              </div>
+                              <div className="text-text-secondary mt-1">Total: <span className="text-text-primary">R$ {fmtMoney(r.total || r.total_com_desconto)}</span></div>
+                            </div>
+                            <div className="space-y-2">
+                              <div className="flex gap-2">
+                                {r.nf_pdf_url && (<a className="inline-flex" href={r.nf_pdf_url} target="_blank" rel="noreferrer"><Button size="sm" variant="outline">Abrir DANFE</Button></a>)}
+                                {r.nf_xml_url && (<a className="inline-flex" href={r.nf_xml_url} target="_blank" rel="noreferrer"><Button size="sm" variant="outline">Baixar XML</Button></a>)}
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                    </React.Fragment>
                   );
                 })}
               </tbody>
             </table>
+          </div>
+          <div className="flex items-center justify-between mt-2 gap-2">
+            <div className="text-xs text-text-secondary">Página {page} de {totalPages} • {sorted.length} registros</div>
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-text-secondary">Itens por página</label>
+              <select className="h-7 rounded-md bg-surface border border-border text-xs px-2" value={pageSize} onChange={e=>{ setPage(1); setPageSize(Number(e.target.value)||50); }}>
+                <option value={20}>20</option>
+                <option value={50}>50</option>
+                <option value={100}>100</option>
+              </select>
+              <Button size="sm" variant="outline" disabled={page<=1} onClick={()=>setPage(p=>Math.max(1,p-1))}>Anterior</Button>
+              <Button size="sm" variant="outline" disabled={page>=totalPages} onClick={()=>setPage(p=>Math.min(totalPages,p+1))}>Próxima</Button>
+            </div>
           </div>
         </TabsContent>
 
         <TabsContent value="nfe">
-          <div className="flex items-center gap-3 mb-3 flex-wrap">
+          <div className="flex items-center gap-2 mb-3 flex-wrap whitespace-nowrap relative z-10">
+            <div className="ml-auto flex items-center gap-2 text-xs text-text-secondary">
+              <span>Selecionadas: <strong className="text-text-primary">{selectedIds.length}</strong></span>
+              <Button size="sm" variant="outline" onClick={()=>setSelectedIds([])} disabled={selectedIds.length===0}>Limpar</Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={()=>{
+                  const base = (nfeSorted || []);
+                  setSelectedIds(Array.from(new Set(base.map(r => r.id))));
+                }}
+                disabled={(nfeSorted || []).length===0}
+              >
+                Selecionar filtrados
+              </Button>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={selectedIds.length===0 && !selectedId}
+              onClick={() => (async () => {
+                try {
+                  const all = nfeRows || [];
+                  const pickId = selectedId || (selectedIds && selectedIds[0]);
+                  const row = all.find(r => r.id === pickId);
+                  if (!row) { toast({ title: 'NF-e não encontrada', variant: 'warning' }); return; }
+                  if (row.pdf_url) { window.open(row.pdf_url, '_blank'); return; }
+                  if (!empresaInfo) { toast({ title: 'Empresa não carregada', variant: 'warning' }); return; }
+                  const { baseUrl, cnpj } = getTransmiteNotaConfigFromEmpresa(empresaInfo);
+                  const dados = row.xml_chave ? { chave: row.xml_chave, chave_nota: row.xml_chave } : { numero: row.numero, serie: row.serie };
+                  setLoading(true);
+                  let pdf = null, xml = null, chave = row.xml_chave || null;
+                  try { const r1 = await consultarEmissaoNfe({ baseUrl, cnpj, dados }); pdf = r1?.url_pdf || r1?.pdf_url || null; xml = r1?.url_xml || r1?.xml_url || null; chave = r1?.chave || r1?.Chave || chave; } catch {}
+                  if (!pdf) { try { const r2 = await consultarPdfNfe({ baseUrl, cnpj, dados }); pdf = r2?.url_pdf || r2?.pdf_url || null; chave = r2?.chave || r2?.Chave || chave; } catch {} }
+                  if (!xml) { try { const r3 = await consultarXmlNfe({ baseUrl, cnpj, dados }); xml = r3?.url_xml || r3?.xml_url || null; chave = chave || r3?.chave || r3?.Chave || chave; } catch {} }
+                  if (pdf || xml || chave) {
+                    await supabase.from('notas_fiscais').update({ pdf_url: pdf || row.pdf_url, xml_url: xml || row.xml_url, xml_chave: chave || row.xml_chave, status: (pdf||xml) ? 'autorizada' : row.status }).eq('id', row.id).eq('codigo_empresa', codigoEmpresa);
+                  }
+                  await loadNfeRows();
+                  if (pdf) { window.open(pdf, '_blank'); }
+                  else { toast({ title: 'Sem PDF disponível', description: 'Documento ainda não possui DANFE.', variant: 'destructive' }); }
+                } catch (e) {
+                  toast({ title: 'Falha ao visualizar NF-e', description: e?.message || String(e), variant: 'destructive' });
+                } finally { setLoading(false); }
+              })()}
+            >
+              Visualizar
+            </Button>
+            <Button size="sm" disabled={selectedIds.length===0 && !selectedId} onClick={handleEmitSelectedNfe}>Emitir NF-e</Button>
+            <Button size="sm" variant="outline" disabled={selectedIds.length===0 && !selectedId} onClick={handleConsultSelectedNfe}>Consultar</Button>
+            <Button size="sm" variant="destructive" disabled={selectedIds.length===0 && !selectedId} onClick={handleCancelSelectedNfe}>Cancelar</Button>
             <div className="flex items-center gap-2">
-              <Label className="text-sm">Buscar</Label>
-              <Input value={search} onChange={(e)=>setSearch(e.target.value)} placeholder="Chave, número..." className="w-60" />
+              <Button
+                size="sm"
+                onClick={async()=>{
+                  setSelectedId(null);
+                  setSelectedIds([]);
+                  const id = await createManualDraft();
+                  if (id) { setManualXml(''); setManualOpen(true); }
+                }}
+              >
+                Nova NF-e
+              </Button>
             </div>
-            <Label className="text-sm ml-1">Status</Label>
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-[170px] rounded-full">
-                <SelectValue placeholder="Selecionar status" />
-              </SelectTrigger>
-              <SelectContent className="rounded-xl">
-                <SelectItem value="all">Todos</SelectItem>
-                <SelectItem value="pendente">Pendente</SelectItem>
-                <SelectItem value="processando">Em andamento</SelectItem>
-                <SelectItem value="autorizada">Autorizada</SelectItem>
-                <SelectItem value="rejeitada">Rejeitada</SelectItem>
-                <SelectItem value="cancelada">Cancelada</SelectItem>
-              </SelectContent>
-            </Select>
-            <Label className="text-sm ml-2">Período</Label>
-            <div className="inline-flex items-center gap-2">
-              <DateInput label="Período inicial" value={from} onChange={setFrom} />
-              <span className="text-text-secondary">até</span>
-              <DateInput label="Período final" value={to} onChange={setTo} />
-            </div>
-            <div className="inline-flex items-center gap-2 ml-2 text-sm">
-              <Checkbox checked={focusPendRej} onCheckedChange={setFocusPendRej} className="rounded-full border-warning data-[state=checked]:bg-warning" />
-              <span>Somente pendentes/rejeitadas</span>
-            </div>
-            <div className="ml-auto">
-              <Button size="sm" onClick={()=>{ setManualXml(''); setManualOpen(true); }}>Nova NF-e</Button>
-            </div>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button size="sm" variant="outline" disabled={exporting}>Ações</Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem disabled={(selectedIds.length===0 && !selectedId)} onClick={()=>exportZipFiscal({ tipo: 'nfe', scope: 'selected', includePdf: false })}>
+                  <Download className="h-4 w-4 mr-2" /> Baixar XML (selecionados)
+                </DropdownMenuItem>
+                <DropdownMenuItem disabled={(selectedIds.length===0 && !selectedId)} onClick={()=>exportZipFiscal({ tipo: 'nfe', scope: 'selected', includePdf: true })}>
+                  <Download className="h-4 w-4 mr-2" /> Baixar XML + PDF (selecionados)
+                </DropdownMenuItem>
+                <DropdownMenuItem disabled={(nfeSorted||[]).length===0} onClick={()=>exportZipFiscal({ tipo: 'nfe', scope: 'filtered', includePdf: false })}>
+                  <Download className="h-4 w-4 mr-2" /> Baixar XML (filtrados)
+                </DropdownMenuItem>
+                <DropdownMenuItem disabled={(nfeSorted||[]).length===0} onClick={()=>exportZipFiscal({ tipo: 'nfe', scope: 'filtered', includePdf: true })}>
+                  <Download className="h-4 w-4 mr-2" /> Baixar XML + PDF (filtrados)
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
 
           <div className="bg-surface rounded border border-border overflow-x-auto">
             <table className="min-w-full text-sm">
               <thead className="bg-surface-2 text-text-secondary">
                 <tr>
-                  <th className="text-left px-3 py-2">Abertura</th>
+                  <th className="w-8 px-3 py-2">
+                    <Checkbox checked={false} onCheckedChange={()=>{}} />
+                  </th>
+                  <th className="text-left px-3 py-2">Data</th>
                   <th className="text-left px-3 py-2">Status</th>
-                  <th className="text-left px-3 py-2">Chave</th>
-                  <th className="text-right px-3 py-2">Total</th>
-                  <th className="text-right px-3 py-2">Ações</th>
+                  <th className="text-left px-3 py-2">Destinatário</th>
+                  <th className="text-left px-3 py-2">Número/Série</th>
+                  <th className="text-right px-3 py-2">Valor</th>
                 </tr>
               </thead>
               <tbody>
-                {(!filtered || filtered.length===0) && (
-                  <tr><td colSpan={6} className="px-3 py-4 text-center text-text-muted">{loading ? 'Carregando...' : 'Nada por aqui'}</td></tr>
+                {(!nfePaged || nfePaged.length===0) && (
+                  <tr><td colSpan={7} className="px-3 py-4 text-center text-text-muted">{nfeLoading ? 'Carregando...' : 'Nada por aqui'}</td></tr>
                 )}
-                {filtered.map(r => {
-                  const s = r.nf_status || 'pendente';
+                {nfePaged.map(r => {
+                  const s = String(r.status || 'rascunho').toLowerCase();
+                  const bcls = statusBadge(s === 'emitida' ? 'autorizada' : s);
+                  const dataRef = r.data_emissao || r.criado_em || r.created_at || null;
                   return (
-                    <tr key={r.id} className={`border-t border-border/60 transition-colors ${selectedId===r.id ? 'bg-surface-2 ring-2 ring-[#FF7A1A]/60 rounded-md' : 'hover:bg-surface-2/50'}`} onClick={() => setSelectedId(r.id)}>
-                      <td className="px-3 py-2 whitespace-nowrap">{fmtDate(r.aberto_em)}</td>
-                      <td className="px-3 py-2 whitespace-nowrap">
-                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] ${statusBadge(s)}`}>{s}</span>
+                    <React.Fragment key={r.id}>
+                    <tr
+                      className={`border-t border-border/60 transition-colors ${selectedId===r.id ? 'bg-surface-2 ring-2 ring-[#FF7A1A]/60 rounded-md' : 'hover:bg-surface-2/50'}`}
+                      onClick={() => {
+                        setSelectedId(r.id);
+                        setSelectedIds(prev => {
+                          if (!prev || prev.length === 0) return [r.id];
+                          if (prev.length === 1 && prev[0] === r.id) return prev;
+                          return prev;
+                        });
+                      }}
+                    >
+                      <td className="px-3 py-2" onClick={(e)=>e.stopPropagation()}>
+                        <Checkbox checked={isSelected(r.id)} onCheckedChange={(v)=>toggleRow(r.id, Boolean(v))} />
                       </td>
-                      <td className="px-3 py-2 break-all max-w-[380px]">{r.xml_chave || '—'}</td>
-                      <td className="px-3 py-2 text-right whitespace-nowrap">R$ {fmtMoney(r.total || r.total_com_desconto)}</td>
-                      <td className="px-3 py-2 text-right whitespace-nowrap flex gap-2 justify-end">
-                        <Button size="sm" onClick={()=>openNfe(r.id)}>Gerar XML NF-e</Button>
-                        <Button size="sm" variant="outline" disabled>Emitir via API (em breve)</Button>
-                        {r.nf_xml_url && (
-                          <a className="inline-flex" href={r.nf_xml_url} target="_blank" rel="noreferrer">
-                            <Button size="sm" variant="outline">XML</Button>
-                          </a>
+                      <td className="px-3 py-2 whitespace-nowrap">{dataRef ? fmtDate(dataRef) : '—'}</td>
+                      <td className="px-3 py-2 whitespace-nowrap">
+                        <div className="flex items-center gap-1">
+                          <span
+                            className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] ${bcls} ${s==='rascunho' ? 'cursor-pointer hover:opacity-80' : ''}`}
+                            onClick={(e)=>{ e.stopPropagation(); if (s==='rascunho') handleEditDraft(r); }}
+                            title={s==='rascunho' ? 'Clique para editar rascunho' : undefined}
+                          >
+                            {s}
+                          </span>
+                          {s==='rascunho' && (
+                            <>
+                              <button
+                                type="button"
+                                className="inline-flex items-center justify-center w-5 h-5 rounded hover:bg-surface-2 text-text-secondary hover:text-text-primary"
+                                onClick={(e)=>{ e.stopPropagation(); handleEditDraft(r); }}
+                                title="Editar rascunho"
+                              >
+                                <Pencil className="w-3 h-3" />
+                              </button>
+                              <button
+                                type="button"
+                                className="inline-flex items-center justify-center w-5 h-5 rounded hover:bg-surface-2 text-text-secondary hover:text-destructive"
+                                onClick={(e)=>{ e.stopPropagation(); setDeleteDraftId(r.id); }}
+                                title="Excluir rascunho"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap max-w-[240px] truncate" title={r.destinatario?.nome || ''}>{r.destinatario?.nome || '—'}</td>
+                      <td className="px-3 py-2 whitespace-nowrap">
+                        {(r.numero ?? '—')}/{(r.serie ?? '—')}
+                        {r.xml_chave && (
+                          <div className="text-[10px] text-text-secondary truncate max-w-[220px] flex items-center gap-1">
+                            <span className="truncate">
+                              {`${String(r.xml_chave).slice(0, 8)}...${String(r.xml_chave).slice(-4)}`}
+                            </span>
+                            <button
+                              type="button"
+                              className="p-0.5 hover:text-text-primary"
+                              onClick={(e)=>{ e.stopPropagation(); navigator.clipboard.writeText(r.xml_chave||''); toast({ title: 'Chave copiada' }); }}
+                              title="Copiar chave"
+                            >
+                              <Copy className="w-3 h-3" />
+                            </button>
+                          </div>
                         )}
                       </td>
+                      <td className="px-3 py-2 text-right whitespace-nowrap">R$ {fmtMoney(r.valor_total || 0)}</td>
                     </tr>
+                    </React.Fragment>
                   );
                 })}
               </tbody>
             </table>
           </div>
+          <div className="flex items-center justify-between mt-2 gap-2">
+            <div className="text-xs text-text-secondary">Página {page} de {Math.max(1, Math.ceil((nfeSorted||[]).length / pageSize))} • {(nfeSorted||[]).length} registros</div>
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-text-secondary">Itens por página</label>
+              <select className="h-7 rounded-md bg-surface border border-border text-xs px-2" value={pageSize} onChange={e=>{ setPage(1); setPageSize(Number(e.target.value)||50); }}>
+                <option value={20}>20</option>
+                <option value={50}>50</option>
+                <option value={100}>100</option>
+              </select>
+              <Button size="sm" variant="outline" disabled={page<=1} onClick={()=>setPage(p=>Math.max(1,p-1))}>Anterior</Button>
+              <Button size="sm" variant="outline" disabled={page>=(Math.max(1, Math.ceil((nfeSorted||[]).length / pageSize)))} onClick={()=>setPage(p=>p+1)}>Próxima</Button>
+            </div>
+          </div>
         </TabsContent>
+
+        <TabsContent value="compras">
+          <ComprasPage />
+        </TabsContent>
+
       </Tabs>
 
+      {/* Modal de confirmação de emissão em lote NFC-e */}
+      <Dialog open={emitConfirmOpen} onOpenChange={setEmitConfirmOpen}>
+        <DialogContent className="sm:max-w-[520px]">
+          <DialogHeader>
+            <DialogTitle>Confirmar emissão de NFC-e</DialogTitle>
+            <DialogDescription>
+              As seguintes comandas serão enviadas para emissão agora. Revise rapidamente antes de confirmar.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[320px] overflow-y-auto mt-2 border border-border/60 rounded-md divide-y divide-border/40 text-xs">
+            {eligibleEmitIds.map(id => {
+              const r = rows.find(x => x.id === id) || {};
+              const mesaLabel = r.mesaNumero ? `Mesa ${r.mesaNumero}` : 'Balcão';
+              return (
+                <div key={id} className="flex items-center justify-between gap-3 px-3 py-2 bg-surface/40">
+                  <div className="space-y-0.5">
+                    <div className="font-medium text-text-primary">{mesaLabel}</div>
+                    <div className="text-text-secondary truncate max-w-[260px]">{r.clientesStr || 'Cliente Consumidor'}</div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-[11px] text-text-secondary">Total</div>
+                    <div className="text-sm font-semibold text-text-primary">R$ {fmtMoney(r.total || r.total_com_desconto)}</div>
+                  </div>
+                </div>
+              );
+            })}
+            {!eligibleEmitIds.length && (
+              <div className="px-3 py-2 text-text-secondary">Nenhuma NFC-e elegível selecionada.</div>
+            )}
+          </div>
+          <div className="flex justify-between items-center mt-3 text-[11px] text-text-secondary">
+            <span>{eligibleEmitIds.length} NFC-e serão emitidas agora.</span>
+            {selectedIds.length > eligibleEmitIds.length && (
+              <span>{selectedIds.length - eligibleEmitIds.length} seleção(ões) serão ignoradas por não estarem pendentes/rejeitadas.</span>
+            )}
+          </div>
+          <div className="flex justify-end gap-2 mt-4">
+            <Button variant="outline" size="sm" onClick={()=>setEmitConfirmOpen(false)}>Cancelar</Button>
+            <Button
+              size="sm"
+              className="bg-[#FF7A1A] hover:bg-[#ff8f3b] text-black"
+              onClick={async ()=>{
+                setEmitConfirmOpen(false);
+                await handleEmitBulk();
+              }}
+            >
+              Confirmar emissão
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Seletor de Comandas para criação de NF-e */}
+      <Dialog open={comandaPickerOpen} onOpenChange={setComandaPickerOpen}>
+        <DialogContent className="w-[95vw] sm:max-w-[760px] max-h-[80vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle>Selecionar Comanda</DialogTitle>
+            <DialogDescription>Escolha a comanda de origem para criar o rascunho de NF-e.</DialogDescription>
+          </DialogHeader>
+          <div className="flex-1 overflow-y-auto mt-2 space-y-2">
+          {(() => {
+            const txt = (comandaPickerFilter || '').trim().toLowerCase();
+            const base = Array.isArray(sorted) ? sorted : [];
+            const filteredComandas = base.filter(c => {
+              if (!txt) return true;
+              const mesaLabel = c.mesaNumero ? `mesa ${c.mesaNumero}` : 'balcao';
+              const s = `${mesaLabel} ${(c.clientesStr||'')}`.toLowerCase();
+              return s.includes(txt);
+            });
+            const usedSet = new Set((nfeRows||[])
+              .filter(r => r.origem === 'comanda' && r.comanda_id)
+              .map(r => r.comanda_id));
+            return (
+              <>
+                <div className="flex items-center justify-between mb-2 gap-2">
+                  <div className="flex-1 min-w-[180px] flex items-center gap-2">
+                    <Input
+                      className="h-8 text-xs"
+                      placeholder="Filtrar por cliente ou mesa"
+                      value={comandaPickerFilter}
+                      onChange={(e)=>setComandaPickerFilter(e.target.value)}
+                    />
+                  </div>
+                  <div className="text-xs text-text-secondary whitespace-nowrap">
+                    {filteredComandas.length} comandas filtradas
+                  </div>
+                </div>
+                <div className="border border-border rounded-md divide-y divide-border">
+                  {filteredComandas.slice(0, 100).map(c => {
+                    const jaTemNfe = usedSet.has(c.id);
+                    return (
+                      <label key={c.id} className="grid grid-cols-12 items-center px-3 py-2 hover:bg-surface-2 cursor-pointer gap-2">
+                        <div className="col-span-1 flex items-center justify-center">
+                          <Checkbox
+                            checked={comandaPickerSelectedId === c.id}
+                            onCheckedChange={(v)=>{
+                              setComandaPickerSelectedId(prev => v ? c.id : (prev === c.id ? null : prev));
+                            }}
+                          />
+                        </div>
+                        <div className="col-span-3 text-sm">{fmtDate(c.aberto_em)}</div>
+                        <div className="col-span-4 text-sm truncate" title={c.clientesStr||''}>{c.clientesStr || '—'}</div>
+                        <div className="col-span-2 flex flex-col text-xs text-text-secondary">
+                          <span>{c.mesaNumero ? `Mesa ${c.mesaNumero}` : 'Balcão'}</span>
+                          {jaTemNfe && (
+                            <span className="text-[10px] text-amber-500">Já possui NF-e vinculada</span>
+                          )}
+                        </div>
+                        <div className="col-span-2 text-right text-sm">R$ {fmtMoney(c.total || c.total_com_desconto)}</div>
+                      </label>
+                    );
+                  })}
+                  {filteredComandas.length === 0 && (
+                    <div className="text-xs text-text-secondary px-3 py-2">Nenhuma comanda encontrada</div>
+                  )}
+                </div>
+              </>
+            );
+          })()}
+          </div>
+          <div className="flex justify-end gap-2 mt-3 pt-2 border-t border-border/60">
+            <Button variant="outline" onClick={()=>setComandaPickerOpen(false)}>Cancelar</Button>
+            <Button onClick={async()=>{
+              if (!comandaPickerSelectedId) { toast({ title:'Selecione uma comanda', variant:'warning' }); return; }
+              const draftId = await createDraftFromComanda(comandaPickerSelectedId);
+              if (draftId) {
+                setManualXml('');
+                await openManualFromComanda(comandaPickerSelectedId);
+                setComandaPickerOpen(false);
+              }
+            }}>Continuar</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Confirmar cancelamento de NF-e */}
+      <Dialog open={!!cancelNfeRow} onOpenChange={(open)=>{ if (!open) { setCancelNfeRow(null); setCancelNfeMotivo(''); } }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Cancelar NF-e</DialogTitle>
+            <DialogDescription>
+              Informe o motivo do cancelamento. Essa ação será enviada para a API fiscal e a nota será marcada como cancelada.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 mt-2">
+            <Label htmlFor="motivo-cancel-nfe">Motivo do cancelamento</Label>
+            <Input
+              id="motivo-cancel-nfe"
+              value={cancelNfeMotivo}
+              onChange={(e)=>setCancelNfeMotivo(e.target.value)}
+              placeholder="Ex.: Nota emitida em duplicidade"
+            />
+          </div>
+          <div className="flex justify-end gap-2 mt-4">
+            <Button variant="outline" onClick={()=>{ setCancelNfeRow(null); setCancelNfeMotivo(''); }}>Cancelar</Button>
+            <Button
+              variant="destructive"
+              onClick={async()=>{
+                if (!cancelNfeRow) { setCancelNfeRow(null); return; }
+                await handleCancelNfeRow(cancelNfeRow);
+              }}
+            >
+              Confirmar cancelamento
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!cancelNfceId} onOpenChange={(open)=>{ if (!open) { setCancelNfceId(null); setCancelNfceMotivo(''); } }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Cancelar NFC-e</DialogTitle>
+            <DialogDescription>Informe o motivo do cancelamento.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 mt-2">
+            <Label htmlFor="motivo-nfce">Motivo</Label>
+            <Input
+              id="motivo-nfce"
+              value={cancelNfceMotivo}
+              onChange={(e)=>setCancelNfceMotivo(e.target.value)}
+              placeholder="Ex.: Cliente desistiu da compra"
+            />
+          </div>
+          <div className="flex justify-end gap-2 mt-4">
+            <Button variant="outline" onClick={()=>{ setCancelNfceId(null); setCancelNfceMotivo(''); }}>Voltar</Button>
+            <Button
+              variant="destructive"
+              onClick={async ()=>{
+                if (!cancelNfceId) { setCancelNfceId(null); return; }
+                const motivo = (cancelNfceMotivo || '').trim();
+                if (!motivo) { toast({ title: 'Informe o motivo do cancelamento', variant: 'warning' }); return; }
+                await handleCancel(cancelNfceId, motivo);
+                setCancelNfceId(null);
+                setCancelNfceMotivo('');
+              }}
+            >
+              Confirmar cancelamento
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={preOpen} onOpenChange={setPreOpen}>
-        <DialogContent className="max-w-[800px]">
+        <DialogContent className="max-w-[880px]">
           <DialogHeader>
             <DialogTitle>Pré-Emissão NFC-e</DialogTitle>
             <DialogDescription>Revise os dados e pendências antes de emitir.</DialogDescription>
@@ -1106,13 +3022,17 @@ export default function FiscalHubPage(){
           {preLoading ? (
             <div className="p-4 text-center text-text-muted">Gerando prévia…</div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="space-y-3">
               <div className="border border-border rounded p-2 bg-surface-2">
-                <div className="text-xs text-text-secondary mb-1">JSON (EnviarNfce)</div>
-                <pre className="text-[11px] whitespace-pre-wrap break-all max-h-[360px] overflow-auto">{prePayload ? JSON.stringify(prePayload, null, 2) : '—'}</pre>
-              </div>
-              <div className="border border-border rounded p-2 bg-surface-2">
-                <div className="text-xs text-text-secondary mb-1">Pendências</div>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="text-xs text-text-secondary">Pendências</div>
+                  <div className="flex items-center gap-2">
+                    <Button size="sm" variant="outline" onClick={()=>setPreShowPayload(v=>!v)}>{preShowPayload ? 'Ocultar JSON' : 'Ver JSON'}</Button>
+                    <Button size="sm" variant="outline" onClick={()=>navigate('/configuracao-fiscal')}>Corrigir Empresa</Button>
+                    <Button size="sm" variant="outline" onClick={()=>setPartyPickerOpen(true)}>Selecionar Cliente</Button>
+                    <Button size="sm" variant="outline" onClick={()=>{ if(selectedId) openPreview(selectedId); }}>Recarregar Prévia</Button>
+                  </div>
+                </div>
                 {(!preMissing || preMissing.length===0) ? (
                   <div className="text-sm text-emerald-500">Nenhuma pendência encontrada.</div>
                 ) : (
@@ -1121,6 +3041,12 @@ export default function FiscalHubPage(){
                   </ul>
                 )}
               </div>
+              {preShowPayload && (
+                <div className="border border-border rounded p-2 bg-surface-2">
+                  <div className="text-xs text-text-secondary mb-1">JSON (EnviarNfce)</div>
+                  <pre className="text-[11px] whitespace-pre-wrap break-all max-h-[360px] overflow-auto">{prePayload ? JSON.stringify(prePayload, null, 2) : '—'}</pre>
+                </div>
+              )}
             </div>
           )}
           <div className="flex justify-end gap-2 mt-3">
@@ -1130,18 +3056,14 @@ export default function FiscalHubPage(){
         </DialogContent>
       </Dialog>
 
-      {/* Party Picker Modal (Cliente/Fornecedor) */}
+      {/* Party Picker Modal (Destinatário unificado) */}
       <Dialog open={partyPickerOpen} onOpenChange={setPartyPickerOpen}>
         <DialogContent className="w-[95vw] sm:max-w-[700px] max-h-[80vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Selecionar {partyModalTipo==='fornecedor'?'fornecedor':'cliente'}</DialogTitle>
+            <DialogTitle>Selecionar destinatário</DialogTitle>
             <DialogDescription>Busque pelo código, nome ou documento e escolha a parte.</DialogDescription>
           </DialogHeader>
           <div className="flex flex-wrap items-center gap-2 mb-3">
-            <div className="flex items-center gap-1">
-              <Button size="sm" variant={partyModalTipo==='cliente'?'default':'outline'} onClick={()=>setPartyModalTipo('cliente')}>Clientes</Button>
-              <Button size="sm" variant={partyModalTipo==='fornecedor'?'default':'outline'} onClick={()=>setPartyModalTipo('fornecedor')}>Fornecedores</Button>
-            </div>
             <div className="flex-1 min-w-[200px]">
               <Input placeholder={`Buscar por código, nome ou documento`} value={partyQuery} onChange={(e)=>setPartyQuery(e.target.value)} />
             </div>
@@ -1177,9 +3099,20 @@ export default function FiscalHubPage(){
           </div>
           <div className="border border-border rounded-md divide-y divide-border">
             {filteredProducts.map(p => (
-              <div key={p.id} className="flex items-center justify-between px-3 py-2 hover:bg-surface-2 cursor-pointer" onClick={()=>{ if (productPickerTarget!=null) applyProductToItem(productPickerTarget, p); setProductPickerOpen(false); }}>
-                <div className="text-sm">{p.name} <span className="text-text-secondary">{p.code ? `(${p.code})` : ''}</span></div>
-                <div className="text-xs text-text-secondary">NCM {p.ncm || '—'} • UN {String(p.unit||'UN').toUpperCase()} • R$ {fmtMoney(p.price ?? p.salePrice ?? 0)}</div>
+              <div
+                key={p.id}
+                className="flex items-center justify-between px-3 py-2 hover:bg-surface-2 cursor-pointer"
+                onClick={()=>{ if (productPickerTarget!=null) applyProductToItem(productPickerTarget, p); setProductPickerOpen(false); }}
+              >
+                <div className="flex flex-col">
+                  <div className="text-sm">
+                    {p.code && (
+                      <span className="text-text-secondary mr-1">[{p.code}]</span>
+                    )}
+                    <span>{p.name}</span>
+                  </div>
+                  <div className="text-[11px] text-text-secondary">R$ {fmtMoney(p.price ?? p.salePrice ?? 0)}</div>
+                </div>
               </div>
             ))}
             {filteredProducts.length===0 && (
@@ -1192,886 +3125,1118 @@ export default function FiscalHubPage(){
         </DialogContent>
       </Dialog>
 
+      {/* Confirmar exclusão de rascunho de NF-e */}
+      <Dialog open={!!deleteDraftId} onOpenChange={(open)=>{ if (!open) setDeleteDraftId(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Remover rascunho</DialogTitle>
+            <DialogDescription>
+              Essa ação remove definitivamente o rascunho de NF-e selecionado. Os dados não poderão ser recuperados.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end gap-2 mt-3">
+            <Button variant="outline" onClick={()=>setDeleteDraftId(null)}>Cancelar</Button>
+            <Button
+              variant="destructive"
+              onClick={async()=>{
+                if (!deleteDraftId || !codigoEmpresa) { setDeleteDraftId(null); return; }
+                try {
+                  await supabase.from('notas_fiscais').delete().eq('id', deleteDraftId).eq('codigo_empresa', codigoEmpresa);
+                  await loadNfeRows();
+                  toast({ title: 'Rascunho removido' });
+                } catch (e) {
+                  toast({ title: 'Falha ao remover rascunho', description: e.message, variant: 'destructive' });
+                } finally {
+                  setDeleteDraftId(null);
+                }
+              }}
+            >
+              Remover rascunho
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={manualOpen} onOpenChange={setManualOpen}>
         <DialogContent className="w-[960px] max-w-[96vw] h-[85vh] overflow-hidden flex flex-col">
           <DialogHeader>
             <DialogTitle>Criar NF-e (manual)</DialogTitle>
-            <DialogDescription>Preencha os dados nas abas para gerar o XML.</DialogDescription>
+            <DialogDescription>Vamos montar do zero.</DialogDescription>
           </DialogHeader>
-          <Tabs value={manualTab} onValueChange={setManualTab} className="w-full flex-1 overflow-hidden flex flex-col">
-            <TabsList className="mb-3 w-full flex flex-wrap justify-start gap-1">
-              <TabsTrigger value="cliente">Cabeçalho</TabsTrigger>
-              <TabsTrigger value="itens">Produtos</TabsTrigger>
-              <TabsTrigger value="impostos">Impostos</TabsTrigger>
-              <TabsTrigger value="totais">Totais</TabsTrigger>
-              <TabsTrigger value="pagamento">Pagamento</TabsTrigger>
-              <TabsTrigger value="transporte">Transporte</TabsTrigger>
-              <TabsTrigger value="adicionais">Informações</TabsTrigger>
-              <TabsTrigger value="rastreabilidade">Rastreabilidade</TabsTrigger>
-            </TabsList>
-            <div className="flex-1 overflow-y-auto pr-1">
-            {manualTab === 'cliente' && (<>
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-2 mb-2">
-              <div>
-                <Label>Tipo da Nota</Label>
-                <Select value={manualForm.tipo_nota} onValueChange={(v)=>setManualForm(f=>({...f, tipo_nota:v, natOp: v==='entrada' ? 'COMPRA' : (f.natOp||'VENDA')}))}>
-                  <SelectTrigger className="h-9">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="saida">Saída</SelectItem>
-                    <SelectItem value="entrada">Entrada</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label>{manualForm.tipo_nota==='entrada' ? 'Fornecedor' : 'Cliente'} (código)</Label>
-                <div className="flex items-center gap-1">
-                  <Input className="h-9 w-[110px]" inputMode="numeric" value={manualForm.party_codigo} onChange={(e)=>setManualForm(f=>({...f, party_codigo: e.target.value.replace(/\D/g,'')}))} onKeyDown={(e)=>{ if (e.key==='Enter') { e.preventDefault(); findPartyByCode(manualForm.party_codigo); } }} onBlur={()=>findPartyByCode(manualForm.party_codigo)} placeholder="—" />
-                  <Button type="button" size="icon" variant="ghost" title="Selecionar" onClick={()=>{ setPartyQuery(''); setPartyModalTipo(manualForm.tipo_nota==='entrada' ? 'fornecedor' : 'cliente'); setPartyPickerOpen(true); }}>
-                    <Search className="h-4 w-4" />
-                  </Button>
-                  { (manualForm.party_codigo || manualForm.nome || manualForm.cpf_cnpj) && (
-                    <Button type="button" size="icon" variant="ghost" title="Limpar" onClick={()=>setManualForm(f=>({
-                      ...f,
-                      party_id:'', party_codigo:'',
-                      tipo_pessoa:'PJ', cpf_cnpj:'', nome:'', email:'', telefone:'',
-                      inscricao_estadual:'', ie_isento:false,
-                      logradouro:'', numero:'', bairro:'', cidade:'', uf:'', cep:'', codigo_municipio_ibge:''
-                    }))}>
-                      <X className="h-4 w-4" />
-                    </Button>
-                  )}
-                </div>
-              </div>
-              <div>
-                <Label>Data Emissão</Label>
-                <DateInput label="Data Emissão" value={manualForm.data_emissao} onChange={(v)=>setManualForm(f=>({...f, data_emissao:v}))} />
-              </div>
-              <div>
-                <Label>Data Saída</Label>
-                <DateInput label="Data Saída" value={manualForm.data_saida} onChange={(v)=>setManualForm(f=>({...f, data_saida:v}))} />
-              </div>
+          <Tabs value={manualStep} onValueChange={setManualStep} className="flex-1 overflow-y-auto">
+            <div className="flex items-center justify-between mb-3 gap-2">
+              <TabsList>
+                <TabsTrigger value="ident">
+                  <span className="flex items-center gap-1">
+                    {!manualTabFlags.identOk && <span className="w-1.5 h-1.5 rounded-full bg-red-500" />}
+                    <span>Identificação</span>
+                  </span>
+                </TabsTrigger>
+                <TabsTrigger value="produtos">
+                  <span className="flex items-center gap-1">
+                    {!manualTabFlags.produtosOk && <span className="w-1.5 h-1.5 rounded-full bg-red-500" />}
+                    <span>Produtos</span>
+                  </span>
+                </TabsTrigger>
+                <TabsTrigger value="pagamentos">
+                  <span className="flex items-center gap-1">
+                    {!manualTabFlags.pagamentosOk && <span className="w-1.5 h-1.5 rounded-full bg-red-500" />}
+                    <span>Pagamentos</span>
+                  </span>
+                </TabsTrigger>
+                <TabsTrigger value="totais">
+                  <span className="flex items-center gap-1">
+                    {!manualTabFlags.totaisOk && <span className="w-1.5 h-1.5 rounded-full bg-red-500" />}
+                    <span>Totais &amp; Impostos</span>
+                  </span>
+                </TabsTrigger>
+                <TabsTrigger value="transporte">
+                  <span className="flex items-center gap-1">
+                    {!manualTabFlags.transpOk && <span className="w-1.5 h-1.5 rounded-full bg-red-500" />}
+                    <span>Transporte</span>
+                  </span>
+                </TabsTrigger>
+                <TabsTrigger value="resumo">Resumo &amp; Emissão</TabsTrigger>
+              </TabsList>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={()=>{ setComandaPickerSelectedId(null); setComandaPickerOpen(true); }}
+              >
+                Selecionar comanda…
+              </Button>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mb-2">
-              <div>
-                <Label>Natureza (natOp)</Label>
-                <Input className="h-8" list="natop-list" value={manualForm.natOp} onChange={(e)=>setManualForm(f=>({...f, natOp: e.target.value}))} />
-              </div>
-              <div>
-                <Label>Série</Label>
-                <Input className="h-8" value={manualForm.serie} onChange={(e)=>setManualForm(f=>({...f, serie: e.target.value}))} />
-              </div>
-              <div>
-                <Label>Número (nNF)</Label>
-                <Input className="h-8" value={manualForm.nNF} onChange={(e)=>setManualForm(f=>({...f, nNF: e.target.value}))} />
-              </div>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mb-2">
-              <div>
-                <Label>Finalidade da NF</Label>
-                <Select value={manualForm.finNFe} onValueChange={(v)=>setManualForm(f=>({...f, finNFe:v}))}>
-                  <SelectTrigger className="h-9">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="1">Normal</SelectItem>
-                    <SelectItem value="2">Complementar</SelectItem>
-                    <SelectItem value="3">Ajuste</SelectItem>
-                    <SelectItem value="4">Devolução</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label>Local de Destino</Label>
-                <Select value={manualForm.idDest} onValueChange={(v)=>setManualForm(f=>({...f, idDest:v}))}>
-                  <SelectTrigger className="h-9">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="1">Operação Interna</SelectItem>
-                    <SelectItem value="2">Interestadual</SelectItem>
-                    <SelectItem value="3">Exterior</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-2 mb-2">
-              <div>
-                <Label>Indicador de presença</Label>
-                <Select value={manualForm.indPres} onValueChange={(v)=>setManualForm(f=>({...f, indPres:v}))}>
-                  <SelectTrigger className="h-9">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="0">Não se aplica</SelectItem>
-                    <SelectItem value="1">Operação presencial</SelectItem>
-                    <SelectItem value="2">Não presencial (internet)</SelectItem>
-                    <SelectItem value="3">Não presencial (teleatendimento)</SelectItem>
-                    <SelectItem value="4">Entrega a domicílio</SelectItem>
-                    <SelectItem value="9">Outros</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label>Intermediador/Marketplace</Label>
-                <Select value={manualForm.indIntermed} onValueChange={(v)=>setManualForm(f=>({...f, indIntermed:v}))}>
-                  <SelectTrigger className="h-9">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="0">Sem intermediador</SelectItem>
-                    <SelectItem value="1">Com intermediador</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="flex items-center gap-2">
-                <Checkbox checked={manualForm.indFinal==='1'} onCheckedChange={(v)=>setManualForm(f=>({...f, indFinal: v? '1':'0'}))} />
-                <span className="text-sm">Consumidor Final</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <Checkbox checked={!!manualForm.baixar_estoque} onCheckedChange={(v)=>setManualForm(f=>({...f, baixar_estoque: !!v}))} />
-                <span className="text-sm">Baixar Estoque</span>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-2 mb-2">
-              <div className="flex items-center gap-2">
-                <Checkbox checked={!!manualForm.destacar_st} onCheckedChange={(v)=>setManualForm(f=>({...f, destacar_st: !!v}))} />
-                <span className="text-sm">Destacar Substituição Trib.</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <Checkbox id="autoApplyCfop" checked={!!autoApplyCfop} onCheckedChange={(v)=>setAutoApplyCfop(!!v)} />
-                <Label htmlFor="autoApplyCfop" className="text-xs">Aplicar CFOP padrão automaticamente aos itens</Label>
-              </div>
-            </div>
-
-            {manualForm.indIntermed === '1' && (
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mb-2">
-                <div>
-                  <Label>CNPJ Intermediador</Label>
-                  <Input inputMode="numeric" placeholder="Somente números" value={manualForm.intermediador_cnpj} onChange={(e)=>setManualForm(f=>({...f, intermediador_cnpj: onlyDigits(e.target.value)}))} />
-                </div>
-                <div className="md:col-span-2">
-                  <Label>Identificador no Intermediador</Label>
-                  <Input value={manualForm.intermediador_id} onChange={(e)=>setManualForm(f=>({...f, intermediador_id: e.target.value}))} />
-                </div>
-              </div>
-            )}
-
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-2 mb-2">
-              <div className="md:col-span-2">
-                <Label>CFOP padrão</Label>
-                <Select value={manualForm.cfop_padrao || ''} onValueChange={(v)=>{ setCfopFilter(''); setManualForm(f=>({...f, cfop_padrao:v, natOp: natFromCfop(v)})); }}>
-                  <SelectTrigger className="mt-1 w-full truncate h-8 text-xs">
-                    <SelectValue placeholder="Selecionar CFOP" />
-                  </SelectTrigger>
-                  <SelectContent className="max-h-[300px] overflow-auto w-[360px] sm:w-[420px]">
-                    <div className="sticky top-0 z-10 p-2 bg-background">
-                      <Input className="h-8 text-xs" placeholder="Filtrar CFOP ou descrição" value={cfopFilter} onChange={(e)=>setCfopFilter(e.target.value)} />
-                    </div>
-                    {CFOP_CATALOG.filter(opt => {
-                      const t = cfopFilter.trim().toLowerCase();
-                      if (!t) return true;
-                      return opt.code.toLowerCase().includes(t) || (opt.desc||'').toLowerCase().includes(t);
-                    }).map(opt => (
-                      <SelectItem key={opt.code} value={opt.code} title={`${opt.code} — ${opt.desc}`}>{`${opt.code} - ${(opt.desc||'').slice(0,60)}`}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            </>)}
-
-
-            <TabsContent value="cliente">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                <div>
-                  <Label>Tipo pessoa</Label>
-                  <Select value={manualForm.tipo_pessoa} onValueChange={(v)=>setManualForm(f=>({...f, tipo_pessoa: v}))}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="PJ">PJ</SelectItem>
-                      <SelectItem value="PF">PF</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <Label>CPF/CNPJ</Label>
-                  <Input inputMode="numeric" placeholder="Somente números" value={manualForm.cpf_cnpj} onChange={(e)=>setManualForm(f=>({...f, cpf_cnpj: onlyDigits(e.target.value)}))} />
-                </div>
-                <div>
-                  <Label>Nome/Razão</Label>
-                  <Input value={manualForm.nome} onChange={(e)=>setManualForm(f=>({...f, nome: e.target.value}))} />
-                </div>
-                <div>
-                  <Label>Inscrição Estadual</Label>
-                  <Input value={manualForm.inscricao_estadual} onChange={(e)=>setManualForm(f=>({...f, inscricao_estadual: e.target.value}))} disabled={manualForm.ie_isento} />
-                </div>
-                <div className="flex items-center gap-2 mt-6">
-                  <Checkbox checked={manualForm.ie_isento} onCheckedChange={(v)=>setManualForm(f=>({...f, ie_isento: !!v, inscricao_estadual: v? 'ISENTO' : f.inscricao_estadual}))} />
-                  <span className="text-sm">IE Isento</span>
-                </div>
-                <div>
-                  <Label>Telefone</Label>
-                  <Input inputMode="numeric" placeholder="(DD) 9XXXX-XXXX" value={manualForm.telefone} onChange={(e)=>setManualForm(f=>({...f, telefone: onlyDigits(e.target.value)}))} />
-                </div>
-                <div>
-                  <Label>Email</Label>
-                  <Input value={manualForm.email} onChange={(e)=>setManualForm(f=>({...f, email: e.target.value}))} />
-                </div>
-                <div>
-                  <Label>Logradouro</Label>
-                  <Input value={manualForm.logradouro} onChange={(e)=>setManualForm(f=>({...f, logradouro: e.target.value}))} />
-                </div>
-                <div>
-                  <Label>Número</Label>
-                  <Input value={manualForm.numero} onChange={(e)=>setManualForm(f=>({...f, numero: e.target.value}))} />
-                </div>
-                <div>
-                  <Label>Bairro</Label>
-                  <Input value={manualForm.bairro} onChange={(e)=>setManualForm(f=>({...f, bairro: e.target.value}))} />
-                </div>
-                <div>
-                  <Label>Cidade</Label>
-                  <Input value={manualForm.cidade} onChange={(e)=>setManualForm(f=>({...f, cidade: e.target.value}))} />
-                </div>
-                <div>
-                  <Label>UF</Label>
-                  <Input value={manualForm.uf} onChange={(e)=>setManualForm(f=>({...f, uf: e.target.value.toUpperCase().slice(0,2)}))} />
-                </div>
-                <div>
-                  <Label>CEP</Label>
-                  <Input inputMode="numeric" placeholder="00000000" value={manualForm.cep} onChange={(e)=>setManualForm(f=>({...f, cep: onlyDigits(e.target.value).slice(0,8)}))} onBlur={()=>lookupCep(manualForm.cep)} />
-                  {manualCepLoading && (<div className="text-xs text-text-secondary mt-1">Buscando endereço…</div>)}
-                </div>
-                <div>
-                  <Label>cMun IBGE</Label>
-                  <Input inputMode="numeric" placeholder="Código do município (IBGE)" value={manualForm.codigo_municipio_ibge} onChange={(e)=>setManualForm(f=>({...f, codigo_municipio_ibge: onlyDigits(e.target.value)}))} />
-                </div>
-              </div>
-            </TabsContent>
-
-            <TabsContent value="itens">
-              <div className="space-y-2">
-                {manualForm.itens.map((it, idx) => (
-                  <div key={idx} className="space-y-1 border border-border rounded-md p-2" onClick={handleItemClick(idx)}>
-                    <div className="grid grid-cols-1 md:grid-cols-12 gap-1 items-start">
-                      <div className="md:col-span-2">
-                        <Label>Código</Label>
-                        <Input className="h-8 text-xs" value={it.codigo}
-                          onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], codigo:e.target.value}; return {...f, itens:a}; })}
-                          onKeyDown={(e)=>{ if(e.key==='Enter'){ const p=(products||[]).find(pp=>String(pp.code||'')===String((it.codigo||'').trim())); if(p) applyProductToItem(idx,p); }} }
-                          onBlur={()=>{ const p=(products||[]).find(pp=>String(pp.code||'')===String((it.codigo||'').trim())); if(p) applyProductToItem(idx,p); }}
-                        />
-                      </div>
-                      <div className="md:col-span-3 min-w-0">
-                        <Label>Descrição</Label>
-                        <div className="flex items-center gap-1">
-                          <Input className="h-8 text-xs flex-1" value={it.descricao} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], descricao:e.target.value}; return {...f, itens:a}; })} />
-                          <Button type="button" size="icon" variant="ghost" title="Buscar produto" onClick={()=>{ setProductPickerTarget(idx); setProductFilter(''); setProductPickerOpen(true); }}>
-                            <Search className="h-4 w-4" />
-                          </Button>
-                          <Button type="button" size="icon" variant="ghost" className="text-text-secondary hover:text-red-500" title="Remover item" onClick={()=>setManualForm(f=>({ ...f, itens: f.itens.filter((_,i)=>i!==idx) }))}>
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </div>
-                      <div className="md:col-span-2 min-w-0">
-                        <Label>CFOP</Label>
-                        <Select value={it.cfop || ''} onValueChange={(v)=>{ setCfopFilter(''); setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], cfop:v}; return { ...f, itens:a, natOp: natFromCfop(v) }; }); }}>
-                          <SelectTrigger className="mt-1 w-full truncate h-8 text-xs">
-                            <SelectValue placeholder="Selecionar CFOP" />
-                          </SelectTrigger>
-                          <SelectContent className="max-h-[300px] overflow-auto w-[360px] sm:w-[420px]">
-                            <div className="sticky top-0 z-10 p-2 bg-background">
-                              <Input className="h-8 text-xs" placeholder="Filtrar CFOP ou descrição" value={cfopFilter} onChange={(e)=>setCfopFilter(e.target.value)} />
-                            </div>
-                            {CFOP_CATALOG.filter(opt => {
-                              const t = cfopFilter.trim().toLowerCase();
-                              if (!t) return true;
-                              return opt.code.toLowerCase().includes(t) || (opt.desc||'').toLowerCase().includes(t);
-                            }).map(opt => (
-                              <SelectItem key={opt.code} value={opt.code} title={`${opt.code} — ${opt.desc}`}>{`${opt.code} - ${(opt.desc||'').slice(0,60)}`}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="md:col-span-1">
-                        <Label>Unid.</Label>
-                        <Input className="h-8 text-xs" list="unid-list" placeholder="UN, KG, LT…" value={it.unidade} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], unidade:e.target.value.toUpperCase().slice(0,5)}; return {...f, itens:a}; })} />
-                      </div>
-                      <div className="md:col-span-1">
-                        <Label>Cód. Barras</Label>
-                        <Input className="h-8 text-xs" value={it.cod_barras||''}
-                          onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], cod_barras:e.target.value}; return {...f, itens:a}; })}
-                          onKeyDown={(e)=>{ if(e.key==='Enter'){ const v=String((it.cod_barras||'').trim()); const p=(products||[]).find(pp=>[pp.barcode, pp.ean, pp.gtin, pp.bar_code].some(x=>String(x||'')===v)); if(p) applyProductToItem(idx,p); }} }
-                          onBlur={()=>{ const v=String((it.cod_barras||'').trim()); const p=(products||[]).find(pp=>[pp.barcode, pp.ean, pp.gtin, pp.bar_code].some(x=>String(x||'')===v)); if(p) applyProductToItem(idx,p); }}
-                        />
-                      </div>
-                      <div className="md:col-span-1">
-                        <Label>Qtd</Label>
-                        <Input className="h-8 text-xs" inputMode="decimal" value={it.quantidade} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], quantidade:e.target.value.replace(/[^0-9.,]/g,'')}; return {...f, itens:a}; })} />
-                      </div>
-                      <div className="md:col-span-2">
-                        <Label>Preço</Label>
-                        <Input className="h-8 text-xs" inputMode="decimal" value={it.preco_unitario} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], preco_unitario: moneyMaskBR(e.target.value)}; return {...f, itens:a}; })} />
-                      </div>
-                    </div>
-                    <div className="flex items-center justify-between text-[11px] text-text-secondary mt-1">
-                      <div className="truncate">{`Item ${idx+1}: ${it.codigo ? it.codigo + ' - ' : ''}${it.descricao || '—'}`}</div>
-                      <div>{`Total item: R$ ${fmtMoney(((parseDec(it.preco_unitario)||0)*(parseDec(it.quantidade)||1)) - ((parseDec(it.desconto_percent)||0) ? ((parseDec(it.preco_unitario)||0)*(parseDec(it.quantidade)||1)*(parseDec(it.desconto_percent)||0)/100) : (parseDec(it.desconto_valor)||0)) + (parseDec(it.acrescimos_valor)||0) + (parseDec(it.frete_valor)||0) + (parseDec(it.seguro_valor)||0))}`}</div>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-3 mt-1">
-                      <div className="flex items-center gap-2">
-                        <Checkbox checked={!!it.dest_icms} onCheckedChange={(v)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], dest_icms: !!v}; return {...f, itens:a}; })} />
-                        <span className="text-xs">Destacar ICMS</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Checkbox checked={!!it.dest_icms_info} onCheckedChange={(v)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], dest_icms_info: !!v}; return {...f, itens:a}; })} />
-                        <span className="text-xs">ICMS na Info. Adicional</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Checkbox checked={!!it.benef_fiscal} onCheckedChange={(v)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], benef_fiscal: !!v}; return {...f, itens:a}; })} />
-                        <span className="text-xs">Benefício Fiscal</span>
-                      </div>
-                    </div>
-                    {expandedItem===idx && (
-                      <div className="mt-2 grid grid-cols-1 md:grid-cols-12 gap-1">
-                        <div className="md:col-span-2">
-                          <Label>NCM</Label>
-                          <Input className="h-8 text-xs" inputMode="numeric" placeholder="8 dígitos" value={it.ncm} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], ncm: onlyDigits(e.target.value).slice(0,8)}; return {...f, itens:a}; })} />
-                        </div>
-                        <div className="md:col-span-2">
-                          <Label>CEST</Label>
-                          <Input className="h-8 text-xs" value={it.cest || ''} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], cest:e.target.value}; return {...f, itens:a}; })} />
-                        </div>
-                        <div className="md:col-span-2">
-                          <Label>Desc. (R$)</Label>
-                          <Input className="h-8 text-xs" inputMode="decimal" value={it.desconto_valor||''} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], desconto_valor: moneyMaskBR(e.target.value)}; return {...f, itens:a}; })} />
-                        </div>
-                        <div className="md:col-span-2">
-                          <Label>Desc. (%)</Label>
-                          <Input className="h-8 text-xs" inputMode="decimal" value={it.desconto_percent||''} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], desconto_percent:e.target.value.replace(/[^0-9.,]/g,'')}; return {...f, itens:a}; })} />
-                        </div>
-                        <div className="md:col-span-2">
-                          <Label>Acréscimos</Label>
-                          <Input className="h-8 text-xs" inputMode="decimal" value={it.acrescimos_valor||''} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], acrescimos_valor: moneyMaskBR(e.target.value)}; return {...f, itens:a}; })} />
-                        </div>
-                        <div className="md:col-span-2">
-                          <Label>Frete (R$)</Label>
-                          <Input className="h-8 text-xs" inputMode="decimal" value={it.frete_valor||''} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], frete_valor: moneyMaskBR(e.target.value)}; return {...f, itens:a}; })} />
-                        </div>
-                        <div className="md:col-span-2">
-                          <Label>Seguro (R$)</Label>
-                          <Input className="h-8 text-xs" inputMode="decimal" value={it.seguro_valor||''} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], seguro_valor: moneyMaskBR(e.target.value)}; return {...f, itens:a}; })} />
-                        </div>
-                        <div className="md:col-span-12">
-                          <Label>Observações</Label>
-                          <Input className="h-8 text-xs" value={it.obs||''} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], obs:e.target.value}; return {...f, itens:a}; })} />
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                ))}
-                <div className="flex justify-start">
-                  <Button size="sm" variant="outline" onClick={()=>{
-                    setManualForm(f=>{
-                      const novo={ descricao:'', codigo:'', cod_barras:'', ncm:'', cest:'', cfop: f.cfop_padrao || '5102', unidade:'UN', quantidade:'1', preco_unitario:'0.00', desconto_valor:'0.00', desconto_percent:'', acrescimos_valor:'0.00', frete_valor:'0.00', seguro_valor:'0.00', obs:'', dest_icms:false, dest_icms_info:false, benef_fiscal:false, impostos:{ origem:'', icms:{ cst:'', csosn:'', base:'', aliquota:'', valor:'', desonerado_valor:'', desoneracao_motivo:'', operacao_valor:'', aliq_diferimento:'', valor_diferido:'' }, icmsst:{ base:'', aliquota:'', valor:'' }, fcp:{ base:'', aliquota:'', valor:'' }, fcpst:{ base:'', aliquota:'', valor:'' }, pis:{ cst:'', aliquota:'', valor:'' }, cofins:{ cst:'', aliquota:'', valor:'' }, ipi:{ cst:'', aliquota:'', valor:'', tipo_calculo:'nenhum', valor_unit:'' }, iss:{ aliquota:'', valor:'' } } };
-                      return { ...f, itens:[...f.itens, novo] };
-                    });
-                  }}>Adicionar item</Button>
-                </div>
-                <div className="mt-2 overflow-x-auto border border-border rounded">
-                  <table className="min-w-full text-[11px]">
-                    <thead>
-                      <tr className="text-text-secondary">
-                        <th className="text-left font-medium px-2 py-1">Item</th>
-                        <th className="text-left font-medium px-2 py-1">Produto</th>
-                        <th className="text-left font-medium px-2 py-1">Descrição</th>
-                        <th className="text-left font-medium px-2 py-1">UN</th>
-                        <th className="text-left font-medium px-2 py-1">CST</th>
-                        <th className="text-right font-medium px-2 py-1">Qtde</th>
-                        <th className="text-right font-medium px-2 py-1">Vr. Unit</th>
-                        <th className="text-right font-medium px-2 py-1">Vr. ICMS</th>
-                        <th className="text-right font-medium px-2 py-1">Vr. ICMS-ST</th>
-                        <th className="text-right font-medium px-2 py-1">Vr. FCP</th>
-                        <th className="text-right font-medium px-2 py-1">Total Item</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {manualForm.itens.map((x, i)=>{
-                        const pu = parseDec(x.preco_unitario)||0;
-                        const q = parseDec(x.quantidade)||1;
-                        const bruto = pu*q;
-                        const descP = parseDec(x.desconto_percent)||0;
-                        const descV = parseDec(x.desconto_valor)||0;
-                        const acres = parseDec(x.acrescimos_valor)||0;
-                        const desconto = descP ? (bruto*descP/100) : descV;
-                        const totalItem = bruto - desconto + acres + (parseDec(x.frete_valor)||0) + (parseDec(x.seguro_valor)||0);
-                        const cst = x.impostos?.icms?.cst || x.impostos?.icms?.csosn || '';
-                        const icms = parseDec(x.impostos?.icms?.valor)||0;
-                        const icmsst = parseDec(x.impostos?.icmsst?.valor)||0;
-                        const fcp = parseDec(x.impostos?.fcp?.valor)||0;
-                        return (
-                          <tr key={i} className="border-t border-border/60">
-                            <td className="px-2 py-1">{i+1}</td>
-                            <td className="px-2 py-1 whitespace-nowrap">{x.codigo||'—'}</td>
-                            <td className="px-2 py-1 truncate max-w-[320px]">{x.descricao||'—'}</td>
-                            <td className="px-2 py-1">{x.unidade||'UN'}</td>
-                            <td className="px-2 py-1">{cst||'—'}</td>
-                            <td className="px-2 py-1 text-right">{fmtMoney(q)}</td>
-                            <td className="px-2 py-1 text-right">{fmtMoney(pu)}</td>
-                            <td className="px-2 py-1 text-right">{fmtMoney(icms)}</td>
-                            <td className="px-2 py-1 text-right">{fmtMoney(icmsst)}</td>
-                            <td className="px-2 py-1 text-right">{fmtMoney(fcp)}</td>
-                            <td className="px-2 py-1 text-right">{fmtMoney(totalItem)}</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </TabsContent>
-
-            <TabsContent value="impostos">
+            <TabsContent value="ident">
               <div className="space-y-3">
-                {manualForm.itens.map((it, idx) => (
-                  <div key={idx} className="border border-border rounded-md p-2 cursor-pointer" onClick={handleItemClick(idx)}>
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="text-sm font-medium truncate">Item {idx+1}: {(it.codigo? `${it.codigo} - `: '')}{it.descricao||'—'}</div>
-                      <div className="text-xs text-text-secondary flex gap-3">
-                        <span>ICMS {it.impostos?.icms?.cst||it.impostos?.icms?.csosn||'—'}/{it.impostos?.icms?.aliquota||'—'}%</span>
-                        <span>PIS {it.impostos?.pis?.cst||'—'}/{it.impostos?.pis?.aliquota||'—'}%</span>
-                        <span>COFINS {it.impostos?.cofins?.cst||'—'}/{it.impostos?.cofins?.aliquota||'—'}%</span>
-                        <span>FCP {it.impostos?.fcp?.aliquota||'—'}%</span>
-                        <span>IPI {it.impostos?.ipi?.cst||'—'}/{it.impostos?.ipi?.aliquota||'—'}%</span>
-                        <span>{`Total R$ ${fmtMoney(((parseDec(it.preco_unitario)||0)*(parseDec(it.quantidade)||1)) - ((parseDec(it.desconto_percent)||0) ? ((parseDec(it.preco_unitario)||0)*(parseDec(it.quantidade)||1)*(parseDec(it.desconto_percent)||0)/100) : (parseDec(it.desconto_valor)||0)) + (parseDec(it.acrescimos_valor)||0) + (parseDec(it.frete_valor)||0) + (parseDec(it.seguro_valor)||0))}`}</span>
-                      </div>
-                    </div>
-                    {expandedItem===idx && (
-                      <div className="mt-3 grid grid-cols-1 md:grid-cols-6 gap-2">
-                        <div>
-                          <Label>Origem</Label>
-                          <Input value={it.impostos?.origem||''} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], impostos:{...a[idx].impostos, origem:e.target.value}}; return {...f, itens:a}; })} />
-                        </div>
-                        <div>
-                          <Label>ICMS CST</Label>
-                          <Input value={it.impostos?.icms?.cst||''} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], impostos:{...a[idx].impostos, icms:{...a[idx].impostos.icms, cst:e.target.value}}}; return {...f, itens:a}; })} />
-                        </div>
-                        <div>
-                          <Label>CSOSN</Label>
-                          <Input value={it.impostos?.icms?.csosn||''} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], impostos:{...a[idx].impostos, icms:{...a[idx].impostos.icms, csosn:e.target.value}}}; return {...f, itens:a}; })} />
-                        </div>
-                        <div>
-                          <Label>Base ICMS</Label>
-                          <Input value={it.impostos?.icms?.base||''} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], impostos:{...a[idx].impostos, icms:{...a[idx].impostos.icms, base:e.target.value}}}; return {...f, itens:a}; })} />
-                        </div>
-                        <div>
-                          <Label>Alíquota ICMS (%)</Label>
-                          <Input value={it.impostos?.icms?.aliquota||''} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], impostos:{...a[idx].impostos, icms:{...a[idx].impostos.icms, aliquota:e.target.value}}}; return {...f, itens:a}; })} />
-                        </div>
-                        <div>
-                          <Label>Valor ICMS</Label>
-                          <Input value={it.impostos?.icms?.valor||''} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], impostos:{...a[idx].impostos, icms:{...a[idx].impostos.icms, valor:e.target.value}}}; return {...f, itens:a}; })} />
-                        </div>
-                        <div>
-                          <Label>Base ICMS-ST</Label>
-                          <Input value={it.impostos?.icmsst?.base||''} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], impostos:{...a[idx].impostos, icmsst:{...a[idx].impostos.icmsst, base:e.target.value}}}; return {...f, itens:a}; })} />
-                        </div>
-                        <div>
-                          <Label>Alíquota ICMS-ST (%)</Label>
-                          <Input value={it.impostos?.icmsst?.aliquota||''} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], impostos:{...a[idx].impostos, icmsst:{...a[idx].impostos.icmsst, aliquota:e.target.value}}}; return {...f, itens:a}; })} />
-                        </div>
-                        <div>
-                          <Label>Valor ICMS-ST</Label>
-                          <Input value={it.impostos?.icmsst?.valor||''} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], impostos:{...a[idx].impostos, icmsst:{...a[idx].impostos.icmsst, valor:e.target.value}}}; return {...f, itens:a}; })} />
-                        </div>
-                        <div>
-                          <Label>FCP Base</Label>
-                          <Input value={it.impostos?.fcp?.base||''} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], impostos:{...a[idx].impostos, fcp:{...a[idx].impostos.fcp, base:e.target.value}}}; return {...f, itens:a}; })} />
-                        </div>
-                        <div>
-                          <Label>FCP Alíquota (%)</Label>
-                          <Input value={it.impostos?.fcp?.aliquota||''} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], impostos:{...a[idx].impostos, fcp:{...a[idx].impostos.fcp, aliquota:e.target.value}}}; return {...f, itens:a}; })} />
-                        </div>
-                        <div>
-                          <Label>FCP Valor</Label>
-                          <Input value={it.impostos?.fcp?.valor||''} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], impostos:{...a[idx].impostos, fcp:{...a[idx].impostos.fcp, valor:e.target.value}}}; return {...f, itens:a}; })} />
-                        </div>
-                        <div>
-                          <Label>FCP-ST Base</Label>
-                          <Input value={it.impostos?.fcpst?.base||''} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], impostos:{...a[idx].impostos, fcpst:{...a[idx].impostos.fcpst, base:e.target.value}}}; return {...f, itens:a}; })} />
-                        </div>
-                        <div>
-                          <Label>FCP-ST Alíquota (%)</Label>
-                          <Input value={it.impostos?.fcpst?.aliquota||''} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], impostos:{...a[idx].impostos, fcpst:{...a[idx].impostos.fcpst, aliquota:e.target.value}}}; return {...f, itens:a}; })} />
-                        </div>
-                        <div>
-                          <Label>FCP-ST Valor</Label>
-                          <Input value={it.impostos?.fcpst?.valor||''} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], impostos:{...a[idx].impostos, fcpst:{...a[idx].impostos.fcpst, valor:e.target.value}}}; return {...f, itens:a}; })} />
-                        </div>
-                        <div>
-                          <Label>ICMS Desonerado (R$)</Label>
-                          <Input value={it.impostos?.icms?.desonerado_valor||''} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], impostos:{...a[idx].impostos, icms:{...a[idx].impostos.icms, desonerado_valor:e.target.value}}}; return {...f, itens:a}; })} />
-                        </div>
-                        <div className="md:col-span-2">
-                          <Label>Motivo da Desoneração</Label>
-                          <Input value={it.impostos?.icms?.desoneracao_motivo||''} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], impostos:{...a[idx].impostos, icms:{...a[idx].impostos.icms, desoneracao_motivo:e.target.value}}}; return {...f, itens:a}; })} />
-                        </div>
-                        <div>
-                          <Label>ICMS Operação (R$)</Label>
-                          <Input value={it.impostos?.icms?.operacao_valor||''} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], impostos:{...a[idx].impostos, icms:{...a[idx].impostos.icms, operacao_valor:e.target.value}}}; return {...f, itens:a}; })} />
-                        </div>
-                        <div>
-                          <Label>Alíquota Diferimento (%)</Label>
-                          <Input value={it.impostos?.icms?.aliq_diferimento||''} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], impostos:{...a[idx].impostos, icms:{...a[idx].impostos.icms, aliq_diferimento:e.target.value}}}; return {...f, itens:a}; })} />
-                        </div>
-                        <div>
-                          <Label>Valor ICMS Diferido</Label>
-                          <Input value={it.impostos?.icms?.valor_diferido||''} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], impostos:{...a[idx].impostos, icms:{...a[idx].impostos.icms, valor_diferido:e.target.value}}}; return {...f, itens:a}; })} />
-                        </div>
-                        <div>
-                          <Label>PIS CST</Label>
-                          <Input value={it.impostos?.pis?.cst||''} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], impostos:{...a[idx].impostos, pis:{...a[idx].impostos.pis, cst:e.target.value}}}; return {...f, itens:a}; })} />
-                        </div>
-                        <div>
-                          <Label>PIS Alíquota (%)</Label>
-                          <Input value={it.impostos?.pis?.aliquota||''} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], impostos:{...a[idx].impostos, pis:{...a[idx].impostos.pis, aliquota:e.target.value}}}; return {...f, itens:a}; })} />
-                        </div>
-                        <div>
-                          <Label>PIS Valor</Label>
-                          <Input value={it.impostos?.pis?.valor||''} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], impostos:{...a[idx].impostos, pis:{...a[idx].impostos.pis, valor:e.target.value}}}; return {...f, itens:a}; })} />
-                        </div>
-                        <div>
-                          <Label>COFINS CST</Label>
-                          <Input value={it.impostos?.cofins?.cst||''} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], impostos:{...a[idx].impostos, cofins:{...a[idx].impostos.cofins, cst:e.target.value}}}; return {...f, itens:a}; })} />
-                        </div>
-                        <div>
-                          <Label>COFINS Alíquota (%)</Label>
-                          <Input value={it.impostos?.cofins?.aliquota||''} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], impostos:{...a[idx].impostos, cofins:{...a[idx].impostos.cofins, aliquota:e.target.value}}}; return {...f, itens:a}; })} />
-                        </div>
-                        <div>
-                          <Label>COFINS Valor</Label>
-                          <Input value={it.impostos?.cofins?.valor||''} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], impostos:{...a[idx].impostos, cofins:{...a[idx].impostos.cofins, valor:e.target.value}}}; return {...f, itens:a}; })} />
-                        </div>
-                        <div>
-                          <Label>IPI CST</Label>
-                          <Input value={it.impostos?.ipi?.cst||''} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], impostos:{...a[idx].impostos, ipi:{...a[idx].impostos.ipi, cst:e.target.value}}}; return {...f, itens:a}; })} />
-                        </div>
-                        <div>
-                          <Label>IPI - Tipo de Cálculo</Label>
-                          <Select value={it.impostos?.ipi?.tipo_calculo||'nenhum'} onValueChange={(v)=>setManualForm(f=>{ const a=[...f.itens]; a[idx] = { ...a[idx], impostos:{...a[idx].impostos, ipi:{...a[idx].impostos.ipi, tipo_calculo:v}} }; return {...f, itens:a}; })}>
-                            <SelectTrigger className="h-8 text-xs" />
-                            <SelectContent>
-                              <SelectItem value="aliquota">Alíquota</SelectItem>
-                              <SelectItem value="valor_unit">Vl Unit.</SelectItem>
-                              <SelectItem value="nenhum">Nenhum</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        {(it.impostos?.ipi?.tipo_calculo||'nenhum')==='aliquota' && (
-                          <div>
-                            <Label>IPI Alíquota (%)</Label>
-                            <Input value={it.impostos?.ipi?.aliquota||''} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], impostos:{...a[idx].impostos, ipi:{...a[idx].impostos.ipi, aliquota:e.target.value}}}; return {...f, itens:a}; })} />
-                          </div>
-                        )}
-                        {(it.impostos?.ipi?.tipo_calculo||'nenhum')==='valor_unit' && (
-                          <div>
-                            <Label>IPI Valor Unitário</Label>
-                            <Input value={it.impostos?.ipi?.valor_unit||''} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], impostos:{...a[idx].impostos, ipi:{...a[idx].impostos.ipi, valor_unit:e.target.value}}}; return {...f, itens:a}; })} />
-                          </div>
-                        )}
-                        <div>
-                          <Label>IPI Valor</Label>
-                          <Input value={it.impostos?.ipi?.valor||''} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], impostos:{...a[idx].impostos, ipi:{...a[idx].impostos.ipi, valor:e.target.value}}}; return {...f, itens:a}; })} />
-                        </div>
-                        <div>
-                          <Label>ISS Alíquota (%)</Label>
-                          <Input value={it.impostos?.iss?.aliquota||''} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], impostos:{...a[idx].impostos, iss:{...a[idx].impostos.iss, aliquota:e.target.value}}}; return {...f, itens:a}; })} />
-                        </div>
-                        <div>
-                          <Label>ISS Valor</Label>
-                          <Input value={it.impostos?.iss?.valor||''} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], impostos:{...a[idx].impostos, iss:{...a[idx].impostos.iss, valor:e.target.value}}}; return {...f, itens:a}; })} />
-                        </div>
-                        <div className="md:col-span-6">
-                          <details>
-                            <summary className="text-xs text-text-secondary cursor-pointer select-none">Impostos 2 (Avançado)</summary>
-                            <div className="mt-2 grid grid-cols-1 md:grid-cols-6 gap-2">
-                              <div>
-                                <Label>AD Rem</Label>
-                                <Input value={it.impostos?.icms?.ad_rem||''} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], impostos:{...a[idx].impostos, icms:{...a[idx].impostos.icms, ad_rem:e.target.value}}}; return {...f, itens:a}; })} />
-                              </div>
-                              <div>
-                                <Label>AD Rem Retenção</Label>
-                                <Input value={it.impostos?.icms?.ad_rem_retencao||''} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], impostos:{...a[idx].impostos, icms:{...a[idx].impostos.icms, ad_rem_retencao:e.target.value}}}; return {...f, itens:a}; })} />
-                              </div>
-                              <div>
-                                <Label>BC Monofásico</Label>
-                                <Input value={it.impostos?.icms?.monofasico_bc||''} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], impostos:{...a[idx].impostos, icms:{...a[idx].impostos.icms, monofasico_bc:e.target.value}}}; return {...f, itens:a}; })} />
-                              </div>
-                              <div>
-                                <Label>ICMS Monofásico</Label>
-                                <Input value={it.impostos?.icms?.monofasico_valor||''} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], impostos:{...a[idx].impostos, icms:{...a[idx].impostos.icms, monofasico_valor:e.target.value}}}; return {...f, itens:a}; })} />
-                              </div>
-                              <div>
-                                <Label>BC Mono Retenção</Label>
-                                <Input value={it.impostos?.icms?.mono_retencao_bc||''} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], impostos:{...a[idx].impostos, icms:{...a[idx].impostos.icms, mono_retencao_bc:e.target.value}}}; return {...f, itens:a}; })} />
-                              </div>
-                              <div>
-                                <Label>ICMS Mono Retenção</Label>
-                                <Input value={it.impostos?.icms?.mono_retencao_valor||''} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], impostos:{...a[idx].impostos, icms:{...a[idx].impostos.icms, mono_retencao_valor:e.target.value}}}; return {...f, itens:a}; })} />
-                              </div>
-                              <div>
-                                <Label>% Redução</Label>
-                                <Input value={it.impostos?.icms?.reducao_percent||''} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], impostos:{...a[idx].impostos, icms:{...a[idx].impostos.icms, reducao_percent:e.target.value}}}; return {...f, itens:a}; })} />
-                              </div>
-                              <div>
-                                <Label>Motivo da Redução</Label>
-                                <Input value={it.impostos?.icms?.reducao_motivo||''} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], impostos:{...a[idx].impostos, icms:{...a[idx].impostos.icms, reducao_motivo:e.target.value}}}; return {...f, itens:a}; })} />
-                              </div>
-                              <div>
-                                <Label>BC Mono Cobrado Ant.</Label>
-                                <Input value={it.impostos?.icms?.mono_cobrado_ant_bc||''} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], impostos:{...a[idx].impostos, icms:{...a[idx].impostos.icms, mono_cobrado_ant_bc:e.target.value}}}; return {...f, itens:a}; })} />
-                              </div>
-                              <div>
-                                <Label>ICMS Mono Cobrado Ant.</Label>
-                                <Input value={it.impostos?.icms?.mono_cobrado_ant_valor||''} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], impostos:{...a[idx].impostos, icms:{...a[idx].impostos.icms, mono_cobrado_ant_valor:e.target.value}}}; return {...f, itens:a}; })} />
-                              </div>
-                              <div>
-                                <Label>ICMS Próprio Devido</Label>
-                                <Input value={it.impostos?.icms?.proprio_devido_valor||''} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], impostos:{...a[idx].impostos, icms:{...a[idx].impostos.icms, proprio_devido_valor:e.target.value}}}; return {...f, itens:a}; })} />
-                              </div>
-                              <div className="md:col-span-6 border-t border-border/40 pt-2">
-                                <div className="text-xs text-text-secondary mb-1">Grupo indicador da origem do combustível</div>
-                                <div className="grid grid-cols-1 md:grid-cols-6 gap-2">
-                                  <div>
-                                    <Label>UF</Label>
-                                    <Input value={it.impostos?.combustivel?.uf||''} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], impostos:{...a[idx].impostos, combustivel:{...a[idx].impostos.combustivel, uf:e.target.value}}}; return {...f, itens:a}; })} />
-                                  </div>
-                                  <div>
-                                    <Label>% origem UF</Label>
-                                    <Input value={it.impostos?.combustivel?.perc_origem_uf||''} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], impostos:{...a[idx].impostos, combustivel:{...a[idx].impostos.combustivel, perc_origem_uf:e.target.value}}}; return {...f, itens:a}; })} />
-                                  </div>
-                                  <div className="md:col-span-2">
-                                    <Label>Indicador de importação</Label>
-                                    <Input value={it.impostos?.combustivel?.indicador_importacao||''} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], impostos:{...a[idx].impostos, combustivel:{...a[idx].impostos.combustivel, indicador_importacao:e.target.value}}}; return {...f, itens:a}; })} />
-                                  </div>
-                                </div>
-                              </div>
-                              <div className="md:col-span-6 border-t border-border/40 pt-2">
-                                <div className="text-xs text-text-secondary mb-1">CIDE</div>
-                                <div className="grid grid-cols-1 md:grid-cols-6 gap-2">
-                                  <div>
-                                    <Label>Aliq. CIDE</Label>
-                                    <Input value={it.impostos?.cide?.aliq||''} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], impostos:{...a[idx].impostos, cide:{...a[idx].impostos.cide, aliq:e.target.value}}}; return {...f, itens:a}; })} />
-                                  </div>
-                                  <div>
-                                    <Label>BC CIDE</Label>
-                                    <Input value={it.impostos?.cide?.base||''} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], impostos:{...a[idx].impostos, cide:{...a[idx].impostos.cide, base:e.target.value}}}; return {...f, itens:a}; })} />
-                                  </div>
-                                  <div>
-                                    <Label>Vl. CIDE</Label>
-                                    <Input value={it.impostos?.cide?.valor||''} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], impostos:{...a[idx].impostos, cide:{...a[idx].impostos.cide, valor:e.target.value}}}; return {...f, itens:a}; })} />
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-                          </details>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </TabsContent>
-
-            <TabsContent value="totais">
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-                <div>
-                  <Label>Desconto Geral (R$)</Label>
-                  <Input value={manualForm.totais.desconto_geral} onChange={(e)=>setManualForm(f=>({...f, totais:{...f.totais, desconto_geral:e.target.value}}))} />
-                </div>
-                <div>
-                  <Label>Frete (R$)</Label>
-                  <Input value={manualForm.totais.frete} onChange={(e)=>setManualForm(f=>({...f, totais:{...f.totais, frete:e.target.value}}))} />
-                </div>
-                <div>
-                  <Label>Outras Despesas (R$)</Label>
-                  <Input value={manualForm.totais.outras_despesas} onChange={(e)=>setManualForm(f=>({...f, totais:{...f.totais, outras_despesas:e.target.value}}))} />
-                </div>
-                <div className="mt-6 text-sm">
-                  <span className="text-text-secondary">Total itens: </span>
-                  {fmtMoney(manualForm.itens.reduce((s,x)=>{ const pu=parseDec(x.preco_unitario); const q=parseDec(x.quantidade)||1; const descP=parseDec(x.desconto_percent)||0; const descV=parseDec(x.desconto_valor)||0; const acres=parseDec(x.acrescimos_valor)||0; const bruto=pu*q; const d = descP? (bruto*descP/100) : descV; return s + (bruto - d + acres); },0))}
-                </div>
-              </div>
-            </TabsContent>
-
-            <TabsContent value="pagamento">
-              <div className="space-y-3">
-                {manualForm.pagamentos.map((p, idx)=> (
-                  <div key={idx} className="grid grid-cols-1 gap-2 items-end md:[grid-template-columns:2fr_1fr_1fr_1fr_auto]">
-                    <div>
-                      <Label>Finalizadora</Label>
-                      <Select value={p.finalizadora_id||''} onValueChange={(id)=>setManualForm(f=>{ const a=[...f.pagamentos]; const fin = (payMethods||[]).find(x=>String(x.id)===String(id)); a[idx] = { ...a[idx], finalizadora_id:id, tipo: fin?.nome || a[idx].tipo }; return { ...f, pagamentos:a }; })}>
-                        <SelectTrigger className="h-9">
-                          <SelectValue placeholder={payMethods.length? 'Selecionar' : 'Carregando…'} />
+                <div className="border border-border rounded-md bg-surface p-3">
+                  <div className="text-sm font-medium mb-2">Identificação da Nota</div>
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
+                    <div className="md:col-span-1 max-w-[210px]">
+                      <Label className={isEmpty(manualForm.modelo) ? 'text-red-400' : ''}>Tipo de Documento</Label>
+                      <Select value={manualForm.modelo} onValueChange={(v)=>setManualForm(f=>({...f, modelo: v}))}>
+                        <SelectTrigger className={`h-8 text-xs ${isEmpty(manualForm.modelo) ? 'border-red-500 text-red-400' : ''}`}>
+                          <SelectValue placeholder="Selecione" />
                         </SelectTrigger>
                         <SelectContent>
-                          {payMethods.map(m => (
-                            <SelectItem key={m.id} value={m.id}>
-                              {`${(m?.codigo_interno!=null && String(m.codigo_interno).trim()!=='') ? String(m.codigo_interno).padStart(2,'0') + ' - ' : ''}${m?.nome || '—'}`}
-                            </SelectItem>
-                          ))}
+                          <SelectItem value="55">55 - NF-e</SelectItem>
+                          <SelectItem value="65">65 - NFC-e</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="md:col-span-1 max-w-[190px]">
+                      <Label className={isEmpty(manualForm.tipo_nota) ? 'text-red-400' : ''}>Tipo de Operação</Label>
+                      <Select value={manualForm.tipo_nota} onValueChange={(v)=>setManualForm(f=>({...f, tipo_nota: v}))}>
+                        <SelectTrigger className={`h-8 text-xs ${isEmpty(manualForm.tipo_nota) ? 'border-red-500 text-red-400' : ''}`}>
+                          <SelectValue placeholder="Selecione" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="saida">Saída</SelectItem>
+                          <SelectItem value="entrada">Entrada</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="md:col-span-1 max-w-[210px]">
+                      <Label className={isEmpty(manualForm.finNFe) ? 'text-red-400' : ''}>Finalidade</Label>
+                      <Select value={manualForm.finNFe} onValueChange={(v)=>setManualForm(f=>({...f, finNFe: v}))}>
+                        <SelectTrigger className={`h-8 text-xs ${isEmpty(manualForm.finNFe) ? 'border-red-500 text-red-400' : ''}`}>
+                          <SelectValue placeholder="Normal" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="1">1 - Normal</SelectItem>
+                          <SelectItem value="2">2 - Complementar</SelectItem>
+                          <SelectItem value="3">3 - Ajuste</SelectItem>
+                          <SelectItem value="4">4 - Devolução</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="md:col-span-1">
+                      <Label className={isEmpty(manualForm.natOp) ? 'text-red-400' : ''}>Natureza da Operação</Label>
+                      <Input
+                        className={`h-8 text-xs ${isEmpty(manualForm.natOp) ? 'border-red-500 text-red-400 placeholder:text-red-400' : ''}`}
+                        value={manualForm.natOp}
+                        onChange={(e)=>setManualForm(f=>({...f, natOp: e.target.value}))}
+                        placeholder="Ex.: Venda de mercadoria"
+                      />
+                    </div>
+                    <div className="md:col-span-1 max-w-[200px]">
+                      <Label className={isEmpty(manualForm.data_emissao) ? 'text-red-400' : ''}>Data de Emissão</Label>
+                      <DateInput label="Selecione" value={manualForm.data_emissao} onChange={(v)=>setManualForm(f=>({...f, data_emissao: v}))} />
+                    </div>
+                    <div className="md:col-span-1 max-w-[200px]">
+                      <Label>Data Saída/Entrada</Label>
+                      <DateInput label="Selecione" value={manualForm.data_saida} onChange={(v)=>setManualForm(f=>({...f, data_saida: v}))} />
+                    </div>
+                    <div className="md:col-span-1 max-w-[120px]">
+                      <Label className={isEmpty(manualForm.serie) ? 'text-red-400' : ''}>Série</Label>
+                      <Input className={`h-8 text-xs ${isEmpty(manualForm.serie) ? 'border-red-500 text-red-400 placeholder:text-red-400' : ''}`} value={manualForm.serie} onChange={(e)=>setManualForm(f=>({...f, serie: e.target.value}))} />
+                    </div>
+                    <div className="md:col-span-1 max-w-[140px]">
+                      <Label>Número</Label>
+                      <Input className="h-8 text-xs" value={manualForm.nNF} onChange={(e)=>setManualForm(f=>({...f, nNF: e.target.value}))} placeholder="automático" />
+                    </div>
+                    <div className="md:col-span-1">
+                      <Label className={isEmpty(manualForm.idDest) ? 'text-red-400' : ''}>Destino da Operação</Label>
+                      <Select value={manualForm.idDest || 'auto'} onValueChange={(v)=>setManualForm(f=>({...f, idDest: v==='auto' ? '' : v}))}>
+                        <SelectTrigger className={`h-8 text-xs ${isEmpty(manualForm.idDest) ? 'border-red-500 text-red-400' : ''}`}><SelectValue placeholder="Automático" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="auto">Automático</SelectItem>
+                          <SelectItem value="1">1 - Interna (mesmo estado)</SelectItem>
+                          <SelectItem value="2">2 - Interestadual</SelectItem>
+                          <SelectItem value="3">3 - Exterior</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="md:col-span-1">
+                      <Label className={isEmpty(manualForm.indFinal) ? 'text-red-400' : ''}>Consumidor Final</Label>
+                      <Select value={manualForm.indFinal ?? ''} onValueChange={(v)=>setManualForm(f=>({...f, indFinal: v}))}>
+                        <SelectTrigger className={`h-8 text-xs ${isEmpty(manualForm.indFinal) ? 'border-red-500 text-red-400' : ''}`}><SelectValue placeholder="Selecione" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="1">Sim</SelectItem>
+                          <SelectItem value="0">Não</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="md:col-span-1">
+                      <Label className={isEmpty(manualForm.indPres) ? 'text-red-400' : ''}>Presença do Comprador</Label>
+                      <Select value={manualForm.indPres ?? ''} onValueChange={(v)=>setManualForm(f=>({...f, indPres: v}))}>
+                        <SelectTrigger className={`h-8 text-xs ${isEmpty(manualForm.indPres) ? 'border-red-500 text-red-400' : ''}`}><SelectValue placeholder="Selecione" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="1">1 - Operação presencial</SelectItem>
+                          <SelectItem value="2">2 - Não presencial, internet</SelectItem>
+                          <SelectItem value="4">4 - Entrega em domicílio</SelectItem>
+                          <SelectItem value="9">9 - Não se aplica</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="border border-border rounded-md bg-surface p-3">
+                  <div className="text-sm font-medium mb-2">Emitente (Empresa)</div>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+                    <div><div className="text-text-secondary">CNPJ</div><div className="text-text-primary">{empresaInfo?.cnpj || '—'}</div></div>
+                    <div><div className="text-text-secondary">Inscrição Estadual</div><div className="text-text-primary">{empresaInfo?.inscricao_estadual || '—'}</div></div>
+                    <div><div className="text-text-secondary">Regime Tributário</div><div className="text-text-primary">{empresaInfo?.regime_tributario || '—'}</div></div>
+                    <div className="md:col-span-3"><div className="text-text-secondary">Razão Social</div><div className="text-text-primary">{empresaInfo?.razao_social || '—'}</div></div>
+                    <div className="md:col-span-3"><div className="text-text-secondary">Nome Fantasia</div><div className="text-text-primary">{empresaInfo?.nome_fantasia || '—'}</div></div>
+                    <div className="md:col-span-3"><div className="text-text-secondary">Endereço</div><div className="text-text-primary">{empresaInfo ? `${empresaInfo.logradouro||empresaInfo.endereco||''} ${empresaInfo.numero||''} ${empresaInfo.bairro||''} - ${empresaInfo.cidade||''}/${empresaInfo.uf||''} • CEP ${empresaInfo.cep||''}`.trim() : '—'}</div></div>
+                  </div>
+                </div>
+
+                <div className="border border-border rounded-md bg-surface p-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="text-sm font-medium">Destinatário</div>
+                    <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-1">
+                        <Input
+                          className="w-[260px] h-8 text-xs"
+                          placeholder="Nome, código, CPF ou CNPJ"
+                          value={partyQuery}
+                          onChange={(e)=>setPartyQuery(e.target.value)}
+                        />
+                        <Button size="icon" variant="outline" className="h-8 w-8" onClick={()=>setPartyPickerOpen(true)}>
+                          <Search className="w-4 h-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                  {(partyQuery||'').trim().length > 0 && filteredPartyList.length > 0 && (
+                    <div className="border border-border rounded-md mb-3 max-h-40 overflow-y-auto text-xs">
+                      {filteredPartyList.slice(0, 8).map(p => (
+                        <div
+                          key={p.id}
+                          className="flex items-center justify-between px-2 py-1 hover:bg-surface-2 cursor-pointer"
+                          onClick={()=>applyParty(p)}
+                        >
+                          <div className="flex flex-col">
+                            <span className="font-medium truncate max-w-[220px]">{p.nome || p.razao_social || 'Sem nome'}</span>
+                            <span className="text-text-secondary truncate max-w-[220px]">{(p.cnpj || p.cpf || '').toString()}</span>
+                          </div>
+                          <span className="text-[10px] text-text-secondary ml-2">
+                            {p.is_fornecedor ? 'Fornecedor' : 'Cliente'}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <div>
+                      <Label>Tipo de Pessoa</Label>
+                      <Select value={manualForm.tipo_pessoa} onValueChange={(v)=>setManualForm(f=>({...f, tipo_pessoa: v}))}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="PF">Pessoa Física</SelectItem>
+                          <SelectItem value="PJ">Pessoa Jurídica</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
                     <div>
-                      <Label>Valor</Label>
-                      <Input className="h-9" inputMode="decimal" value={p.valor||''} onChange={(e)=>setManualForm(f=>{ const a=[...f.pagamentos]; a[idx]={...a[idx], valor: moneyMaskBR(e.target.value)}; return {...f, pagamentos:a}; })} />
+                      <Label className={isEmpty(manualForm.cpf_cnpj) ? 'text-red-400' : ''}>{manualForm.tipo_pessoa==='PF' ? 'CPF' : 'CNPJ'}</Label>
+                      <Input className={isEmpty(manualForm.cpf_cnpj) ? 'border-red-500 text-red-400 placeholder:text-red-400' : ''} value={manualForm.cpf_cnpj} onChange={(e)=>setManualForm(f=>({...f, cpf_cnpj: e.target.value}))} />
                     </div>
                     <div>
-                      <Label>Parcelas</Label>
-                      <Input className="h-9" inputMode="numeric" value={p.parcelas||''} onChange={(e)=>setManualForm(f=>{ const a=[...f.pagamentos]; a[idx]={...a[idx], parcelas: onlyDigits(e.target.value)}; return {...f, pagamentos:a}; })} />
+                      <Label className={isEmpty(manualForm.nome) ? 'text-red-400' : ''}>Nome/Razão Social</Label>
+                      <Input className={isEmpty(manualForm.nome) ? 'border-red-500 text-red-400 placeholder:text-red-400' : ''} value={manualForm.nome} onChange={(e)=>setManualForm(f=>({...f, nome: e.target.value}))} />
                     </div>
                     <div>
-                      <Label>Troco</Label>
-                      <Input className="h-9" inputMode="decimal" value={p.troco||''} onChange={(e)=>setManualForm(f=>{ const a=[...f.pagamentos]; a[idx]={...a[idx], troco: moneyMaskBR(e.target.value)}; return {...f, pagamentos:a}; })} />
+                      <Label className={isEmpty(manualForm.indIEDest) ? 'text-red-400' : ''}>Indicador de IE</Label>
+                      <Select value={manualForm.indIEDest || '9'} onValueChange={(v)=>setManualForm(f=>({...f, indIEDest: v, ie_isento: v==='2', inscricao_estadual: v==='2' ? 'ISENTO' : f.inscricao_estadual}))}>
+                        <SelectTrigger className={isEmpty(manualForm.indIEDest) ? 'border-red-500 text-red-400' : ''}><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="1">Contribuinte</SelectItem>
+                          <SelectItem value="2">Isento</SelectItem>
+                          <SelectItem value="9">Não Contribuinte</SelectItem>
+                        </SelectContent>
+                      </Select>
                     </div>
-                    <div className="flex items-end justify-end">
-                      <Button type="button" size="icon" variant="ghost" className="text-red-500 hover:text-red-600" title="Remover pagamento" onClick={()=>setManualForm(f=>({ ...f, pagamentos: f.pagamentos.filter((_,i)=>i!==idx) }))}>
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
+                    <div>
+                      <Label>Inscrição Estadual</Label>
+                      <div className="flex items-center gap-2">
+                        <Input value={manualForm.ie_isento ? 'ISENTO' : (manualForm.inscricao_estadual||'')} onChange={(e)=>setManualForm(f=>({...f, inscricao_estadual: e.target.value, ie_isento: String(e.target.value||'').toUpperCase()==='ISENTO'}))} />
+                        <Button type="button" size="sm" variant={manualForm.ie_isento ? 'default' : 'outline'} onClick={()=>setManualForm(f=>({...f, ie_isento: true, inscricao_estadual: 'ISENTO', indIEDest: '2'}))}>ISENTO</Button>
+                      </div>
+                    </div>
+                    <div>
+                      <Label className={isEmpty(manualForm.cep) ? 'text-red-400' : ''}>CEP</Label>
+                      <Input className={isEmpty(manualForm.cep) ? 'border-red-500 text-red-400 placeholder:text-red-400' : ''} value={manualForm.cep} onChange={(e)=>setManualForm(f=>({...f, cep: e.target.value}))} onBlur={()=>lookupCep(manualForm.cep)} />
+                    </div>
+                    <div className="md:col-span-2">
+                      <Label className={isEmpty(manualForm.logradouro) ? 'text-red-400' : ''}>Logradouro</Label>
+                      <Input className={isEmpty(manualForm.logradouro) ? 'border-red-500 text-red-400 placeholder:text-red-400' : ''} value={manualForm.logradouro} onChange={(e)=>setManualForm(f=>({...f, logradouro: e.target.value}))} />
+                    </div>
+                    <div>
+                      <Label className={isEmpty(manualForm.numero) ? 'text-red-400' : ''}>Número</Label>
+                      <Input className={isEmpty(manualForm.numero) ? 'border-red-500 text-red-400 placeholder:text-red-400' : ''} value={manualForm.numero} onChange={(e)=>setManualForm(f=>({...f, numero: e.target.value}))} />
+                    </div>
+                    <div>
+                      <Label className={isEmpty(manualForm.bairro) ? 'text-red-400' : ''}>Bairro</Label>
+                      <Input className={isEmpty(manualForm.bairro) ? 'border-red-500 text-red-400 placeholder:text-red-400' : ''} value={manualForm.bairro} onChange={(e)=>setManualForm(f=>({...f, bairro: e.target.value}))} />
+                    </div>
+                    <div>
+                      <Label className={isEmpty(manualForm.cidade) ? 'text-red-400' : ''}>Cidade</Label>
+                      <Input className={isEmpty(manualForm.cidade) ? 'border-red-500 text-red-400 placeholder:text-red-400' : ''} value={manualForm.cidade} onChange={(e)=>setManualForm(f=>({...f, cidade: e.target.value}))} />
+                    </div>
+                    <div>
+                      <Label className={isEmpty(manualForm.uf) ? 'text-red-400' : ''}>UF</Label>
+                      <Input className={isEmpty(manualForm.uf) ? 'border-red-500 text-red-400 placeholder:text-red-400' : ''} value={manualForm.uf} onChange={(e)=>setManualForm(f=>({...f, uf: (e.target.value||'').toUpperCase().slice(0,2)}))} />
+                    </div>
+                    <div>
+                      <Label className={isEmpty(manualForm.codigo_municipio_ibge) ? 'text-red-400' : ''}>Código IBGE</Label>
+                      <Input
+                        className={`h-8 text-xs ${isEmpty(manualForm.codigo_municipio_ibge) ? 'border-red-500 text-red-400 placeholder:text-red-400' : ''}`}
+                        value={manualForm.codigo_municipio_ibge}
+                        onChange={(e)=>setManualForm(f=>({...f, codigo_municipio_ibge: e.target.value}))}
+                        placeholder="Ex.: 3550308"
+                      />
                     </div>
                   </div>
-                ))}
-                <div className="flex justify-start">
-                  <Button size="sm" variant="outline" onClick={()=>setManualForm(f=>{ const def = (payMethods||[])[0]; return { ...f, pagamentos:[...f.pagamentos, { finalizadora_id: def?.id || '', tipo: def?.nome || 'Dinheiro', valor:'' }] }; })}>Adicionar pagamento</Button>
                 </div>
               </div>
+            </TabsContent>
+            <TabsContent value="produtos">
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <Button size="sm" onClick={()=>{
+                    setManualForm(f=>{
+                      const newItem = {
+                        descricao: '', codigo: '', cod_barras: '', ncm: '', cest: '', cfop: f.cfop_padrao || '5102', unidade: 'UN',
+                        quantidade: '1', preco_unitario: '0,00', desconto_valor: '0,00', desconto_percent: '', acrescimos_valor: '0,00', frete_valor: '0,00', seguro_valor: '0,00', obs: '',
+                        impostos: { origem: '', icms: { cst:'', csosn:'', base:'', aliquota:'', valor:'' }, pis: { cst:'', aliquota:'', valor:'' }, cofins: { cst:'', aliquota:'', valor:'' }, ipi: { cst:'', aliquota:'', valor:'', tipo_calculo:'nenhum', valor_unit:'' } }
+                      };
+                      return { ...f, itens: [...f.itens, newItem] };
+                    });
+                  }}>Adicionar item</Button>
+                </div>
+
+                <div className="border border-border rounded-md overflow-x-auto">
+                  <table className="min-w-full text-xs">
+                    <thead className="bg-surface-2 text-text-secondary">
+                      <tr>
+                        <th className="text-left px-2 py-2">Produto</th>
+                        <th className="text-center px-2 py-2 w-[80px]">Qtd</th>
+                        <th className="text-center px-2 py-2 w-[110px]">V. Unit</th>
+                        <th className="text-center px-2 py-2 w-[110px]">Desconto</th>
+                        <th className="text-center px-2 py-2 w-[110px]">Total</th>
+                        <th className="text-center px-2 py-2 w-[180px]">Ações</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {manualForm.itens.map((it, idx) => {
+                        const pu = parseDec(it.preco_unitario)||0; const q = parseDec(it.quantidade)||1; const bruto = pu*q;
+                        const descP = parseDec(it.desconto_percent)||0; const descV = parseDec(it.desconto_valor)||0;
+                        const desconto = descP ? (bruto*descP/100) : descV; const totalItem = Math.max(0, bruto - desconto + (parseDec(it.acrescimos_valor)||0));
+                        return (
+                          <React.Fragment key={idx}>
+                            <tr className="border-t border-border/60">
+                              <td className="px-2 py-1">
+                                <div className="flex items-center gap-1">
+                                  <Input className="h-7 text-xs flex-1" value={it.descricao} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx] = { ...a[idx], descricao: e.target.value }; return { ...f, itens: a }; })} placeholder="Descrição" />
+                                  <Button
+                                    size="icon"
+                                    variant="outline"
+                                    className="h-7 w-7 flex-shrink-0"
+                                    title="Buscar produto"
+                                    onClick={()=>{ setProductPickerTarget(idx); setProductPickerOpen(true); }}
+                                  >
+                                    <Search className="w-3.5 h-3.5" />
+                                  </Button>
+                                </div>
+                                <div className="text-[10px] text-text-secondary">{it.codigo || '—'} • UN {String(it.unidade||'UN')}</div>
+                              </td>
+                              <td className="px-2 py-1 text-center">
+                                <div className="w-[80px] mx-auto">
+                                  <Input className="h-7 text-right text-xs" value={it.quantidade} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx] = { ...a[idx], quantidade: e.target.value }; return { ...f, itens: a }; })} />
+                                </div>
+                              </td>
+                              <td className="px-2 py-1 text-center">
+                                <div className="w-[110px] mx-auto">
+                                  <Input
+                                    className="h-7 text-right text-xs"
+                                    value={it.preco_unitario}
+                                    onChange={(e)=>setManualForm(f=>{
+                                      const a = [...f.itens];
+                                      const formatted = moneyMaskBR(e.target.value || '');
+                                      a[idx] = { ...a[idx], preco_unitario: formatted };
+                                      return { ...f, itens: a };
+                                    })}
+                                    onKeyDown={(e) => {
+                                      e.stopPropagation();
+                                      const allowed = ['Backspace','Delete','ArrowLeft','ArrowRight','Tab'];
+                                      if (allowed.includes(e.key)) return;
+                                      if (!/^[0-9]$/.test(e.key)) {
+                                        e.preventDefault();
+                                      }
+                                    }}
+                                    onBeforeInput={(e) => {
+                                      const data = e.data ?? '';
+                                      if (data && /\D/.test(data)) e.preventDefault();
+                                    }}
+                                  />
+                                </div>
+                              </td>
+                              <td className="px-2 py-1 text-center">
+                                <div className="w-[110px] mx-auto">
+                                  <Input
+                                    className="h-7 text-right text-xs"
+                                    value={it.desconto_valor}
+                                    onChange={(e)=>setManualForm(f=>{
+                                      const a = [...f.itens];
+                                      const formatted = moneyMaskBR(e.target.value || '');
+                                      a[idx] = { ...a[idx], desconto_valor: formatted, desconto_percent: '' };
+                                      return { ...f, itens: a };
+                                    })}
+                                    onKeyDown={(e) => {
+                                      e.stopPropagation();
+                                      const allowed = ['Backspace','Delete','ArrowLeft','ArrowRight','Tab'];
+                                      if (allowed.includes(e.key)) return;
+                                      if (!/^[0-9]$/.test(e.key)) {
+                                        e.preventDefault();
+                                      }
+                                    }}
+                                    onBeforeInput={(e) => {
+                                      const data = e.data ?? '';
+                                      if (data && /\D/.test(data)) e.preventDefault();
+                                    }}
+                                  />
+                                </div>
+                              </td>
+                              <td className="px-2 py-1 text-right">R$ {fmtMoney(totalItem)}</td>
+                              <td className="px-2 py-1 text-right">
+                                <div className="flex items-center justify-end gap-2">
+                                  {(() => {
+                                    const imp = it.impostos || {};
+                                    const ic = imp.icms || {};
+                                    const pis = imp.pis || {};
+                                    const cof = imp.cofins || {};
+                                    const ok = imp.origem && (ic.cst || ic.csosn) &&
+                                      (pis.aliquota !== undefined && String(pis.aliquota).trim() !== '') &&
+                                      (cof.aliquota !== undefined && String(cof.aliquota).trim() !== '');
+                                    return !ok ? <span className="w-1.5 h-1.5 rounded-full bg-red-500" /> : null;
+                                  })()}
+                                  <Button size="sm" variant="outline" className="h-7" onClick={()=>setExpandedItem(expandedItem===idx?null:idx)}>{expandedItem===idx?'Ocultar':'Detalhes'}</Button>
+                                  <Button size="sm" variant="outline" className="h-7" onClick={()=>{
+                                    setManualForm(f=>{ const a=[...f.itens]; a.splice(idx,1); return { ...f, itens: a }; });
+                                  }}>Remover</Button>
+                                </div>
+                              </td>
+                            </tr>
+                            {expandedItem===idx && (
+                              <tr className="border-t border-border/60 bg-surface-2/40">
+                                <td colSpan={6} className="px-2 py-2">
+                                  <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
+                                    <div>
+                                      <Label>NCM</Label>
+                                      <Input className="h-7 text-xs" value={it.ncm||''} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], ncm:e.target.value}; return {...f, itens:a}; })} />
+                                    </div>
+                                    <div>
+                                      <Label>CFOP</Label>
+                                      <Input className="h-7 text-xs" value={it.cfop||''} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], cfop:e.target.value}; return {...f, itens:a}; })} />
+                                    </div>
+                                    <div>
+                                      <Label className={isEmpty(it.impostos?.icms?.cst) && isEmpty(it.impostos?.icms?.csosn) ? 'text-red-400' : ''}>CST/CSOSN</Label>
+                                      <Input
+                                        className={`h-7 text-xs ${isEmpty(it.impostos?.icms?.cst) && isEmpty(it.impostos?.icms?.csosn) ? 'border-red-500 text-red-400 placeholder:text-red-400' : ''}`}
+                                        value={it.impostos?.icms?.cst || it.impostos?.icms?.csosn || ''}
+                                        onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; const imp={...(a[idx].impostos||{}), icms:{...(a[idx].impostos?.icms||{}), cst:e.target.value, csosn:e.target.value}}; a[idx]={...a[idx], impostos: imp}; return {...f, itens:a}; })}
+                                      />
+                                    </div>
+                                    <div>
+                                      <Label className={isEmpty(it.impostos?.origem) ? 'text-red-400' : ''}>Origem</Label>
+                                      <Input
+                                        className={`h-7 text-xs ${isEmpty(it.impostos?.origem) ? 'border-red-500 text-red-400 placeholder:text-red-400' : ''}`}
+                                        value={it.impostos?.origem||''}
+                                        onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; const imp={...(a[idx].impostos||{}), origem:e.target.value}; a[idx]={...a[idx], impostos:imp}; return {...f, itens:a}; })}
+                                      />
+                                    </div>
+                                    <div>
+                                      <Label>ICMS %</Label>
+                                      <Input className="h-7 text-xs" value={it.impostos?.icms?.aliquota||''} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; const ic={...(a[idx].impostos?.icms||{}), aliquota:e.target.value}; a[idx]={...a[idx], impostos:{...(a[idx].impostos||{}), icms:ic}}; return {...f, itens:a}; })} />
+                                    </div>
+                                    <div>
+                                      <Label>ICMS Base</Label>
+                                      <Input className="h-7 text-xs" value={it.impostos?.icms?.base||''} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; const ic={...(a[idx].impostos?.icms||{}), base:e.target.value}; a[idx]={...a[idx], impostos:{...(a[idx].impostos||{}), icms:ic}}; return {...f, itens:a}; })} />
+                                    </div>
+                                    <div>
+                                      <Label className={isEmpty(it.impostos?.pis?.aliquota) ? 'text-red-400' : ''}>PIS %</Label>
+                                      <Input
+                                        className={`h-7 text-xs ${isEmpty(it.impostos?.pis?.aliquota) ? 'border-red-500 text-red-400 placeholder:text-red-400' : ''}`}
+                                        value={it.impostos?.pis?.aliquota||''}
+                                        onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; const ps={...(a[idx].impostos?.pis||{}), aliquota:e.target.value}; a[idx]={...a[idx], impostos:{...(a[idx].impostos||{}), pis:ps}}; return {...f, itens:a}; })}
+                                      />
+                                    </div>
+                                    <div>
+                                      <Label className={isEmpty(it.impostos?.cofins?.aliquota) ? 'text-red-400' : ''}>COFINS %</Label>
+                                      <Input
+                                        className={`h-7 text-xs ${isEmpty(it.impostos?.cofins?.aliquota) ? 'border-red-500 text-red-400 placeholder:text-red-400' : ''}`}
+                                        value={it.impostos?.cofins?.aliquota||''}
+                                        onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; const cf={...(a[idx].impostos?.cofins||{}), aliquota:e.target.value}; a[idx]={...a[idx], impostos:{...(a[idx].impostos||{}), cofins:cf}}; return {...f, itens:a}; })}
+                                      />
+                                    </div>
+                                    <div>
+                                      <Label>IPI %</Label>
+                                      <Input className="h-7 text-xs" value={it.impostos?.ipi?.aliquota||''} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; const ip={...(a[idx].impostos?.ipi||{}), aliquota:e.target.value}; a[idx]={...a[idx], impostos:{...(a[idx].impostos||{}), ipi:ip}}; return {...f, itens:a}; })} />
+                                    </div>
+                                    <div className="md:col-span-4">
+                                      <Label>Observação do item</Label>
+                                      <Input className="h-7 text-xs" value={it.obs || ''} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx] = { ...a[idx], obs: e.target.value }; return { ...f, itens: a }; })} />
+                                    </div>
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </React.Fragment>
+                        );
+                      })}
+                      {manualForm.itens.length === 0 && (
+                        <tr>
+                          <td colSpan={6} className="px-2 py-3 text-center text-text-secondary">Nenhum item. Use "Adicionar item" para inserir.</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                  <div>
+                    <Label>Desconto Geral</Label>
+                    <Input
+                      className="h-8 text-xs text-right"
+                      value={manualForm.totais.desconto_geral}
+                      onChange={(e)=>setManualForm(f=>({
+                        ...f,
+                        totais: { ...f.totais, desconto_geral: moneyMaskBR(e.target.value || '') },
+                      }))}
+                      onKeyDown={(e) => {
+                        e.stopPropagation();
+                        const allowed = ['Backspace','Delete','ArrowLeft','ArrowRight','Tab'];
+                        if (allowed.includes(e.key)) return;
+                        if (!/^[0-9]$/.test(e.key)) {
+                          e.preventDefault();
+                        }
+                      }}
+                      onBeforeInput={(e) => {
+                        const data = e.data ?? '';
+                        if (data && /\D/.test(data)) e.preventDefault();
+                      }}
+                    />
+                  </div>
+                  <div>
+                    <Label>Frete</Label>
+                    <Input
+                      className="h-8 text-xs text-right"
+                      value={manualForm.totais.frete}
+                      onChange={(e)=>setManualForm(f=>({
+                        ...f,
+                        totais: { ...f.totais, frete: moneyMaskBR(e.target.value || '') },
+                      }))}
+                      onKeyDown={(e) => {
+                        e.stopPropagation();
+                        const allowed = ['Backspace','Delete','ArrowLeft','ArrowRight','Tab'];
+                        if (allowed.includes(e.key)) return;
+                        if (!/^[0-9]$/.test(e.key)) {
+                          e.preventDefault();
+                        }
+                      }}
+                      onBeforeInput={(e) => {
+                        const data = e.data ?? '';
+                        if (data && /\D/.test(data)) e.preventDefault();
+                      }}
+                    />
+                  </div>
+                  <div>
+                    <Label>Outras Despesas</Label>
+                    <Input
+                      className="h-8 text-xs text-right"
+                      value={manualForm.totais.outras_despesas}
+                      onChange={(e)=>setManualForm(f=>({
+                        ...f,
+                        totais: { ...f.totais, outras_despesas: moneyMaskBR(e.target.value || '') },
+                      }))}
+                      onKeyDown={(e) => {
+                        e.stopPropagation();
+                        const allowed = ['Backspace','Delete','ArrowLeft','ArrowRight','Tab'];
+                        if (allowed.includes(e.key)) return;
+                        if (!/^[0-9]$/.test(e.key)) {
+                          e.preventDefault();
+                        }
+                      }}
+                      onBeforeInput={(e) => {
+                        const data = e.data ?? '';
+                        if (data && /\D/.test(data)) e.preventDefault();
+                      }}
+                    />
+                  </div>
+                  <div className="text-right self-end">
+                    {(() => {
+                      const rows = manualForm.itens || [];
+                      let soma = 0; rows.forEach(it=>{ const pu = parseDec(it.preco_unitario)||0; const q = parseDec(it.quantidade)||1; const bruto = pu*q; const descP = parseDec(it.desconto_percent)||0; const descV = parseDec(it.desconto_valor)||0; const desconto = descP ? (bruto*descP/100) : descV; const totalItem = Math.max(0, bruto - desconto + (parseDec(it.acrescimos_valor)||0)); soma += totalItem; });
+                      const dg = parseDec(manualForm.totais.desconto_geral)||0; const fr = parseDec(manualForm.totais.frete)||0; const od = parseDec(manualForm.totais.outras_despesas)||0;
+                      const nota = soma - dg + fr + od;
+                      return (
+                        <div className="text-sm">
+                          <div className="text-text-secondary">Total dos Produtos</div>
+                          <div className="text-xl font-semibold">R$ {fmtMoney(soma)}</div>
+                          <div className="text-text-secondary mt-1">Total da Nota</div>
+                          <div className="text-xl font-semibold">R$ {fmtMoney(nota)}</div>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                </div>
+              </div>
+            </TabsContent>
+
+            <TabsContent value="pagamentos">
+              {(() => {
+                const itens = manualForm.itens || [];
+                let totalProdutos = 0;
+                itens.forEach((it, idx) => {
+                  const pu = parseDec(it.preco_unitario)||0;
+                  const q = parseDec(it.quantidade)||1;
+                  const bruto = pu*q;
+                  const descP = parseDec(it.desconto_percent)||0;
+                  const descV = parseDec(it.desconto_valor)||0;
+                  const desconto = descP ? (bruto*descP/100) : descV;
+                  const acres = parseDec(it.acrescimos_valor)||0;
+                  const totalItem = Math.max(0, bruto - desconto + acres);
+                  totalProdutos += totalItem;
+                });
+                const descontoGeral = parseDec(manualForm.totais.desconto_geral)||0;
+                const frete = parseDec(manualForm.totais.frete)||0;
+                const outras = parseDec(manualForm.totais.outras_despesas)||0;
+                const totalNota = totalProdutos - descontoGeral + frete + outras;
+
+                const pagamentos = manualForm.pagamentos || [];
+                const totalPago = pagamentos.reduce((s,p) => s + (parseDec(p.valor)||0), 0);
+                const diff = (totalPago || 0) - (totalNota || 0);
+
+                const addPagamento = () => {
+                  setManualForm(f => {
+                    const arr = Array.isArray(f.pagamentos) ? [...f.pagamentos] : [];
+                    const baseTotal = totalNota || 0;
+                    arr.push({
+                      finalizadora_id: '',
+                      tipo: 'Dinheiro',
+                      valor: moneyMaskBR(baseTotal.toFixed(2)),
+                      bandeira: '',
+                      autorizacao: '',
+                      parcelas: '',
+                      troco: '',
+                    });
+                    return { ...f, pagamentos: arr };
+                  });
+                };
+
+                const removePagamento = (idx) => {
+                  setManualForm(f => {
+                    const arr = Array.isArray(f.pagamentos) ? [...f.pagamentos] : [];
+                    arr.splice(idx,1);
+                    return { ...f, pagamentos: arr };
+                  });
+                };
+
+                const handleChangeValor = (idx, raw) => {
+                  setManualForm(f => {
+                    const arr = Array.isArray(f.pagamentos) ? [...f.pagamentos] : [];
+                    const formatted = moneyMaskBR(raw || '');
+                    arr[idx] = { ...(arr[idx] || {}), valor: formatted };
+                    return { ...f, pagamentos: arr };
+                  });
+                };
+
+                return (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-sm font-medium">Formas de pagamento</div>
+                      <Button size="sm" onClick={addPagamento}>Adicionar pagamento</Button>
+                    </div>
+
+                    <div className="border border-border rounded-md overflow-x-auto">
+                      <table className="min-w-full text-xs">
+                        <thead className="bg-surface-2 text-text-secondary">
+                          <tr>
+                            <th className="text-left px-2 py-2">Forma</th>
+                            <th className="text-left px-2 py-2 w-[180px]">Bandeira / Autorização</th>
+                            <th className="text-right px-2 py-2 w-[140px]">Valor</th>
+                            <th className="text-center px-2 py-2 w-[80px]">Ações</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {pagamentos.map((pg, idx) => {
+                            const fin = (payMethods || []).find(m => String(m.id) === String(pg.finalizadora_id));
+                            return (
+                              <tr key={idx} className="border-t border-border/60">
+                                <td className="px-2 py-1">
+                                  <select
+                                    className="h-7 text-xs bg-surface border border-border rounded-md px-1 w-full"
+                                    value={pg.finalizadora_id || ''}
+                                    onChange={(e)=>setManualForm(f=>{
+                                      const arr = Array.isArray(f.pagamentos) ? [...f.pagamentos] : [];
+                                      const id = e.target.value || '';
+                                      const fm = (payMethods || []).find(m => String(m.id) === String(id));
+                                      arr[idx] = {
+                                        ...(arr[idx] || {}),
+                                        finalizadora_id: id,
+                                        tipo: fm?.nome || (arr[idx]?.tipo || ''),
+                                      };
+                                      return { ...f, pagamentos: arr };
+                                    })}
+                                  >
+                                    <option value="">Selecione</option>
+                                    {(payMethods || []).map(m => (
+                                      <option key={m.id} value={m.id}>
+                                        {m.codigo_interno ? `[${m.codigo_interno}] ` : ''}{m.nome}
+                                      </option>
+                                    ))}
+                                  </select>
+                                  <div className="text-[10px] text-text-secondary truncate">{pg.tipo || fin?.nome || '—'}</div>
+                                </td>
+                                <td className="px-2 py-1">
+                                  <div className="flex flex-col gap-1">
+                                    <Input
+                                      className="h-7 text-xs"
+                                      placeholder="Bandeira (Visa, Master...)"
+                                      value={pg.bandeira || ''}
+                                      onChange={(e)=>setManualForm(f=>{
+                                        const arr = Array.isArray(f.pagamentos) ? [...f.pagamentos] : [];
+                                        arr[idx] = { ...(arr[idx] || {}), bandeira: e.target.value };
+                                        return { ...f, pagamentos: arr };
+                                      })}
+                                    />
+                                    <Input
+                                      className="h-7 text-xs"
+                                      placeholder="Nº autorização (opcional)"
+                                      value={pg.autorizacao || ''}
+                                      onChange={(e)=>setManualForm(f=>{
+                                        const arr = Array.isArray(f.pagamentos) ? [...f.pagamentos] : [];
+                                        arr[idx] = { ...(arr[idx] || {}), autorizacao: e.target.value };
+                                        return { ...f, pagamentos: arr };
+                                      })}
+                                    />
+                                  </div>
+                                </td>
+                                <td className="px-2 py-1 text-right">
+                                  <Input
+                                    className="h-7 text-right text-xs"
+                                    value={pg.valor || '0,00'}
+                                    onChange={(e)=>handleChangeValor(idx, e.target.value)}
+                                    onKeyDown={(e) => {
+                                      e.stopPropagation();
+                                      const allowed = ['Backspace','Delete','ArrowLeft','ArrowRight','Tab'];
+                                      if (allowed.includes(e.key)) return;
+                                      if (!/^[0-9]$/.test(e.key)) {
+                                        e.preventDefault();
+                                      }
+                                    }}
+                                    onBeforeInput={(e) => {
+                                      const data = e.data ?? '';
+                                      if (data && /\D/.test(data)) e.preventDefault();
+                                    }}
+                                  />
+                                </td>
+                                <td className="px-2 py-1 text-center">
+                                  <Button size="icon" variant="outline" className="h-7 w-7" onClick={()=>removePagamento(idx)}>
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </Button>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                          {pagamentos.length === 0 && (
+                            <tr>
+                              <td colSpan={4} className="px-2 py-3 text-center text-text-secondary text-xs">Nenhum pagamento. Use "Adicionar pagamento".</td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div className="flex flex-col md:flex-row justify-between gap-3 text-xs">
+                      <div className="space-y-1">
+                        <div><span className="text-text-secondary">Total da Nota:</span> <span className="font-semibold">R$ {fmtMoney(totalNota)}</span></div>
+                        <div><span className="text-text-secondary">Total Pago:</span> <span className="font-semibold">R$ {fmtMoney(totalPago)}</span></div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-text-secondary mb-0.5">Diferença (Pago - Nota)</div>
+                        <div className={Math.abs(diff) < 0.009 ? 'font-semibold text-emerald-500' : 'font-semibold text-amber-500'}>
+                          R$ {fmtMoney(diff)}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
             </TabsContent>
 
             <TabsContent value="transporte">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                <div>
-                  <Label>Tipo do frete</Label>
-                  <Input value={manualForm.transporte.tipo_frete} onChange={(e)=>setManualForm(f=>({...f, transporte:{...f.transporte, tipo_frete:e.target.value}}))} />
+              <div className="space-y-4">
+                <div className="border border-border rounded-md bg-surface p-3">
+                  <div className="text-sm font-medium mb-2">Transporte</div>
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
+                    <div>
+                      <Label className={isEmpty(manualForm.transporte?.tipo_frete) ? 'text-red-400' : ''}>Modalidade do Frete</Label>
+                      <Select value={manualForm.transporte?.tipo_frete || '9'} onValueChange={(v)=>setManualForm(f=>({ ...f, transporte: { ...(f.transporte||{}), tipo_frete: v } }))}>
+                        <SelectTrigger className={`h-8 text-xs ${isEmpty(manualForm.transporte?.tipo_frete) ? 'border-red-500 text-red-400' : ''}`}><SelectValue placeholder="Selecione" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="0">Por conta do Emitente</SelectItem>
+                          <SelectItem value="1">Por conta do Destinatário</SelectItem>
+                          <SelectItem value="9">Sem Frete</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="md:col-span-3">
+                      <Label>Transportadora (se houver)</Label>
+                      <Input className="h-8 text-xs" value={manualForm.transporte?.transportadora || ''} onChange={(e)=>setManualForm(f=>({ ...f, transporte: { ...(f.transporte||{}), transportadora: e.target.value } }))} />
+                    </div>
+                    <div>
+                      <Label>Placa do Veículo</Label>
+                      <Input className="h-8 text-xs" value={manualForm.transporte?.placa || ''} onChange={(e)=>setManualForm(f=>({ ...f, transporte: { ...(f.transporte||{}), placa: (e.target.value||'').toUpperCase() } }))} placeholder="ABC1D23" />
+                    </div>
+                    <div>
+                      <Label>UF da Placa</Label>
+                      <Input className="h-8 text-xs" value={manualForm.transporte?.uf_placa || ''} onChange={(e)=>setManualForm(f=>({ ...f, transporte: { ...(f.transporte||{}), uf_placa: (e.target.value||'').toUpperCase().slice(0,2) } }))} placeholder="UF" />
+                    </div>
+                    <div>
+                      <Label>Qtd. de Volumes</Label>
+                      <Input className="h-8 text-xs" value={manualForm.transporte?.volumes || ''} onChange={(e)=>setManualForm(f=>({ ...f, transporte: { ...(f.transporte||{}), volumes: e.target.value } }))} />
+                    </div>
+                    <div>
+                      <Label>Peso Bruto (kg)</Label>
+                      <Input className="h-8 text-xs" value={manualForm.transporte?.peso_bruto || ''} onChange={(e)=>setManualForm(f=>({ ...f, transporte: { ...(f.transporte||{}), peso_bruto: e.target.value } }))} />
+                    </div>
+                    <div>
+                      <Label>Peso Líquido (kg)</Label>
+                      <Input className="h-8 text-xs" value={manualForm.transporte?.peso_liquido || ''} onChange={(e)=>setManualForm(f=>({ ...f, transporte: { ...(f.transporte||{}), peso_liquido: e.target.value } }))} />
+                    </div>
+                  </div>
                 </div>
-                <div>
-                  <Label>Transportadora</Label>
-                  <Input value={manualForm.transporte.transportadora} onChange={(e)=>setManualForm(f=>({...f, transporte:{...f.transporte, transportadora:e.target.value}}))} />
-                </div>
-                <div>
-                  <Label>Placa</Label>
-                  <Input value={manualForm.transporte.placa} onChange={(e)=>setManualForm(f=>({...f, transporte:{...f.transporte, placa:e.target.value}}))} />
-                </div>
-                <div>
-                  <Label>Volumes</Label>
-                  <Input value={manualForm.transporte.volumes} onChange={(e)=>setManualForm(f=>({...f, transporte:{...f.transporte, volumes:e.target.value}}))} />
-                </div>
-                <div>
-                  <Label>Peso líquido</Label>
-                  <Input value={manualForm.transporte.peso_liquido} onChange={(e)=>setManualForm(f=>({...f, transporte:{...f.transporte, peso_liquido:e.target.value}}))} />
-                </div>
-                <div>
-                  <Label>Peso bruto</Label>
-                  <Input value={manualForm.transporte.peso_bruto} onChange={(e)=>setManualForm(f=>({...f, transporte:{...f.transporte, peso_bruto:e.target.value}}))} />
+
+                <div className="border border-border rounded-md bg-surface p-3">
+                  <div className="text-sm font-medium mb-2">Informações Adicionais</div>
+                  <div className="grid grid-cols-1 gap-3">
+                    <div>
+                      <Label>Observações Fiscais</Label>
+                      <textarea className="w-full h-20 text-xs rounded-md border border-border bg-surface px-2 py-1" value={manualForm.adicionais?.info_fisco || ''} onChange={(e)=>setManualForm(f=>({ ...f, adicionais: { ...(f.adicionais||{}), info_fisco: e.target.value } }))} />
+                    </div>
+                    <div>
+                      <Label>Informações Complementares</Label>
+                      <textarea className="w-full h-20 text-xs rounded-md border border-border bg-surface px-2 py-1" value={manualForm.adicionais?.obs_gerais || ''} onChange={(e)=>setManualForm(f=>({ ...f, adicionais: { ...(f.adicionais||{}), obs_gerais: e.target.value } }))} />
+                    </div>
+                    <div>
+                      <Label>Observações Legais</Label>
+                      <textarea className="w-full h-20 text-xs rounded-md border border-border bg-surface px-2 py-1" value={manualForm.adicionais?.obs_legais || ''} onChange={(e)=>setManualForm(f=>({ ...f, adicionais: { ...(f.adicionais||{}), obs_legais: e.target.value } }))} />
+                    </div>
+                  </div>
                 </div>
               </div>
             </TabsContent>
 
-            <TabsContent value="adicionais">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div>
-                  <Label>Observações gerais</Label>
-                  <Input value={manualForm.adicionais.obs_gerais} onChange={(e)=>setManualForm(f=>({...f, adicionais:{...f.adicionais, obs_gerais:e.target.value}}))} />
-                </div>
-                <div>
-                  <Label>Info para o Fisco</Label>
-                  <Input value={manualForm.adicionais.info_fisco} onChange={(e)=>setManualForm(f=>({...f, adicionais:{...f.adicionais, info_fisco:e.target.value}}))} />
-                </div>
-                <div>
-                  <Label>Info para o Cliente</Label>
-                  <Input value={manualForm.adicionais.info_cliente} onChange={(e)=>setManualForm(f=>({...f, adicionais:{...f.adicionais, info_cliente:e.target.value}}))} />
-                </div>
-                <div>
-                  <Label>Referência documento</Label>
-                  <Input value={manualForm.adicionais.referencia_doc} onChange={(e)=>setManualForm(f=>({...f, adicionais:{...f.adicionais, referencia_doc:e.target.value}}))} />
-                </div>
-              </div>
+            <TabsContent value="totais">
+              {(() => {
+                const itens = manualForm.itens || [];
+                let totalProdutos = 0;
+                let totalDescontos = 0;
+                let baseICMS = 0;
+                let valorICMS = 0;
+                let valorPIS = 0;
+                let valorCOFINS = 0;
+                let valorIPI = 0;
+                let freteItens = 0;
+                let seguroItens = 0;
+                let outrasDespesasItens = 0;
+
+                itens.forEach(it => {
+                  const pu = parseDec(it.preco_unitario)||0;
+                  const q = parseDec(it.quantidade)||1;
+                  const bruto = pu*q;
+                  const descP = parseDec(it.desconto_percent)||0;
+                  const descV = parseDec(it.desconto_valor)||0;
+                  const desconto = descP ? (bruto*descP/100) : descV;
+                  const acres = parseDec(it.acrescimos_valor)||0;
+                  const totalItem = Math.max(0, bruto - desconto + acres);
+                  totalProdutos += totalItem;
+                  totalDescontos += desconto;
+
+                  const baseItemICMS = parseDec(it.impostos?.icms?.base) || totalItem;
+                  const aliqICMS = parseDec(it.impostos?.icms?.aliquota) || 0;
+                  const valICMS = baseItemICMS * aliqICMS / 100;
+                  baseICMS += baseItemICMS;
+                  valorICMS += valICMS;
+
+                  const aliqPIS = parseDec(it.impostos?.pis?.aliquota) || 0;
+                  const aliqCOFINS = parseDec(it.impostos?.cofins?.aliquota) || 0;
+                  const aliqIPI = parseDec(it.impostos?.ipi?.aliquota) || 0;
+                  valorPIS += totalItem * aliqPIS / 100;
+                  valorCOFINS += totalItem * aliqCOFINS / 100;
+                  valorIPI += totalItem * aliqIPI / 100;
+
+                  freteItens += parseDec(it.frete_valor)||0;
+                  seguroItens += parseDec(it.seguro_valor)||0;
+                  outrasDespesasItens += acres;
+                });
+
+                const descontoGeral = parseDec(manualForm.totais.desconto_geral)||0;
+                const freteNota = parseDec(manualForm.totais.frete)||0;
+                const outrasDespesaNota = parseDec(manualForm.totais.outras_despesas)||0;
+
+                const freteTotal = freteItens + freteNota;
+                const seguroTotal = seguroItens; // ainda não há campo de seguro na nota
+                const outrasDespesasTotal = outrasDespesasItens + outrasDespesaNota;
+
+                const valorTotalNota = totalProdutos - descontoGeral + freteTotal + seguroTotal + outrasDespesasTotal;
+
+                return (
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      <div className="border border-border rounded-md p-3 bg-surface">
+                        <div className="text-xs text-text-secondary mb-1">Total dos Produtos</div>
+                        <div className="text-lg font-semibold">R$ {fmtMoney(totalProdutos)}</div>
+                      </div>
+                      <div className="border border-border rounded-md p-3 bg-surface">
+                        <div className="text-xs text-text-secondary mb-1">Total de Descontos</div>
+                        <div className="text-lg font-semibold">R$ {fmtMoney(totalDescontos + descontoGeral)}</div>
+                      </div>
+                      <div className="border border-border rounded-md p-3 bg-surface">
+                        <div className="text-xs text-text-secondary mb-1">Valor Total da Nota</div>
+                        <div className="text-lg font-semibold">R$ {fmtMoney(valorTotalNota)}</div>
+                      </div>
+                    </div>
+
+                    <div className="border border-border rounded-md p-3 bg-surface space-y-3">
+                      <div className="text-sm font-medium mb-1">ICMS / PIS / COFINS / IPI</div>
+                      <div className="grid grid-cols-1 md:grid-cols-4 gap-3 text-xs">
+                        <div>
+                          <div className="text-text-secondary mb-0.5">Base de Cálculo ICMS</div>
+                          <div className="font-semibold">R$ {fmtMoney(baseICMS)}</div>
+                        </div>
+                        <div>
+                          <div className="text-text-secondary mb-0.5">Valor do ICMS</div>
+                          <div className="font-semibold">R$ {fmtMoney(valorICMS)}</div>
+                        </div>
+                        <div>
+                          <div className="text-text-secondary mb-0.5">Valor do PIS</div>
+                          <div className="font-semibold">R$ {fmtMoney(valorPIS)}</div>
+                        </div>
+                        <div>
+                          <div className="text-text-secondary mb-0.5">Valor do COFINS</div>
+                          <div className="font-semibold">R$ {fmtMoney(valorCOFINS)}</div>
+                        </div>
+                        <div>
+                          <div className="text-text-secondary mb-0.5">Valor do IPI</div>
+                          <div className="font-semibold">R$ {fmtMoney(valorIPI)}</div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="border border-border rounded-md p-3 bg-surface space-y-2 text-xs">
+                      <div className="text-sm font-medium mb-1">Outros Valores</div>
+                      <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                        <div>
+                          <div className="text-text-secondary mb-0.5">Frete</div>
+                          <div className="font-semibold">R$ {fmtMoney(freteTotal)}</div>
+                        </div>
+                        <div>
+                          <div className="text-text-secondary mb-0.5">Seguro</div>
+                          <div className="font-semibold">R$ {fmtMoney(seguroTotal)}</div>
+                        </div>
+                        <div>
+                          <div className="text-text-secondary mb-0.5">Outras Despesas</div>
+                          <div className="font-semibold">R$ {fmtMoney(outrasDespesasTotal)}</div>
+                        </div>
+                        <div>
+                          <div className="text-text-secondary mb-0.5">Desconto Geral</div>
+                          <div className="font-semibold">R$ {fmtMoney(descontoGeral)}</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
             </TabsContent>
-            <TabsContent value="rastreabilidade">
-              <div className="text-sm text-text-secondary">Rastreabilidade de Produtos</div>
+
+            <TabsContent value="resumo">
+              {(() => {
+                const itens = manualForm.itens || [];
+                let soma = 0; let descontosItens = 0;
+                itens.forEach(it => {
+                  const pu = parseDec(it.preco_unitario)||0; const q = parseDec(it.quantidade)||1; const bruto = pu*q;
+                  const descP = parseDec(it.desconto_percent)||0; const descV = parseDec(it.desconto_valor)||0; const desconto = descP ? (bruto*descP/100) : descV; const acres = parseDec(it.acrescimos_valor)||0;
+                  const totalItem = Math.max(0, bruto - desconto + acres); soma += totalItem; descontosItens += desconto;
+                });
+                const descontoGeral = parseDec(manualForm.totais?.desconto_geral)||0;
+                const frete = parseDec(manualForm.totais?.frete)||0;
+                const outras = parseDec(manualForm.totais?.outras_despesas)||0;
+                const totalNota = soma - descontoGeral + frete + outras;
+                const totalPago = (manualForm.pagamentos||[]).reduce((s,p)=> s + (parseDec(p.valor)||0), 0);
+                const diff = totalPago - totalNota;
+
+                const isNFCe = String(manualForm.modelo) === '65';
+                const isNFe = String(manualForm.modelo) === '55';
+
+                // ide checks (subset available at this stage)
+                const ideOk = !!(manualForm.modelo && manualForm.serie && manualForm.natOp && manualForm.data_emissao && manualForm.tipo_nota && manualForm.idDest && (manualForm.indFinal ?? '') !== '' && (manualForm.indPres ?? '') !== '' && manualForm.finNFe);
+
+                // emit checks (empresa)
+                const empresaIBGE = empresaInfo?.cidade_ibge || empresaInfo?.codigo_municipio_ibge || empresaInfo?.codigo_ibge_municipio || empresaInfo?.ibge || empresaInfo?.cod_municipio || '';
+                const emitOk = !!(empresaInfo && empresaInfo.cnpj && empresaInfo.razao_social && empresaInfo.regime_tributario && empresaInfo.inscricao_estadual && empresaInfo.logradouro && (empresaInfo.numero||empresaInfo.nro) && empresaInfo.bairro && empresaInfo.cidade && empresaInfo.uf && empresaInfo.cep && empresaIBGE);
+
+                // dest checks: required for NF-e; optional for NFC-e (if provided, must be complete)
+                const destHasAny = !!(manualForm?.nome || manualForm?.cpf_cnpj);
+                const destRequired = isNFe;
+                const destFilled = !!(manualForm?.cpf_cnpj && manualForm?.nome && manualForm?.indIEDest && manualForm?.logradouro && manualForm?.numero && manualForm?.bairro && manualForm?.cidade && manualForm?.uf && manualForm?.cep);
+                const destOk = destRequired ? destFilled : (destHasAny ? destFilled : true);
+
+                // items + product fields
+                const itensOk = Array.isArray(itens) && itens.length > 0;
+                const produtosCompletos = itensOk && itens.every(it => (it.codigo || it.descricao) && it.ncm && it.cfop && it.unidade && parseDec(it.quantidade) > 0 && (it.preco_unitario || it.preco_unitario === '0,00'));
+
+                // impostos: exigir ao menos origem, ICMS (CST/CSOSN) e alíquotas de PIS/COFINS
+                const impostosOk = itensOk && itens.every(it => {
+                  const imp = it.impostos||{}; const ic = imp.icms||{}; const pis = imp.pis||{}; const cof = imp.cofins||{};
+                  const okICMS = !!(imp.origem !== undefined && imp.origem !== '' && (ic.cst || ic.csosn));
+                  const okPIS = !!(pis.aliquota !== undefined && String(pis.aliquota).trim() !== '');
+                  const okCOFINS = !!(cof.aliquota !== undefined && String(cof.aliquota).trim() !== '');
+                  return okICMS && okPIS && okCOFINS;
+                });
+
+                // totais (zero é válido, nulo não)
+                const baseICMS = (()=>{
+                  let v=0; itens.forEach(it=>{ const totalItem = (parseDec(it.preco_unitario)||0)*(parseDec(it.quantidade)||1) - (parseDec(it.desconto_percent)||0 ? ((parseDec(it.preco_unitario)||0)*(parseDec(it.quantidade)||1)*(parseDec(it.desconto_percent)||0)/100) : (parseDec(it.desconto_valor)||0)) + (parseDec(it.acrescimos_valor)||0); const baseItem = parseDec(it.impostos?.icms?.base); v += isFinite(baseItem) && baseItem>0 ? baseItem : totalItem; }); return v; })();
+                const valorICMS = itens.reduce((s,it)=> s + (((parseDec(it.impostos?.icms?.base) || ((parseDec(it.preco_unitario)||0)*(parseDec(it.quantidade)||1))) * (parseDec(it.impostos?.icms?.aliquota)||0))/100), 0);
+                const valorPIS = itens.reduce((s,it)=> s + (((parseDec(it.preco_unitario)||0)*(parseDec(it.quantidade)||1)) * (parseDec(it.impostos?.pis?.aliquota)||0))/100, 0);
+                const valorCOFINS = itens.reduce((s,it)=> s + (((parseDec(it.preco_unitario)||0)*(parseDec(it.quantidade)||1)) * (parseDec(it.impostos?.cofins?.aliquota)||0))/100, 0);
+                const valorIPI = itens.reduce((s,it)=> s + (((parseDec(it.preco_unitario)||0)*(parseDec(it.quantidade)||1)) * (parseDec(it.impostos?.ipi?.aliquota)||0))/100, 0);
+                const vTotTrib = valorICMS + valorPIS + valorCOFINS + valorIPI;
+                const totaisOk = [totalNota, baseICMS, valorICMS, valorPIS, valorCOFINS, valorIPI, frete, descontoGeral, outras, vTotTrib].every(v => v !== null && v !== undefined && !Number.isNaN(v));
+
+                // transporte
+                const transpOk = !!(manualForm.transporte && manualForm.transporte.tipo_frete);
+
+                // pagamento (apenas NFC-e obrigatório)
+                // Para NFC-e, aceitar troco: totalPago >= totalNota
+                const pagamentosAdequados = (totalPago + 0.009) >= totalNota;
+                const requiresCard = isNFCe && (manualForm.pagamentos||[]).some(pg => {
+                  const fin = (payMethods || []).find(m => String(m.id) === String(pg.finalizadora_id));
+                  const t = String(pg.tipo || fin?.nome || '').toLowerCase();
+                  return t.includes('cart') || t.includes('crédit') || t.includes('credit') || t.includes('déb') || t.includes('deb');
+                });
+                const cardDetailsOk = !requiresCard || (manualForm.pagamentos||[]).every(pg => {
+                  const fin = (payMethods || []).find(m => String(m.id) === String(pg.finalizadora_id));
+                  const t = String(pg.tipo || fin?.nome || '').toLowerCase();
+                  const isCard = t.includes('cart') || t.includes('crédit') || t.includes('credit') || t.includes('déb') || t.includes('deb');
+                  return !isCard || !!(pg.bandeira && pg.bandeira.trim());
+                });
+                const pagOk = isNFCe ? ((manualForm.pagamentos||[]).length > 0 && pagamentosAdequados && cardDetailsOk) : true;
+
+                const allOk = ideOk && emitOk && itensOk && produtosCompletos && impostosOk && totaisOk && transpOk && destOk && pagOk;
+
+                const Row = ({ ok, label, extra }) => (
+                  <div className="flex items-center justify-between px-3 py-2 border-b border-border/60 last:border-b-0">
+                    <div className="flex items-center gap-2">
+                      {ok ? <CheckCircle2 className="w-4 h-4 text-emerald-500" /> : <AlertTriangle className="w-4 h-4 text-amber-500" />}
+                      <div className="text-sm">{label}</div>
+                    </div>
+                    {extra ? <div className="text-xs text-text-secondary">{extra}</div> : null}
+                  </div>
+                );
+
+                return (
+                  <div className="space-y-3">
+                    <div className="border border-border rounded-md bg-surface">
+                      <div className="text-sm font-medium px-3 py-2">Checklist</div>
+                      <div>
+                        <Row ok={ideOk} label="Identificação" />
+                        <Row ok={emitOk} label="Emitente" />
+                        <Row ok={destOk} label="Destinatário" extra={isNFCe && !destHasAny ? 'Opcional na NFC-e' : (manualForm?.nome || '')} />
+                        <Row ok={itensOk} label="Itens" extra={`${itens.length} item(ns)`} />
+                        <Row ok={produtosCompletos} label="Produtos completos" />
+                        <Row ok={impostosOk} label="Impostos por item" />
+                        <Row ok={totaisOk} label="Totais" />
+                        <Row ok={transpOk} label="Transporte" />
+                        <Row ok={pagOk} label="Pagamento" extra={isNFCe ? `Pago R$ ${fmtMoney(totalPago)} • Nota R$ ${fmtMoney(totalNota)}` : undefined} />
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col md:flex-row items-center justify-between gap-3">
+                      <div className="text-sm text-text-secondary">
+                        <div>Total da Nota: <span className="text-text-primary font-semibold">R$ {fmtMoney(totalNota)}</span></div>
+                        <div>Total Pago: <span className="text-text-primary font-semibold">R$ {fmtMoney(totalPago)}</span></div>
+                        <div>Diferença: <span className={Math.abs(diff) < 0.009 ? 'text-emerald-500 font-semibold' : 'text-amber-500 font-semibold'}>R$ {fmtMoney(diff)}</span></div>
+                      </div>
+                      <div className="flex flex-wrap justify-end gap-2">
+                        <Button size="sm" variant="outline" onClick={async()=>{
+                          const errs = [];
+                          if (!ideOk) errs.push('Preencha os dados de identificação da nota');
+                          if (!emitOk) errs.push('Complete os dados da empresa (CNPJ, endereço, inscrição, regime)');
+                          if (!destOk) errs.push(isNFe ? 'Informe os dados do destinatário' : 'Revise os dados do destinatário preenchidos');
+                          if (!itensOk) errs.push('Adicione pelo menos um item na nota');
+                          if (!produtosCompletos) errs.push('Revise os campos obrigatórios dos itens (produto, NCM, CFOP, unidade, quantidade, preço)');
+                          if (!impostosOk) errs.push('Preencha os impostos de todos os itens (origem, ICMS, PIS e COFINS)');
+                          if (!totaisOk) errs.push('Verifique os totais da nota');
+                          if (!transpOk) errs.push('Informe a modalidade do frete em Transporte');
+                          if (!pagOk) errs.push('Revise a forma de pagamento e o valor pago');
+                          if (errs.length) toast({ title: 'Ainda faltam dados para emitir', description: errs.join(' • '), variant: 'warning' });
+                          else toast({ title: 'Tudo certo', description: 'A nota está pronta para emitir', variant: 'success' });
+                        }}>Validar Nota</Button>
+                        <Button size="sm" disabled={!allOk} onClick={emitirNota}>Emitir Nota</Button>
+                        <Button size="sm" variant="outline" onClick={saveDraft}>Salvar Rascunho</Button>
+                        <Button size="sm" variant="outline" onClick={()=>setManualOpen(false)}>Cancelar Emissão</Button>
+                      </div>
+                    </div>
+
+                    <div className="border border-border rounded-md bg-surface p-3 text-xs text-text-secondary">
+                      <div className="mb-1 font-medium text-text-primary">Pós-Emissão</div>
+                      <div>Após a emissão, exibiremos o status SEFAZ, chave de acesso, links do XML e DANFE, e opções de envio por e-mail ou WhatsApp.</div>
+                    </div>
+                  </div>
+                );
+              })()}
             </TabsContent>
-            </div>
           </Tabs>
 
           <div className="flex justify-end gap-2 mt-3">
+            <Button onClick={saveDraft} disabled={manualSaving}>{manualSaving ? 'Salvando...' : 'Salvar rascunho'}</Button>
             <Button variant="outline" onClick={()=>setManualOpen(false)}>Fechar</Button>
-            <Button onClick={async ()=>{
-              try {
-                const issues = [];
-                const doc = onlyDigits(manualForm.cpf_cnpj);
-                if (manualForm.tipo_pessoa === 'PF' && doc && doc.length !== 11) issues.push('CPF deve ter 11 dígitos');
-                if (manualForm.tipo_pessoa === 'PJ' && doc && doc.length !== 14) issues.push('CNPJ deve ter 14 dígitos');
-                if (!manualForm.nome) issues.push('Nome/Razão não informado');
-                if (manualForm.email && !isEmail(manualForm.email)) issues.push('Email inválido');
-                if (manualForm.uf && manualForm.uf.length !== 2) issues.push('UF deve ter 2 letras');
-                if (manualForm.cep && onlyDigits(manualForm.cep).length !== 8) issues.push('CEP deve ter 8 dígitos');
-                if (!manualForm.codigo_municipio_ibge) issues.push('Código IBGE do município é obrigatório');
-                const itemIssues = [];
-                manualForm.itens.forEach((x,i)=>{
-                  if (!x.descricao) itemIssues.push(`Item ${i+1}: descrição obrigatória`);
-                  if (!x.ncm || onlyDigits(x.ncm).length !== 8) itemIssues.push(`Item ${i+1}: NCM deve ter 8 dígitos`);
-                  if (!x.cfop || onlyDigits(x.cfop).length !== 4) itemIssues.push(`Item ${i+1}: CFOP deve ter 4 dígitos`);
-                  if (parseDec(x.quantidade) <= 0) itemIssues.push(`Item ${i+1}: quantidade deve ser > 0`);
-                  if (parseDec(x.preco_unitario) <= 0) itemIssues.push(`Item ${i+1}: preço deve ser > 0`);
-                });
-                issues.push(...itemIssues);
-                if (issues.length) { toast({ title: 'Pendências para gerar XML', description: issues.join('\n'), variant: 'destructive' }); return; }
-                const itens = manualForm.itens.map(x=>{
-                  const pu = parseDec(x.preco_unitario)||0;
-                  const q = parseDec(x.quantidade)||1;
-                  const bruto = pu*q;
-                  const descP = parseDec(x.desconto_percent)||0;
-                  const descV = parseDec(x.desconto_valor)||0;
-                  const acres = parseDec(x.acrescimos_valor)||0;
-                  const desconto = descP ? (bruto*descP/100) : descV;
-                  const totalItem = bruto - desconto + acres;
-                  return {
-                    preco_unitario: pu,
-                    quantidade: q,
-                    preco_total: totalItem,
-                    produtos: { nome: x.descricao||'Produto', codigo: x.codigo||'', ncm: x.ncm||'', cfopInterno: x.cfop||'5102' }
-                  };
-                });
-                const totalItens = itens.reduce((s,i)=> s + (Number(i.preco_total)||0), 0);
-                const total = totalItens - (parseDec(manualForm.totais.desconto_geral)||0) + (parseDec(manualForm.totais.frete)||0) + (parseDec(manualForm.totais.outras_despesas)||0);
-                const cliente = {
-                  tipo_pessoa: manualForm.tipo_pessoa,
-                  cpf_cnpj: onlyDigits(manualForm.cpf_cnpj),
-                  nome: manualForm.nome,
-                  email: manualForm.email,
-                  logradouro: manualForm.logradouro,
-                  numero: manualForm.numero,
-                  bairro: manualForm.bairro,
-                  cidade: manualForm.cidade,
-                  uf: manualForm.uf,
-                  cep: onlyDigits(manualForm.cep),
-                  codigo_municipio_ibge: manualForm.codigo_municipio_ibge,
-                  inscricao_estadual: manualForm.ie_isento ? 'ISENTO' : manualForm.inscricao_estadual,
-                  telefone: manualForm.telefone,
-                };
-                const pagamentos = (manualForm.pagamentos && manualForm.pagamentos.length) ? manualForm.pagamentos.map(p=>{ const fin = (payMethods||[]).find(x=>String(x.id)===String(p.finalizadora_id)); const cod = fin?.codigo_sefaz || '99'; return { finalizadoras: { codigo_sefaz: cod }, valor: parseDec(p.valor)||0 }; }) : [{ finalizadoras:{ codigo_sefaz:'99' }, valor: total }];
-                const xml = await gerarXMLNFeFromData({ codigoEmpresa, cliente, itens, pagamentos, modelo: '55', overrides: { natOp: manualForm.natOp, serie: manualForm.serie, nNF: manualForm.nNF, indFinal: manualForm.indFinal, indPres: manualForm.indPres, idDest: manualForm.idDest, tpNF: manualForm.tipo_nota==='entrada' ? '0' : '1' } });
-                setManualXml(xml);
-                setXmlPreviewOpen(true);
-                toast({ title: 'XML NF-e gerado' });
-              } catch (e) { toast({ title: 'Falha ao gerar XML', description: e.message, variant: 'destructive' }); }
-            }}>Gerar XML</Button>
           </div>
           {false && manualXml && (
             <div className="mt-4">
@@ -2220,12 +4385,12 @@ export default function FiscalHubPage(){
             </div>
             <div>
               <Label>Destino da Operação (idDest)</Label>
-              <Select value={nfeForm.idDest || ''} onValueChange={(v)=>setNfeForm(f=>({...f, idDest: v}))}>
+              <Select value={nfeForm.idDest || 'auto'} onValueChange={(v)=>setNfeForm(f=>({...f, idDest: v}))}>
                 <SelectTrigger>
                   <SelectValue placeholder="Automático" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">Automático</SelectItem>
+                  <SelectItem value="auto">Automático</SelectItem>
                   <SelectItem value="1">Interna (mesmo estado)</SelectItem>
                   <SelectItem value="2">Interestadual</SelectItem>
                   <SelectItem value="3">Exterior</SelectItem>
@@ -2294,3 +4459,4 @@ function downloadText(filename, text) {
     URL.revokeObjectURL(url);
   } catch {}
 }
+

@@ -975,7 +975,7 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
               </div>
 
               {/* NCM/CEST */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-6">
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 sm:gap-6">
                 <div className="grid grid-cols-1 sm:grid-cols-2 items-start sm:items-center gap-2 sm:gap-4">
                   <Label className="text-xs sm:text-right">NCM</Label>
                   <Input value={ncm} onChange={(e)=>setNcm(formatNCM(e.target.value))} placeholder="00000000" disabled={!editEnabled} className="text-xs sm:text-sm" />
@@ -984,9 +984,9 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
                   <Label className="text-xs sm:text-right">CEST</Label>
                   <Input value={cest} onChange={(e)=>setCest(formatCEST(e.target.value))} placeholder="0000000" disabled={!editEnabled} className="text-xs sm:text-sm" />
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 items-start sm:items-center gap-2 sm:gap-4 sm:col-span-1">
+                <div className="grid grid-cols-1 sm:grid-cols-2 items-start sm:items-center gap-2 sm:gap-4 sm:col-span-2">
                   <Label className="text-xs sm:text-right">Descrição NCM</Label>
-                  <Input value={ncmDescription} onChange={(e)=>setNcmDescription(e.target.value)} placeholder="Descrição do NCM" disabled={!editEnabled} className="text-xs sm:text-sm" />
+                  <Input value={ncmDescription} onChange={(e)=>setNcmDescription(e.target.value)} placeholder="Descrição do NCM" disabled={!editEnabled} className="text-sm" />
                 </div>
               </div>
             </TabsContent>

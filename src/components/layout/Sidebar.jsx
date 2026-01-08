@@ -211,17 +211,7 @@ function Sidebar({ onNavigate, isVisible, setIsVisible, sidebarPinned }) {
                     <Package className="h-4 w-4 mr-3" /> Produtos
                   </NavLink>
                 </li>
-                {/* 4. Compras */}
-                <li>
-                  <NavLink
-                    to="/compras"
-                    onClick={handleNavClick}
-                    className={({ isActive }) => isActive ? 'flex items-center h-[40px] px-3 rounded-sm bg-brand/20 text-text-primary font-medium text-sm' : 'flex items-center h-[40px] px-3 rounded-sm text-text-secondary hover:bg-surface-2 hover:text-text-primary transition-colors text-sm'}
-                  >
-                    <ShoppingBag className="h-4 w-4 mr-3" /> Compras
-                  </NavLink>
-                </li>
-                {/* 5. Equipe */}
+                {/* 4. Equipe */}
                 <li>
                   <NavLink
                     to="/equipe"

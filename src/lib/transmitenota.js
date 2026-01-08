@@ -1,5 +1,6 @@
-// Lightweight client for Transmite Nota API
-// Usage: provide baseUrl from your env/dashboard (e.g., https://api.transmitenota.com.br)
+// Lightweight client for Emissor Fiscal API
+// Now proxied via Supabase Edge Function 'emissor' to avoid exposing ApiKey in the client.
+import { supabase } from '@/lib/supabase';
 
 async function httpPostJson({ url, body }) {
   const res = await fetch(url, {
@@ -11,7 +12,7 @@ async function httpPostJson({ url, body }) {
   let json;
   try { json = text ? JSON.parse(text) : null; } catch { json = { raw: text }; }
   if (!res.ok) {
-    const msg = json?.message || json?.erro || res.statusText || 'Erro na API Transmite Nota';
+    const msg = json?.message || json?.erro || res.statusText || 'Erro na API fiscal';
     const err = new Error(msg);
     err.status = res.status;
     err.response = json ?? text;
@@ -19,6 +20,32 @@ async function httpPostJson({ url, body }) {
   }
   return json;
 }
+
+function deriveAmbienteFromBaseUrl(baseUrl) {
+  const s = String(baseUrl || '').toLowerCase();
+  if (s.includes('/producao')) return 'producao';
+  if (s.includes('/produção')) return 'producao';
+  return 'homologacao';
+}
+
+async function edgeInvoke({ acao, ambiente, cnpj, dados }) {
+  const payload = { acao, ambiente: ambiente || 'homologacao', cnpj: (cnpj || '').replace(/\D/g, ''), dados: dados || {} };
+  const { data, error } = await supabase.functions.invoke('emissor', { body: payload });
+  if (error) {
+    const e = new Error(error.message || 'Erro na API fiscal');
+    e.response = error;
+    throw e;
+  }
+  // O Edge Function normaliza erros em { message, status, response }
+  if (data && data.status && data.status >= 400 && !data.ok) {
+    const e = new Error(data.message || 'Erro na API fiscal');
+    e.status = data.status;
+    e.response = data.response;
+    throw e;
+  }
+  return data;
+}
+ 
 
 function joinUrl(baseUrl, path) {
   const b = String(baseUrl || '').replace(/\/$/, '');
@@ -28,95 +55,114 @@ function joinUrl(baseUrl, path) {
 
 // Testar conexão: tenta acessar a API e diferenciar erros comuns
 export async function testarConexaoTN({ baseUrl, apiKey, cnpj }) {
-  const url = joinUrl(baseUrl, '/ConsultarEmissaoNotaNfce/');
   try {
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ApiKey: apiKey || '', Cnpj: (cnpj || '').replace(/\D/g, ''), Dados: {} }),
-    });
-    const text = await res.text();
-    let json; try { json = text ? JSON.parse(text) : null; } catch {}
-    // Heurística: 401/403 => credenciais inválidas; 404 => URL incorreta; 200 => ok; 400 => alcançou o endpoint (provável credenciais ok, dados faltando)
-    const status = res.status;
-    if (status === 200) return { reachable: true, authorized: true, status, response: json ?? text };
-    if (status === 400) return { reachable: true, authorized: true, status, response: json ?? text };
-    if (status === 401 || status === 403) return { reachable: true, authorized: false, status, response: json ?? text };
-    if (status === 404) return { reachable: false, authorized: false, status, response: json ?? text };
-    return { reachable: true, authorized: null, status, response: json ?? text };
+    const ambiente = deriveAmbienteFromBaseUrl(baseUrl);
+    const resp = await edgeInvoke({ acao: 'teste_conexao', ambiente, cnpj, dados: {} });
+    const status = resp?.status;
+    const meta = { via: resp?.via || 'edge', ambiente: resp?.ambiente || ambiente };
+    if (status === 200) return { reachable: true, authorized: true, status, response: resp?.response, meta };
+    if (status === 400) return { reachable: true, authorized: true, status, response: resp?.response, meta };
+    if (status === 401 || status === 403) return { reachable: true, authorized: false, status, response: resp?.response, meta };
+    if (status === 404) return { reachable: false, authorized: false, status, response: resp?.response, meta };
+    return { reachable: true, authorized: null, status, response: resp?.response, meta };
   } catch (e) {
     return { reachable: false, authorized: false, error: e?.message || String(e) };
   }
 }
 
 export async function adicionarEmpresa({ baseUrl, apiKey, cnpj, dados }) {
-  if (!baseUrl) throw new Error('baseUrl obrigatório');
-  if (!apiKey) throw new Error('apiKey obrigatório');
   if (!cnpj) throw new Error('cnpj obrigatório');
-  const url = joinUrl(baseUrl, '/AdicionarEmpresa/');
-  return httpPostJson({ url, body: { ApiKey: apiKey, Cnpj: cnpj, Dados: dados || {} } });
+  const ambiente = deriveAmbienteFromBaseUrl(baseUrl);
+  return edgeInvoke({ acao: 'adicionar_empresa', ambiente, cnpj, dados });
 }
 
 export async function enviarCertificado({ baseUrl, apiKey, cnpj, certificadoBase64, senhaCertificado }) {
-  if (!baseUrl) throw new Error('baseUrl obrigatório');
-  if (!apiKey) throw new Error('apiKey obrigatório');
   if (!cnpj) throw new Error('cnpj obrigatório');
   if (!certificadoBase64) throw new Error('certificadoBase64 obrigatório');
   if (!senhaCertificado) throw new Error('senhaCertificado obrigatório');
-  const url = joinUrl(baseUrl, '/EnviarCertificado/');
-  return httpPostJson({
-    url,
-    body: { ApiKey: apiKey, Cnpj: cnpj, Dados: { arquivo_certificado_base64: certificadoBase64, senha_certificado: senhaCertificado } },
-  });
+  const ambiente = deriveAmbienteFromBaseUrl(baseUrl);
+  const dados = { arquivo_certificado_base64: certificadoBase64, senha_certificado: senhaCertificado };
+  return edgeInvoke({ acao: 'enviar_certificado', ambiente, cnpj, dados });
 }
 
 export async function enviarNfce({ baseUrl, apiKey, cnpj, dados }) {
-  if (!baseUrl) throw new Error('baseUrl obrigatório');
-  if (!apiKey) throw new Error('apiKey obrigatório');
   if (!cnpj) throw new Error('cnpj obrigatório');
   if (!dados) throw new Error('dados obrigatório');
-  const url = joinUrl(baseUrl, '/EnviarNfce/');
-  return httpPostJson({ url, body: { ApiKey: apiKey, Cnpj: cnpj, Dados: dados } });
+  const ambiente = deriveAmbienteFromBaseUrl(baseUrl);
+  return edgeInvoke({ acao: 'nfce_enviar', ambiente, cnpj, dados });
 }
 
 export async function alterarDadosNfce({ baseUrl, apiKey, cnpj, dados }) {
-  const url = joinUrl(baseUrl, '/AlterarDadosNfce/');
-  return httpPostJson({ url, body: { ApiKey: apiKey, Cnpj: cnpj, Dados: dados } });
+  const ambiente = deriveAmbienteFromBaseUrl(baseUrl);
+  return edgeInvoke({ acao: 'nfce_alterar', ambiente, cnpj, dados });
 }
 
 export async function consultarEmissaoNfce({ baseUrl, apiKey, cnpj, dados }) {
-  const url = joinUrl(baseUrl, '/ConsultarEmissaoNotaNfce/');
-  return httpPostJson({ url, body: { ApiKey: apiKey, Cnpj: cnpj, Dados: dados } });
+  const ambiente = deriveAmbienteFromBaseUrl(baseUrl);
+  return edgeInvoke({ acao: 'nfce_consultar', ambiente, cnpj, dados });
 }
 
 export async function cancelarNfce({ baseUrl, apiKey, cnpj, dados }) {
-  const url = joinUrl(baseUrl, '/CancelarNfce/');
-  return httpPostJson({ url, body: { ApiKey: apiKey, Cnpj: cnpj, Dados: dados } });
+  const ambiente = deriveAmbienteFromBaseUrl(baseUrl);
+  return edgeInvoke({ acao: 'nfce_cancelar', ambiente, cnpj, dados });
 }
 
 export async function consultarPdfNfce({ baseUrl, apiKey, cnpj, dados }) {
-  const url = joinUrl(baseUrl, '/ConsultarPDFNfce/');
-  return httpPostJson({ url, body: { ApiKey: apiKey, Cnpj: cnpj, Dados: dados } });
+  const ambiente = deriveAmbienteFromBaseUrl(baseUrl);
+  return edgeInvoke({ acao: 'nfce_pdf', ambiente, cnpj, dados });
 }
 
 export async function consultarXmlNfce({ baseUrl, apiKey, cnpj, dados }) {
-  const url = joinUrl(baseUrl, '/ConsultarXMLNfce/');
-  return httpPostJson({ url, body: { ApiKey: apiKey, Cnpj: cnpj, Dados: dados } });
+  const ambiente = deriveAmbienteFromBaseUrl(baseUrl);
+  return edgeInvoke({ acao: 'nfce_xml', ambiente, cnpj, dados });
+}
+
+// NF-e (modelo 55)
+export async function enviarNfe({ baseUrl, apiKey, cnpj, dados }) {
+  if (!cnpj) throw new Error('cnpj obrigatório');
+  if (!dados) throw new Error('dados obrigatório');
+  const ambiente = deriveAmbienteFromBaseUrl(baseUrl);
+  const clean = { ...dados };
+  try { delete clean.Numero; } catch {}
+  try { delete clean.Serie; } catch {}
+  return edgeInvoke({ acao: 'nfe_enviar', ambiente, cnpj, dados: clean });
+}
+
+export async function consultarEmissaoNfe({ baseUrl, apiKey, cnpj, dados }) {
+  const ambiente = deriveAmbienteFromBaseUrl(baseUrl);
+  return edgeInvoke({ acao: 'nfe_consultar', ambiente, cnpj, dados });
+}
+
+export async function cancelarNfe({ baseUrl, apiKey, cnpj, dados }) {
+  const ambiente = deriveAmbienteFromBaseUrl(baseUrl);
+  return edgeInvoke({ acao: 'nfe_cancelar', ambiente, cnpj, dados });
+}
+
+export async function consultarPdfNfe({ baseUrl, apiKey, cnpj, dados }) {
+  const ambiente = deriveAmbienteFromBaseUrl(baseUrl);
+  return edgeInvoke({ acao: 'nfe_pdf', ambiente, cnpj, dados });
+}
+
+export async function consultarXmlNfe({ baseUrl, apiKey, cnpj, dados }) {
+  const ambiente = deriveAmbienteFromBaseUrl(baseUrl);
+  return edgeInvoke({ acao: 'nfe_xml', ambiente, cnpj, dados });
 }
 
 // Helpers para ambiente/global
 export function getTransmiteNotaConfigFromEmpresa(empresa) {
   const amb = (empresa?.ambiente || 'homologacao').toLowerCase();
   const isProd = amb === 'producao';
-  const baseUrl = isProd
+  const baseUrlRaw = isProd
     ? (empresa?.transmitenota_base_url_prod || empresa?.transmitenota_base_url || '')
     : (empresa?.transmitenota_base_url_hml || empresa?.transmitenota_base_url || '');
   const apiKey = isProd
     ? (empresa?.transmitenota_apikey_prod || empresa?.transmitenota_apikey || '')
     : (empresa?.transmitenota_apikey_hml || empresa?.transmitenota_apikey || '');
+  const baseUrl = baseUrlRaw || (isProd ? '/api/producao' : '/api/homologacao');
   return {
     baseUrl,
     apiKey,
+    ambiente: amb,
     cnpj: (empresa?.cnpj || '').replace(/\D/g, ''),
   };
 }

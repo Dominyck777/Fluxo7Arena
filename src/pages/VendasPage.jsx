@@ -5,7 +5,7 @@ import { createPortal } from 'react-dom';
 import { DragDropContext, Droppable, Draggable } from 'react-beautiful-dnd';
 import { Button } from '@/components/ui/button';
 import { useToast } from "@/components/ui/use-toast";
-import { Plus, GripVertical, Search, CheckCircle, Clock, FileText, ShoppingBag, Trash2, DollarSign, X, Store, Lock, Unlock, Minus, Banknote, ArrowDownCircle, ArrowUpCircle, CalendarDays, Users, ChevronRight, AlertCircle, Edit, Printer } from 'lucide-react';
+import { Plus, GripVertical, Search, CheckCircle, Clock, FileText, ShoppingBag, Trash2, DollarSign, X, Store, Lock, Unlock, Minus, Banknote, ArrowDownCircle, ArrowUpCircle, CalendarDays, Users, ChevronRight, AlertCircle, Edit, Printer, Settings } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -14,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger, } from "@/components/ui/alert-dialog"
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
-import { listMesas, ensureCaixaAberto, fecharCaixa, getOrCreateComandaForMesa, listarItensDaComanda, adicionarItem, atualizarQuantidadeItem, removerItem, listarFinalizadoras, registrarPagamento, fecharComandaEMesa, cancelarComandaEMesa, listarComandasAbertas, listarTotaisPorComanda, criarMesa, listarClientes, adicionarClientesAComanda, listarClientesDaComanda, getCaixaAberto, listarResumoSessaoCaixaAtual, criarMovimentacaoCaixa, listarMovimentacoesCaixa, listarItensDeTodasComandasAbertas, listarPagamentosPorComandaEStatus, salvarRascunhoPagamentosComanda, promoverPagamentosRascunhoParaPago, listarComandaBalcaoAberta, getOrCreateComandaBalcao } from '@/lib/store';
+import { listMesas, ensureCaixaAberto, fecharCaixa, getOrCreateComandaForMesa, listarItensDaComanda, adicionarItem, atualizarQuantidadeItem, removerItem, listarFinalizadoras, registrarPagamento, fecharComandaEMesa, cancelarComandaEMesa, listarComandasAbertas, listarTotaisPorComanda, criarMesa, listarClientes, adicionarClientesAComanda, listarClientesDaComanda, getCaixaAberto, listarResumoSessaoCaixaAtual, criarMovimentacaoCaixa, listarMovimentacoesCaixa, listarItensDeTodasComandasAbertas, listarPagamentosPorComandaEStatus, salvarRascunhoPagamentosComanda, promoverPagamentosRascunhoParaPago, listarComandaBalcaoAberta, getOrCreateComandaBalcao, inativarMesa, listarTodasMesas, reativarMesa } from '@/lib/store';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -100,6 +100,7 @@ function VendasPage() {
   // Abrir mesa
   const [isCreateTableDialog, setIsCreateTableDialog] = useState(false);
   const [isCreateMesaOpen, setIsCreateMesaOpen] = useState(false);
+  const [isManageMesasOpen, setIsManageMesasOpen] = useState(false);
   const [isOpenTableDialog, setIsOpenTableDialog] = useState(false);
   const [mesaOpening, setMesaOpening] = useState(false);
   const [mesaCancelling, setMesaCancelling] = useState(false);
@@ -832,10 +833,6 @@ function VendasPage() {
           }
         }
         // (removido) hooks aninhados: refreshCashierStatus e efeitos — agora definidos no topo do componente
-        try {
-          const prods = await listProducts({ includeInactive: false, codigoEmpresa });
-          setProducts(prods || []);
-        } catch (e) { console.warn('Falha ao carregar produtos:', e?.message || e); }
         clearTimeout(slowFallback);
         clearTimeout(safetyTimer);
       } catch (e) {
@@ -847,7 +844,26 @@ function VendasPage() {
     hydrateFromCache();
     if (authReady && codigoEmpresa) load();
     return () => {};
-  }, [authReady, userProfile?.codigo_empresa, anyDialogOpen]);
+  }, [authReady, userProfile?.codigo_empresa]);
+
+  // Carregar produtos de forma independente dos diálogos, evitando piscadas ao abrir/fechar modais
+  useEffect(() => {
+    if (!authReady || !userProfile?.codigo_empresa) return;
+    let canceled = false;
+    const codigoEmpresa = userProfile.codigo_empresa;
+    (async () => {
+      try {
+        const prods = await listProducts({ includeInactive: false, codigoEmpresa });
+        if (!canceled) setProducts(prods || []);
+      } catch (e) {
+        console.warn('Falha ao carregar produtos:', e?.message || e);
+        if (!canceled) setProducts([]);
+      }
+    })();
+    return () => {
+      canceled = true;
+    };
+  }, [authReady, userProfile?.codigo_empresa]);
 
   // Checar status do caixa assim que a autenticação estiver pronta (evita exigir abrir caixa após F5)
   useEffect(() => {
@@ -2722,7 +2738,9 @@ function VendasPage() {
                   </AlertDialog>
                 </>
               ) : (
-                <Button size="sm" className="h-7 px-2.5 rounded-full text-[12px] font-medium leading-none whitespace-nowrap" disabled={!isCashierOpen} onClick={() => { if (!isCashierOpen) { toast({ title: 'Caixa Fechado', description: 'Abra o caixa antes de abrir uma mesa.', variant: 'warning' }); return; } setPendingTable(table); setIsOpenTableDialog(true); }}>Abrir Mesa</Button>
+                <div className="flex items-center gap-2">
+                  <Button size="sm" className="h-7 px-2.5 rounded-full text-[12px] font-medium leading-none whitespace-nowrap" disabled={!isCashierOpen} onClick={() => { if (!isCashierOpen) { toast({ title: 'Caixa Fechado', description: 'Abra o caixa antes de abrir uma mesa.', variant: 'warning' }); return; } setPendingTable(table); setIsOpenTableDialog(true); }}>Abrir Mesa</Button>
+                </div>
               )}
             </div>
           </div>
@@ -2867,6 +2885,113 @@ function VendasPage() {
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => setIsCreateMesaOpen(false)} disabled={loading}>Cancelar</Button>
             <Button type="button" onClick={confirmCreate} disabled={loading}>{loading ? 'Criando...' : 'Criar Mesa'}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    );
+  };
+
+  const ManageMesasDialog = () => {
+    const [lista, setLista] = useState([]);
+    const [sel, setSel] = useState(new Set());
+    const [loadingList, setLoadingList] = useState(false);
+    const { userProfile } = useAuth();
+    const { toast } = useToast();
+
+    const carregar = async () => {
+      try {
+        setLoadingList(true);
+        const all = await listarTodasMesas(userProfile?.codigo_empresa);
+        setLista(Array.isArray(all) ? all : []);
+      } catch (e) {
+        toast({ title: 'Falha ao listar mesas', description: e?.message || 'Tente novamente', variant: 'destructive' });
+      } finally { setLoadingList(false); }
+    };
+
+    useEffect(() => { if (isManageMesasOpen) carregar(); }, [isManageMesasOpen]);
+
+    const toggle = (id) => { const n = new Set(sel); n.has(id) ? n.delete(id) : n.add(id); setSel(n); };
+    const allSelected = (lista || []).length > 0 && (lista || []).every(m => sel.has(m.id));
+    const toggleAll = () => {
+      if ((lista || []).length === 0) return;
+      if (allSelected) setSel(new Set());
+      else setSel(new Set((lista || []).map(m => m.id)));
+    };
+
+    const doInativar = async () => {
+      const ids = lista.filter(m => sel.has(m.id) && m.status === 'available').map(m => m.id);
+      if (ids.length === 0) { toast({ title: 'Selecione mesas disponíveis', variant: 'warning' }); return; }
+      try {
+        for (const id of ids) { await inativarMesa({ mesaId: id, codigoEmpresa: userProfile?.codigo_empresa }); }
+        toast({ title: 'Mesas inativadas', description: `${ids.length} mesa(s)`, variant: 'success' });
+        try { await refreshTablesLight({ showToast: false }); } catch {}
+        await carregar();
+      } catch (e) {
+        toast({ title: 'Falha ao inativar', description: e?.message || 'Tente novamente', variant: 'destructive' });
+      }
+    };
+
+    const doReativar = async () => {
+      const ids = lista.filter(m => sel.has(m.id) && m.status === 'inactive').map(m => m.id);
+      if (ids.length === 0) { toast({ title: 'Selecione mesas inativas', variant: 'warning' }); return; }
+      try {
+        for (const id of ids) { await reativarMesa({ mesaId: id, codigoEmpresa: userProfile?.codigo_empresa }); }
+        toast({ title: 'Mesas reativadas', description: `${ids.length} mesa(s)`, variant: 'success' });
+        try { await refreshTablesLight({ showToast: false }); } catch {}
+        await carregar();
+      } catch (e) {
+        toast({ title: 'Falha ao reativar', description: e?.message || 'Tente novamente', variant: 'destructive' });
+      }
+    };
+
+    // reativarTodas removido conforme solicitação do usuário
+
+    return (
+      <Dialog open={isManageMesasOpen} onOpenChange={(open) => { setIsManageMesasOpen(open); if (!open) setSel(new Set()); }}>
+        <DialogContent className="sm:max-w-xl w-[92vw]">
+          <DialogHeader>
+            <DialogTitle className="text-2xl font-bold">Gerenciar Mesas</DialogTitle>
+            <DialogDescription>Selecione mesas e ative/inative.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 max-h-[50vh] overflow-auto thin-scroll">
+            <div className="flex items-center gap-2 px-1">
+              <input type="checkbox" className="h-4 w-4 rounded-sm border border-amber-500/60 bg-black accent-amber-400" checked={allSelected} onChange={toggleAll} />
+              <span className="text-sm select-none">Selecionar todas</span>
+            </div>
+            {loadingList ? (
+              <div className="text-sm text-text-muted">Carregando...</div>
+            ) : (
+              <ul className="space-y-1">
+                {lista.map(m => {
+                  const s = String(m.status || '').toLowerCase();
+                  const isInactive = s === 'inactive';
+                  const label = isInactive ? 'Inativa' : s === 'available' ? 'Disponível' : s === 'occupied' ? 'Ocupada' : s === 'awaiting-payment' ? 'Aguardando Pagamento' : (m.status || '');
+                  const badgeClass = isInactive
+                    ? 'bg-slate-500/15 text-slate-300 border border-slate-500/30'
+                    : s === 'available'
+                      ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
+                      : 'bg-amber-500/15 text-amber-300 border border-amber-500/30';
+                  return (
+                    <li key={m.id} className="flex items-center justify-between gap-3 border border-border/40 rounded px-2 py-1.5">
+                      <label className="flex items-center gap-2 select-none min-w-0">
+                        <input
+                          type="checkbox"
+                          checked={sel.has(m.id)}
+                          onChange={() => toggle(m.id)}
+                          className="h-4 w-4 rounded-sm border border-amber-500/60 bg-black accent-amber-400"
+                        />
+                        <span className="text-sm whitespace-nowrap truncate max-w-[55vw] md:max-w-[32rem]">{m.nome || `Mesa ${m.numero}`}</span>
+                      </label>
+                      <span className={`text-[11px] px-2 py-0.5 rounded-full font-semibold whitespace-nowrap ${badgeClass}`}>{label}</span>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+          <DialogFooter className="flex items-center justify-end gap-2">
+            <Button type="button" variant="destructive" onClick={doInativar} disabled={loadingList}>Inativar</Button>
+            <Button type="button" onClick={doReativar} disabled={loadingList}>Ativar</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -4723,7 +4848,7 @@ function VendasPage() {
   const OpenCashierDialog = () => (
     <AlertDialog open={openCashDialogOpen} onOpenChange={setOpenCashDialogOpen}>
       <AlertDialogTrigger asChild>
-          <Button variant="success" size="sm" disabled={isCashierOpen || openCashInProgress} onClick={() => setOpenCashDialogOpen(true)} className="px-3">
+          <Button variant="success" size="sm" disabled={isCashierOpen || openCashInProgress} onClick={() => setOpenCashDialogOpen(true)} className="px-3 whitespace-nowrap">
             <Unlock className="h-4 w-4" />
             <span className="ml-2 md:hidden">Abrir</span>
             <span className="ml-2 hidden md:inline">Abrir Caixa</span>
@@ -4768,7 +4893,7 @@ function VendasPage() {
       <>
       <AlertDialog open={isCloseCashOpen} onOpenChange={(open) => { setIsCloseCashOpen(open); if (open) handlePrepareClose(); }}>
         <AlertDialogTrigger asChild>
-          <Button variant="destructive" size="sm" disabled={!isCashierOpen} onClick={() => setIsCloseCashOpen(true)} className="px-3">
+          <Button variant="destructive" size="sm" disabled={!isCashierOpen} onClick={() => setIsCloseCashOpen(true)} className="px-3 whitespace-nowrap">
             <Lock className="h-4 w-4" />
             <span className="ml-2 md:hidden">Fechar</span>
             <span className="ml-2 hidden md:inline">Fechar Caixa</span>
@@ -5745,7 +5870,7 @@ function VendasPage() {
           </Tabs>
         </div>
 
-        <div className="flex items-center justify-between mb-2 md:mb-6 gap-2 md:gap-4">
+        <div className="flex items-center justify-between mb-2 md:mb-6 gap-2 md:gap-3 pr-2">
           <div className="hidden md:flex items-center gap-2 md:gap-3">
             <Tabs value="mesas" onValueChange={(v) => {
               if (v === 'mesas') navigate('/vendas');
@@ -5759,19 +5884,22 @@ function VendasPage() {
               </TabsList>
             </Tabs>
           </div>
-          <div className="flex items-center gap-1.5 md:gap-3 flex-shrink-0">
+          <div className="flex items-center gap-1.5 md:gap-2">
             <OpenCashierDialog />
             <CloseCashierDialog />
-            <Button variant="outline" size="sm" onClick={() => setIsCashierDetailsOpen(true)} className="px-3">
+            <Button variant="outline" size="sm" onClick={() => setIsCashierDetailsOpen(true)} className="px-2.5">
               <Banknote className="h-4 w-4" />
               <span className="ml-2 md:hidden">Detalhes</span>
               <span className="ml-2 hidden md:inline">Detalhes do Caixa</span>
-              <kbd className="ml-2 hidden md:inline px-2 py-1 text-xs font-bold font-mono text-white bg-gray-700 border border-gray-600 rounded">F11</kbd>
+              <kbd className="ml-2 hidden lg:inline px-2 py-1 text-xs font-bold font-mono text-white bg-gray-700 border border-gray-600 rounded">F11</kbd>
             </Button>
             <div className="hidden md:block w-px h-6 bg-border mx-1"></div>
-            <Button onClick={() => setIsCreateMesaOpen(true)} className="hidden md:flex" size="sm">
+            <Button onClick={() => setIsManageMesasOpen(true)} className="inline-flex h-9 w-9 p-0 items-center justify-center shrink-0" size="icon" variant="outline" title="Gerenciar Mesas">
+              <Settings className="h-4 w-4" />
+            </Button>
+            <Button onClick={() => setIsCreateMesaOpen(true)} className="hidden md:flex px-3" size="sm">
               <Plus className="mr-2 h-4 w-4" /> Nova Mesa
-              <kbd className="ml-2 px-2 py-1 text-xs font-bold font-mono text-white bg-gray-700 border border-gray-600 rounded">F1</kbd>
+              <kbd className="ml-2 hidden lg:inline px-2 py-1 text-xs font-bold font-mono text-white bg-gray-700 border border-gray-600 rounded">F1</kbd>
             </Button>
           </div>
         </div>
@@ -5929,6 +6057,7 @@ function VendasPage() {
       {isManageClientsOpen ? <ManageClientsDialog /> : null}
       <OpenTableDialog />
       <CreateMesaDialog />
+      <ManageMesasDialog />
       {/* Warning banner (always-on overlay, mobile-focused) */}
       {mobileWarnOpen && (
         <div className="fixed left-3 right-3 z-[9999]" role="alert" aria-live="assertive" style={{ bottom: 'calc(12px + env(safe-area-inset-bottom, 0px))' }}>

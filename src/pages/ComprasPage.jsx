@@ -4,6 +4,8 @@ import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Search, FileText, Package, Calendar as CalendarIcon, DollarSign, User, Eye, Download, Filter, TrendingUp, BarChart3, X, Trash2, Edit, RefreshCw, Settings } from 'lucide-react';
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/dropdown-menu';
+import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
 import { listPurchases, getPurchaseItems, deactivatePurchase, updatePurchase } from '@/lib/purchases';
 import { listProducts } from '@/lib/products';
@@ -47,12 +49,45 @@ export default function ComprasPage() {
   const [page, setPage] = useState(1);
   const [pageSize] = useState(100);
   const [totalCount, setTotalCount] = useState(0);
+  const [exporting, setExporting] = useState(false);
 
   // Função para formatar moeda brasileira
   const formatCurrencyBR = (value) => {
     const digits = String(value || '').replace(/\D/g, '');
     const number = digits ? Number(digits) / 100 : 0;
     return number.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  };
+
+  const exportXmlZipEntradas = async () => {
+    try {
+      setExporting(true);
+      const items = (filteredPurchases || [])
+        .filter(p => !!p.xml_completo)
+        .map(p => ({ tipo: 'entrada', chave: p.chave_nfe, xml: p.xml_completo }));
+      if (!items.length) { alert('Nenhum XML disponível nos resultados filtrados.'); return; }
+      const safe = (s) => String(s||'').replace(/[^0-9A-Za-z_-]/g,'');
+      const dfrom = dateFrom ? format(dateFrom, 'yyyy-MM-dd') : '';
+      const dto = dateTo ? format(dateTo, 'yyyy-MM-dd') : '';
+      const zipName = `nfe-entrada-filtrados-${safe(dfrom)}_a_${safe(dto)}-xml.zip`;
+      const { data, error } = await supabase.functions.invoke('emissor', {
+        body: { acao: 'export_zip', ambiente: 'homologacao', cnpj: '', dados: { items, includePdf: false, zipName } },
+        responseType: 'arrayBuffer',
+      });
+      if (error) throw error;
+      const blob = new Blob([data], { type: 'application/zip' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = zipName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      alert(`Falha ao exportar ZIP: ${e?.message || e}`);
+    } finally {
+      setExporting(false);
+    }
   };
 
   // Converter moeda para número
@@ -378,6 +413,18 @@ export default function ComprasPage() {
             >
               <Settings className="h-4 w-4" />
             </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button type="button" variant="outline" size="sm" className="h-9" disabled={exporting}>
+                  Ações
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem disabled={filteredPurchases.length === 0} onClick={exportXmlZipEntradas}>
+                  <Download className="h-4 w-4 mr-2" /> Baixar XML (filtrados)
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
           <div className="flex flex-row flex-wrap items-end gap-2">
             <div className="flex-1 min-w-[140px]">
