@@ -28,7 +28,11 @@ table,storage,migrations,null,table,supabase_storage_admin,null
 table,auth,refresh_tokens,null,table,supabase_auth_admin,Auth: Store of tokens used to refresh JWT tokens once they expire.
 table,vault,secrets,null,table,supabase_admin,Table with encrypted `secret` column for storing sensitive information on disk.
 table,vault,decrypted_secrets,null,view,supabase_admin,null
+<<<<<<< Updated upstream
 table,realtime,messages_2026_01_08,null,table,supabase_admin,null
+=======
+table,realtime,messages_2025_12_21,null,table,supabase_admin,null
+>>>>>>> Stashed changes
 table,auth,saml_relay_states,null,table,supabase_auth_admin,Auth: Contains SAML Relay State information for each Service Provider initiated login.
 table,auth,flow_state,null,table,supabase_auth_admin,stores metadata for pkce logins
 table,auth,identities,null,table,supabase_auth_admin,Auth: Stores identities associated to a user.
@@ -45,7 +49,13 @@ table,public,agendamento_participantes,null,table,postgres,Cotas de valor por pa
 table,storage,s3_multipart_uploads_parts,null,table,supabase_storage_admin,null
 table,storage,s3_multipart_uploads,null,table,supabase_storage_admin,null
 table,public,quadras,null,table,postgres,null
+<<<<<<< Updated upstream
 table,public,agendamentos,null,table,postgres,null
+=======
+table,public,agendamento_participantes,null,table,postgres,Cotas de valor por participante do agendamento
+table,public,agendamentos,null,table,postgres,null
+table,realtime,messages_2025_12_22,null,table,supabase_admin,null
+>>>>>>> Stashed changes
 table,public,estoque_baixa_log,null,table,postgres,null
 table,public,empresa_counters,null,table,postgres,null
 table,public,colaboradores,null,table,postgres,null
@@ -59,7 +69,11 @@ table,public,comanda_clientes,null,table,postgres,null
 table,public,caixa_sessoes,null,table,postgres,null
 table,public,quadras_dias_funcionamento,null,table,postgres,Configuração de dias de funcionamento das quadras por dia da semana e fechamentos específicos
 table,public,contas_receber,null,table,postgres,null
+<<<<<<< Updated upstream
 table,realtime,messages_2026_01_10,null,table,supabase_admin,null
+=======
+table,realtime,messages_2025_12_23,null,table,supabase_admin,null
+>>>>>>> Stashed changes
 table,public,contas_receber_baixas,null,table,postgres,null
 table,auth,oauth_authorizations,null,table,supabase_auth_admin,null
 table,public,compras,null,table,postgres,Registro de compras (NF-es de entrada) importadas via XML
@@ -80,20 +94,27 @@ table,auth,mfa_factors,null,table,supabase_auth_admin,auth: stores metadata abou
 table,public,caixa_resumos,null,table,postgres,null
 table,public,v_agendamentos_isis,null,view,postgres,null
 table,storage,objects,null,table,supabase_storage_admin,null
+table,realtime,messages_2025_12_24,null,table,supabase_admin,null
 table,public,caixa_movimentacoes,null,table,postgres,null
 table,public,clientes,null,table,postgres,null
 table,public,estoque_reservado,null,table,postgres,Controle de estoque reservado para evitar overselling
 table,public,comanda_historico,null,table,postgres,Auditoria de alterações em comandas para rastreabilidade
+table,realtime,messages_2025_12_25,null,table,supabase_admin,null
 table,public,contas_pagar,null,table,postgres,null
 table,public,contas_pagar_baixas,null,table,postgres,null
 table,public,comanda_itens,null,table,postgres,null
 table,net,http_request_queue,null,table,supabase_admin,null
 table,net,_http_response,null,table,supabase_admin,null
 table,public,empresas,null,table,postgres,null
+<<<<<<< Updated upstream
+=======
+table,realtime,messages_2025_12_26,null,table,supabase_admin,null
+>>>>>>> Stashed changes
 table,supabase_functions,migrations,null,table,supabase_functions_admin,null
 table,supabase_functions,hooks,null,table,supabase_functions_admin,Supabase Functions Hooks: Audit trail for triggered hooks.
 table,public,user_ui_settings,null,table,postgres,null
 table,public,isis_conversas,null,table,postgres,Histórico de conversas da Ísis atreladas à empresa/cliente/agendamento.
+<<<<<<< Updated upstream
 table,realtime,messages_2026_01_04,null,table,supabase_admin,null
 table,public,isis_chat_sessions,null,table,postgres,null
 table,public,notas_fiscais,null,table,postgres,null
@@ -102,6 +123,14 @@ table,realtime,messages_2026_01_05,null,table,supabase_admin,null
 table,public,comandas,null,table,postgres,null
 table,auth,oauth_client_states,null,table,supabase_auth_admin,Stores OAuth states for third-party provider authentication flows where Supabase acts as the OAuth client.
 table,realtime,messages_2026_01_06,null,table,supabase_admin,null
+=======
+table,public,isis_chat_sessions,null,table,postgres,null
+table,public,notas_fiscais,null,table,postgres,null
+table,public,isis_chat_messages,null,table,postgres,null
+table,public,comandas,null,table,postgres,null
+table,auth,oauth_client_states,null,table,supabase_auth_admin,Stores OAuth states for third-party provider authentication flows where Supabase acts as the OAuth client.
+table,realtime,messages_2025_12_20,null,table,supabase_admin,null
+>>>>>>> Stashed changes
 column,public,lower,idx_produtos_categoria,text default null,null,null
 column,auth,id,sso_providers_pkey,uuid default null,null,null
 column,auth,lower,sso_providers_resource_id_idx,text default null,null,null
@@ -300,10 +329,17 @@ column,public,ativa,produto_categorias,boolean default true,null,null
 column,public,created_at,produto_categorias,timestamp with time zone default now(),null,null
 column,public,updated_at,produto_categorias,timestamp with time zone default now(),null,null
 column,public,id,users_pkey,uuid default null,null,null
+<<<<<<< Updated upstream
 column,realtime,id,messages_2026_01_08_pkey,uuid default null,null,null
 column,realtime,inserted_at,messages_2026_01_08_pkey,timestamp without time zone default null,null,null
 column,realtime,inserted_at,messages_2026_01_08_inserted_at_topic_idx,timestamp without time zone default null,null,null
 column,realtime,topic,messages_2026_01_08_inserted_at_topic_idx,text default null,null,null
+=======
+column,realtime,id,messages_2025_12_21_pkey,uuid default null,null,null
+column,realtime,inserted_at,messages_2025_12_21_pkey,timestamp without time zone default null,null,null
+column,realtime,inserted_at,messages_2025_12_21_inserted_at_topic_idx,timestamp without time zone default null,null,null
+column,realtime,topic,messages_2025_12_21_inserted_at_topic_idx,text default null,null,null
+>>>>>>> Stashed changes
 column,public,id,quadras_dias_funcionamento_pkey,uuid default null,null,null
 column,storage,id,buckets,text default null,null,null
 column,storage,name,buckets,text default null,null,null
@@ -385,6 +421,7 @@ column,public,quadra_id,idx_quadras_dias_funcionamento_quadra,uuid default null,
 column,public,codigo_empresa,idx_quadras_dias_funcionamento_empresa,text default null,null,null
 column,auth,email,users_email_partial_key,character varying(255) default null,null,null
 column,public,data_fechamento,idx_quadras_dias_funcionamento_data,date default null,null,null
+<<<<<<< Updated upstream
 column,realtime,topic,messages_2026_01_08,text default null,null,null
 column,realtime,extension,messages_2026_01_08,text default null,null,null
 column,realtime,payload,messages_2026_01_08,jsonb default null,null,null
@@ -393,6 +430,16 @@ column,realtime,private,messages_2026_01_08,boolean default false,null,null
 column,realtime,updated_at,messages_2026_01_08,timestamp without time zone default now(),null,null
 column,realtime,inserted_at,messages_2026_01_08,timestamp without time zone default now(),null,null
 column,realtime,id,messages_2026_01_08,uuid default gen_random_uuid(),null,null
+=======
+column,realtime,topic,messages_2025_12_21,text default null,null,null
+column,realtime,extension,messages_2025_12_21,text default null,null,null
+column,realtime,payload,messages_2025_12_21,jsonb default null,null,null
+column,realtime,event,messages_2025_12_21,text default null,null,null
+column,realtime,private,messages_2025_12_21,boolean default false,null,null
+column,realtime,updated_at,messages_2025_12_21,timestamp without time zone default now(),null,null
+column,realtime,inserted_at,messages_2025_12_21,timestamp without time zone default now(),null,null
+column,realtime,id,messages_2025_12_21,uuid default gen_random_uuid(),null,null
+>>>>>>> Stashed changes
 column,auth,user_id,mfa_factors_user_id_idx,uuid default null,null,null
 column,public,id,sales_pkey,uuid default null,null,null
 column,auth,phone,users_phone_key,text default null,null,null
@@ -545,6 +592,7 @@ column,public,valor_cota,v_agendamento_participantes,"numeric(10,2) default null
 column,public,status_pagamento_text,v_agendamento_participantes,text default null,null,null
 column,public,status_pagamento,v_agendamento_participantes,payment_status default null,null,null
 column,public,codigo_empresa,uq_caixa_aberto_por_empresa,text default null,null,null
+<<<<<<< Updated upstream
 column,public,id,agendamento_participantes,uuid default gen_random_uuid(),null,null
 column,public,agendamento_id,agendamento_participantes,uuid default null,null,null
 column,public,cliente_id,agendamento_participantes,uuid default null,null,null
@@ -561,6 +609,10 @@ column,public,aplicar_taxa,agendamento_participantes,boolean default false,null,
 column,public,ordem,agendamento_participantes,integer default 1,null,Ordem do participante no agendamento (1=representante/primeiro)
 column,public,is_representante,agendamento_participantes,boolean default false,null,null
 column,public,deleted_at,agendamento_participantes,timestamp with time zone default null,null,null
+=======
+column,realtime,id,messages_2025_12_22_pkey,uuid default null,null,null
+column,realtime,inserted_at,messages_2025_12_22_pkey,timestamp without time zone default null,null,null
+>>>>>>> Stashed changes
 column,storage,id,s3_multipart_uploads_parts,uuid default gen_random_uuid(),null,null
 column,storage,upload_id,s3_multipart_uploads_parts,text default null,null,null
 column,storage,size,s3_multipart_uploads_parts,bigint default 0,null,null
@@ -571,6 +623,8 @@ column,storage,etag,s3_multipart_uploads_parts,text default null,null,null
 column,storage,owner_id,s3_multipart_uploads_parts,text default null,null,null
 column,storage,version,s3_multipart_uploads_parts,text default null,null,null
 column,storage,created_at,s3_multipart_uploads_parts,timestamp with time zone default now(),null,null
+column,realtime,inserted_at,messages_2025_12_22_inserted_at_topic_idx,timestamp without time zone default null,null,null
+column,realtime,topic,messages_2025_12_22_inserted_at_topic_idx,text default null,null,null
 column,storage,id,s3_multipart_uploads,text default null,null,null
 column,storage,in_progress_size,s3_multipart_uploads,bigint default 0,null,null
 column,storage,upload_signature,s3_multipart_uploads,text default null,null,null
@@ -649,10 +703,21 @@ column,public,created_by_isis,agendamentos,boolean default false,null,null
 column,public,isis_session_id,agendamentos,uuid default null,null,null
 column,public,canceled_by,agendamentos,text default null,null,null
 column,public,canceled_at,agendamentos,timestamp with time zone default null,null,null
+<<<<<<< Updated upstream
 column,realtime,inserted_at,messages_2026_01_09_inserted_at_topic_idx,timestamp without time zone default null,null,null
 column,realtime,topic,messages_2026_01_09_inserted_at_topic_idx,text default null,null,null
 column,realtime,inserted_at,messages_2026_01_07_inserted_at_topic_idx,timestamp without time zone default null,null,null
 column,realtime,topic,messages_2026_01_07_inserted_at_topic_idx,text default null,null,null
+=======
+column,realtime,topic,messages_2025_12_22,text default null,null,null
+column,realtime,extension,messages_2025_12_22,text default null,null,null
+column,realtime,payload,messages_2025_12_22,jsonb default null,null,null
+column,realtime,event,messages_2025_12_22,text default null,null,null
+column,realtime,private,messages_2025_12_22,boolean default false,null,null
+column,realtime,updated_at,messages_2025_12_22,timestamp without time zone default now(),null,null
+column,realtime,inserted_at,messages_2025_12_22,timestamp without time zone default now(),null,null
+column,realtime,id,messages_2025_12_22,uuid default gen_random_uuid(),null,null
+>>>>>>> Stashed changes
 column,public,comanda_id,estoque_baixa_log,uuid default null,null,null
 column,public,baixado_em,estoque_baixa_log,timestamp with time zone default now(),null,null
 column,public,empresa_id,empresa_counters,uuid default null,null,null
@@ -808,10 +873,17 @@ column,public,id,movimentos_saldo_pkey,uuid default null,null,null
 column,public,codigo_empresa,idx_mov_saldo_empresa,text default null,null,null
 column,public,cliente_id,idx_mov_saldo_cliente,uuid default null,null,null
 column,public,agendamento_id,idx_mov_saldo_agendamento,uuid default null,null,null
+<<<<<<< Updated upstream
 column,realtime,id,messages_2026_01_10_pkey,uuid default null,null,null
 column,realtime,inserted_at,messages_2026_01_10_pkey,timestamp without time zone default null,null,null
 column,realtime,inserted_at,messages_2026_01_10_inserted_at_topic_idx,timestamp without time zone default null,null,null
 column,realtime,topic,messages_2026_01_10_inserted_at_topic_idx,text default null,null,null
+=======
+column,realtime,id,messages_2025_12_23_pkey,uuid default null,null,null
+column,realtime,inserted_at,messages_2025_12_23_pkey,timestamp without time zone default null,null,null
+column,realtime,inserted_at,messages_2025_12_23_inserted_at_topic_idx,timestamp without time zone default null,null,null
+column,realtime,topic,messages_2025_12_23_inserted_at_topic_idx,text default null,null,null
+>>>>>>> Stashed changes
 column,public,id,movimentos_saldo,uuid default gen_random_uuid(),null,null
 column,public,codigo_empresa,movimentos_saldo,text default null,null,null
 column,public,cliente_id,movimentos_saldo,uuid default null,null,null
@@ -865,6 +937,7 @@ column,public,status,contas_receber,text default 'aberto'::text,null,null
 column,public,observacoes,contas_receber,text default null,null,null
 column,public,criado_em,contas_receber,timestamp with time zone default now(),null,null
 column,public,atualizado_em,contas_receber,timestamp with time zone default now(),null,null
+<<<<<<< Updated upstream
 column,realtime,topic,messages_2026_01_10,text default null,null,null
 column,realtime,extension,messages_2026_01_10,text default null,null,null
 column,realtime,payload,messages_2026_01_10,jsonb default null,null,null
@@ -873,6 +946,16 @@ column,realtime,private,messages_2026_01_10,boolean default false,null,null
 column,realtime,updated_at,messages_2026_01_10,timestamp without time zone default now(),null,null
 column,realtime,inserted_at,messages_2026_01_10,timestamp without time zone default now(),null,null
 column,realtime,id,messages_2026_01_10,uuid default gen_random_uuid(),null,null
+=======
+column,realtime,topic,messages_2025_12_23,text default null,null,null
+column,realtime,extension,messages_2025_12_23,text default null,null,null
+column,realtime,payload,messages_2025_12_23,jsonb default null,null,null
+column,realtime,event,messages_2025_12_23,text default null,null,null
+column,realtime,private,messages_2025_12_23,boolean default false,null,null
+column,realtime,updated_at,messages_2025_12_23,timestamp without time zone default now(),null,null
+column,realtime,inserted_at,messages_2025_12_23,timestamp without time zone default now(),null,null
+column,realtime,id,messages_2025_12_23,uuid default gen_random_uuid(),null,null
+>>>>>>> Stashed changes
 column,public,status,idx_compras_status,character varying(20) default null,null,null
 column,public,id,contas_receber_baixas_pkey,uuid default null,null,null
 column,public,id,compras_itens_pkey,uuid default null,null,null
@@ -1132,7 +1215,14 @@ column,auth,created_at,oauth_clients,timestamp with time zone default now(),null
 column,auth,updated_at,oauth_clients,timestamp with time zone default now(),null,null
 column,auth,deleted_at,oauth_clients,timestamp with time zone default null,null,null
 column,auth,client_type,oauth_clients,auth.oauth_client_type default 'confidential'::auth.oauth_client_type,null,null
+<<<<<<< Updated upstream
+=======
+column,realtime,id,messages_2025_12_24_pkey,uuid default null,null,null
+column,realtime,inserted_at,messages_2025_12_24_pkey,timestamp without time zone default null,null,null
+>>>>>>> Stashed changes
 column,storage,id,vector_indexes_pkey,text default null,null,null
+column,realtime,inserted_at,messages_2025_12_24_inserted_at_topic_idx,timestamp without time zone default null,null,null
+column,realtime,topic,messages_2025_12_24_inserted_at_topic_idx,text default null,null,null
 column,auth,deleted_at,oauth_clients_deleted_at_idx,timestamp with time zone default null,null,null
 column,realtime,inserted_at,messages_inserted_at_topic_index,timestamp without time zone default null,null,null
 column,realtime,topic,messages_inserted_at_topic_index,text default null,null,null
@@ -1219,6 +1309,14 @@ column,storage,version,objects,text default null,null,null
 column,storage,owner_id,objects,text default null,null,null
 column,storage,user_metadata,objects,jsonb default null,null,null
 column,storage,level,objects,integer default null,null,null
+column,realtime,topic,messages_2025_12_24,text default null,null,null
+column,realtime,extension,messages_2025_12_24,text default null,null,null
+column,realtime,payload,messages_2025_12_24,jsonb default null,null,null
+column,realtime,event,messages_2025_12_24,text default null,null,null
+column,realtime,private,messages_2025_12_24,boolean default false,null,null
+column,realtime,updated_at,messages_2025_12_24,timestamp without time zone default now(),null,null
+column,realtime,inserted_at,messages_2025_12_24,timestamp without time zone default now(),null,null
+column,realtime,id,messages_2025_12_24,uuid default gen_random_uuid(),null,null
 column,public,id,caixa_movimentacoes,bigint default nextval('caixa_movimentacoes_id_seq'::regclass),null,null
 column,public,codigo_empresa,caixa_movimentacoes,text default null,null,null
 column,public,caixa_sessao_id,caixa_movimentacoes,uuid default null,null,null
@@ -1309,9 +1407,21 @@ column,public,criado_em,comanda_historico,timestamp with time zone default now()
 column,public,to_tsvector,idx_mesas_nome,text default null,null,null
 column,public,origem,idx_comandas_origem,text default null,null,null
 column,public,xml_chave,idx_comandas_xml_chave,text default null,null,null
+column,realtime,id,messages_2025_12_25_pkey,uuid default null,null,null
+column,realtime,inserted_at,messages_2025_12_25_pkey,timestamp without time zone default null,null,null
+column,realtime,inserted_at,messages_2025_12_25_inserted_at_topic_idx,timestamp without time zone default null,null,null
+column,realtime,topic,messages_2025_12_25_inserted_at_topic_idx,text default null,null,null
 column,public,codigo_empresa,idx_comandas_empresa_fechado,text default null,null,null
 column,public,fechado_em,idx_comandas_empresa_fechado,timestamp with time zone default null,null,null
 column,public,codigo_empresa,idx_mesas_empresa,text default null,null,null
+column,realtime,topic,messages_2025_12_25,text default null,null,null
+column,realtime,extension,messages_2025_12_25,text default null,null,null
+column,realtime,payload,messages_2025_12_25,jsonb default null,null,null
+column,realtime,event,messages_2025_12_25,text default null,null,null
+column,realtime,private,messages_2025_12_25,boolean default false,null,null
+column,realtime,updated_at,messages_2025_12_25,timestamp without time zone default now(),null,null
+column,realtime,inserted_at,messages_2025_12_25,timestamp without time zone default now(),null,null
+column,realtime,id,messages_2025_12_25,uuid default gen_random_uuid(),null,null
 column,public,id,contas_pagar,uuid default gen_random_uuid(),null,null
 column,public,codigo_empresa,contas_pagar,text default null,null,null
 column,public,fornecedor_id,contas_pagar,uuid default null,null,null
@@ -1359,8 +1469,15 @@ column,public,conta_id,idx_cp_baixas_empresa_conta,uuid default null,null,null
 column,public,codigo_empresa,idx_cp_baixas_empresa_data,text default null,null,null
 column,public,data_baixa,idx_cp_baixas_empresa_data,date default null,null,null
 column,public,agendamento_id,idx_comandas_agendamento_id,uuid default null,null,null
+<<<<<<< Updated upstream
 column,realtime,id,messages_2026_01_04_pkey,uuid default null,null,null
 column,realtime,inserted_at,messages_2026_01_04_pkey,timestamp without time zone default null,null,null
+=======
+column,realtime,id,messages_2025_12_26_pkey,uuid default null,null,null
+column,realtime,inserted_at,messages_2025_12_26_pkey,timestamp without time zone default null,null,null
+column,realtime,inserted_at,messages_2025_12_26_inserted_at_topic_idx,timestamp without time zone default null,null,null
+column,realtime,topic,messages_2025_12_26_inserted_at_topic_idx,text default null,null,null
+>>>>>>> Stashed changes
 column,public,desconto_tipo,idx_comanda_itens_desconto_tipo,character varying(20) default null,null,null
 column,public,desconto_tipo,idx_comandas_desconto_tipo,character varying(20) default null,null,null
 column,realtime,inserted_at,messages_2026_01_04_inserted_at_topic_idx,timestamp without time zone default null,null,null
@@ -1452,6 +1569,17 @@ column,public,transmitenota_base_url,empresas,text default null,null,null
 column,public,transmitenota_base_url_hml,empresas,text default null,null,null
 column,public,transmitenota_base_url_prod,empresas,text default null,null,null
 column,public,cfgfiscal_hash,empresas,text default null,null,null
+<<<<<<< Updated upstream
+=======
+column,realtime,topic,messages_2025_12_26,text default null,null,null
+column,realtime,extension,messages_2025_12_26,text default null,null,null
+column,realtime,payload,messages_2025_12_26,jsonb default null,null,null
+column,realtime,event,messages_2025_12_26,text default null,null,null
+column,realtime,private,messages_2025_12_26,boolean default false,null,null
+column,realtime,updated_at,messages_2025_12_26,timestamp without time zone default now(),null,null
+column,realtime,inserted_at,messages_2025_12_26,timestamp without time zone default now(),null,null
+column,realtime,id,messages_2025_12_26,uuid default gen_random_uuid(),null,null
+>>>>>>> Stashed changes
 column,supabase_functions,version,migrations,text default null,null,null
 column,supabase_functions,inserted_at,migrations,timestamp with time zone default now(),null,null
 column,supabase_functions,id,hooks,bigint default nextval('supabase_functions.hooks_id_seq'::regclass),null,null
@@ -1587,16 +1715,22 @@ column,public,nf_cancelado_em,comandas,timestamp with time zone default null,nul
 column,public,nf_motivo_cancelamento,comandas,text default null,null,null
 column,public,xml_protocolo,comandas,text default null,null,null
 column,auth,created_at,idx_oauth_client_states_created_at,timestamp with time zone default null,null,null
+<<<<<<< Updated upstream
 column,realtime,id,messages_2026_01_05_pkey,uuid default null,null,null
 column,realtime,inserted_at,messages_2026_01_05_pkey,timestamp without time zone default null,null,null
 column,realtime,inserted_at,messages_2026_01_05_inserted_at_topic_idx,timestamp without time zone default null,null,null
 column,realtime,topic,messages_2026_01_05_inserted_at_topic_idx,text default null,null,null
+=======
+>>>>>>> Stashed changes
 column,auth,id,oauth_client_states,uuid default null,null,null
 column,auth,provider_type,oauth_client_states,text default null,null,null
 column,auth,code_verifier,oauth_client_states,text default null,null,null
 column,auth,created_at,oauth_client_states,timestamp with time zone default null,null,null
+<<<<<<< Updated upstream
 column,realtime,id,messages_2026_01_06_pkey,uuid default null,null,null
 column,realtime,inserted_at,messages_2026_01_06_pkey,timestamp without time zone default null,null,null
+=======
+>>>>>>> Stashed changes
 column,public,codigo_empresa,comandas_empresa_idx,text default null,null,null
 column,public,mesa_id,comandas_mesa_idx,uuid default null,null,null
 column,realtime,inserted_at,messages_2026_01_06_inserted_at_topic_idx,timestamp without time zone default null,null,null
@@ -1607,6 +1741,7 @@ column,public,codigo_empresa,mesas_empresa_idx,text default null,null,null
 column,public,codigo_empresa,pagamentos_empresa_idx,text default null,null,null
 column,public,comanda_id,pagamentos_comanda_idx,uuid default null,null,null
 column,public,codigo_empresa,produtos_empresa_idx,character varying(10) default null,null,null
+<<<<<<< Updated upstream
 column,realtime,topic,messages_2026_01_06,text default null,null,null
 column,realtime,extension,messages_2026_01_06,text default null,null,null
 column,realtime,payload,messages_2026_01_06,jsonb default null,null,null
@@ -1615,6 +1750,20 @@ column,realtime,private,messages_2026_01_06,boolean default false,null,null
 column,realtime,updated_at,messages_2026_01_06,timestamp without time zone default now(),null,null
 column,realtime,inserted_at,messages_2026_01_06,timestamp without time zone default now(),null,null
 column,realtime,id,messages_2026_01_06,uuid default gen_random_uuid(),null,null
+=======
+column,realtime,id,messages_2025_12_20_pkey,uuid default null,null,null
+column,realtime,inserted_at,messages_2025_12_20_pkey,timestamp without time zone default null,null,null
+column,realtime,inserted_at,messages_2025_12_20_inserted_at_topic_idx,timestamp without time zone default null,null,null
+column,realtime,topic,messages_2025_12_20_inserted_at_topic_idx,text default null,null,null
+column,realtime,topic,messages_2025_12_20,text default null,null,null
+column,realtime,extension,messages_2025_12_20,text default null,null,null
+column,realtime,payload,messages_2025_12_20,jsonb default null,null,null
+column,realtime,event,messages_2025_12_20,text default null,null,null
+column,realtime,private,messages_2025_12_20,boolean default false,null,null
+column,realtime,updated_at,messages_2025_12_20,timestamp without time zone default now(),null,null
+column,realtime,inserted_at,messages_2025_12_20,timestamp without time zone default now(),null,null
+column,realtime,id,messages_2025_12_20,uuid default gen_random_uuid(),null,null
+>>>>>>> Stashed changes
 constraint,auth,domain not empty,sso_domains,CHECK ((char_length(domain) > 0)),null,null
 constraint,auth,sso_domains_pkey,sso_domains,PRIMARY KEY (id),null,null
 constraint,auth,sso_domains_sso_provider_id_fkey,sso_domains,FOREIGN KEY (sso_provider_id) REFERENCES auth.sso_providers(id) ON DELETE CASCADE,null,null
@@ -1645,7 +1794,11 @@ constraint,auth,refresh_tokens_pkey,refresh_tokens,PRIMARY KEY (id),null,null
 constraint,auth,refresh_tokens_session_id_fkey,refresh_tokens,FOREIGN KEY (session_id) REFERENCES auth.sessions(id) ON DELETE CASCADE,null,null
 constraint,auth,refresh_tokens_token_unique,refresh_tokens,UNIQUE (token),null,null
 constraint,vault,secrets_pkey,secrets,PRIMARY KEY (id),null,null
+<<<<<<< Updated upstream
 constraint,realtime,messages_2026_01_08_pkey,messages_2026_01_08,"PRIMARY KEY (id, inserted_at)",null,null
+=======
+constraint,realtime,messages_2025_12_21_pkey,messages_2025_12_21,"PRIMARY KEY (id, inserted_at)",null,null
+>>>>>>> Stashed changes
 constraint,auth,request_id not empty,saml_relay_states,CHECK ((char_length(request_id) > 0)),null,null
 constraint,auth,saml_relay_states_flow_state_id_fkey,saml_relay_states,FOREIGN KEY (flow_state_id) REFERENCES auth.flow_state(id) ON DELETE CASCADE,null,null
 constraint,auth,saml_relay_states_pkey,saml_relay_states,PRIMARY KEY (id),null,null
@@ -1674,6 +1827,7 @@ constraint,auth,sessions_scopes_length,sessions,CHECK ((char_length(scopes) <= 4
 constraint,auth,sessions_user_id_fkey,sessions,FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE,null,null
 constraint,realtime,schema_migrations_pkey,schema_migrations,PRIMARY KEY (version),null,null
 constraint,realtime,pk_subscription,subscription,PRIMARY KEY (id),null,null
+<<<<<<< Updated upstream
 constraint,public,agendamento_participantes_agendamento_id_fkey,agendamento_participantes,FOREIGN KEY (agendamento_id) REFERENCES agendamentos(id) ON DELETE CASCADE,null,null
 constraint,public,agendamento_participantes_cliente_id_fkey,agendamento_participantes,FOREIGN KEY (cliente_id) REFERENCES clientes(id) ON UPDATE CASCADE ON DELETE RESTRICT,null,null
 constraint,public,agendamento_participantes_pkey,agendamento_participantes,PRIMARY KEY (id),null,null
@@ -1681,6 +1835,8 @@ constraint,public,agendamento_participantes_valor_cota_check,agendamento_partici
 constraint,public,agp_codigo_empresa_fkey,agendamento_participantes,FOREIGN KEY (codigo_empresa) REFERENCES empresas(codigo_empresa) ON UPDATE CASCADE ON DELETE RESTRICT,null,null
 constraint,public,agp_finalizadora_id_fkey,agendamento_participantes,FOREIGN KEY (finalizadora_id) REFERENCES finalizadoras(id) ON UPDATE CASCADE ON DELETE SET NULL,null,null
 constraint,public,fk_agp_cliente,agendamento_participantes,FOREIGN KEY (cliente_id) REFERENCES clientes(id) ON UPDATE CASCADE ON DELETE RESTRICT,null,null
+=======
+>>>>>>> Stashed changes
 constraint,storage,s3_multipart_uploads_parts_bucket_id_fkey,s3_multipart_uploads_parts,FOREIGN KEY (bucket_id) REFERENCES storage.buckets(id),null,null
 constraint,storage,s3_multipart_uploads_parts_pkey,s3_multipart_uploads_parts,PRIMARY KEY (id),null,null
 constraint,storage,s3_multipart_uploads_parts_upload_id_fkey,s3_multipart_uploads_parts,FOREIGN KEY (upload_id) REFERENCES storage.s3_multipart_uploads(id) ON DELETE CASCADE,null,null
@@ -1690,6 +1846,16 @@ constraint,public,courts_pkey,quadras,PRIMARY KEY (id),null,null
 constraint,public,quadras_codigo_empresa_fkey,quadras,FOREIGN KEY (codigo_empresa) REFERENCES empresas(codigo_empresa) ON UPDATE CASCADE ON DELETE RESTRICT,null,null
 constraint,public,quadras_horario_valido,quadras,CHECK (((hora_fim > hora_inicio) OR ((hora_fim = '00:00:00'::time without time zone) AND (hora_inicio <> '00:00:00'::time without time zone)))),null,null
 constraint,public,quadras_valor_nonneg,quadras,CHECK (((valor IS NULL) OR (valor >= (0)::numeric))),null,null
+<<<<<<< Updated upstream
+=======
+constraint,public,agendamento_participantes_agendamento_id_fkey,agendamento_participantes,FOREIGN KEY (agendamento_id) REFERENCES agendamentos(id) ON DELETE CASCADE,null,null
+constraint,public,agendamento_participantes_cliente_id_fkey,agendamento_participantes,FOREIGN KEY (cliente_id) REFERENCES clientes(id) ON UPDATE CASCADE ON DELETE RESTRICT,null,null
+constraint,public,agendamento_participantes_pkey,agendamento_participantes,PRIMARY KEY (id),null,null
+constraint,public,agendamento_participantes_valor_cota_check,agendamento_participantes,CHECK ((valor_cota >= (0)::numeric)),null,null
+constraint,public,agp_codigo_empresa_fkey,agendamento_participantes,FOREIGN KEY (codigo_empresa) REFERENCES empresas(codigo_empresa) ON UPDATE CASCADE ON DELETE RESTRICT,null,null
+constraint,public,agp_finalizadora_id_fkey,agendamento_participantes,FOREIGN KEY (finalizadora_id) REFERENCES finalizadoras(id) ON UPDATE CASCADE ON DELETE SET NULL,null,null
+constraint,public,fk_agp_cliente,agendamento_participantes,FOREIGN KEY (cliente_id) REFERENCES clientes(id) ON UPDATE CASCADE ON DELETE RESTRICT,null,null
+>>>>>>> Stashed changes
 constraint,realtime,messages_pkey,messages,"PRIMARY KEY (id, inserted_at)",null,null
 constraint,public,agendamentos_codigo_empresa_fkey,agendamentos,FOREIGN KEY (codigo_empresa) REFERENCES empresas(codigo_empresa) ON UPDATE CASCADE ON DELETE RESTRICT,null,null
 constraint,public,agendamentos_isis_session_id_fkey,agendamentos,FOREIGN KEY (isis_session_id) REFERENCES isis_chat_sessions(id) ON DELETE SET NULL,null,null
@@ -1697,6 +1863,10 @@ constraint,public,agendamentos_valor_nonneg,agendamentos,CHECK (((valor_total IS
 constraint,public,bookings_court_id_fkey,agendamentos,FOREIGN KEY (quadra_id) REFERENCES quadras(id),null,null
 constraint,public,bookings_customer_id_fkey,agendamentos,FOREIGN KEY (cliente_id) REFERENCES clientes(id),null,null
 constraint,public,bookings_pkey,agendamentos,PRIMARY KEY (id),null,null
+<<<<<<< Updated upstream
+=======
+constraint,realtime,messages_2025_12_22_pkey,messages_2025_12_22,"PRIMARY KEY (id, inserted_at)",null,null
+>>>>>>> Stashed changes
 constraint,public,estoque_baixa_log_pkey,estoque_baixa_log,PRIMARY KEY (comanda_id),null,null
 constraint,public,empresa_counters_pkey,empresa_counters,PRIMARY KEY (empresa_id),null,null
 constraint,public,colaboradores_codigo_empresa_fkey,colaboradores,FOREIGN KEY (codigo_empresa) REFERENCES empresas(codigo_empresa) ON DELETE RESTRICT,null,null
@@ -1704,8 +1874,11 @@ constraint,public,user_profiles_pkey,colaboradores,PRIMARY KEY (id),null,null
 constraint,storage,buckets_analytics_pkey,buckets_analytics,PRIMARY KEY (id),null,null
 constraint,storage,prefixes_bucketId_fkey,prefixes,FOREIGN KEY (bucket_id) REFERENCES storage.buckets(id),null,null
 constraint,storage,prefixes_pkey,prefixes,"PRIMARY KEY (bucket_id, level, name)",null,null
+<<<<<<< Updated upstream
 constraint,realtime,messages_2026_01_09_pkey,messages_2026_01_09,"PRIMARY KEY (id, inserted_at)",null,null
 constraint,realtime,messages_2026_01_07_pkey,messages_2026_01_07,"PRIMARY KEY (id, inserted_at)",null,null
+=======
+>>>>>>> Stashed changes
 constraint,public,products_pkey,produtos,PRIMARY KEY (id),null,null
 constraint,public,produtos_company_code_fkey,produtos,FOREIGN KEY (codigo_empresa) REFERENCES empresas(codigo_empresa) ON UPDATE CASCADE ON DELETE RESTRICT,null,null
 constraint,public,produtos_estoque_check,produtos,CHECK ((estoque >= 0)),null,null
@@ -1733,7 +1906,11 @@ constraint,public,quadras_dias_funcionamento_quadra_id_fkey,quadras_dias_funcion
 constraint,public,quadras_dias_funcionamento_tipo_check,quadras_dias_funcionamento,"CHECK (((tipo)::text = ANY ((ARRAY['dia_semana'::character varying, 'data_fechamento'::character varying])::text[])))",null,null
 constraint,public,contas_receber_cliente_id_fkey,contas_receber,FOREIGN KEY (cliente_id) REFERENCES clientes(id),null,null
 constraint,public,contas_receber_pkey,contas_receber,PRIMARY KEY (id),null,null
+<<<<<<< Updated upstream
 constraint,realtime,messages_2026_01_10_pkey,messages_2026_01_10,"PRIMARY KEY (id, inserted_at)",null,null
+=======
+constraint,realtime,messages_2025_12_23_pkey,messages_2025_12_23,"PRIMARY KEY (id, inserted_at)",null,null
+>>>>>>> Stashed changes
 constraint,public,contas_receber_baixas_conta_id_fkey,contas_receber_baixas,FOREIGN KEY (conta_id) REFERENCES contas_receber(id) ON DELETE CASCADE,null,null
 constraint,public,contas_receber_baixas_finalizadora_id_fkey,contas_receber_baixas,FOREIGN KEY (finalizadora_id) REFERENCES finalizadoras(id),null,null
 constraint,public,contas_receber_baixas_pagamento_id_fkey,contas_receber_baixas,FOREIGN KEY (pagamento_id) REFERENCES pagamentos(id),null,null
@@ -1804,6 +1981,10 @@ constraint,public,caixa_resumos_caixa_sessao_id_fkey,caixa_resumos,FOREIGN KEY (
 constraint,public,caixa_resumos_pkey,caixa_resumos,PRIMARY KEY (id),null,null
 constraint,storage,objects_bucketId_fkey,objects,FOREIGN KEY (bucket_id) REFERENCES storage.buckets(id),null,null
 constraint,storage,objects_pkey,objects,PRIMARY KEY (id),null,null
+<<<<<<< Updated upstream
+=======
+constraint,realtime,messages_2025_12_24_pkey,messages_2025_12_24,"PRIMARY KEY (id, inserted_at)",null,null
+>>>>>>> Stashed changes
 constraint,public,caixa_movimentacoes_caixa_sessao_id_fkey,caixa_movimentacoes,FOREIGN KEY (caixa_sessao_id) REFERENCES caixa_sessoes(id) ON DELETE CASCADE,null,null
 constraint,public,caixa_movimentacoes_pkey,caixa_movimentacoes,PRIMARY KEY (id),null,null
 constraint,public,caixa_movimentacoes_tipo_check,caixa_movimentacoes,"CHECK ((tipo = ANY (ARRAY['sangria'::text, 'suprimento'::text, 'troco'::text, 'ajuste'::text])))",null,null
@@ -1814,6 +1995,10 @@ constraint,public,estoque_reservado_pkey,estoque_reservado,PRIMARY KEY (id),null
 constraint,public,estoque_reservado_produto_id_fkey,estoque_reservado,FOREIGN KEY (produto_id) REFERENCES produtos(id) ON DELETE CASCADE,null,null
 constraint,public,comanda_historico_comanda_id_fkey,comanda_historico,FOREIGN KEY (comanda_id) REFERENCES comandas(id) ON DELETE CASCADE,null,null
 constraint,public,comanda_historico_pkey,comanda_historico,PRIMARY KEY (id),null,null
+<<<<<<< Updated upstream
+=======
+constraint,realtime,messages_2025_12_25_pkey,messages_2025_12_25,"PRIMARY KEY (id, inserted_at)",null,null
+>>>>>>> Stashed changes
 constraint,public,contas_pagar_fornecedor_id_fkey,contas_pagar,FOREIGN KEY (fornecedor_id) REFERENCES clientes(id),null,null
 constraint,public,contas_pagar_pkey,contas_pagar,PRIMARY KEY (id),null,null
 constraint,public,contas_pagar_baixas_caixa_movimentacao_id_fkey,contas_pagar_baixas,FOREIGN KEY (caixa_movimentacao_id) REFERENCES caixa_movimentacoes(id),null,null
@@ -1830,6 +2015,10 @@ constraint,public,fk_comanda_itens_produto,comanda_itens,FOREIGN KEY (produto_id
 constraint,public,companies_company_code_key,empresas,UNIQUE (codigo_empresa),null,null
 constraint,public,companies_pkey,empresas,PRIMARY KEY (id),null,null
 constraint,public,empresas_codigo_empresa_unique,empresas,UNIQUE (codigo_empresa),null,null
+<<<<<<< Updated upstream
+=======
+constraint,realtime,messages_2025_12_26_pkey,messages_2025_12_26,"PRIMARY KEY (id, inserted_at)",null,null
+>>>>>>> Stashed changes
 constraint,supabase_functions,migrations_pkey,migrations,PRIMARY KEY (version),null,null
 constraint,supabase_functions,hooks_pkey,hooks,PRIMARY KEY (id),null,null
 constraint,public,user_ui_settings_pkey,user_ui_settings,"PRIMARY KEY (user_id, scope)",null,null
@@ -1837,21 +2026,31 @@ constraint,public,user_ui_settings_user_id_fkey,user_ui_settings,FOREIGN KEY (us
 constraint,public,isis_conversas_agendamento_id_fkey,isis_conversas,FOREIGN KEY (agendamento_id) REFERENCES agendamentos(id) ON DELETE SET NULL,null,null
 constraint,public,isis_conversas_cliente_id_fkey,isis_conversas,FOREIGN KEY (cliente_id) REFERENCES clientes(id),null,null
 constraint,public,isis_conversas_pkey,isis_conversas,PRIMARY KEY (id),null,null
+<<<<<<< Updated upstream
 constraint,realtime,messages_2026_01_04_pkey,messages_2026_01_04,"PRIMARY KEY (id, inserted_at)",null,null
+=======
+>>>>>>> Stashed changes
 constraint,public,isis_chat_sessions_pkey,isis_chat_sessions,PRIMARY KEY (id),null,null
 constraint,public,notas_fiscais_origem_check,notas_fiscais,"CHECK ((origem = ANY (ARRAY['comanda'::text, 'manual'::text])))",null,null
 constraint,public,notas_fiscais_pkey,notas_fiscais,PRIMARY KEY (id),null,null
 constraint,public,isis_chat_messages_from_role_check,isis_chat_messages,"CHECK ((from_role = ANY (ARRAY['assistant'::text, 'user'::text])))",null,null
 constraint,public,isis_chat_messages_pkey,isis_chat_messages,PRIMARY KEY (id),null,null
 constraint,public,isis_chat_messages_session_id_fkey,isis_chat_messages,FOREIGN KEY (session_id) REFERENCES isis_chat_sessions(id) ON DELETE CASCADE,null,null
+<<<<<<< Updated upstream
 constraint,realtime,messages_2026_01_05_pkey,messages_2026_01_05,"PRIMARY KEY (id, inserted_at)",null,null
+=======
+>>>>>>> Stashed changes
 constraint,public,chk_comandas_status_valid,comandas,"CHECK ((status = ANY (ARRAY['open'::text, 'closed'::text, 'cancelled'::text])))",null,null
 constraint,public,comandas_mesa_id_fkey,comandas,FOREIGN KEY (mesa_id) REFERENCES mesas(id) ON DELETE SET NULL,null,null
 constraint,public,comandas_origem_check,comandas,"CHECK (((origem = ANY (ARRAY['manual'::text, 'xml'::text, 'api'::text])) OR (origem IS NULL)))",null,null
 constraint,public,comandas_pkey,comandas,PRIMARY KEY (id),null,null
 constraint,public,fk_comandas_mesa,comandas,FOREIGN KEY (mesa_id) REFERENCES mesas(id) ON DELETE SET NULL,null,null
 constraint,auth,oauth_client_states_pkey,oauth_client_states,PRIMARY KEY (id),null,null
+<<<<<<< Updated upstream
 constraint,realtime,messages_2026_01_06_pkey,messages_2026_01_06,"PRIMARY KEY (id, inserted_at)",null,null
+=======
+constraint,realtime,messages_2025_12_20_pkey,messages_2025_12_20,"PRIMARY KEY (id, inserted_at)",null,null
+>>>>>>> Stashed changes
 index,auth,sso_domains_pkey,sso_domains,CREATE UNIQUE INDEX sso_domains_pkey ON auth.sso_domains USING btree (id),null,null
 index,auth,sso_domains_sso_provider_id_idx,sso_domains,CREATE INDEX sso_domains_sso_provider_id_idx ON auth.sso_domains USING btree (sso_provider_id),null,null
 index,auth,sso_domains_domain_idx,sso_domains,CREATE UNIQUE INDEX sso_domains_domain_idx ON auth.sso_domains USING btree (lower(domain)),null,null
@@ -1895,8 +2094,13 @@ index,auth,refresh_tokens_session_id_revoked_idx,refresh_tokens,"CREATE INDEX re
 index,auth,refresh_tokens_updated_at_idx,refresh_tokens,CREATE INDEX refresh_tokens_updated_at_idx ON auth.refresh_tokens USING btree (updated_at DESC),null,null
 index,vault,secrets_pkey,secrets,CREATE UNIQUE INDEX secrets_pkey ON vault.secrets USING btree (id),null,null
 index,vault,secrets_name_idx,secrets,CREATE UNIQUE INDEX secrets_name_idx ON vault.secrets USING btree (name) WHERE (name IS NOT NULL),null,null
+<<<<<<< Updated upstream
 index,realtime,messages_2026_01_08_pkey,messages_2026_01_08,"CREATE UNIQUE INDEX messages_2026_01_08_pkey ON realtime.messages_2026_01_08 USING btree (id, inserted_at)",null,null
 index,realtime,messages_2026_01_08_inserted_at_topic_idx,messages_2026_01_08,"CREATE INDEX messages_2026_01_08_inserted_at_topic_idx ON realtime.messages_2026_01_08 USING btree (inserted_at DESC, topic) WHERE ((extension = 'broadcast'::text) AND (private IS TRUE))",null,null
+=======
+index,realtime,messages_2025_12_21_pkey,messages_2025_12_21,"CREATE UNIQUE INDEX messages_2025_12_21_pkey ON realtime.messages_2025_12_21 USING btree (id, inserted_at)",null,null
+index,realtime,messages_2025_12_21_inserted_at_topic_idx,messages_2025_12_21,"CREATE INDEX messages_2025_12_21_inserted_at_topic_idx ON realtime.messages_2025_12_21 USING btree (inserted_at DESC, topic) WHERE ((extension = 'broadcast'::text) AND (private IS TRUE))",null,null
+>>>>>>> Stashed changes
 index,auth,saml_relay_states_pkey,saml_relay_states,CREATE UNIQUE INDEX saml_relay_states_pkey ON auth.saml_relay_states USING btree (id),null,null
 index,auth,saml_relay_states_sso_provider_id_idx,saml_relay_states,CREATE INDEX saml_relay_states_sso_provider_id_idx ON auth.saml_relay_states USING btree (sso_provider_id),null,null
 index,auth,saml_relay_states_for_email_idx,saml_relay_states,CREATE INDEX saml_relay_states_for_email_idx ON auth.saml_relay_states USING btree (for_email),null,null
@@ -1955,6 +2159,11 @@ index,public,agendamentos_codigo_empresa_idx,agendamentos,CREATE INDEX agendamen
 index,public,ux_agendamentos_empresa_codigo,agendamentos,"CREATE UNIQUE INDEX ux_agendamentos_empresa_codigo ON public.agendamentos USING btree (codigo_empresa, codigo)",null,null
 index,public,agendamentos_inicio_idx,agendamentos,CREATE INDEX agendamentos_inicio_idx ON public.agendamentos USING btree (inicio),null,null
 index,public,agendamentos_meta_roles_gin,agendamentos,CREATE INDEX agendamentos_meta_roles_gin ON public.agendamentos USING gin (meta_roles),null,null
+<<<<<<< Updated upstream
+=======
+index,realtime,messages_2025_12_22_pkey,messages_2025_12_22,"CREATE UNIQUE INDEX messages_2025_12_22_pkey ON realtime.messages_2025_12_22 USING btree (id, inserted_at)",null,null
+index,realtime,messages_2025_12_22_inserted_at_topic_idx,messages_2025_12_22,"CREATE INDEX messages_2025_12_22_inserted_at_topic_idx ON realtime.messages_2025_12_22 USING btree (inserted_at DESC, topic) WHERE ((extension = 'broadcast'::text) AND (private IS TRUE))",null,null
+>>>>>>> Stashed changes
 index,public,estoque_baixa_log_pkey,estoque_baixa_log,CREATE UNIQUE INDEX estoque_baixa_log_pkey ON public.estoque_baixa_log USING btree (comanda_id),null,null
 index,public,empresa_counters_pkey,empresa_counters,CREATE UNIQUE INDEX empresa_counters_pkey ON public.empresa_counters USING btree (empresa_id),null,null
 index,public,user_profiles_pkey,colaboradores,CREATE UNIQUE INDEX user_profiles_pkey ON public.colaboradores USING btree (id),null,null
@@ -2009,8 +2218,13 @@ index,public,contas_receber_pkey,contas_receber,CREATE UNIQUE INDEX contas_receb
 index,public,idx_contas_receber_empresa_status,contas_receber,"CREATE INDEX idx_contas_receber_empresa_status ON public.contas_receber USING btree (codigo_empresa, status)",null,null
 index,public,idx_contas_receber_empresa_vencimento,contas_receber,"CREATE INDEX idx_contas_receber_empresa_vencimento ON public.contas_receber USING btree (codigo_empresa, data_vencimento)",null,null
 index,public,idx_contas_receber_empresa_cliente,contas_receber,"CREATE INDEX idx_contas_receber_empresa_cliente ON public.contas_receber USING btree (codigo_empresa, cliente_id)",null,null
+<<<<<<< Updated upstream
 index,realtime,messages_2026_01_10_pkey,messages_2026_01_10,"CREATE UNIQUE INDEX messages_2026_01_10_pkey ON realtime.messages_2026_01_10 USING btree (id, inserted_at)",null,null
 index,realtime,messages_2026_01_10_inserted_at_topic_idx,messages_2026_01_10,"CREATE INDEX messages_2026_01_10_inserted_at_topic_idx ON realtime.messages_2026_01_10 USING btree (inserted_at DESC, topic) WHERE ((extension = 'broadcast'::text) AND (private IS TRUE))",null,null
+=======
+index,realtime,messages_2025_12_23_pkey,messages_2025_12_23,"CREATE UNIQUE INDEX messages_2025_12_23_pkey ON realtime.messages_2025_12_23 USING btree (id, inserted_at)",null,null
+index,realtime,messages_2025_12_23_inserted_at_topic_idx,messages_2025_12_23,"CREATE INDEX messages_2025_12_23_inserted_at_topic_idx ON realtime.messages_2025_12_23 USING btree (inserted_at DESC, topic) WHERE ((extension = 'broadcast'::text) AND (private IS TRUE))",null,null
+>>>>>>> Stashed changes
 index,public,contas_receber_baixas_pkey,contas_receber_baixas,CREATE UNIQUE INDEX contas_receber_baixas_pkey ON public.contas_receber_baixas USING btree (id),null,null
 index,public,idx_cr_baixas_empresa_conta,contas_receber_baixas,"CREATE INDEX idx_cr_baixas_empresa_conta ON public.contas_receber_baixas USING btree (codigo_empresa, conta_id)",null,null
 index,public,idx_cr_baixas_empresa_data,contas_receber_baixas,"CREATE INDEX idx_cr_baixas_empresa_data ON public.contas_receber_baixas USING btree (codigo_empresa, data_baixa)",null,null
@@ -2091,6 +2305,8 @@ index,storage,idx_objects_bucket_id_name,objects,"CREATE INDEX idx_objects_bucke
 index,storage,idx_name_bucket_level_unique,objects,"CREATE UNIQUE INDEX idx_name_bucket_level_unique ON storage.objects USING btree (name COLLATE ""C"", bucket_id, level)",null,null
 index,storage,objects_bucket_id_level_idx,objects,"CREATE UNIQUE INDEX objects_bucket_id_level_idx ON storage.objects USING btree (bucket_id, level, name COLLATE ""C"")",null,null
 index,storage,idx_objects_lower_name,objects,"CREATE INDEX idx_objects_lower_name ON storage.objects USING btree ((path_tokens[level]), lower(name) text_pattern_ops, bucket_id, level)",null,null
+index,realtime,messages_2025_12_24_pkey,messages_2025_12_24,"CREATE UNIQUE INDEX messages_2025_12_24_pkey ON realtime.messages_2025_12_24 USING btree (id, inserted_at)",null,null
+index,realtime,messages_2025_12_24_inserted_at_topic_idx,messages_2025_12_24,"CREATE INDEX messages_2025_12_24_inserted_at_topic_idx ON realtime.messages_2025_12_24 USING btree (inserted_at DESC, topic) WHERE ((extension = 'broadcast'::text) AND (private IS TRUE))",null,null
 index,public,caixa_movimentacoes_pkey,caixa_movimentacoes,CREATE UNIQUE INDEX caixa_movimentacoes_pkey ON public.caixa_movimentacoes USING btree (id),null,null
 index,public,idx_caixa_mov_empresa_sessao,caixa_movimentacoes,"CREATE INDEX idx_caixa_mov_empresa_sessao ON public.caixa_movimentacoes USING btree (codigo_empresa, caixa_sessao_id)",null,null
 index,public,idx_caixa_mov_tipo,caixa_movimentacoes,CREATE INDEX idx_caixa_mov_tipo ON public.caixa_movimentacoes USING btree (tipo),null,null
@@ -2114,6 +2330,8 @@ index,public,comanda_historico_pkey,comanda_historico,CREATE UNIQUE INDEX comand
 index,public,idx_comanda_historico_comanda_id,comanda_historico,CREATE INDEX idx_comanda_historico_comanda_id ON public.comanda_historico USING btree (comanda_id),null,null
 index,public,idx_comanda_historico_codigo_empresa,comanda_historico,CREATE INDEX idx_comanda_historico_codigo_empresa ON public.comanda_historico USING btree (codigo_empresa),null,null
 index,public,idx_comanda_historico_tipo,comanda_historico,CREATE INDEX idx_comanda_historico_tipo ON public.comanda_historico USING btree (tipo_alteracao),null,null
+index,realtime,messages_2025_12_25_pkey,messages_2025_12_25,"CREATE UNIQUE INDEX messages_2025_12_25_pkey ON realtime.messages_2025_12_25 USING btree (id, inserted_at)",null,null
+index,realtime,messages_2025_12_25_inserted_at_topic_idx,messages_2025_12_25,"CREATE INDEX messages_2025_12_25_inserted_at_topic_idx ON realtime.messages_2025_12_25 USING btree (inserted_at DESC, topic) WHERE ((extension = 'broadcast'::text) AND (private IS TRUE))",null,null
 index,public,contas_pagar_pkey,contas_pagar,CREATE UNIQUE INDEX contas_pagar_pkey ON public.contas_pagar USING btree (id),null,null
 index,public,idx_contas_pagar_empresa_status,contas_pagar,"CREATE INDEX idx_contas_pagar_empresa_status ON public.contas_pagar USING btree (codigo_empresa, status)",null,null
 index,public,idx_contas_pagar_empresa_vencimento,contas_pagar,"CREATE INDEX idx_contas_pagar_empresa_vencimento ON public.contas_pagar USING btree (codigo_empresa, data_vencimento)",null,null
@@ -2135,6 +2353,11 @@ index,public,companies_pkey,empresas,CREATE UNIQUE INDEX companies_pkey ON publi
 index,public,companies_company_code_key,empresas,CREATE UNIQUE INDEX companies_company_code_key ON public.empresas USING btree (codigo_empresa),null,null
 index,public,companies_code_idx,empresas,CREATE INDEX companies_code_idx ON public.empresas USING btree (codigo_empresa),null,null
 index,public,empresas_codigo_empresa_unique,empresas,CREATE UNIQUE INDEX empresas_codigo_empresa_unique ON public.empresas USING btree (codigo_empresa),null,null
+<<<<<<< Updated upstream
+=======
+index,realtime,messages_2025_12_26_pkey,messages_2025_12_26,"CREATE UNIQUE INDEX messages_2025_12_26_pkey ON realtime.messages_2025_12_26 USING btree (id, inserted_at)",null,null
+index,realtime,messages_2025_12_26_inserted_at_topic_idx,messages_2025_12_26,"CREATE INDEX messages_2025_12_26_inserted_at_topic_idx ON realtime.messages_2025_12_26 USING btree (inserted_at DESC, topic) WHERE ((extension = 'broadcast'::text) AND (private IS TRUE))",null,null
+>>>>>>> Stashed changes
 index,supabase_functions,migrations_pkey,migrations,CREATE UNIQUE INDEX migrations_pkey ON supabase_functions.migrations USING btree (version),null,null
 index,supabase_functions,hooks_pkey,hooks,CREATE UNIQUE INDEX hooks_pkey ON supabase_functions.hooks USING btree (id),null,null
 index,supabase_functions,supabase_functions_hooks_request_id_idx,hooks,CREATE INDEX supabase_functions_hooks_request_id_idx ON supabase_functions.hooks USING btree (request_id),null,null
@@ -2144,8 +2367,11 @@ index,public,isis_conversas_pkey,isis_conversas,CREATE UNIQUE INDEX isis_convers
 index,public,isis_conversas_emp_created_idx,isis_conversas,"CREATE INDEX isis_conversas_emp_created_idx ON public.isis_conversas USING btree (codigo_empresa, created_at DESC)",null,null
 index,public,isis_conversas_agendamento_idx,isis_conversas,CREATE INDEX isis_conversas_agendamento_idx ON public.isis_conversas USING btree (agendamento_id),null,null
 index,public,isis_conversas_cliente_idx,isis_conversas,CREATE INDEX isis_conversas_cliente_idx ON public.isis_conversas USING btree (cliente_id),null,null
+<<<<<<< Updated upstream
 index,realtime,messages_2026_01_04_pkey,messages_2026_01_04,"CREATE UNIQUE INDEX messages_2026_01_04_pkey ON realtime.messages_2026_01_04 USING btree (id, inserted_at)",null,null
 index,realtime,messages_2026_01_04_inserted_at_topic_idx,messages_2026_01_04,"CREATE INDEX messages_2026_01_04_inserted_at_topic_idx ON realtime.messages_2026_01_04 USING btree (inserted_at DESC, topic) WHERE ((extension = 'broadcast'::text) AND (private IS TRUE))",null,null
+=======
+>>>>>>> Stashed changes
 index,public,isis_chat_sessions_pkey,isis_chat_sessions,CREATE UNIQUE INDEX isis_chat_sessions_pkey ON public.isis_chat_sessions USING btree (id),null,null
 index,public,idx_isis_chat_sessions_started,isis_chat_sessions,CREATE INDEX idx_isis_chat_sessions_started ON public.isis_chat_sessions USING btree (started_at DESC),null,null
 index,public,notas_fiscais_pkey,notas_fiscais,CREATE UNIQUE INDEX notas_fiscais_pkey ON public.notas_fiscais USING btree (id),null,null
@@ -2154,8 +2380,11 @@ index,public,idx_notas_fiscais_status,notas_fiscais,CREATE INDEX idx_notas_fisca
 index,public,idx_notas_fiscais_criado_em,notas_fiscais,CREATE INDEX idx_notas_fiscais_criado_em ON public.notas_fiscais USING btree (criado_em DESC),null,null
 index,public,isis_chat_messages_pkey,isis_chat_messages,CREATE UNIQUE INDEX isis_chat_messages_pkey ON public.isis_chat_messages USING btree (id),null,null
 index,public,idx_isis_chat_messages_session_created,isis_chat_messages,"CREATE INDEX idx_isis_chat_messages_session_created ON public.isis_chat_messages USING btree (session_id, created_at DESC)",null,null
+<<<<<<< Updated upstream
 index,realtime,messages_2026_01_05_pkey,messages_2026_01_05,"CREATE UNIQUE INDEX messages_2026_01_05_pkey ON realtime.messages_2026_01_05 USING btree (id, inserted_at)",null,null
 index,realtime,messages_2026_01_05_inserted_at_topic_idx,messages_2026_01_05,"CREATE INDEX messages_2026_01_05_inserted_at_topic_idx ON realtime.messages_2026_01_05 USING btree (inserted_at DESC, topic) WHERE ((extension = 'broadcast'::text) AND (private IS TRUE))",null,null
+=======
+>>>>>>> Stashed changes
 index,public,idx_comandas_mesa_status,comandas,"CREATE INDEX idx_comandas_mesa_status ON public.comandas USING btree (mesa_id, status) WHERE (fechado_em IS NULL)",null,null
 index,public,comandas_pkey,comandas,CREATE UNIQUE INDEX comandas_pkey ON public.comandas USING btree (id),null,null
 index,public,idx_comandas_mesa,comandas,CREATE INDEX idx_comandas_mesa ON public.comandas USING btree (mesa_id),null,null
@@ -2174,8 +2403,13 @@ index,public,comandas_empresa_idx,comandas,CREATE INDEX comandas_empresa_idx ON 
 index,public,comandas_mesa_idx,comandas,CREATE INDEX comandas_mesa_idx ON public.comandas USING btree (mesa_id),null,null
 index,auth,oauth_client_states_pkey,oauth_client_states,CREATE UNIQUE INDEX oauth_client_states_pkey ON auth.oauth_client_states USING btree (id),null,null
 index,auth,idx_oauth_client_states_created_at,oauth_client_states,CREATE INDEX idx_oauth_client_states_created_at ON auth.oauth_client_states USING btree (created_at),null,null
+<<<<<<< Updated upstream
 index,realtime,messages_2026_01_06_pkey,messages_2026_01_06,"CREATE UNIQUE INDEX messages_2026_01_06_pkey ON realtime.messages_2026_01_06 USING btree (id, inserted_at)",null,null
 index,realtime,messages_2026_01_06_inserted_at_topic_idx,messages_2026_01_06,"CREATE INDEX messages_2026_01_06_inserted_at_topic_idx ON realtime.messages_2026_01_06 USING btree (inserted_at DESC, topic) WHERE ((extension = 'broadcast'::text) AND (private IS TRUE))",null,null
+=======
+index,realtime,messages_2025_12_20_pkey,messages_2025_12_20,"CREATE UNIQUE INDEX messages_2025_12_20_pkey ON realtime.messages_2025_12_20 USING btree (id, inserted_at)",null,null
+index,realtime,messages_2025_12_20_inserted_at_topic_idx,messages_2025_12_20,"CREATE INDEX messages_2025_12_20_inserted_at_topic_idx ON realtime.messages_2025_12_20 USING btree (inserted_at DESC, topic) WHERE ((extension = 'broadcast'::text) AND (private IS TRUE))",null,null
+>>>>>>> Stashed changes
 trigger,public,trg_ag_participantes_set_empresa,agendamento_participantes,CREATE TRIGGER trg_ag_participantes_set_empresa BEFORE INSERT OR UPDATE OF agendamento_id ON public.agendamento_participantes FOR EACH ROW EXECUTE FUNCTION set_ag_participantes_codigo_empresa(),null,null
 trigger,public,trg_mov_saldo_apply,movimentos_saldo,CREATE TRIGGER trg_mov_saldo_apply AFTER INSERT OR DELETE OR UPDATE ON public.movimentos_saldo FOR EACH ROW EXECUTE FUNCTION fn_mov_saldo_apply(),null,null
 trigger,public,trg_mesas_updated_at,mesas,CREATE TRIGGER trg_mesas_updated_at BEFORE UPDATE ON public.mesas FOR EACH ROW EXECUTE FUNCTION set_updated_at(),null,null
@@ -2478,9 +2712,11 @@ type,public,empresa_counters,null,empresa_counters,null,null
 type,realtime,equality_op,null,realtime.equality_op,null,null
 type,realtime,user_defined_filter,null,realtime.user_defined_filter,null,null
 type,realtime,subscription,null,realtime.subscription,null,null
+type,realtime,messages_2025_12_21,null,realtime.messages_2025_12_21,null,null
 type,storage,prefixes,null,storage.prefixes,null,null
 type,storage,buckettype,null,storage.buckettype,null,null
 type,storage,buckets_analytics,null,storage.buckets_analytics,null,null
+type,realtime,messages_2025_12_23,null,realtime.messages_2025_12_23,null,null
 type,public,v_agendamentos_detalhado,null,v_agendamentos_detalhado,null,null
 type,public,caixa_sessoes,null,caixa_sessoes,null,null
 type,public,payment_method,null,payment_method,null,null
@@ -2508,6 +2744,8 @@ type,public,comanda_historico,null,comanda_historico,null,null
 type,public,estoque_reservado,null,estoque_reservado,null,null
 type,public,colaboradores,null,colaboradores,null,null
 type,public,agendamentos,null,agendamentos,null,null
+type,realtime,messages_2025_12_22,null,realtime.messages_2025_12_22,null,null
+type,realtime,messages_2025_12_26,null,realtime.messages_2025_12_26,null,null
 type,public,mesa_status,null,mesa_status,null,null
 type,public,comanda_status,null,comanda_status,null,null
 type,public,caixa_mov_tipo,null,caixa_mov_tipo,null,null
@@ -2536,6 +2774,8 @@ type,public,compras,null,compras,null,null
 type,public,compras_itens,null,compras_itens,null,null
 type,public,quadras_dias_funcionamento,null,quadras_dias_funcionamento,null,null
 type,public,v_agendamentos_isis,null,v_agendamentos_isis,null,null
+type,realtime,messages_2025_12_24,null,realtime.messages_2025_12_24,null,null
+type,realtime,messages_2025_12_25,null,realtime.messages_2025_12_25,null,null
 type,public,isis_conversas,null,isis_conversas,null,null
 type,net,http_method,null,net.http_method,null,null
 type,net,http_request_queue,null,net.http_request_queue,null,null
@@ -2631,8 +2871,13 @@ grant,auth,users,null,"supabase_auth_admin=arwdDxtm/supabase_auth_admin,dashboar
 grant,auth,audit_log_entries,null,"supabase_auth_admin=arwdDxtm/supabase_auth_admin,dashboard_user=arwdDxtm/supabase_auth_admin,postgres=ar*wdDxtm/supabase_auth_admin",supabase_auth_admin,null
 grant,public,produto_categorias,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
 grant,public,users_pkey,null,null,postgres,null
+<<<<<<< Updated upstream
 grant,realtime,messages_2026_01_08_pkey,null,null,supabase_admin,null
 grant,realtime,messages_2026_01_08_inserted_at_topic_idx,null,null,supabase_admin,null
+=======
+grant,realtime,messages_2025_12_21_pkey,null,null,supabase_admin,null
+grant,realtime,messages_2025_12_21_inserted_at_topic_idx,null,null,supabase_admin,null
+>>>>>>> Stashed changes
 grant,public,quadras_dias_funcionamento_pkey,null,null,postgres,null
 grant,storage,buckets,null,"supabase_storage_admin=a*r*w*d*D*x*t*m*/supabase_storage_admin,anon=arwdDxtm/supabase_storage_admin,authenticated=arwdDxtm/supabase_storage_admin,service_role=arwdDxtm/supabase_storage_admin,postgres=a*r*w*d*D*x*t*m*/supabase_storage_admin",supabase_storage_admin,null
 grant,public,usuarios,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
@@ -2665,7 +2910,11 @@ grant,public,idx_quadras_dias_funcionamento_quadra,null,null,postgres,null
 grant,public,idx_quadras_dias_funcionamento_empresa,null,null,postgres,null
 grant,auth,users_email_partial_key,null,null,supabase_auth_admin,null
 grant,public,idx_quadras_dias_funcionamento_data,null,null,postgres,null
+<<<<<<< Updated upstream
 grant,realtime,messages_2026_01_08,null,"supabase_admin=arwdDxtm/supabase_admin,postgres=arwdDxtm/supabase_admin,dashboard_user=arwdDxtm/supabase_admin",supabase_admin,null
+=======
+grant,realtime,messages_2025_12_21,null,"supabase_admin=arwdDxtm/supabase_admin,postgres=arwdDxtm/supabase_admin,dashboard_user=arwdDxtm/supabase_admin",supabase_admin,null
+>>>>>>> Stashed changes
 grant,auth,mfa_factors_user_id_idx,null,null,supabase_auth_admin,null
 grant,public,sales_pkey,null,null,postgres,null
 grant,auth,users_phone_key,null,null,supabase_auth_admin,null
@@ -2723,8 +2972,13 @@ grant,public,idx_caixa_empresa,null,null,postgres,null
 grant,public,agendamento_participantes_agendamento_id_idx,null,null,postgres,null
 grant,public,v_agendamento_participantes,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
 grant,public,uq_caixa_aberto_por_empresa,null,null,postgres,null
+<<<<<<< Updated upstream
 grant,public,agendamento_participantes,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
+=======
+grant,realtime,messages_2025_12_22_pkey,null,null,supabase_admin,null
+>>>>>>> Stashed changes
 grant,storage,s3_multipart_uploads_parts,null,"supabase_storage_admin=arwdDxtm/supabase_storage_admin,service_role=arwdDxtm/supabase_storage_admin,authenticated=r/supabase_storage_admin,anon=r/supabase_storage_admin",supabase_storage_admin,null
+grant,realtime,messages_2025_12_22_inserted_at_topic_idx,null,null,supabase_admin,null
 grant,storage,s3_multipart_uploads,null,"supabase_storage_admin=arwdDxtm/supabase_storage_admin,service_role=arwdDxtm/supabase_storage_admin,authenticated=r/supabase_storage_admin,anon=r/supabase_storage_admin",supabase_storage_admin,null
 grant,realtime,user_defined_filter,null,null,supabase_admin,null
 grant,public,idx_pagamentos_caixa,null,null,postgres,null
@@ -2745,8 +2999,12 @@ grant,realtime,messages_2026_01_09_pkey,null,null,supabase_admin,null
 grant,realtime,messages,null,"supabase_realtime_admin=arwdDxtm/supabase_realtime_admin,postgres=arwdDxtm/supabase_realtime_admin,dashboard_user=arwdDxtm/supabase_realtime_admin,anon=arw/supabase_realtime_admin,authenticated=arw/supabase_realtime_admin,service_role=arw/supabase_realtime_admin",supabase_realtime_admin,null
 grant,public,user_profiles_pkey,null,null,postgres,null
 grant,public,agendamentos,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
+<<<<<<< Updated upstream
 grant,realtime,messages_2026_01_09_inserted_at_topic_idx,null,null,supabase_admin,null
 grant,realtime,messages_2026_01_07_inserted_at_topic_idx,null,null,supabase_admin,null
+=======
+grant,realtime,messages_2025_12_22,null,"supabase_admin=arwdDxtm/supabase_admin,postgres=arwdDxtm/supabase_admin,dashboard_user=arwdDxtm/supabase_admin",supabase_admin,null
+>>>>>>> Stashed changes
 grant,public,estoque_baixa_log,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
 grant,public,empresa_counters,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
 grant,public,idx_comanda_clientes_cliente,null,null,postgres,null
@@ -2787,8 +3045,13 @@ grant,public,movimentos_saldo_pkey,null,null,postgres,null
 grant,public,idx_mov_saldo_empresa,null,null,postgres,null
 grant,public,idx_mov_saldo_cliente,null,null,postgres,null
 grant,public,idx_mov_saldo_agendamento,null,null,postgres,null
+<<<<<<< Updated upstream
 grant,realtime,messages_2026_01_10_pkey,null,null,supabase_admin,null
 grant,realtime,messages_2026_01_10_inserted_at_topic_idx,null,null,supabase_admin,null
+=======
+grant,realtime,messages_2025_12_23_pkey,null,null,supabase_admin,null
+grant,realtime,messages_2025_12_23_inserted_at_topic_idx,null,null,supabase_admin,null
+>>>>>>> Stashed changes
 grant,public,movimentos_saldo,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
 grant,public,comanda_clientes,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
 grant,public,idx_compras_itens_selecionado,null,null,postgres,null
@@ -2798,7 +3061,11 @@ grant,public,idx_pagamentos_comanda,null,null,postgres,null
 grant,public,quadras_dias_funcionamento,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
 grant,public,idx_compras_itens_produto,null,null,postgres,null
 grant,public,contas_receber,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
+<<<<<<< Updated upstream
 grant,realtime,messages_2026_01_10,null,"supabase_admin=arwdDxtm/supabase_admin,postgres=arwdDxtm/supabase_admin,dashboard_user=arwdDxtm/supabase_admin",supabase_admin,null
+=======
+grant,realtime,messages_2025_12_23,null,"supabase_admin=arwdDxtm/supabase_admin,postgres=arwdDxtm/supabase_admin,dashboard_user=arwdDxtm/supabase_admin",supabase_admin,null
+>>>>>>> Stashed changes
 grant,public,idx_compras_status,null,null,postgres,null
 grant,public,contas_receber_baixas_pkey,null,null,postgres,null
 grant,public,compras_itens_pkey,null,null,postgres,null
@@ -2868,7 +3135,12 @@ grant,public,idx_pagamentos_recebido_em,null,null,postgres,null
 grant,storage,buckets_vectors_pkey,null,null,supabase_storage_admin,null
 grant,auth,oauth_clients_pkey,null,null,supabase_auth_admin,null
 grant,auth,oauth_clients,null,"postgres=arwdDxtm/supabase_auth_admin,supabase_auth_admin=arwdDxtm/supabase_auth_admin,dashboard_user=arwdDxtm/supabase_auth_admin",supabase_auth_admin,null
+<<<<<<< Updated upstream
+=======
+grant,realtime,messages_2025_12_24_pkey,null,null,supabase_admin,null
+>>>>>>> Stashed changes
 grant,storage,vector_indexes_pkey,null,null,supabase_storage_admin,null
+grant,realtime,messages_2025_12_24_inserted_at_topic_idx,null,null,supabase_admin,null
 grant,auth,oauth_clients_deleted_at_idx,null,null,supabase_auth_admin,null
 grant,realtime,messages_inserted_at_topic_index,null,null,supabase_realtime_admin,null
 grant,public,finalizadoras,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
@@ -2883,6 +3155,7 @@ grant,public,idx_comandas_codigo_empresa,null,null,postgres,null
 grant,public,caixa_resumos,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
 grant,public,v_agendamentos_isis,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
 grant,storage,objects,null,"supabase_storage_admin=a*r*w*d*D*x*t*m*/supabase_storage_admin,anon=arwdDxtm/supabase_storage_admin,authenticated=arwdDxtm/supabase_storage_admin,service_role=arwdDxtm/supabase_storage_admin,postgres=a*r*w*d*D*x*t*m*/supabase_storage_admin",supabase_storage_admin,null
+grant,realtime,messages_2025_12_24,null,"supabase_admin=arwdDxtm/supabase_admin,postgres=arwdDxtm/supabase_admin,dashboard_user=arwdDxtm/supabase_admin",supabase_admin,null
 grant,public,caixa_movimentacoes,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
 grant,public,idx_comanda_itens_comanda_id,null,null,postgres,null
 grant,public,idx_comanda_itens_codigo_empresa,null,null,postgres,null
@@ -2904,8 +3177,11 @@ grant,public,comanda_historico,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/po
 grant,public,idx_mesas_nome,null,null,postgres,null
 grant,public,idx_comandas_origem,null,null,postgres,null
 grant,public,idx_comandas_xml_chave,null,null,postgres,null
+grant,realtime,messages_2025_12_25_pkey,null,null,supabase_admin,null
+grant,realtime,messages_2025_12_25_inserted_at_topic_idx,null,null,supabase_admin,null
 grant,public,idx_comandas_empresa_fechado,null,null,postgres,null
 grant,public,idx_mesas_empresa,null,null,postgres,null
+grant,realtime,messages_2025_12_25,null,"supabase_admin=arwdDxtm/supabase_admin,postgres=arwdDxtm/supabase_admin,dashboard_user=arwdDxtm/supabase_admin",supabase_admin,null
 grant,public,contas_pagar,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
 grant,public,contas_pagar_baixas,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
 grant,storage,buckets_analytics_pkey,null,null,supabase_storage_admin,null
@@ -2923,7 +3199,12 @@ grant,public,contas_pagar_baixas_pkey,null,null,postgres,null
 grant,public,idx_cp_baixas_empresa_conta,null,null,postgres,null
 grant,public,idx_cp_baixas_empresa_data,null,null,postgres,null
 grant,public,idx_comandas_agendamento_id,null,null,postgres,null
+<<<<<<< Updated upstream
 grant,realtime,messages_2026_01_04_pkey,null,null,supabase_admin,null
+=======
+grant,realtime,messages_2025_12_26_pkey,null,null,supabase_admin,null
+grant,realtime,messages_2025_12_26_inserted_at_topic_idx,null,null,supabase_admin,null
+>>>>>>> Stashed changes
 grant,public,idx_comanda_itens_desconto_tipo,null,null,postgres,null
 grant,public,idx_comandas_desconto_tipo,null,null,postgres,null
 grant,realtime,messages_2026_01_04_inserted_at_topic_idx,null,null,supabase_admin,null
@@ -2946,6 +3227,10 @@ grant,net,http_request_queue,null,"supabase_admin=arwdDxtm/supabase_admin,=arwdD
 grant,net,_http_response,null,"supabase_admin=arwdDxtm/supabase_admin,=arwdDxtm/supabase_admin",supabase_admin,null
 grant,supabase_functions,migrations_pkey,null,null,supabase_functions_admin,null
 grant,public,empresas,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
+<<<<<<< Updated upstream
+=======
+grant,realtime,messages_2025_12_26,null,"supabase_admin=arwdDxtm/supabase_admin,postgres=arwdDxtm/supabase_admin,dashboard_user=arwdDxtm/supabase_admin",supabase_admin,null
+>>>>>>> Stashed changes
 grant,supabase_functions,migrations,null,"supabase_functions_admin=arwdDxtm/supabase_functions_admin,postgres=arwdDxtm/supabase_functions_admin,anon=arwdDxtm/supabase_functions_admin,authenticated=arwdDxtm/supabase_functions_admin,service_role=arwdDxtm/supabase_functions_admin",supabase_functions_admin,null
 grant,supabase_functions,hooks,null,"supabase_functions_admin=arwdDxtm/supabase_functions_admin,postgres=arwdDxtm/supabase_functions_admin,anon=arwdDxtm/supabase_functions_admin,authenticated=arwdDxtm/supabase_functions_admin,service_role=arwdDxtm/supabase_functions_admin",supabase_functions_admin,null
 grant,supabase_functions,hooks_pkey,null,null,supabase_functions_admin,null
@@ -2976,10 +3261,14 @@ grant,realtime,messages_2026_01_05,null,"supabase_admin=arwdDxtm/supabase_admin,
 grant,auth,oauth_client_states_pkey,null,null,supabase_auth_admin,null
 grant,public,comandas,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
 grant,auth,idx_oauth_client_states_created_at,null,null,supabase_auth_admin,null
+<<<<<<< Updated upstream
 grant,realtime,messages_2026_01_05_pkey,null,null,supabase_admin,null
 grant,realtime,messages_2026_01_05_inserted_at_topic_idx,null,null,supabase_admin,null
 grant,auth,oauth_client_states,null,"postgres=arwdDxtm/supabase_auth_admin,supabase_auth_admin=arwdDxtm/supabase_auth_admin,dashboard_user=arwdDxtm/supabase_auth_admin",supabase_auth_admin,null
 grant,realtime,messages_2026_01_06_pkey,null,null,supabase_admin,null
+=======
+grant,auth,oauth_client_states,null,"postgres=arwdDxtm/supabase_auth_admin,supabase_auth_admin=arwdDxtm/supabase_auth_admin,dashboard_user=arwdDxtm/supabase_auth_admin",supabase_auth_admin,null
+>>>>>>> Stashed changes
 grant,public,comandas_empresa_idx,null,null,postgres,null
 grant,public,comandas_mesa_idx,null,null,postgres,null
 grant,realtime,messages_2026_01_06_inserted_at_topic_idx,null,null,supabase_admin,null
@@ -2989,4 +3278,10 @@ grant,public,mesas_empresa_idx,null,null,postgres,null
 grant,public,pagamentos_empresa_idx,null,null,postgres,null
 grant,public,pagamentos_comanda_idx,null,null,postgres,null
 grant,public,produtos_empresa_idx,null,null,postgres,null
+<<<<<<< Updated upstream
 grant,realtime,messages_2026_01_06,null,"supabase_admin=arwdDxtm/supabase_admin,postgres=arwdDxtm/supabase_admin,dashboard_user=arwdDxtm/supabase_admin",supabase_admin,null
+=======
+grant,realtime,messages_2025_12_20_pkey,null,null,supabase_admin,null
+grant,realtime,messages_2025_12_20_inserted_at_topic_idx,null,null,supabase_admin,null
+grant,realtime,messages_2025_12_20,null,"supabase_admin=arwdDxtm/supabase_admin,postgres=arwdDxtm/supabase_admin,dashboard_user=arwdDxtm/supabase_admin",supabase_admin,null
+>>>>>>> Stashed changes
