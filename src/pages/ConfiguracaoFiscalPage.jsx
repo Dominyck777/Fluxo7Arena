@@ -45,7 +45,7 @@ export default function ConfiguracaoFiscalPage() {
     transmitenota_base_url_prod: '',
     transmitenota_apikey_prod: '',
   });
-  const [unlocked, setUnlocked] = useState(false);
+  const [unlocked, setUnlocked] = useState(true);
   const [hasLock, setHasLock] = useState(false);
   const [pass, setPass] = useState('');
   const [pass2, setPass2] = useState('');

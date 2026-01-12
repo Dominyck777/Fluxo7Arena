@@ -12,6 +12,7 @@ import { Search, Plus, CheckCircle, Unlock, Lock, Banknote, X, FileText, Shoppin
 import { useNavigate } from 'react-router-dom';
 import { listProducts } from '@/lib/products';
 import { useAuth } from '@/contexts/AuthContext';
+import { DescontoComandaDialog } from '@/components/DescontoComandaDialog';
 import { getOrCreateComandaBalcao, listarComandaBalcaoAberta, criarComandaBalcao, listarItensDaComanda, adicionarItem, listarFinalizadoras, registrarPagamento, fecharComandaEMesa, listarClientes, adicionarClientesAComanda, atualizarQuantidadeItem, removerItem, listarClientesDaComanda, verificarEstoqueComanda, ensureCaixaAberto, fecharCaixa, listarResumoSessaoCaixaAtual, getCaixaAberto, listarMovimentacoesCaixa, listarComandasAbertas, criarMovimentacaoCaixa, listarItensDeTodasComandasAbertas } from '@/lib/store';
 import { supabase } from '@/lib/supabase';
 
@@ -56,6 +57,8 @@ export default function BalcaoPage() {
   const [paymentLines, setPaymentLines] = useState([]); // {id, clientId, methodId, value}
   const [nextPayLineId, setNextPayLineId] = useState(1);
   const [payClients, setPayClients] = useState([]); // clientes carregados para o modal (id, nome, codigo)
+  const [isDiscountOpen, setIsDiscountOpen] = useState(false);
+  const [comandaDiscount, setComandaDiscount] = useState({ tipo: null, valor: 0, motivo: '' });
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [isProductDetailsOpen, setIsProductDetailsOpen] = useState(false);
   const [selectedCommandItem, setSelectedCommandItem] = useState(null);
@@ -401,6 +404,29 @@ export default function BalcaoPage() {
     sync();
     return () => { active = false; };
   }, [isPayOpen, selectedClientIds, comandaId, userProfile?.codigo_empresa]);
+  useEffect(() => {
+    let active = true;
+    const loadDiscount = async () => {
+      try {
+        if (!isPayOpen || !comandaId) return;
+        const { data } = await supabase
+          .from('comandas')
+          .select('desconto_tipo, desconto_valor, desconto_motivo')
+          .eq('id', comandaId)
+          .single();
+        if (!active) return;
+        setComandaDiscount({
+          tipo: data?.desconto_tipo || null,
+          valor: Number(data?.desconto_valor || 0),
+          motivo: data?.desconto_motivo || ''
+        });
+      } catch {
+        if (active) setComandaDiscount({ tipo: null, valor: 0, motivo: '' });
+      }
+    };
+    loadDiscount();
+    return () => { active = false; };
+  }, [isPayOpen, comandaId]);
 
   // ===== Helpers de Pagamento (base + taxa) =====
   const parseBRL = (s) => { const d = String(s || '').replace(/\D/g, ''); return d ? Number(d) / 100 : 0; };
@@ -436,13 +462,16 @@ export default function BalcaoPage() {
   useEffect(() => {
     try {
       if (!isPayOpen) return;
-      // total dos itens da comanda
-      let totalBase = 0;
+      // total dos itens da comanda (considerando desconto)
+      let subtotal = 0;
       try {
-        totalBase = (items || []).reduce((acc, it) => acc + Number(it.quantity||0)*Number(it.price||0), 0);
+        subtotal = (items || []).reduce((acc, it) => acc + Number(it.quantity||0)*Number(it.price||0), 0);
       } catch {}
+      const tipo = comandaDiscount?.tipo; const val = Number(comandaDiscount?.valor || 0);
+      let descCmd = 0; if (tipo === 'percentual' && val > 0) descCmd = subtotal * (val/100); else if (tipo === 'fixo' && val > 0) descCmd = val;
+      const discountedBase = Math.max(0, subtotal - descCmd);
       const baseSum = sumBasePayments();
-      const diff = totalBase - baseSum;
+      const diff = discountedBase - baseSum;
       if (Math.abs(diff) > 0.009 && Math.abs(diff) <= 0.05 && Array.isArray(paymentLines) && paymentLines.length > 0) {
         setPaymentLines(prev => prev.map((line, idx, arr) => {
           if (idx !== arr.length - 1) return line;
@@ -917,7 +946,22 @@ export default function BalcaoPage() {
                     <Button variant="outline" onClick={() => setIsSuprimentoOpen(false)} disabled={suprimentoLoading}>Cancelar</Button>
                     <Button onClick={performSuprimento} disabled={suprimentoLoading}>{suprimentoLoading ? 'Registrando...' : 'Confirmar'}</Button>
                   </DialogFooter>
-                </DialogContent>
+                </DialogContent>        
+            onApply={async () => {
+              try {
+                const { data } = await supabase
+                  .from('comandas')
+                  .select('desconto_tipo, desconto_valor, desconto_motivo')
+                  .eq('id', comandaId)
+                  .single();
+                setComandaDiscount({ tipo: data?.desconto_tipo || null, valor: Number(data?.desconto_valor || 0), motivo: data?.desconto_motivo || '' });
+              } catch {}
+              setIsDiscountOpen(false);
+            }}
+            onClose={() => setIsDiscountOpen(false)}
+            codigoEmpresa={userProfile?.codigo_empresa}
+          />
+        )}
               </Dialog>
               <Dialog open={isSangriaOpen} onOpenChange={setIsSangriaOpen}>
                 <DialogContent className="sm:max-w-sm w-[92vw] max-h-[85vh] animate-none" onKeyDown={(e) => e.stopPropagation()}>
@@ -943,13 +987,43 @@ export default function BalcaoPage() {
                     <Button variant="outline" onClick={() => setIsSangriaOpen(false)} disabled={sangriaLoading}>Cancelar</Button>
                     <Button onClick={performSangria} disabled={sangriaLoading}>{sangriaLoading ? 'Registrando...' : 'Confirmar'}</Button>
                   </DialogFooter>
-                </DialogContent>
+                </DialogContent>        
+            onApply={async () => {
+              try {
+                const { data } = await supabase
+                  .from('comandas')
+                  .select('desconto_tipo, desconto_valor, desconto_motivo')
+                  .eq('id', comandaId)
+                  .single();
+                setComandaDiscount({ tipo: data?.desconto_tipo || null, valor: Number(data?.desconto_valor || 0), motivo: data?.desconto_motivo || '' });
+              } catch {}
+              setIsDiscountOpen(false);
+            }}
+            onClose={() => setIsDiscountOpen(false)}
+            codigoEmpresa={userProfile?.codigo_empresa}
+          />
+        )}
               </Dialog>
             </>
           ) : (
             <div className="text-sm text-text-muted">Nenhuma sessão de caixa aberta.</div>
           )}
-        </DialogContent>
+        </DialogContent>        
+            onApply={async () => {
+              try {
+                const { data } = await supabase
+                  .from('comandas')
+                  .select('desconto_tipo, desconto_valor, desconto_motivo')
+                  .eq('id', comandaId)
+                  .single();
+                setComandaDiscount({ tipo: data?.desconto_tipo || null, valor: Number(data?.desconto_valor || 0), motivo: data?.desconto_motivo || '' });
+              } catch {}
+              setIsDiscountOpen(false);
+            }}
+            onClose={() => setIsDiscountOpen(false)}
+            codigoEmpresa={userProfile?.codigo_empresa}
+          />
+        )}
       </Dialog>
     );
   };
@@ -1925,7 +1999,22 @@ export default function BalcaoPage() {
             <Button variant="outline" onClick={() => { setIsProductDetailsOpen(false); setSelectedProduct(null); }}>Fechar</Button>
             <Button onClick={async () => { if (selectedProduct) { await addProduct(selectedProduct, { skipClientCheck: false }); setIsProductDetailsOpen(false); setSelectedProduct(null); } }}>Adicionar</Button>
           </DialogFooter>
-        </DialogContent>
+        </DialogContent>        
+            onApply={async () => {
+              try {
+                const { data } = await supabase
+                  .from('comandas')
+                  .select('desconto_tipo, desconto_valor, desconto_motivo')
+                  .eq('id', comandaId)
+                  .single();
+                setComandaDiscount({ tipo: data?.desconto_tipo || null, valor: Number(data?.desconto_valor || 0), motivo: data?.desconto_motivo || '' });
+              } catch {}
+              setIsDiscountOpen(false);
+            }}
+            onClose={() => setIsDiscountOpen(false)}
+            codigoEmpresa={userProfile?.codigo_empresa}
+          />
+        )}
       </Dialog>
 
       {/* Overlay global de carregamento para abrir/cancelar/fechar venda no balcão */}
@@ -2019,7 +2108,22 @@ export default function BalcaoPage() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsProductPickerOpen(false)}>Fechar</Button>
           </DialogFooter>
-        </DialogContent>
+        </DialogContent>        
+            onApply={async () => {
+              try {
+                const { data } = await supabase
+                  .from('comandas')
+                  .select('desconto_tipo, desconto_valor, desconto_motivo')
+                  .eq('id', comandaId)
+                  .single();
+                setComandaDiscount({ tipo: data?.desconto_tipo || null, valor: Number(data?.desconto_valor || 0), motivo: data?.desconto_motivo || '' });
+              } catch {}
+              setIsDiscountOpen(false);
+            }}
+            onClose={() => setIsDiscountOpen(false)}
+            codigoEmpresa={userProfile?.codigo_empresa}
+          />
+        )}
       </Dialog>
 
       {/* Layout principal: desktop usa painéis lado a lado; mobile foca na comanda + botão Produto */}
@@ -2485,17 +2589,30 @@ export default function BalcaoPage() {
       </div>
 
       <Dialog open={isPayOpen} onOpenChange={setIsPayOpen}>
-        <DialogContent className="sm:max-w-xl w-[92vw] max-h-[90vh] flex flex-col overflow-hidden animate-none" onKeyDown={(e) => e.stopPropagation()}>
+        <DialogContent className="sm:max-w-xl w-[92vw] max-h-[90vh] min-h-0 flex flex-col overflow-hidden animate-none" onKeyDown={(e) => e.stopPropagation()}>
           <DialogHeader>
             <DialogTitle className="text-2xl font-bold">Fechar Conta</DialogTitle>
             <DialogDescription>Divida o pagamento entre clientes e várias finalizadoras, se necessário.</DialogDescription>
           </DialogHeader>
-          <div className="space-y-3">
-            <div className="flex justify-between text-lg font-semibold">
-              <span>Total</span>
-              <span>R$ {total.toFixed(2)}</span>
-            </div>
-            <div className="flex-1 space-y-2 overflow-y-auto thin-scroll pr-1">
+          <div className="flex-1 min-h-0 flex flex-col space-y-3">
+            {(() => {
+              const subtotal = (items || []).reduce((acc, it) => acc + Number(it.quantity||0)*Number(it.price||0), 0);
+              const tipo = comandaDiscount?.tipo; const val = Number(comandaDiscount?.valor || 0);
+              let descCmd = 0; if (tipo === 'percentual' && val > 0) descCmd = subtotal * (val/100); else if (tipo === 'fixo' && val > 0) descCmd = val;
+              const totalDisp = Math.max(0, subtotal - descCmd);
+              return (
+                <>
+                  <div className="flex justify-between text-lg font-semibold">
+                    <span>Total</span>
+                    <span>R$ {totalDisp.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-end">
+                    <Button type="button" size="sm" variant="outline" onClick={() => setIsDiscountOpen(true)}>Editar desconto</Button>
+                  </div>
+                </>
+              );
+            })()}
+            <div className="flex-1 min-h-0 space-y-2 overflow-y-auto thin-scroll pr-1">
               <Label className="block">Pagamentos</Label>
               {/** Helper para resolver nome do cliente em qualquer cenário */}
               {(() => null)()}
@@ -2536,7 +2653,10 @@ export default function BalcaoPage() {
                           setPaymentLines(prev => {
                             const remain = prev.filter(x => x.id !== ln.id);
                             if (remain.length === 0) return [];
-                            const totalBase = (items || []).reduce((acc, it) => acc + Number(it.quantity||0)*Number(it.price||0), 0);
+                            const subtotal = (items || []).reduce((acc, it) => acc + Number(it.quantity||0)*Number(it.price||0), 0);
+                            const tipo = comandaDiscount?.tipo; const val = Number(comandaDiscount?.valor || 0);
+                            let descCmd = 0; if (tipo === 'percentual' && val > 0) descCmd = subtotal * (val/100); else if (tipo === 'fixo' && val > 0) descCmd = val;
+                            const totalBase = Math.max(0, subtotal - descCmd);
                             const basePer = Math.floor((totalBase / remain.length) * 100) / 100; // Arredondar para baixo
                             const baseRemainder = totalBase - (basePer * remain.length); // Calcular resto
                             return remain.map((line, i) => {
@@ -2663,7 +2783,10 @@ export default function BalcaoPage() {
                       const hasPct = Number(fin?.taxa_percentual || 0) > 0;
                       const newLines = [...prev, { id: nextPayLineId, clientId: clientPick, methodId: defMethod, value: '', chargeFee: hasPct }];
                       // Distribuir BASE
-                      const totalBase = (items || []).reduce((acc, it) => acc + Number(it.quantity||0)*Number(it.price||0), 0);
+                      const subtotal = (items || []).reduce((acc, it) => acc + Number(it.quantity||0)*Number(it.price||0), 0);
+                            const tipo = comandaDiscount?.tipo; const val = Number(comandaDiscount?.valor || 0);
+                            let descCmd = 0; if (tipo === 'percentual' && val > 0) descCmd = subtotal * (val/100); else if (tipo === 'fixo' && val > 0) descCmd = val;
+                            const totalBase = Math.max(0, subtotal - descCmd);
                       const basePer = Math.floor((totalBase / newLines.length) * 100) / 100;
                       const baseRemainder = totalBase - (basePer * newLines.length);
                       return newLines.map((line, idx) => {
@@ -2680,8 +2803,10 @@ export default function BalcaoPage() {
               {(() => {
                 const somaExibida = sumPayments();
                 const feeSum = sumFees();
-                const totalBase = (items || []).reduce((acc, it) => acc + Number(it.quantity||0)*Number(it.price||0), 0);
-                const esperado = totalBase + feeSum;
+                const subtotal = (items || []).reduce((acc, it) => acc + Number(it.quantity||0)*Number(it.price||0), 0);
+                const tipo = comandaDiscount?.tipo; const val = Number(comandaDiscount?.valor || 0);
+                let descCmd = 0; if (tipo === 'percentual' && val > 0) descCmd = subtotal * (val/100); else if (tipo === 'fixo' && val > 0) descCmd = val;
+                const esperado = Math.max(0, (subtotal - descCmd) + feeSum);
                 const restante = esperado - somaExibida;
                 return (
                   <>
@@ -2693,11 +2818,29 @@ export default function BalcaoPage() {
               })()}
             </div>
           </div>
-          <DialogFooter>
+          <DialogFooter className="sticky bottom-0 bg-surface/95 backdrop-blur supports-[backdrop-filter]:bg-surface/75 border-t border-border">
             <Button variant="outline" onClick={() => setIsPayOpen(false)} disabled={payLoading}>Cancelar</Button>
             <Button onClick={confirmPay} disabled={payLoading}>{payLoading ? 'Processando...' : 'Confirmar Pagamento'}</Button>
           </DialogFooter>
-        </DialogContent>
+        </DialogContent>        {isDiscountOpen && (
+          <DescontoComandaDialog
+            comanda={{ id: comandaId, desconto_tipo: comandaDiscount?.tipo, desconto_valor: Number(comandaDiscount?.valor || 0), desconto_motivo: comandaDiscount?.motivo || '' }}
+            subtotal={(items || []).reduce((acc, it) => acc + Number(it.quantity||0)*Number(it.price||0), 0)}
+            onApply={async () => {
+              try {
+                const { data } = await supabase
+                  .from('comandas')
+                  .select('desconto_tipo, desconto_valor, desconto_motivo')
+                  .eq('id', comandaId)
+                  .single();
+                setComandaDiscount({ tipo: data?.desconto_tipo || null, valor: Number(data?.desconto_valor || 0), motivo: data?.desconto_motivo || '' });
+              } catch {}
+              setIsDiscountOpen(false);
+            }}
+            onClose={() => setIsDiscountOpen(false)}
+            codigoEmpresa={userProfile?.codigo_empresa}
+          />
+        )}
       </Dialog>
 
       {/* Wizard de Cliente: obrigatório antes de vender */}
@@ -2873,7 +3016,22 @@ export default function BalcaoPage() {
               }
             }}>Confirmar</Button>
           </DialogFooter>
-        </DialogContent>
+        </DialogContent>        
+            onApply={async () => {
+              try {
+                const { data } = await supabase
+                  .from('comandas')
+                  .select('desconto_tipo, desconto_valor, desconto_motivo')
+                  .eq('id', comandaId)
+                  .single();
+                setComandaDiscount({ tipo: data?.desconto_tipo || null, valor: Number(data?.desconto_valor || 0), motivo: data?.desconto_motivo || '' });
+              } catch {}
+              setIsDiscountOpen(false);
+            }}
+            onClose={() => setIsDiscountOpen(false)}
+            codigoEmpresa={userProfile?.codigo_empresa}
+          />
+        )}
       </Dialog>
 
       {/* Modal de Detalhes do Item da Comanda */}
@@ -3035,7 +3193,22 @@ export default function BalcaoPage() {
               </DialogFooter>
             </>
           )}
-        </DialogContent>
+        </DialogContent>        
+            onApply={async () => {
+              try {
+                const { data } = await supabase
+                  .from('comandas')
+                  .select('desconto_tipo, desconto_valor, desconto_motivo')
+                  .eq('id', comandaId)
+                  .single();
+                setComandaDiscount({ tipo: data?.desconto_tipo || null, valor: Number(data?.desconto_valor || 0), motivo: data?.desconto_motivo || '' });
+              } catch {}
+              setIsDiscountOpen(false);
+            }}
+            onClose={() => setIsDiscountOpen(false)}
+            codigoEmpresa={userProfile?.codigo_empresa}
+          />
+        )}
       </Dialog>
       {/* Mobile warning banner */}
       {mobileWarnOpen && (

@@ -332,6 +332,7 @@ export default function FiscalHubPage(){
     try {
       const row = (rows||[]).find(r => r.id === comandaId);
       const total = Number(row?.total || row?.total_com_desconto || 0) || 0;
+      const { ambiente: amb } = getTransmiteNotaConfigFromEmpresa(empresaInfo || {});
       const { data, error } = await supabase.from('notas_fiscais').insert({
         codigo_empresa: codigoEmpresa,
         origem: 'comanda',
@@ -344,6 +345,7 @@ export default function FiscalHubPage(){
         pdf_url: null,
         valor_total: total,
         destinatario: null,
+        ambiente: amb || 'homologacao',
       }).select('id').single();
       if (error) throw error;
       await loadNfeRows();
@@ -359,6 +361,7 @@ export default function FiscalHubPage(){
   const createManualDraft = async () => {
     if (!codigoEmpresa) return null;
     try {
+      const { ambiente: amb } = getTransmiteNotaConfigFromEmpresa(empresaInfo || {});
       const { data, error } = await supabase.from('notas_fiscais').insert({
         codigo_empresa: codigoEmpresa,
         origem: 'manual',
@@ -371,6 +374,7 @@ export default function FiscalHubPage(){
         pdf_url: null,
         valor_total: null,
         destinatario: null,
+        ambiente: amb || 'homologacao',
       }).select('id').single();
       if (error) throw error;
       await loadNfeRows();
@@ -1071,6 +1075,7 @@ export default function FiscalHubPage(){
             pdf_url: pdfUrl || null,
             numero: form?.nNF ? Number(form.nNF) : null,
             serie: form?.serie ? Number(form.serie) : null,
+            ambiente: (getTransmiteNotaConfigFromEmpresa(empresaInfo||{}).ambiente || null),
           }).eq('id', draftId).eq('codigo_empresa', codigoEmpresa);
           await loadNfeRows();
         } catch {}
@@ -1950,6 +1955,7 @@ export default function FiscalHubPage(){
       try {
         const row = rows.find(r => r.id === nfeComandaId);
         const total = Number(row?.total || 0);
+        const { ambiente: amb } = getTransmiteNotaConfigFromEmpresa(empresaInfo || {});
         await supabase.from('notas_fiscais').insert({
           codigo_empresa: codigoEmpresa,
           origem: 'comanda',
@@ -1962,6 +1968,7 @@ export default function FiscalHubPage(){
           pdf_url: null,
           valor_total: isFinite(total) ? total : null,
           destinatario: null,
+          ambiente: amb || 'homologacao',
         });
       } catch {}
       try { await supabase.from('auditoria_fiscal').insert({ codigo_empresa: codigoEmpresa, acao: 'salvar_xml', modelo: '55', comanda_id: nfeComandaId, status: 'success' }); } catch {}
@@ -2277,6 +2284,18 @@ export default function FiscalHubPage(){
               <p className="text-xs text-text-secondary mt-1 hidden sm:block">
                 Acompanhe NFC-e e NF-e, pendências e cancelamentos em um só lugar.
               </p>
+              {(() => {
+                const cfg = getTransmiteNotaConfigFromEmpresa(empresaInfo || {});
+                const amb = (cfg?.ambiente || 'homologacao');
+                const label = amb === 'producao' ? 'Produção' : 'Homologação';
+                const cls = amb === 'producao' ? 'bg-emerald-500/15 text-emerald-600 border-emerald-600/30' : 'bg-amber-500/15 text-amber-700 border-amber-600/30';
+                return (
+                  <div className={["mt-2 inline-flex items-center gap-2 text-[11px] px-2 py-0.5 rounded-full border", cls].join(' ')}>
+                    <span>Ambiente:</span>
+                    <strong>{label}</strong>
+                  </div>
+                );
+              })()}
             </div>
             <div className="flex items-center gap-3 flex-wrap justify-end">
               <TabsList className="hidden sm:inline-flex rounded-full bg-surface-2 px-1 py-0.5">
@@ -2749,6 +2768,14 @@ export default function FiscalHubPage(){
                           >
                             {s}
                           </span>
+                          {(() => {
+                            const ambVal = String(r.ambiente || (getTransmiteNotaConfigFromEmpresa(empresaInfo||{}).ambiente) || 'homologacao');
+                            const clsAmb = ambVal === 'producao' ? 'bg-emerald-500/15 text-emerald-600 border border-emerald-600/30' : 'bg-amber-500/15 text-amber-700 border border-amber-600/30';
+                            const labelAmb = ambVal === 'producao' ? 'Produção' : 'Homologação';
+                            return (
+                              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] ${clsAmb}`}>{labelAmb}</span>
+                            );
+                          })()}
                           {s==='rascunho' && (
                             <>
                               <button
@@ -2856,16 +2883,24 @@ export default function FiscalHubPage(){
             )}
           </div>
           <div className="flex justify-end gap-2 mt-4">
-            <Button variant="outline" size="sm" onClick={()=>setEmitConfirmOpen(false)}>Cancelar</Button>
+            <Button variant="outline" size="sm" disabled={nfceConfirmEmitting} onClick={()=>setEmitConfirmOpen(false)}>Cancelar</Button>
             <Button
               size="sm"
               className="bg-[#FF7A1A] hover:bg-[#ff8f3b] text-black"
+              disabled={nfceConfirmEmitting}
               onClick={async ()=>{
-                setEmitConfirmOpen(false);
-                await handleEmitBulk();
+                setNfceConfirmEmitting(true);
+                try {
+                  await handleEmitBulk();
+                  setEmitConfirmOpen(false);
+                } finally {
+                  setNfceConfirmEmitting(false);
+                }
               }}
             >
-              Confirmar emissão
+              {nfceConfirmEmitting ? (
+                <span className="inline-flex items-center"><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Emitindo…</span>
+              ) : 'Confirmar emissão'}
             </Button>
           </div>
         </DialogContent>
@@ -4226,7 +4261,15 @@ export default function FiscalHubPage(){
                           if (errs.length) toast({ title: 'Ainda faltam dados para emitir', description: errs.join(' • '), variant: 'warning' });
                           else toast({ title: 'Tudo certo', description: 'A nota está pronta para emitir', variant: 'success' });
                         }}>Validar Nota</Button>
-                        <Button size="sm" disabled={!allOk} onClick={emitirNota}>Emitir Nota</Button>
+                        <Button
+                          size="sm"
+                          disabled={!allOk || manualEmitting}
+                          onClick={async()=>{ setManualEmitting(true); try { await emitirNota(); } finally { setManualEmitting(false); } }}
+                        >
+                          {manualEmitting ? (
+                            <span className="inline-flex items-center"><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Emitindo…</span>
+                          ) : 'Emitir Nota'}
+                        </Button>
                         <Button size="sm" variant="outline" onClick={saveDraft}>Salvar Rascunho</Button>
                         <Button size="sm" variant="outline" onClick={()=>setManualOpen(false)}>Cancelar Emissão</Button>
                       </div>
@@ -4260,6 +4303,7 @@ export default function FiscalHubPage(){
                       const { error: upErr } = await supabase.storage.from('fiscal').upload(path, blob, { contentType: 'text/xml' });
                       if (upErr) throw upErr;
                       try {
+                        const { ambiente: amb } = getTransmiteNotaConfigFromEmpresa(empresaInfo || {});
                         const itens = manualForm.itens.map(x=>{
                           const pu = parseDec(x.preco_unitario)||0; const q = parseDec(x.quantidade)||1; const bruto = pu*q;
                           const descP = parseDec(x.desconto_percent)||0; const descV = parseDec(x.desconto_valor)||0; const acres = parseDec(x.acrescimos_valor)||0;
@@ -4293,6 +4337,7 @@ export default function FiscalHubPage(){
                             cep: manualForm.cep,
                             codigo_municipio_ibge: manualForm.codigo_municipio_ibge,
                           },
+                          ambiente: amb || 'homologacao',
                         });
                       } catch {}
                       toast({ title: 'XML salvo' });

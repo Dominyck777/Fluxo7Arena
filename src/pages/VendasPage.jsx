@@ -1226,6 +1226,10 @@ function VendasPage() {
     } catch {}
     const ch = supabase.channel(`loja:${codigoEmpresa}`);
     const handler = (payload) => {
+      // Evitar piscar o PayDialog: não atualizar mesas/comandas enquanto o modal de pagamento está aberto
+      if (isPayOpenRef.current) {
+        return;
+      }
       const t = payload?.table || payload?.table_name || '';
       const row = payload?.new || payload?.old || {};
       const evt = payload?.eventType || payload?.type || payload?.event || '';
@@ -1511,11 +1515,13 @@ function VendasPage() {
           // Não filtrar clientes já usados
           const pick = (payClients[0]?.id) || '';
           const defMethod = (payMethods && payMethods[0] && payMethods[0].id) ? payMethods[0].id : null;
-          const newId = nextPayLineId;
-          const nextState = [...prev, { id: newId, clientId: pick, methodId: defMethod, value: '', chargeFee: true }];
+          const base = Array.isArray(prev) ? prev : [];
+          const currentMax = base.reduce((m, x) => Math.max(m, Number(x?.id || 0)), 0);
+          const newId = currentMax + 1;
+          const nextState = [...base, { id: newId, clientId: pick, methodId: defMethod, value: '', chargeFee: true }];
           
-          // agenda foco após render
-          setNextPayLineId(n => n + 1);
+          // agenda foco após render e manter contador coerente
+          setNextPayLineId(n => Math.max(n, newId + 1));
           if (!isMobile) {
             setTimeout(() => {
               const el = valueRefs.current.get(newId);
@@ -1789,12 +1795,12 @@ function VendasPage() {
 
     return (
       <Dialog open={isPayOpen} onOpenChange={setIsPayOpen}>
-        <DialogContent className="sm:max-w-xl w-[92vw] h-[85vh] animate-none flex flex-col overflow-hidden" onKeyDown={(e) => e.stopPropagation()} onKeyDownCapture={(e) => e.stopPropagation()} onPointerDownOutside={(e) => e.stopPropagation()} onInteractOutside={(e) => e.stopPropagation()}>
+        <DialogContent forceMount onOpenAutoFocus={(e) => e.preventDefault()} className="sm:max-w-xl w-[92vw] h-[85vh] min-h-0 animate-none flex flex-col overflow-hidden" onKeyDown={(e) => e.stopPropagation()} onKeyDownCapture={(e) => e.stopPropagation()} onPointerDownOutside={(e) => e.preventDefault()} onInteractOutside={(e) => e.preventDefault()}>
           <DialogHeader>
             <DialogTitle className="text-2xl font-bold">Fechar Conta</DialogTitle>
             <DialogDescription>Divida o pagamento entre clientes e várias finalizadoras, se necessário.</DialogDescription>
           </DialogHeader>
-          <div className="space-y-2">
+          <div className="flex-1 min-h-0 flex flex-col space-y-2">
             {/* Cálculo de descontos - Compacto */}
             {(() => {
               let subtotalItens = 0;
@@ -1874,7 +1880,7 @@ function VendasPage() {
                 // PERMITIR selecionar o mesmo cliente múltiplas vezes - não filtrar por usados
                 const remaining = (payClients || []).filter(c => String(c.id) !== String(primary?.id || ''));
                 return (
-                  <div key={ln.id} className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-center">
+                  <div key={'payline-' + ln.id} className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-center">
                     <div className="sm:col-span-1 flex sm:justify-start">
                       {paymentLines.length > 1 && idx > 0 && (
                         <Button type="button" variant="outline" size="sm" className="h-8 w-8" onClick={() => {
@@ -2067,20 +2073,23 @@ function VendasPage() {
               })}
               <div>
                 <Button type="button" variant="secondary" size="sm" className="pointer-events-auto"
-                  onPointerUp={(e) => { e.preventDefault(); e.stopPropagation();
+                  onClick={(e) => { e.preventDefault(); e.stopPropagation();
                   payDirtyRef.current = true;
                   setPaymentLines(prev => {
+                    const base = Array.isArray(prev) ? prev : [];
+                    const currentMax = base.reduce((m, x) => Math.max(m, Number(x?.id || 0)), 0);
+                    const newId = currentMax + 1;
                     // PERMITIR selecionar o mesmo cliente múltiplas vezes
                     const pick = (payClients[0]?.id) || '';
                     const defMethod = (payMethods && payMethods[0] && payMethods[0].id) ? payMethods[0].id : null;
-                    const newLines = [...prev, { id: nextPayLineId, clientId: pick, methodId: defMethod, value: '', chargeFee: true }];
+                    const newLines = [...base, { id: newId, clientId: pick, methodId: defMethod, value: '', chargeFee: true }];
                     
                     // Distribuir valor total automaticamente entre todas as linhas
                     const totalValue = total > 0 ? total : 0;
                     const perLine = Math.floor((totalValue / newLines.length) * 100) / 100; // Arredondar para baixo
                     const remainder = totalValue - (perLine * newLines.length); // Calcular resto
                     
-                    return newLines.map((line, idx) => {
+                    const mapped = newLines.map((line, idx) => {
                       // Adicionar o resto na última linha para fechar exato
                       const value = idx === newLines.length - 1 ? perLine + remainder : perLine;
                       const t = taxaForLine(line);
@@ -2088,8 +2097,10 @@ function VendasPage() {
                       const base = charge && t > 0 ? (value / (1 + t)) : value;
                       return { ...line, baseValue: base, value: formatBRL(value) };
                     });
+                    // manter nextPayLineId coerente (não é fonte de IDs)
+                    setNextPayLineId(n => Math.max(n, newId + 1));
+                    return mapped;
                   });
-                  setNextPayLineId(n => n + 1);
                 }}
                 >Adicionar forma</Button>
               </div>
@@ -2111,7 +2122,7 @@ function VendasPage() {
               })()}
             </div>
           </div>
-          <DialogFooter className="sticky bottom-0 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/75">
+          <DialogFooter className="sticky bottom-0 bg-surface/95 backdrop-blur supports-[backdrop-filter]:bg-surface/75 border-t border-border">
             <Button type="button" variant="outline" onClick={() => setIsPayOpen(false)} disabled={payLoading}>Cancelar</Button>
             <Button type="button" onClick={confirmPay} disabled={!((paymentLines && paymentLines.length > 0) && !payLoading)}>
               {payLoading ? 'Processando...' : 'Confirmar Pagamento'}
