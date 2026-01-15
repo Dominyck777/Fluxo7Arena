@@ -18,7 +18,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { generateNfcePayloadPreview, generateNfcePayloadFromManual, generateNfePayloadFromManual } from '@/lib/fiscal-mapper';
 import { listarTotaisPorComanda, listMesas, listarClientesPorComandas, listarFinalizadorasPorComandas, listarItensDaComanda, listarClientes, listarFinalizadoras } from '@/lib/store';
 import { enviarNfce, consultarEmissaoNfce, cancelarNfce, consultarPdfNfce, consultarXmlNfce, getTransmiteNotaConfigFromEmpresa, enviarNfe, consultarEmissaoNfe, cancelarNfe, consultarPdfNfe, consultarXmlNfe } from '@/lib/transmitenota';
-import { Settings, Search, Trash2, X, FileText, CheckCircle2, AlertTriangle, Copy, Download, Pencil, Loader2 } from 'lucide-react';
+import { Settings, Search, Trash2, X, FileText, CheckCircle2, AlertTriangle, Copy, Download, Pencil, Loader2, Filter } from 'lucide-react';
 import { gerarXMLNFe, gerarXMLNFeFromData } from '@/lib/nfe';
 import { listProducts } from '@/lib/products';
 import cfopList from '@/data/cfop.json';
@@ -41,9 +41,9 @@ function DateInput({ label, value, onChange }){
   const updatePos = React.useCallback(() => {
     if (!btnRef.current) return;
     const r = btnRef.current.getBoundingClientRect();
-    const width = 320; // approx calendar width
+    const width = 280; // largura um pouco menor para caber melhor no mobile
     const left = Math.min(Math.max(8, r.left), window.innerWidth - width - 8);
-    const top = Math.min(r.bottom + 6, window.innerHeight - 8 - 300); // ensure visible
+    const top = Math.min(r.bottom + 6, window.innerHeight - 8 - 260); // altura um pouco menor
     setPos({ top, left });
   }, []);
 
@@ -66,16 +66,16 @@ function DateInput({ label, value, onChange }){
         </button>
       </div>
       {open && ReactDOM.createPortal(
-        <div className="fixed z-[1000] p-2 bg-black text-white border border-warning/40 rounded-md shadow-xl" style={{ top: pos.top, left: pos.left }}>
+        <div className="fixed z-[1000] p-2 bg-black text-white border border-warning/40 rounded-md shadow-xl" style={{ top: pos.top, left: pos.left, width: 280 }}>
           <Calendar
             mode="single"
             selected={selected || undefined}
             onSelect={(d)=>{ if (d) { onChange(formatYMD(d)); setOpen(false); } }}
             showOutsideDays
             classNames={{
-              caption_label: 'text-sm font-medium text-white',
-              head_cell: 'text-xs text-warning/80 w-9',
-              day: 'h-9 w-9 p-0 font-normal text-white hover:bg-warning/10 rounded-md',
+              caption_label: 'text-[11px] font-medium text-white',
+              head_cell: 'text-[10px] text-warning/80 w-7',
+              day: 'h-7 w-7 p-0 font-normal text-white hover:bg-warning/10 rounded-md',
               day_selected: 'bg-warning text-black hover:bg-warning focus:bg-warning',
               day_today: 'border border-warning text-white',
               day_outside: 'text-white/30',
@@ -126,6 +126,60 @@ export default function FiscalHubPage(){
     setSelectedIds(prev => (checked ? Array.from(new Set([...(prev||[]), id])) : (prev||[]).filter(x => x !== id)));
     setSelectedId(prevSel => (checked ? id : (prevSel === id ? null : prevSel)));
   };
+
+  const exportNfeCsv = (scope = 'filtered') => {
+    const delimiter = ';';
+    const escapeCell = (v) => {
+      let s = String(v ?? '');
+      s = s.replaceAll('"','""');
+      s = s.replaceAll(';','|');
+      return `"${s}"`;
+    };
+    const headers = ['Numero','Serie','Status','Destinatario','Origem','Chave','DataEmissao','ValorTotal'];
+    const lines = [headers.join(delimiter)];
+
+    let base = [];
+    if (scope === 'selected') {
+      const set = new Set(selectedIds);
+      if (selectedId) set.add(selectedId);
+      // Apenas notas atualmente consideradas na visão NF-e (nfeSorted), filtradas e ordenadas
+      base = (nfeSorted || []).filter(r => set.has(r.id));
+    } else {
+      // 'filtered' deve refletir exatamente o que está na tela (nfeSorted = filtradas + ordenadas)
+      base = nfeSorted || [];
+    }
+
+    base.forEach(r => {
+      const status = (r.status || 'pendente');
+      const destNome = r.destinatario?.nome || '';
+      const origemDesc = r.origem === 'comanda'
+        ? `Comanda ${r.comanda_id ?? ''}`
+        : (r.origem || 'manual');
+      const dataRef = r.data_emissao || r.criado_em || r.created_at || '';
+      const row = [
+        r.numero ?? '',
+        r.serie ?? '',
+        status,
+        destNome,
+        origemDesc,
+        r.xml_chave ?? '',
+        dataRef,
+        String(r.valor_total ?? ''),
+      ];
+      lines.push(row.map(escapeCell).join(delimiter));
+    });
+
+    const blob = new Blob(["\uFEFF" + lines.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `nfe-${scope}-${new Date().toISOString().slice(0,10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
 
   const handleEditSelectedNfeDraft = async () => {
     try {
@@ -255,7 +309,9 @@ export default function FiscalHubPage(){
       const form = row?.draft_data;
       if (!form || !Array.isArray(form.itens) || form.itens.length === 0) {
         setCurrentDraftId(row.id);
-        if (row.draft_data) setManualForm(row.draft_data);
+        if (row.draft_data) {
+          setManualForm(row.draft_data);
+        }
         setManualOpen(true);
         toast({ title: 'Rascunho incompleto', description: 'Abra o rascunho para revisar e emitir.', variant: 'warning' });
         return;
@@ -532,6 +588,9 @@ export default function FiscalHubPage(){
     transporte: { tipo_frete: '9', transportadora: '', placa: '', volumes: '', peso_liquido: '', peso_bruto: '' },
     adicionais: { obs_gerais: '', info_fisco: '', info_cliente: '', referencia_doc: '' },
   });
+  const [cfopOptions, setCfopOptions] = useState([]);
+  const [cfopModalOpen, setCfopModalOpen] = useState(false);
+  const [cfopForm, setCfopForm] = useState({ codigo: '', descricao: '' });
   const [currentDraftId, setCurrentDraftId] = useState(null);
   const [manualSaving, setManualSaving] = useState(false);
   const [manualEmitting, setManualEmitting] = useState(false);
@@ -762,6 +821,45 @@ export default function FiscalHubPage(){
   useEffect(() => {
     setManualForm(f => ({ ...f, cfop_padrao: autoChooseCfop(f.uf) }));
   }, [manualForm.tipo_nota, empresaUF, manualForm.uf]);
+
+  // Carrega CFOPs cadastrados para a empresa quando o modal de NF-e manual abre
+  useEffect(() => {
+    if (!manualOpen || !codigoEmpresa) return;
+    let alive = true;
+    (async () => {
+      try {
+        const fallback = [
+          { id: '5102', codigo: '5102', descricao: 'Venda de mercadoria adquirida ou recebida de terceiros', tipo_nota: 'saida' },
+          { id: '5101', codigo: '5101', descricao: 'Venda de produção do estabelecimento', tipo_nota: 'saida' },
+          { id: '6102', codigo: '6102', descricao: 'Venda de mercadoria para fora do estado (terceiros)', tipo_nota: 'saida' },
+          { id: '6101', codigo: '6101', descricao: 'Venda de produção para fora do estado', tipo_nota: 'saida' },
+        ];
+        const { data, error } = await supabase
+          .from('cfops')
+          .select('id, codigo, descricao, tipo_nota')
+          .eq('codigo_empresa', codigoEmpresa)
+          .order('codigo');
+        if (error) throw error;
+        if (!alive) return;
+        const fromDb = Array.isArray(data) ? data : [];
+        const existing = new Set(fromDb.map(c => String(c.codigo)));
+        const merged = [
+          ...fromDb,
+          ...fallback.filter(c => !existing.has(String(c.codigo))),
+        ];
+        setCfopOptions(merged);
+      } catch (e) {
+        console.error('[FiscalHub][CFOP] Falha ao carregar CFOPs', e);
+        setCfopOptions([
+          { id: '5102', codigo: '5102', descricao: 'Venda de mercadoria adquirida ou recebida de terceiros', tipo_nota: 'saida' },
+          { id: '5101', codigo: '5101', descricao: 'Venda de produção do estabelecimento', tipo_nota: 'saida' },
+          { id: '6102', codigo: '6102', descricao: 'Venda de mercadoria para fora do estado (terceiros)', tipo_nota: 'saida' },
+          { id: '6101', codigo: '6101', descricao: 'Venda de produção para fora do estado', tipo_nota: 'saida' },
+        ]);
+      }
+    })();
+    return () => { alive = false; };
+  }, [manualOpen, codigoEmpresa]);
 
   // Quando CFOP padrão muda, aplica automaticamente aos itens que estavam com o CFOP anterior ou vazio
   const prevCfopRef = useRef(manualForm.cfop_padrao);
@@ -1570,13 +1668,23 @@ export default function FiscalHubPage(){
       try { namesByComanda = await listarClientesPorComandas(ids); } catch { namesByComanda = {}; }
       try { finsByComanda = await listarFinalizadorasPorComandas(ids); } catch { finsByComanda = {}; }
 
-      const enriched = base.map(r => ({
-        ...r,
-        total: Number(totals[r.id] || 0),
-        mesaNumero: mapMesaNumero.get(r.mesa_id),
-        clientesStr: Array.isArray(namesByComanda[r.id]) ? namesByComanda[r.id].join(', ') : (namesByComanda[r.id] || ''),
-        finalizadorasStr: Array.isArray(finsByComanda[r.id]) ? finsByComanda[r.id].join(', ') : (finsByComanda[r.id] || ''),
-      }));
+      const enriched = base.map(r => {
+        const bruto = Number(totals[r.id] || 0);
+        const tipo = r?.desconto_tipo;
+        const val = Number(r?.desconto_valor || 0);
+        let desc = 0;
+        if (tipo === 'percentual' && val > 0) desc = bruto * (val/100);
+        else if (tipo === 'fixo' && val > 0) desc = val;
+        const totalComDesconto = Math.max(0, bruto - desc);
+        return {
+          ...r,
+          total_sem_desconto: bruto,
+          total: totalComDesconto,
+          mesaNumero: mapMesaNumero.get(r.mesa_id),
+          clientesStr: Array.isArray(namesByComanda[r.id]) ? namesByComanda[r.id].join(', ') : (namesByComanda[r.id] || ''),
+          finalizadorasStr: Array.isArray(finsByComanda[r.id]) ? finsByComanda[r.id].join(', ') : (finsByComanda[r.id] || ''),
+        };
+      });
 
       setRows(enriched);
     } catch (e) {
@@ -1756,6 +1864,7 @@ export default function FiscalHubPage(){
     const start = (page - 1) * pageSize;
     return (nfeSorted||[]).slice(start, start + pageSize);
   }, [nfeSorted, page, pageSize]);
+  const nfeTotalPages = Math.max(1, Math.ceil((nfeSorted||[]).length / pageSize));
   const allPageSelected = useMemo(() => {
     if (!paged || paged.length === 0) return false;
     return paged.every(r => selectedIds.includes(r.id));
@@ -1776,14 +1885,83 @@ export default function FiscalHubPage(){
     setOpenDetails(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
   };
   const selectedRows = useMemo(() => (rows||[]).filter(r => selectedIds.includes(r.id)), [rows, selectedIds]);
-  const eligibleEmitIds = useMemo(() => selectedRows.filter(r => ['pendente','rejeitada'].includes(r.nf_status||'pendente')).map(r=>r.id), [selectedRows]);
+  const eligibleEmitIds = useMemo(
+    () => selectedRows
+      .filter(r => ['pendente','rejeitada'].includes(String(r.nf_status || 'pendente').toLowerCase()))
+      .map(r => r.id),
+    [selectedRows]
+  );
   const eligibleConsultIds = useMemo(
     () => selectedRows
       .filter(r => ['processando','rejeitada','pendente','erro'].includes(String(r.nf_status||'').toLowerCase()))
       .map(r=>r.id),
     [selectedRows]
   );
-  const eligibleCancelIds = useMemo(() => selectedRows.filter(r => (r.nf_status||'')==='autorizada').map(r=>r.id), [selectedRows]);
+  const eligibleCancelIds = useMemo(
+    () => selectedRows
+      .filter(r => String(r.nf_status||'').toLowerCase() === 'autorizada')
+      .map(r=>r.id),
+    [selectedRows]
+  );
+
+  const hasSelection = selectedIds.length > 0;
+  const allEmitEligible = hasSelection && eligibleEmitIds.length === selectedRows.length;
+  const allConsultEligible = hasSelection && eligibleConsultIds.length === selectedRows.length;
+  const allCancelEligible = hasSelection && eligibleCancelIds.length === selectedRows.length;
+
+  const currentViewRow = useMemo(() => {
+    const pickId = selectedId || (selectedIds && selectedIds[0]);
+    if (!pickId) return null;
+    return (rows||[]).find(r => r.id === pickId) || null;
+  }, [rows, selectedId, selectedIds]);
+  const canViewSelected = !!currentViewRow && ['autorizada','cancelada'].includes(String(currentViewRow.nf_status||'').toLowerCase());
+
+  // Elegibilidade para ações na aba NF-e (usa nfeRows)
+  const selectedNfeRows = useMemo(
+    () => (nfeRows||[]).filter(r => selectedIds.includes(r.id)),
+    [nfeRows, selectedIds]
+  );
+  const eligibleNfeEmitIds = useMemo(
+    () => selectedNfeRows
+      .filter(r => {
+        const s = String(r.status || 'rascunho').toLowerCase();
+        return ['rascunho','pendente','rejeitada'].includes(s);
+      })
+      .map(r => r.id),
+    [selectedNfeRows]
+  );
+  const eligibleNfeConsultIds = useMemo(
+    () => selectedNfeRows
+      .filter(r => {
+        const s = String(r.status || 'rascunho').toLowerCase();
+        // Permite consulta para qualquer NF-e que já saiu do estado "puro rascunho"
+        return s !== 'rascunho';
+      })
+      .map(r => r.id),
+    [selectedNfeRows]
+  );
+  const eligibleNfeCancelIds = useMemo(
+    () => selectedNfeRows
+      .filter(r => {
+        const s = String(r.status || 'rascunho').toLowerCase();
+        // Para NF-e tratamos 'emitida' como equivalente a 'autorizada' para cancelamento
+        return ['autorizada','emitida'].includes(s);
+      })
+      .map(r => r.id),
+    [selectedNfeRows]
+  );
+
+  const hasNfeSelection = selectedNfeRows.length > 0;
+  const allNfeEmitEligible = hasNfeSelection && eligibleNfeEmitIds.length === selectedNfeRows.length;
+  const allNfeConsultEligible = hasNfeSelection && eligibleNfeConsultIds.length === selectedNfeRows.length;
+  const allNfeCancelEligible = hasNfeSelection && eligibleNfeCancelIds.length === selectedNfeRows.length;
+
+  const currentViewNfeRow = useMemo(() => {
+    const pickId = selectedId || (selectedIds && selectedIds[0]);
+    if (!pickId) return null;
+    return (nfeRows||[]).find(r => r.id === pickId) || null;
+  }, [nfeRows, selectedId, selectedIds]);
+  const canViewSelectedNfe = !!currentViewNfeRow && ['autorizada','emitida','cancelada'].includes(String(currentViewNfeRow.status||'').toLowerCase());
 
   const handleEmitBulk = async () => {
     if (!eligibleEmitIds.length) { toast({ title: 'Nenhum elegível', description: 'Selecione notas pendentes/rejeitadas para emitir.', variant: 'destructive' }); return; }
@@ -1813,7 +1991,7 @@ export default function FiscalHubPage(){
     setCancelNfceMotivo('');
   };
 
-  const exportCsv = () => {
+  const exportCsv = (scope = 'filtered') => {
     const delimiter = ';'; // pt-BR Excel geralmente espera ponto e vírgula
     const escapeCell = (v) => {
       let s = String(v ?? '');
@@ -1821,11 +1999,22 @@ export default function FiscalHubPage(){
       s = s.replaceAll(';','|'); // evita quebrar colunas
       return `"${s}"`;
     };
-    const headers = ['ComandaID','Mesa','Clientes','Finalizadoras','StatusNF','Numero','Serie','Chave','AutorizadoEm','CanceladoEm','Total'];
+    const headers = ['Comanda','Mesa','Clientes','Finalizadoras','StatusNF','Numero','Serie','Chave','AutorizadoEm','CanceladoEm','Total'];
     const lines = [headers.join(delimiter)];
-    (filtered||[]).forEach(r => {
+
+    let base = [];
+    if (scope === 'selected') {
+      const set = new Set(selectedIds);
+      if (selectedId) set.add(selectedId);
+      base = (rows || []).filter(r => set.has(r.id));
+    } else {
+      base = filtered || [];
+    }
+
+    base.forEach(r => {
+      const comandaLabel = r.mesaNumero ? `Mesa ${r.mesaNumero}` : 'Balcão';
       const row = [
-        r.id,
+        comandaLabel,
         r.mesaNumero ?? '',
         (r.clientesStr||''),
         (r.finalizadorasStr||''),
@@ -1853,12 +2042,13 @@ export default function FiscalHubPage(){
   const statusBadge = (s) => {
     const v = (s || 'pendente').toLowerCase();
     const map = {
-      rascunho: 'bg-gray-500/15 text-gray-300 border border-gray-400/30',
+      // Rascunho: cinza neutro, distinto do amarelo de "pendente"
+      rascunho: 'bg-surface-2 text-text-secondary border border-border/60',
       pendente: 'bg-amber-500/15 text-amber-400 border border-amber-400/30',
       processando: 'bg-blue-500/15 text-blue-400 border border-blue-400/30',
       autorizada: 'bg-emerald-500/15 text-emerald-400 border border-emerald-400/30',
       rejeitada: 'bg-red-500/15 text-red-400 border border-red-400/30',
-      cancelada: 'bg-violet-500/15 text-violet-400 border border-violet-400/30',
+      cancelada: 'bg-red-500/15 text-red-400 border border-red-400/30',
     };
     return map[v] || map.pendente;
   };
@@ -2279,8 +2469,34 @@ export default function FiscalHubPage(){
 
         <div className="flex flex-col gap-2 mb-4">
           <div className="flex items-center justify-between gap-4 flex-wrap">
-            <div>
-              <h1 className="text-xl font-semibold">Central Fiscal</h1>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center justify-between gap-2">
+                <h1 className="text-xl font-semibold">Central Fiscal</h1>
+                {/* Botões ao lado do título apenas no mobile */}
+                <div className="flex items-center gap-2 sm:hidden">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="rounded-full"
+                    onClick={()=>exportCsv('filtered')}
+                    title="Exportar CSV das comandas/NF"
+                  >
+                    <Download className="w-4 h-4 mr-1" />
+                    <span>CSV</span>
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="rounded-full"
+                    onClick={() => navigate('/configuracao-fiscal')}
+                    title="Configuração Fiscal da Empresa"
+                  >
+                    <Settings className="w-4 h-4" />
+                  </Button>
+                </div>
+              </div>
               <p className="text-xs text-text-secondary mt-1 hidden sm:block">
                 Acompanhe NFC-e e NF-e, pendências e cancelamentos em um só lugar.
               </p>
@@ -2290,7 +2506,7 @@ export default function FiscalHubPage(){
                 const label = amb === 'producao' ? 'Produção' : 'Homologação';
                 const cls = amb === 'producao' ? 'bg-emerald-500/15 text-emerald-600 border-emerald-600/30' : 'bg-amber-500/15 text-amber-700 border-amber-600/30';
                 return (
-                  <div className={["mt-2 inline-flex items-center gap-2 text-[11px] px-2 py-0.5 rounded-full border", cls].join(' ')}>
+                  <div className={["mt-2 inline-flex items-center gap-2 text-[11px] px-2 py-0.5 rounded-full border hidden sm:inline-flex", cls].join(' ')}>
                     <span>Ambiente:</span>
                     <strong>{label}</strong>
                   </div>
@@ -2300,19 +2516,21 @@ export default function FiscalHubPage(){
             <div className="flex items-center gap-3 flex-wrap justify-end">
               <TabsList className="hidden sm:inline-flex rounded-full bg-surface-2 px-1 py-0.5">
                 <TabsTrigger value="nfce">NFC-e</TabsTrigger>
-                <TabsTrigger value="nfe">NF-e Saída</TabsTrigger>
+                <TabsTrigger value="nfe">NF-e</TabsTrigger>
                 <TabsTrigger value="compras">NF-e Entrada (Compras)</TabsTrigger>
               </TabsList>
-              <div className="flex items-center gap-2">
+              {/* Botões permanecem na direita apenas no desktop */}
+              <div className="hidden sm:flex items-center gap-2">
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
                   className="rounded-full"
-                  onClick={exportCsv}
+                  onClick={()=>exportCsv('filtered')}
                   title="Exportar CSV das comandas/NF"
                 >
-                  Exportar CSV
+                  <Download className="w-4 h-4 mr-1" />
+                  <span>CSV</span>
                 </Button>
                 <Button
                   type="button"
@@ -2331,15 +2549,21 @@ export default function FiscalHubPage(){
           {/* Tabs para telas pequenas */}
           <TabsList className="sm:hidden w-full justify-start rounded-lg bg-surface-2 px-1 py-1 overflow-x-auto">
             <TabsTrigger value="nfce" className="flex-1 min-w-[90px]">NFC-e</TabsTrigger>
-            <TabsTrigger value="nfe" className="flex-1 min-w-[100px]">NF-e Saída</TabsTrigger>
+            <TabsTrigger value="nfe" className="flex-1 min-w-[100px]">NF-e</TabsTrigger>
             <TabsTrigger value="compras" className="flex-1 min-w-[130px]">NF-e Entrada</TabsTrigger>
           </TabsList>
 
-          {/* Filtros globais (afetam NFC-e e NF-e Saída, baseados nas comandas) */}
-          <div className="bg-surface-2/60 border border-border/70 rounded-xl px-3 py-3 flex flex-wrap items-center gap-3">
-            <div className="flex items-center gap-2 min-w-[220px]">
+          {/* Filtros globais - versão desktop/tablet */}
+          <div className="hidden sm:flex bg-surface-2/60 border border-border/70 rounded-xl px-3 py-3 flex flex-wrap items-center gap-3">
+            {/* Busca global - apenas desktop */}
+            <div className="hidden sm:flex items-center gap-2 min-w-[220px]">
               <Label className="text-xs text-text-secondary">Buscar</Label>
-              <Input value={search} onChange={(e)=>setSearch(e.target.value)} placeholder="Chave, número, cliente..." className="w-[200px] sm:w-60 h-8 text-xs" />
+              <Input
+                value={search}
+                onChange={(e)=>setSearch(e.target.value)}
+                placeholder="Chave, número, cliente..."
+                className="w-[200px] sm:w-60 h-8 text-xs"
+              />
             </div>
             <div className="flex items-center gap-2">
               <Label className="text-xs text-text-secondary">Status</Label>
@@ -2413,10 +2637,109 @@ export default function FiscalHubPage(){
                 </Popover>
               </div>
             </div>
-            <div className="inline-flex items-center gap-2 text-xs ml-auto">
+            <div className="hidden sm:inline-flex items-center gap-2 text-xs ml-auto">
               <Checkbox checked={focusPendRej} onCheckedChange={setFocusPendRej} className="rounded-full border-warning data-[state=checked]:bg-warning" />
               <span>Somente pendentes/rejeitadas</span>
             </div>
+          </div>
+
+          {/* Busca + botão de filtros - apenas mobile */}
+          <div className="sm:hidden mt-2">
+            <div className="flex items-center gap-2">
+              <div className="flex-1">
+                <Input
+                  value={search}
+                  onChange={(e)=>setSearch(e.target.value)}
+                  placeholder="Chave, número, cliente..."
+                  className="h-9 text-xs"
+                />
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                className="h-9 w-9 shrink-0"
+                onClick={() => setMobileFiltersOpen(v => !v)}
+              >
+                <Filter className="w-4 h-4" />
+              </Button>
+            </div>
+            {mobileFiltersOpen && (
+              <div className="mt-2 bg-surface-2/60 border border-border/70 rounded-xl px-3 py-3 flex flex-col gap-3">
+                <div className="flex items-center gap-2">
+                  <Label className="text-xs text-text-secondary">Status</Label>
+                  <Select value={statusFilter} onValueChange={setStatusFilter}>
+                    <SelectTrigger className="h-8 flex-1 rounded-full text-xs">
+                      <SelectValue placeholder="Selecionar status" />
+                    </SelectTrigger>
+                    <SelectContent className="rounded-xl text-xs">
+                      <SelectItem value="all">Todos</SelectItem>
+                      <SelectItem value="pendente">Pendente</SelectItem>
+                      <SelectItem value="processando">Em andamento</SelectItem>
+                      <SelectItem value="autorizada">Autorizada</SelectItem>
+                      <SelectItem value="rejeitada">Rejeitada</SelectItem>
+                      <SelectItem value="cancelada">Cancelada</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Label className="text-xs text-text-secondary">Período</Label>
+                  <div className="inline-flex items-center gap-2">
+                    <Popover modal={true}>
+                      <PopoverTrigger asChild>
+                        <button
+                          type="button"
+                          className="h-7 px-2 rounded-md bg-surface border border-border text-xs inline-flex items-center gap-1"
+                        >
+                          <span>
+                            {from ? new Date(from + 'T00:00:00').toLocaleDateString('pt-BR') : 'Início'}
+                          </span>
+                        </button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto p-2 z-50" align="start">
+                        <Calendar
+                          mode="single"
+                          selected={from ? new Date(from + 'T00:00:00') : undefined}
+                          onSelect={(d) => {
+                            if (!d) return;
+                            const y = d.getFullYear();
+                            const m = pad(d.getMonth() + 1);
+                            const dy = pad(d.getDate());
+                            setFrom(`${y}-${m}-${dy}`);
+                          }}
+                        />
+                      </PopoverContent>
+                    </Popover>
+                    <span className="text-text-secondary text-xs">até</span>
+                    <Popover modal={true}>
+                      <PopoverTrigger asChild>
+                        <button
+                          type="button"
+                          className="h-7 px-2 rounded-md bg-surface border border-border text-xs inline-flex items-center gap-1"
+                        >
+                          <span>
+                            {to ? new Date(to + 'T00:00:00').toLocaleDateString('pt-BR') : 'Fim'}
+                          </span>
+                        </button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto p-2 z-50" align="start">
+                        <Calendar
+                          mode="single"
+                          selected={to ? new Date(to + 'T00:00:00') : undefined}
+                          onSelect={(d) => {
+                            if (!d) return;
+                            const y = d.getFullYear();
+                            const m = pad(d.getMonth() + 1);
+                            const dy = pad(d.getDate());
+                            setTo(`${y}-${m}-${dy}`);
+                          }}
+                        />
+                      </PopoverContent>
+                    </Popover>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
@@ -2436,105 +2759,313 @@ export default function FiscalHubPage(){
 
         <TabsContent value="nfce">
 
-          <div className="flex items-center gap-2 mb-2 flex-nowrap whitespace-nowrap relative z-10">
-            <div className="ml-auto flex items-center gap-2 text-xs text-text-secondary">
+          <div className="flex items-center gap-2 mb-2 flex-wrap sm:flex-nowrap whitespace-normal sm:whitespace-nowrap relative z-10">
+            {/* Bloco de selecionadas só no desktop/tablet */}
+            <div className="hidden sm:flex ml-auto items-center gap-2 text-xs text-text-secondary">
               <span>Selecionadas: <strong className="text-text-primary">{selectedIds.length}</strong></span>
               <Button size="sm" variant="outline" onClick={()=>setSelectedIds([])} disabled={selectedIds.length===0}>Limpar</Button>
               <Button size="sm" variant="outline" onClick={()=>setSelectedIds(Array.from(new Set((filtered||[]).map(r=>r.id))))} disabled={(filtered||[]).length===0}>Selecionar filtrados</Button>
             </div>
-            <Button size="sm" variant="outline" disabled={!canConsult || (selectedIds.length===0 && !selectedId)} onClick={() => (async () => {
-              const pickId = selectedId || selectedIds[0];
-              const row = rows.find(r => r.id === pickId);
-              if (!row) return;
-              if (row.nf_pdf_url) { window.open(row.nf_pdf_url, '_blank'); return; }
-              try {
-                setLoading(true);
-                const { empresa } = await generateNfcePayloadPreview({ comandaId: row.id, codigoEmpresa });
-                const cfg = getTransmiteNotaConfigFromEmpresa(empresa);
-                let pdf = null, xml = null, chave = row.xml_chave || null; let authorized = false;
 
-                // 1) Se tivermos SearchKey salva (xml_protocolo), tentar consulta completa por ela
-                if (row.xml_protocolo) {
+            {/* Ações principais no mobile: Visualizar, Emitir e menu de Mais ações */}
+            <div className="flex sm:hidden items-center gap-2 w-full justify-start">
+              <Button
+                size="sm"
+                variant="outline"
+                className="flex-1"
+                disabled={!canConsult || (selectedIds.length===0 && !selectedId)}
+                onClick={() => (async () => {
+                  const pickId = selectedId || selectedIds[0];
+                  const row = rows.find(r => r.id === pickId);
+                  if (!row) return;
+                  if (row.nf_pdf_url) { window.open(row.nf_pdf_url, '_blank'); return; }
                   try {
-                    const resp = await consultarEmissaoNfce({ baseUrl: cfg.baseUrl, cnpj: cfg.cnpj, dados: { SearchKey: row.xml_protocolo, searchkey: row.xml_protocolo } });
-                    console.log('[FiscalHub][NFC-e visualizar->consulta] resposta completa:', resp);
-                    const rawStatus = String(resp?.status || resp?.Status || resp?.cStat || '').toLowerCase();
-                    authorized = !!(resp?.autorizada || resp?.Autorizada || resp?.sucesso || resp?.Sucesso || rawStatus === '100');
-                    pdf = resp?.pdf_url || resp?.PdfUrl || null;
-                    xml = resp?.xml_url || resp?.XmlUrl || null;
-                    chave = resp?.chave || resp?.Chave || chave;
-                  } catch (e) {
-                    console.warn('[FiscalHub][NFC-e visualizar] consulta por SearchKey falhou, tentando PDF/XML direto', e);
+                    setLoading(true);
+                    const { empresa } = await generateNfcePayloadPreview({ comandaId: row.id, codigoEmpresa });
+                    const cfg = getTransmiteNotaConfigFromEmpresa(empresa);
+                    let pdf = null, xml = null, chave = row.xml_chave || null; let authorized = false;
+
+                    // 1) Se tivermos SearchKey salva (xml_protocolo), tentar consulta completa por ela
+                    if (row.xml_protocolo) {
+                      try {
+                        const resp = await consultarEmissaoNfce({ baseUrl: cfg.baseUrl, cnpj: cfg.cnpj, dados: { SearchKey: row.xml_protocolo, searchkey: row.xml_protocolo } });
+                        console.log('[FiscalHub][NFC-e visualizar->consulta] resposta completa:', resp);
+                        const rawStatus = String(resp?.status || resp?.Status || resp?.cStat || '').toLowerCase();
+                        authorized = !!(resp?.autorizada || resp?.Autorizada || resp?.sucesso || resp?.Sucesso || rawStatus === '100');
+                        pdf = resp?.pdf_url || resp?.PdfUrl || null;
+                        xml = resp?.xml_url || resp?.XmlUrl || null;
+                        chave = resp?.chave || resp?.Chave || chave;
+                      } catch (e) {
+                        console.warn('[FiscalHub][NFC-e visualizar] consulta por SearchKey falhou, tentando PDF/XML direto', e);
+                      }
+                    }
+
+                    // 2) Se ainda não temos PDF/XML, buscar direto por número/série
+                    if (!pdf && !xml) {
+                      const baseDados = { numero: row.nf_numero, Numero: row.nf_numero, serie: row.nf_serie, Serie: row.nf_serie };
+                      try {
+                        const rpdf = await consultarPdfNfce({ baseUrl: cfg.baseUrl, cnpj: cfg.cnpj, dados: baseDados });
+                        pdf = rpdf?.pdf_url || rpdf?.PdfUrl || pdf;
+                        chave = rpdf?.chave || rpdf?.Chave || chave;
+                      } catch {}
+                      try {
+                        const rxml = await consultarXmlNfce({ baseUrl: cfg.baseUrl, cnpj: cfg.cnpj, dados: baseDados });
+                        xml = rxml?.xml_url || rxml?.XmlUrl || xml;
+                        chave = chave || rxml?.chave || rxml?.Chave || chave;
+                      } catch {}
+                      authorized = !!(pdf || xml || authorized);
+                    }
+                    if (pdf || xml || authorized || chave) {
+                      await supabase.from('comandas').update({
+                        nf_pdf_url: pdf || row.nf_pdf_url,
+                        nf_xml_url: xml || row.nf_xml_url,
+                        xml_chave: chave || row.xml_chave,
+                        nf_status: authorized ? 'autorizada' : (row.nf_status || null),
+                      }).eq('id', row.id).eq('codigo_empresa', codigoEmpresa);
+                    }
+                    if (pdf) { window.open(pdf, '_blank'); }
+                    else { toast({ title: 'Sem PDF disponível', description: 'Documento ainda não possui DANFE.', variant: 'destructive' }); }
+                    await load();
+                  } catch (e) { toast({ title: 'Falha ao visualizar', description: e.message, variant: 'destructive' }); }
+                  finally { setLoading(false); }
+                })()}
+              >
+                Visualizar
+              </Button>
+              <Button
+                size="sm"
+                className="flex-1"
+                disabled={!canEmit || !allEmitEligible}
+                onClick={() => {
+                  if (!eligibleEmitIds.length) {
+                    toast({ title: 'Nenhum elegível', description: 'Selecione notas pendentes/rejeitadas para emitir.', variant: 'destructive' });
+                    return;
                   }
-                }
+                  setEmitConfirmOpen(true);
+                }}
+              >
+                Emitir ({eligibleEmitIds.length||0})
+              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button size="sm" variant="outline" className="px-2" disabled={exporting && !canConsult && !canCancel}>
+                    Mais
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem disabled={!canConsult || !allConsultEligible} onClick={handleConsultBulk}>
+                    Consultar ({eligibleConsultIds.length||0})
+                  </DropdownMenuItem>
+                  <DropdownMenuItem disabled={!canCancel || !allCancelEligible} onClick={handleCancelBulk}>
+                    <span className="text-destructive">Cancelar ({eligibleCancelIds.length||0})</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={()=>exportCsv('selected')}>
+                    Exportar CSV
+                  </DropdownMenuItem>
+                  <DropdownMenuItem disabled={(selectedIds.length===0 && !selectedId)} onClick={()=>exportZipFiscal({ tipo: 'nfce', scope: 'selected', includePdf: false })}>
+                    <Download className="h-4 w-4 mr-2" /> Baixar XML (selecionados)
+                  </DropdownMenuItem>
+                  <DropdownMenuItem disabled={(selectedIds.length===0 && !selectedId)} onClick={()=>exportZipFiscal({ tipo: 'nfce', scope: 'selected', includePdf: true })}>
+                    <Download className="h-4 w-4 mr-2" /> Baixar XML + PDF (selecionados)
+                  </DropdownMenuItem>
+                  <DropdownMenuItem disabled={(filtered||[]).length===0} onClick={()=>exportZipFiscal({ tipo: 'nfce', scope: 'filtered', includePdf: false })}>
+                    <Download className="h-4 w-4 mr-2" /> Baixar XML (filtrados)
+                  </DropdownMenuItem>
+                  <DropdownMenuItem disabled={(filtered||[]).length===0} onClick={()=>exportZipFiscal({ tipo: 'nfce', scope: 'filtered', includePdf: true })}>
+                    <Download className="h-4 w-4 mr-2" /> Baixar XML + PDF (filtrados)
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
 
-                // 2) Se ainda não temos PDF/XML, buscar direto por número/série
-                if (!pdf && !xml) {
-                  const baseDados = { numero: row.nf_numero, Numero: row.nf_numero, serie: row.nf_serie, Serie: row.nf_serie };
-                  try {
-                    const rpdf = await consultarPdfNfce({ baseUrl: cfg.baseUrl, cnpj: cfg.cnpj, dados: baseDados });
-                    pdf = rpdf?.pdf_url || rpdf?.PdfUrl || pdf;
-                    chave = rpdf?.chave || rpdf?.Chave || chave;
-                  } catch {}
-                  try {
-                    const rxml = await consultarXmlNfce({ baseUrl: cfg.baseUrl, cnpj: cfg.cnpj, dados: baseDados });
-                    xml = rxml?.xml_url || rxml?.XmlUrl || xml;
-                    chave = chave || rxml?.chave || rxml?.Chave || chave;
-                  } catch {}
-                  authorized = !!(pdf || xml || authorized);
-                }
-                if (pdf || xml || authorized || chave) {
-                  await supabase.from('comandas').update({
-                    nf_pdf_url: pdf || row.nf_pdf_url,
-                    nf_xml_url: xml || row.nf_xml_url,
-                    xml_chave: chave || row.xml_chave,
-                    nf_status: authorized ? 'autorizada' : (row.nf_status || null),
-                  }).eq('id', row.id).eq('codigo_empresa', codigoEmpresa);
-                }
-                if (pdf) { window.open(pdf, '_blank'); }
-                else { toast({ title: 'Sem PDF disponível', description: 'Documento ainda não possui DANFE.', variant: 'destructive' }); }
-                await load();
-              } catch (e) { toast({ title: 'Falha ao visualizar', description: e.message, variant: 'destructive' }); }
-              finally { setLoading(false); }
-            })()}>Visualizar</Button>
-            <Button
-              size="sm"
-              disabled={!canEmit || selectedIds.length===0}
-              onClick={() => {
-                if (!eligibleEmitIds.length) {
-                  toast({ title: 'Nenhum elegível', description: 'Selecione notas pendentes/rejeitadas para emitir.', variant: 'destructive' });
-                  return;
-                }
-                setEmitConfirmOpen(true);
-              }}
-            >
-              Emitir ({eligibleEmitIds.length||0})
-            </Button>
-            <Button size="sm" variant="outline" disabled={!canConsult || selectedIds.length===0} onClick={handleConsultBulk}>Consultar ({eligibleConsultIds.length||0})</Button>
-            <Button size="sm" variant="destructive" disabled={!canCancel || selectedIds.length===0} onClick={handleCancelBulk}>Cancelar ({eligibleCancelIds.length||0})</Button>
-            <Button size="sm" variant="outline" onClick={exportCsv}>Exportar CSV</Button>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button size="sm" variant="outline" disabled={exporting}>Ações</Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem disabled={(selectedIds.length===0 && !selectedId)} onClick={()=>exportZipFiscal({ tipo: 'nfce', scope: 'selected', includePdf: false })}>
-                  <Download className="h-4 w-4 mr-2" /> Baixar XML (selecionados)
-                </DropdownMenuItem>
-                <DropdownMenuItem disabled={(selectedIds.length===0 && !selectedId)} onClick={()=>exportZipFiscal({ tipo: 'nfce', scope: 'selected', includePdf: true })}>
-                  <Download className="h-4 w-4 mr-2" /> Baixar XML + PDF (selecionados)
-                </DropdownMenuItem>
-                <DropdownMenuItem disabled={(filtered||[]).length===0} onClick={()=>exportZipFiscal({ tipo: 'nfce', scope: 'filtered', includePdf: false })}>
-                  <Download className="h-4 w-4 mr-2" /> Baixar XML (filtrados)
-                </DropdownMenuItem>
-                <DropdownMenuItem disabled={(filtered||[]).length===0} onClick={()=>exportZipFiscal({ tipo: 'nfce', scope: 'filtered', includePdf: true })}>
-                  <Download className="h-4 w-4 mr-2" /> Baixar XML + PDF (filtrados)
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            {/* Ações completas só no desktop/tablet */}
+            <div className="hidden sm:flex items-center gap-2">
+              <Button size="sm" variant="outline" disabled={!canViewSelected} onClick={() => (async () => {
+                const pickId = selectedId || selectedIds[0];
+                const row = rows.find(r => r.id === pickId);
+                if (!row) return;
+                if (row.nf_pdf_url) { window.open(row.nf_pdf_url, '_blank'); return; }
+                try {
+                  setLoading(true);
+                  const { empresa } = await generateNfcePayloadPreview({ comandaId: row.id, codigoEmpresa });
+                  const cfg = getTransmiteNotaConfigFromEmpresa(empresa);
+                  let pdf = null, xml = null, chave = row.xml_chave || null; let authorized = false;
+
+                  // 1) Se tivermos SearchKey salva (xml_protocolo), tentar consulta completa por ela
+                  if (row.xml_protocolo) {
+                    try {
+                      const resp = await consultarEmissaoNfce({ baseUrl: cfg.baseUrl, cnpj: cfg.cnpj, dados: { SearchKey: row.xml_protocolo, searchkey: row.xml_protocolo } });
+                      console.log('[FiscalHub][NFC-e visualizar->consulta] resposta completa:', resp);
+                      const rawStatus = String(resp?.status || resp?.Status || resp?.cStat || '').toLowerCase();
+                      authorized = !!(resp?.autorizada || resp?.Autorizada || resp?.sucesso || resp?.Sucesso || rawStatus === '100');
+                      pdf = resp?.pdf_url || resp?.PdfUrl || null;
+                      xml = resp?.xml_url || resp?.XmlUrl || null;
+                      chave = resp?.chave || resp?.Chave || chave;
+                    } catch (e) {
+                      console.warn('[FiscalHub][NFC-e visualizar] consulta por SearchKey falhou, tentando PDF/XML direto', e);
+                    }
+                  }
+
+                  // 2) Se ainda não temos PDF/XML, buscar direto por número/série
+                  if (!pdf && !xml) {
+                    const baseDados = { numero: row.nf_numero, Numero: row.nf_numero, serie: row.nf_serie, Serie: row.nf_serie };
+                    try {
+                      const rpdf = await consultarPdfNfce({ baseUrl: cfg.baseUrl, cnpj: cfg.cnpj, dados: baseDados });
+                      pdf = rpdf?.pdf_url || rpdf?.PdfUrl || pdf;
+                      chave = rpdf?.chave || rpdf?.Chave || chave;
+                    } catch {}
+                    try {
+                      const rxml = await consultarXmlNfce({ baseUrl: cfg.baseUrl, cnpj: cfg.cnpj, dados: baseDados });
+                      xml = rxml?.xml_url || rxml?.XmlUrl || xml;
+                      chave = chave || rxml?.chave || rxml?.Chave || chave;
+                    } catch {}
+                    authorized = !!(pdf || xml || authorized);
+                  }
+                  if (pdf || xml || authorized || chave) {
+                    await supabase.from('comandas').update({
+                      nf_pdf_url: pdf || row.nf_pdf_url,
+                      nf_xml_url: xml || row.nf_xml_url,
+                      xml_chave: chave || row.xml_chave,
+                      nf_status: authorized ? 'autorizada' : (row.nf_status || null),
+                    }).eq('id', row.id).eq('codigo_empresa', codigoEmpresa);
+                  }
+                  if (pdf) { window.open(pdf, '_blank'); }
+                  else { toast({ title: 'Sem PDF disponível', description: 'Documento ainda não possui DANFE.', variant: 'destructive' }); }
+                  await load();
+                } catch (e) { toast({ title: 'Falha ao visualizar', description: e.message, variant: 'destructive' }); }
+                finally { setLoading(false); }
+              })()}>Visualizar</Button>
+              <Button
+                size="sm"
+                disabled={!canEmit || !allEmitEligible}
+                onClick={() => {
+                  if (!eligibleEmitIds.length) {
+                    toast({ title: 'Nenhum elegível', description: 'Selecione notas pendentes/rejeitadas para emitir.', variant: 'destructive' });
+                    return;
+                  }
+                  setEmitConfirmOpen(true);
+                }}
+              >
+                Emitir ({eligibleEmitIds.length||0})
+              </Button>
+              <Button size="sm" variant="outline" disabled={!canConsult || !allConsultEligible} onClick={handleConsultBulk}>Consultar ({eligibleConsultIds.length||0})</Button>
+              <Button size="sm" variant="destructive" disabled={!canCancel || !allCancelEligible} onClick={handleCancelBulk}>Cancelar ({eligibleCancelIds.length||0})</Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={(selectedIds.length===0 && !selectedId)}
+                onClick={()=>exportCsv('selected')}
+              >
+                Exportar CSV
+              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button size="sm" variant="outline" disabled={exporting}>Ações</Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem disabled={(selectedIds.length===0 && !selectedId)} onClick={()=>exportCsv('selected')}>
+                    Exportar CSV
+                  </DropdownMenuItem>
+                  <DropdownMenuItem disabled={(selectedIds.length===0 && !selectedId)} onClick={()=>exportZipFiscal({ tipo: 'nfce', scope: 'selected', includePdf: false })}>
+                    <Download className="h-4 w-4 mr-2" /> Baixar XML (selecionados)
+                  </DropdownMenuItem>
+                  <DropdownMenuItem disabled={(selectedIds.length===0 && !selectedId)} onClick={()=>exportZipFiscal({ tipo: 'nfce', scope: 'selected', includePdf: true })}>
+                    <Download className="h-4 w-4 mr-2" /> Baixar XML + PDF (selecionados)
+                  </DropdownMenuItem>
+                  <DropdownMenuItem disabled={(filtered||[]).length===0} onClick={()=>exportZipFiscal({ tipo: 'nfce', scope: 'filtered', includePdf: false })}>
+                    <Download className="h-4 w-4 mr-2" /> Baixar XML (filtrados)
+                  </DropdownMenuItem>
+                  <DropdownMenuItem disabled={(filtered||[]).length===0} onClick={()=>exportZipFiscal({ tipo: 'nfce', scope: 'filtered', includePdf: true })}>
+                    <Download className="h-4 w-4 mr-2" /> Baixar XML + PDF (filtrados)
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
           </div>
 
-          <div className="bg-surface rounded border border-border overflow-x-auto">
+          {/* Lista em cards para mobile (usa margem negativa para aproveitar mais a largura da tela) */}
+          <div className="sm:hidden space-y-2 -mx-2">
+            {(!paged || paged.length === 0) && (
+              <div className="px-3 py-4 text-center text-text-muted border border-border rounded-md bg-surface">
+                {loading ? 'Carregando...' : 'Nada por aqui'}
+              </div>
+            )}
+            {paged.map((r) => {
+              const s = r.nf_status || 'pendente';
+              const statusBg =
+                s === 'autorizada'
+                  ? 'bg-emerald-500/5 border-emerald-500/40'
+                  : s === 'cancelada'
+                    ? 'bg-red-500/5 border-red-500/40'
+                    : s === 'rejeitada'
+                      ? 'bg-orange-500/5 border-orange-500/40'
+                      : s === 'processando' || s === 'em_andamento'
+                        ? 'bg-sky-500/5 border-sky-500/40'
+                        : s === 'pendente'
+                          ? 'bg-amber-500/5 border-amber-500/40'
+                          : 'bg-surface border-border/70';
+              return (
+                <div
+                  key={r.id}
+                  className={`rounded-lg px-3 py-2 text-xs flex flex-col gap-1 border ${statusBg}`}
+                  onClick={() => toggleRow(r.id, !isSelected(r.id))}
+                >
+                  <div className="flex items-start gap-2">
+                    <div onClick={(e)=>{ e.stopPropagation(); toggleRow(r.id, !isSelected(r.id)); }} className="pt-1">
+                      <Checkbox checked={isSelected(r.id)} onCheckedChange={(v)=>toggleRow(r.id, Boolean(v))} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="font-medium text-sm truncate">
+                          {r.mesaNumero ? `Mesa ${r.mesaNumero}` : 'Balcão'}
+                        </div>
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] ${statusBadge(s)}`}>{s}</span>
+                      </div>
+                      <div className="text-xs text-text-secondary flex items-center justify-between gap-2 mt-0.5">
+                        <span>{fmtDate(r.aberto_em)}</span>
+                        <span className="font-semibold text-text-primary">R$ {fmtMoney(r.total || r.total_com_desconto)}</span>
+                      </div>
+                      <div className="mt-1 text-xs text-text-secondary truncate" title={r.clientesStr || ''}>
+                        <span className="text-text-muted">Cliente(s): </span>
+                        <span className="text-text-primary">{r.clientesStr || '—'}</span>
+                      </div>
+                      <div className="mt-0.5 text-xs text-text-secondary flex items-center justify-between gap-2">
+                        <div className="truncate" title={r.finalizadorasStr || ''}>
+                          <span className="text-text-muted">Pagamento: </span>
+                          <span className="text-text-primary">{r.finalizadorasStr || '—'}</span>
+                        </div>
+                        <span className="whitespace-nowrap text-text-primary text-[11px]">{(r.nf_numero ?? '—')}/{(r.nf_serie ?? '—')}</span>
+                      </div>
+                      <div className="mt-0.5 text-[11px] text-text-secondary" title={r.xml_chave || ''}>
+                        <span className="text-text-muted block mb-0.5">Chave:</span>
+                        <span className="text-text-primary text-[10px] truncate block">{r.xml_chave || '—'}</span>
+                      </div>
+                    </div>
+                  </div>
+                  {/* Bloco inferior no mobile: apenas botões de acesso aos documentos, sem repetir informações */}
+                  {(r.nf_pdf_url || r.nf_xml_url) && (
+                    <div className="mt-2 border-t border-border/60 pt-2 text-[11px]">
+                      <div className="flex gap-2">
+                        {r.nf_pdf_url && (
+                          <a className="inline-flex flex-1" href={r.nf_pdf_url} target="_blank" rel="noreferrer">
+                            <Button size="sm" variant="outline" className="w-full">Abrir DANFE</Button>
+                          </a>
+                        )}
+                        {r.nf_xml_url && (
+                          <a className="inline-flex flex-1" href={r.nf_xml_url} target="_blank" rel="noreferrer">
+                            <Button size="sm" variant="outline" className="w-full">Baixar XML</Button>
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Tabela clássica apenas para desktop/tablet */}
+          <div className="hidden sm:block bg-surface rounded border border-border overflow-x-auto">
             <table className="min-w-full text-sm">
               <thead className="bg-surface-2 text-text-secondary">
                 <tr>
@@ -2612,14 +3143,20 @@ export default function FiscalHubPage(){
             </table>
           </div>
           <div className="flex items-center justify-between mt-2 gap-2">
-            <div className="text-xs text-text-secondary">Página {page} de {totalPages} • {sorted.length} registros</div>
-            <div className="flex items-center gap-2">
-              <label className="text-xs text-text-secondary">Itens por página</label>
-              <select className="h-7 rounded-md bg-surface border border-border text-xs px-2" value={pageSize} onChange={e=>{ setPage(1); setPageSize(Number(e.target.value)||50); }}>
-                <option value={20}>20</option>
-                <option value={50}>50</option>
-                <option value={100}>100</option>
-              </select>
+            {/* Info de página: compacto no mobile, detalhado no desktop */}
+            <div className="sm:hidden text-[11px] text-text-secondary">Pág. {page} de {totalPages}</div>
+            <div className="hidden sm:block text-xs text-text-secondary">Página {page} de {totalPages} • {sorted.length} registros</div>
+            <div className="flex items-center gap-2 ml-auto">
+              {/* Seletor de itens por página apenas em desktop */}
+              <div className="hidden sm:flex items-center gap-2">
+                <label className="text-xs text-text-secondary">Itens por página</label>
+                <select className="h-7 rounded-md bg-surface border border-border text-xs px-2" value={pageSize} onChange={e=>{ setPage(1); setPageSize(Number(e.target.value)||50); }}>
+                  <option value={20}>20</option>
+                  <option value={50}>50</option>
+                  <option value={100}>100</option>
+                </select>
+              </div>
+              {/* No mobile ficam só os botões de navegação */}
               <Button size="sm" variant="outline" disabled={page<=1} onClick={()=>setPage(p=>Math.max(1,p-1))}>Anterior</Button>
               <Button size="sm" variant="outline" disabled={page>=totalPages} onClick={()=>setPage(p=>Math.min(totalPages,p+1))}>Próxima</Button>
             </div>
@@ -2628,7 +3165,8 @@ export default function FiscalHubPage(){
 
         <TabsContent value="nfe">
           <div className="flex items-center gap-2 mb-3 flex-wrap whitespace-nowrap relative z-10">
-            <div className="ml-auto flex items-center gap-2 text-xs text-text-secondary">
+            {/* Bloco de selecionadas só no desktop/tablet */}
+            <div className="hidden sm:flex ml-auto items-center gap-2 text-xs text-text-secondary">
               <span>Selecionadas: <strong className="text-text-primary">{selectedIds.length}</strong></span>
               <Button size="sm" variant="outline" onClick={()=>setSelectedIds([])} disabled={selectedIds.length===0}>Limpar</Button>
               <Button
@@ -2643,84 +3181,283 @@ export default function FiscalHubPage(){
                 Selecionar filtrados
               </Button>
             </div>
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={selectedIds.length===0 && !selectedId}
-              onClick={() => (async () => {
-                try {
-                  const all = nfeRows || [];
-                  const pickId = selectedId || (selectedIds && selectedIds[0]);
-                  const row = all.find(r => r.id === pickId);
-                  if (!row) { toast({ title: 'NF-e não encontrada', variant: 'warning' }); return; }
-                  if (row.pdf_url) { window.open(row.pdf_url, '_blank'); return; }
-                  if (!empresaInfo) { toast({ title: 'Empresa não carregada', variant: 'warning' }); return; }
-                  const { baseUrl, cnpj } = getTransmiteNotaConfigFromEmpresa(empresaInfo);
-                  const dados = row.xml_chave ? { chave: row.xml_chave, chave_nota: row.xml_chave } : { numero: row.numero, serie: row.serie };
-                  setLoading(true);
-                  let pdf = null, xml = null, chave = row.xml_chave || null;
-                  try { const r1 = await consultarEmissaoNfe({ baseUrl, cnpj, dados }); pdf = r1?.url_pdf || r1?.pdf_url || null; xml = r1?.url_xml || r1?.xml_url || null; chave = r1?.chave || r1?.Chave || chave; } catch {}
-                  if (!pdf) { try { const r2 = await consultarPdfNfe({ baseUrl, cnpj, dados }); pdf = r2?.url_pdf || r2?.pdf_url || null; chave = r2?.chave || r2?.Chave || chave; } catch {} }
-                  if (!xml) { try { const r3 = await consultarXmlNfe({ baseUrl, cnpj, dados }); xml = r3?.url_xml || r3?.xml_url || null; chave = chave || r3?.chave || r3?.Chave || chave; } catch {} }
-                  if (pdf || xml || chave) {
-                    await supabase.from('notas_fiscais').update({ pdf_url: pdf || row.pdf_url, xml_url: xml || row.xml_url, xml_chave: chave || row.xml_chave, status: (pdf||xml) ? 'autorizada' : row.status }).eq('id', row.id).eq('codigo_empresa', codigoEmpresa);
-                  }
-                  await loadNfeRows();
-                  if (pdf) { window.open(pdf, '_blank'); }
-                  else { toast({ title: 'Sem PDF disponível', description: 'Documento ainda não possui DANFE.', variant: 'destructive' }); }
-                } catch (e) {
-                  toast({ title: 'Falha ao visualizar NF-e', description: e?.message || String(e), variant: 'destructive' });
-                } finally { setLoading(false); }
-              })()}
-            >
-              Visualizar
-            </Button>
-            <Button
-              size="sm"
-              disabled={(selectedIds.length===0 && !selectedId) || nfeToolbarEmitting}
-              onClick={async()=>{ setNfeToolbarEmitting(true); try { await handleEmitSelectedNfe(); } finally { setNfeToolbarEmitting(false); } }}
-            >
-              {nfeToolbarEmitting ? (
-                <span className="inline-flex items-center"><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Emitindo…</span>
-              ) : 'Emitir NF-e'}
-            </Button>
-            <Button size="sm" variant="outline" disabled={selectedIds.length===0 && !selectedId} onClick={handleConsultSelectedNfe}>Consultar</Button>
-            <Button size="sm" variant="destructive" disabled={selectedIds.length===0 && !selectedId} onClick={handleCancelSelectedNfe}>Cancelar</Button>
-            <div className="flex items-center gap-2">
+
+            {/* Ações principais no mobile: Visualizar, Emitir e menu de Mais ações */}
+            <div className="flex sm:hidden items-center gap-2 w-full justify-start">
               <Button
                 size="sm"
-                onClick={async()=>{
-                  setSelectedId(null);
-                  setSelectedIds([]);
-                  const id = await createManualDraft();
-                  if (id) { setManualXml(''); setManualOpen(true); }
-                }}
+                variant="outline"
+                className="flex-1"
+                disabled={!canViewSelectedNfe}
+                onClick={() => (async () => {
+                  try {
+                    const all = nfeRows || [];
+                    const pickId = selectedId || (selectedIds && selectedIds[0]);
+                    const row = all.find(r => r.id === pickId);
+                    if (!row) { toast({ title: 'NF-e não encontrada', variant: 'warning' }); return; }
+                    if (row.pdf_url) { window.open(row.pdf_url, '_blank'); return; }
+                    if (!empresaInfo) { toast({ title: 'Empresa não carregada', variant: 'warning' }); return; }
+                    const { baseUrl, cnpj } = getTransmiteNotaConfigFromEmpresa(empresaInfo);
+                    const dados = row.xml_chave ? { chave: row.xml_chave, chave_nota: row.xml_chave } : { numero: row.numero, serie: row.serie };
+                    setLoading(true);
+                    let pdf = null, xml = null, chave = row.xml_chave || null;
+                    try { const r1 = await consultarEmissaoNfe({ baseUrl, cnpj, dados }); pdf = r1?.url_pdf || r1?.pdf_url || null; xml = r1?.url_xml || r1?.xml_url || null; chave = r1?.chave || r1?.Chave || chave; } catch {}
+                    if (!pdf) { try { const r2 = await consultarPdfNfe({ baseUrl, cnpj, dados }); pdf = r2?.url_pdf || r2?.pdf_url || null; chave = r2?.chave || r2?.Chave || chave; } catch {} }
+                    if (!xml) { try { const r3 = await consultarXmlNfe({ baseUrl, cnpj, dados }); xml = r3?.url_xml || r3?.xml_url || null; chave = chave || r3?.chave || r3?.Chave || chave; } catch {} }
+                    if (pdf || xml || chave) {
+                      await supabase.from('notas_fiscais').update({ pdf_url: pdf || row.pdf_url, xml_url: xml || row.xml_url, xml_chave: chave || row.xml_chave, status: (pdf||xml) ? 'autorizada' : row.status }).eq('id', row.id).eq('codigo_empresa', codigoEmpresa);
+                    }
+                    await loadNfeRows();
+                    if (pdf) { window.open(pdf, '_blank'); }
+                    else { toast({ title: 'Sem PDF disponível', description: 'Documento ainda não possui DANFE.', variant: 'destructive' }); }
+                  } catch (e) {
+                    toast({ title: 'Falha ao visualizar NF-e', description: e?.message || String(e), variant: 'destructive' });
+                  } finally { setLoading(false); }
+                })()}
               >
-                Nova NF-e
+                Visualizar
               </Button>
+              <Button
+                size="sm"
+                className="flex-1"
+                disabled={!allNfeEmitEligible || nfeToolbarEmitting}
+                onClick={async()=>{ setNfeToolbarEmitting(true); try { await handleEmitSelectedNfe(); } finally { setNfeToolbarEmitting(false); } }}
+              >
+                {nfeToolbarEmitting ? (
+                  <span className="inline-flex items-center"><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Emitindo…</span>
+                ) : 'Emitir NF-e'}
+              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button size="sm" variant="outline" className="px-2" disabled={exporting}>
+                    Mais
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem disabled={!allNfeConsultEligible} onClick={handleConsultSelectedNfe}>
+                    Consultar
+                  </DropdownMenuItem>
+                  <DropdownMenuItem disabled={!allNfeCancelEligible} onClick={handleCancelSelectedNfe}>
+                    <span className="text-destructive">Cancelar</span>
+                  </DropdownMenuItem>
+                  {/* Criar NF-e manual desabilitado no mobile enquanto em desenvolvimento */}
+                  <DropdownMenuItem
+                    disabled
+                    className="opacity-60 cursor-not-allowed"
+                  >
+                    Nova NF-e (em desenvolvimento)
+                  </DropdownMenuItem>
+                  <DropdownMenuItem disabled={(selectedIds.length===0 && !selectedId)} onClick={()=>exportNfeCsv('selected')}>
+                    Exportar NF-e (CSV)
+                  </DropdownMenuItem>
+                  <DropdownMenuItem disabled={(selectedIds.length===0 && !selectedId)} onClick={()=>exportZipFiscal({ tipo: 'nfe', scope: 'selected', includePdf: false })}>
+                    <Download className="h-4 w-4 mr-2" /> Baixar XML (selecionados)
+                  </DropdownMenuItem>
+                  <DropdownMenuItem disabled={(selectedIds.length===0 && !selectedId)} onClick={()=>exportZipFiscal({ tipo: 'nfe', scope: 'selected', includePdf: true })}>
+                    <Download className="h-4 w-4 mr-2" /> Baixar XML + PDF (selecionados)
+                  </DropdownMenuItem>
+                  <DropdownMenuItem disabled={(nfeSorted||[]).length===0} onClick={()=>exportZipFiscal({ tipo: 'nfe', scope: 'filtered', includePdf: false })}>
+                    <Download className="h-4 w-4 mr-2" /> Baixar XML (filtrados)
+                  </DropdownMenuItem>
+                  <DropdownMenuItem disabled={(nfeSorted||[]).length===0} onClick={()=>exportZipFiscal({ tipo: 'nfe', scope: 'filtered', includePdf: true })}>
+                    <Download className="h-4 w-4 mr-2" /> Baixar XML + PDF (filtrados)
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button size="sm" variant="outline" disabled={exporting}>Ações</Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem disabled={(selectedIds.length===0 && !selectedId)} onClick={()=>exportZipFiscal({ tipo: 'nfe', scope: 'selected', includePdf: false })}>
-                  <Download className="h-4 w-4 mr-2" /> Baixar XML (selecionados)
-                </DropdownMenuItem>
-                <DropdownMenuItem disabled={(selectedIds.length===0 && !selectedId)} onClick={()=>exportZipFiscal({ tipo: 'nfe', scope: 'selected', includePdf: true })}>
-                  <Download className="h-4 w-4 mr-2" /> Baixar XML + PDF (selecionados)
-                </DropdownMenuItem>
-                <DropdownMenuItem disabled={(nfeSorted||[]).length===0} onClick={()=>exportZipFiscal({ tipo: 'nfe', scope: 'filtered', includePdf: false })}>
-                  <Download className="h-4 w-4 mr-2" /> Baixar XML (filtrados)
-                </DropdownMenuItem>
-                <DropdownMenuItem disabled={(nfeSorted||[]).length===0} onClick={()=>exportZipFiscal({ tipo: 'nfe', scope: 'filtered', includePdf: true })}>
-                  <Download className="h-4 w-4 mr-2" /> Baixar XML + PDF (filtrados)
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+
+            {/* Ações completas só no desktop/tablet */}
+            <div className="hidden sm:flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={!canViewSelectedNfe}
+                onClick={() => (async () => {
+                  try {
+                    const all = nfeRows || [];
+                    const pickId = selectedId || (selectedIds && selectedIds[0]);
+                    const row = all.find(r => r.id === pickId);
+                    if (!row) { toast({ title: 'NF-e não encontrada', variant: 'warning' }); return; }
+                    if (row.pdf_url) { window.open(row.pdf_url, '_blank'); return; }
+                    if (!empresaInfo) { toast({ title: 'Empresa não carregada', variant: 'warning' }); return; }
+                    const { baseUrl, cnpj } = getTransmiteNotaConfigFromEmpresa(empresaInfo);
+                    const dados = row.xml_chave ? { chave: row.xml_chave, chave_nota: row.xml_chave } : { numero: row.numero, serie: row.serie };
+                    setLoading(true);
+                    let pdf = null, xml = null, chave = row.xml_chave || null;
+                    try { const r1 = await consultarEmissaoNfe({ baseUrl, cnpj, dados }); pdf = r1?.url_pdf || r1?.pdf_url || null; xml = r1?.url_xml || r1?.xml_url || null; chave = r1?.chave || r1?.Chave || chave; } catch {}
+                    if (!pdf) { try { const r2 = await consultarPdfNfe({ baseUrl, cnpj, dados }); pdf = r2?.url_pdf || r2?.pdf_url || null; chave = r2?.chave || r2?.Chave || chave; } catch {} }
+                    if (!xml) { try { const r3 = await consultarXmlNfe({ baseUrl, cnpj, dados }); xml = r3?.url_xml || r3?.xml_url || null; chave = chave || r3?.chave || r3?.Chave || chave; } catch {} }
+                    if (pdf || xml || chave) {
+                      await supabase.from('notas_fiscais').update({ pdf_url: pdf || row.pdf_url, xml_url: xml || row.xml_url, xml_chave: chave || row.xml_chave, status: (pdf||xml) ? 'autorizada' : row.status }).eq('id', row.id).eq('codigo_empresa', codigoEmpresa);
+                    }
+                    await loadNfeRows();
+                    if (pdf) { window.open(pdf, '_blank'); }
+                    else { toast({ title: 'Sem PDF disponível', description: 'Documento ainda não possui DANFE.', variant: 'destructive' }); }
+                  } catch (e) {
+                    toast({ title: 'Falha ao visualizar NF-e', description: e?.message || String(e), variant: 'destructive' });
+                  } finally { setLoading(false); }
+                })()}
+              >
+                Visualizar
+              </Button>
+              <Button
+                size="sm"
+                disabled={!allNfeEmitEligible || nfeToolbarEmitting}
+                onClick={async()=>{ setNfeToolbarEmitting(true); try { await handleEmitSelectedNfe(); } finally { setNfeToolbarEmitting(false); } }}
+              >
+                {nfeToolbarEmitting ? (
+                  <span className="inline-flex items-center"><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Emitindo…</span>
+                ) : 'Emitir NF-e'}
+              </Button>
+              <Button size="sm" variant="outline" disabled={!allNfeConsultEligible} onClick={handleConsultSelectedNfe}>Consultar</Button>
+              <Button size="sm" variant="destructive" disabled={!allNfeCancelEligible} onClick={handleCancelSelectedNfe}>Cancelar</Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  onClick={async()=>{
+                    setSelectedId(null);
+                    setSelectedIds([]);
+                    const id = await createManualDraft();
+                    if (id) { setManualXml(''); setManualOpen(true); }
+                  }}
+                >
+                  Nova NF-e
+                </Button>
+              </div>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button size="sm" variant="outline" disabled={exporting}>Ações</Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem
+                    disabled={(selectedIds.length===0 && !selectedId)}
+                    onClick={()=>exportNfeCsv('selected')}
+                  >
+                    Exportar CSV
+                  </DropdownMenuItem>
+                  <DropdownMenuItem disabled={(selectedIds.length===0 && !selectedId)} onClick={()=>exportZipFiscal({ tipo: 'nfe', scope: 'selected', includePdf: false })}>
+                    <Download className="h-4 w-4 mr-2" /> Baixar XML (selecionados)
+                  </DropdownMenuItem>
+                  <DropdownMenuItem disabled={(selectedIds.length===0 && !selectedId)} onClick={()=>exportZipFiscal({ tipo: 'nfe', scope: 'selected', includePdf: true })}>
+                    <Download className="h-4 w-4 mr-2" /> Baixar XML + PDF (selecionados)
+                  </DropdownMenuItem>
+                  <DropdownMenuItem disabled={(nfeSorted||[]).length===0} onClick={()=>exportZipFiscal({ tipo: 'nfe', scope: 'filtered', includePdf: false })}>
+                    <Download className="h-4 w-4 mr-2" /> Baixar XML (filtrados)
+                  </DropdownMenuItem>
+                  <DropdownMenuItem disabled={(nfeSorted||[]).length===0} onClick={()=>exportZipFiscal({ tipo: 'nfe', scope: 'filtered', includePdf: true })}>
+                    <Download className="h-4 w-4 mr-2" /> Baixar XML + PDF (filtrados)
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
           </div>
 
-          <div className="bg-surface rounded border border-border overflow-x-auto">
+          {/* Lista em cards para mobile (NF-e) */}
+          <div className="sm:hidden space-y-2 -mx-2">
+            {(!nfePaged || nfePaged.length === 0) && (
+              <div className="px-3 py-4 text-center text-text-muted border border-border rounded-md bg-surface">
+                {nfeLoading ? 'Carregando...' : 'Nada por aqui'}
+              </div>
+            )}
+            {nfePaged.map((r) => {
+              const rawStatus = String(r.status || 'rascunho').toLowerCase();
+              const s = rawStatus === 'emitida' ? 'autorizada' : rawStatus;
+              const statusBg =
+                s === 'autorizada'
+                  ? 'bg-emerald-500/5 border-emerald-500/40'
+                  : s === 'cancelada'
+                    ? 'bg-red-500/5 border-red-500/40'
+                    : s === 'rejeitada'
+                      ? 'bg-orange-500/5 border-orange-500/40'
+                      : s === 'processando' || s === 'em_andamento'
+                        ? 'bg-sky-500/5 border-sky-500/40'
+                        : s === 'pendente' || s === 'rascunho'
+                          ? 'bg-amber-500/5 border-amber-500/40'
+                          : 'bg-surface border-border/70';
+              const dataRef = r.data_emissao || r.criado_em || r.created_at || null;
+              return (
+                <div
+                  key={r.id}
+                  className={`rounded-lg px-3 py-2 text-xs flex flex-col gap-1 border ${statusBg}`}
+                  onClick={() => toggleRow(r.id, !isSelected(r.id))}
+                >
+                  <div className="flex items-start gap-2">
+                    <div
+                      onClick={(e)=>{ e.stopPropagation(); toggleRow(r.id, !isSelected(r.id)); }}
+                      className="pt-1"
+                    >
+                      <Checkbox checked={isSelected(r.id)} onCheckedChange={(v)=>toggleRow(r.id, Boolean(v))} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="font-medium text-sm truncate">
+                              NF-e {(r.numero ?? '—')}/{(r.serie ?? '—')}
+                            </div>
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] ${statusBadge(s)}`}>{s}</span>
+                          </div>
+                          <div className="text-xs text-text-secondary flex items-center justify-between gap-2 mt-0.5">
+                            <span>{dataRef ? fmtDate(dataRef) : '—'}</span>
+                            <span className="font-semibold text-text-primary">R$ {fmtMoney(r.valor_total || 0)}</span>
+                          </div>
+                          <div className="mt-1 text-xs text-text-secondary truncate" title={r.destinatario?.nome || ''}>
+                            <span className="text-text-muted">Destinatário: </span>
+                            <span className="text-text-primary">{r.destinatario?.nome || '—'}</span>
+                          </div>
+                          <div className="mt-0.5 text-[11px] text-text-secondary" title={r.xml_chave || ''}>
+                            <span className="text-text-muted block mb-0.5">Chave:</span>
+                            <span className="text-text-primary text-[10px] truncate block">{r.xml_chave || '—'}</span>
+                          </div>
+                        </div>
+                        {rawStatus === 'rascunho' && (
+                          <div className="flex flex-col items-end gap-1 ml-1">
+                            {false && (
+                              <button
+                                type="button"
+                                className="inline-flex items-center justify-center w-6 h-6 rounded hover:bg-surface-2 text-text-secondary hover:text-text-primary"
+                                onClick={(e)=>{ e.stopPropagation(); handleEditDraft(r); }}
+                                title="Editar rascunho"
+                              >
+                                <Pencil className="w-3 h-3" />
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              className="inline-flex items-center justify-center w-6 h-6 rounded hover:bg-surface-2 text-text-secondary hover:text-destructive"
+                              onClick={(e)=>{ e.stopPropagation(); setDeleteDraftId(r.id); }}
+                              title="Excluir rascunho"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  {(r.pdf_url || r.xml_url) && (
+                    <div className="mt-2 border-t border-border/60 pt-2 text-[11px]">
+                      <div className="flex gap-2">
+                        {r.pdf_url && (
+                          <a className="inline-flex flex-1" href={r.pdf_url} target="_blank" rel="noreferrer">
+                            <Button size="sm" variant="outline" className="w-full">Abrir DANFE</Button>
+                          </a>
+                        )}
+                        {r.xml_url && (
+                          <a className="inline-flex flex-1" href={r.xml_url} target="_blank" rel="noreferrer">
+                            <Button size="sm" variant="outline" className="w-full">Baixar XML</Button>
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Tabela clássica apenas para desktop/tablet (NF-e) */}
+          <div className="hidden sm:block bg-surface rounded border border-border overflow-x-auto">
             <table className="min-w-full text-sm">
               <thead className="bg-surface-2 text-text-secondary">
                 <tr>
@@ -2762,9 +3499,7 @@ export default function FiscalHubPage(){
                       <td className="px-3 py-2 whitespace-nowrap">
                         <div className="flex items-center gap-1">
                           <span
-                            className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] ${bcls} ${s==='rascunho' ? 'cursor-pointer hover:opacity-80' : ''}`}
-                            onClick={(e)=>{ e.stopPropagation(); if (s==='rascunho') handleEditDraft(r); }}
-                            title={s==='rascunho' ? 'Clique para editar rascunho' : undefined}
+                            className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] ${bcls}`}
                           >
                             {s}
                           </span>
@@ -2778,14 +3513,16 @@ export default function FiscalHubPage(){
                           })()}
                           {s==='rascunho' && (
                             <>
-                              <button
-                                type="button"
-                                className="inline-flex items-center justify-center w-5 h-5 rounded hover:bg-surface-2 text-text-secondary hover:text-text-primary"
-                                onClick={(e)=>{ e.stopPropagation(); handleEditDraft(r); }}
-                                title="Editar rascunho"
-                              >
-                                <Pencil className="w-3 h-3" />
-                              </button>
+                              {false && (
+                                <button
+                                  type="button"
+                                  className="inline-flex items-center justify-center w-5 h-5 rounded hover:bg-surface-2 text-text-secondary hover:text-text-primary"
+                                  onClick={(e)=>{ e.stopPropagation(); handleEditDraft(r); }}
+                                  title="Editar rascunho"
+                                >
+                                  <Pencil className="w-3 h-3" />
+                                </button>
+                              )}
                               <button
                                 type="button"
                                 className="inline-flex items-center justify-center w-5 h-5 rounded hover:bg-surface-2 text-text-secondary hover:text-destructive"
@@ -2826,16 +3563,19 @@ export default function FiscalHubPage(){
             </table>
           </div>
           <div className="flex items-center justify-between mt-2 gap-2">
-            <div className="text-xs text-text-secondary">Página {page} de {Math.max(1, Math.ceil((nfeSorted||[]).length / pageSize))} • {(nfeSorted||[]).length} registros</div>
+            <div className="sm:hidden text-[11px] text-text-secondary">Pág. {page} de {nfeTotalPages}</div>
+            <div className="hidden sm:block text-xs text-text-secondary">Página {page} de {nfeTotalPages} • {(nfeSorted||[]).length} registros</div>
             <div className="flex items-center gap-2">
-              <label className="text-xs text-text-secondary">Itens por página</label>
-              <select className="h-7 rounded-md bg-surface border border-border text-xs px-2" value={pageSize} onChange={e=>{ setPage(1); setPageSize(Number(e.target.value)||50); }}>
-                <option value={20}>20</option>
-                <option value={50}>50</option>
-                <option value={100}>100</option>
-              </select>
+              <div className="hidden sm:flex items-center gap-2">
+                <label className="text-xs text-text-secondary">Itens por página</label>
+                <select className="h-7 rounded-md bg-surface border border-border text-xs px-2" value={pageSize} onChange={e=>{ setPage(1); setPageSize(Number(e.target.value)||50); }}>
+                  <option value={20}>20</option>
+                  <option value={50}>50</option>
+                  <option value={100}>100</option>
+                </select>
+              </div>
               <Button size="sm" variant="outline" disabled={page<=1} onClick={()=>setPage(p=>Math.max(1,p-1))}>Anterior</Button>
-              <Button size="sm" variant="outline" disabled={page>=(Math.max(1, Math.ceil((nfeSorted||[]).length / pageSize)))} onClick={()=>setPage(p=>p+1)}>Próxima</Button>
+              <Button size="sm" variant="outline" disabled={page>=nfeTotalPages} onClick={()=>setPage(p=>Math.min(nfeTotalPages,p+1))}>Próxima</Button>
             </div>
           </div>
         </TabsContent>
@@ -2901,6 +3641,75 @@ export default function FiscalHubPage(){
               {nfceConfirmEmitting ? (
                 <span className="inline-flex items-center"><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Emitindo…</span>
               ) : 'Confirmar emissão'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal para cadastrar novo CFOP */}
+      <Dialog open={cfopModalOpen} onOpenChange={setCfopModalOpen}>
+        <DialogContent className="w-[95vw] sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Novo CFOP</DialogTitle>
+            <DialogDescription>Cadastrar um código CFOP para esta empresa.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 mt-2">
+            <div>
+              <Label>Código CFOP</Label>
+              <Input
+                value={cfopForm.codigo}
+                onChange={e => setCfopForm(f => ({ ...f, codigo: e.target.value }))}
+                placeholder="Ex.: 5102"
+              />
+            </div>
+            <div>
+              <Label>Descrição</Label>
+              <Input
+                value={cfopForm.descricao}
+                onChange={e => setCfopForm(f => ({ ...f, descricao: e.target.value }))}
+                placeholder="Ex.: Venda de mercadoria adquirida de terceiros"
+              />
+            </div>
+          </div>
+          <div className="flex justify-end gap-2 mt-4">
+            <Button variant="outline" onClick={() => setCfopModalOpen(false)}>Cancelar</Button>
+            <Button
+              onClick={async () => {
+                const codigo = (cfopForm.codigo || '').trim();
+                const descricao = (cfopForm.descricao || '').trim();
+                if (!codigo || !descricao) {
+                  toast({ title: 'Informe código e descrição do CFOP', variant: 'warning' });
+                  return;
+                }
+                if (!codigoEmpresa) {
+                  toast({ title: 'Empresa não encontrada para salvar CFOP', variant: 'destructive' });
+                  return;
+                }
+                try {
+                  const { data, error } = await supabase
+                    .from('cfops')
+                    .insert({
+                      codigo_empresa: codigoEmpresa,
+                      codigo,
+                      descricao,
+                      tipo_nota: manualForm.tipo_nota || 'saida',
+                    })
+                    .select()
+                    .single();
+                  if (error) throw error;
+                  setCfopOptions(prev => [...prev, data]);
+                  setManualForm(f => ({
+                    ...f,
+                    cfop_padrao: codigo,
+                    natOp: descricao || f.natOp || '',
+                  }));
+                  setCfopModalOpen(false);
+                } catch (e) {
+                  toast({ title: 'Falha ao salvar CFOP', description: e.message, variant: 'destructive' });
+                }
+              }}
+            >
+              Salvar
             </Button>
           </div>
         </DialogContent>
@@ -3208,39 +4017,60 @@ export default function FiscalHubPage(){
           </DialogHeader>
           <Tabs value={manualStep} onValueChange={setManualStep} className="flex-1 overflow-y-auto">
             <div className="flex items-center justify-between mb-3 gap-2">
-              <TabsList>
-                <TabsTrigger value="ident">
-                  <span className="flex items-center gap-1">
-                    {!manualTabFlags.identOk && <span className="w-1.5 h-1.5 rounded-full bg-red-500" />}
-                    <span>Identificação</span>
-                  </span>
-                </TabsTrigger>
-                <TabsTrigger value="produtos">
-                  <span className="flex items-center gap-1">
-                    {!manualTabFlags.produtosOk && <span className="w-1.5 h-1.5 rounded-full bg-red-500" />}
-                    <span>Produtos</span>
-                  </span>
-                </TabsTrigger>
-                <TabsTrigger value="pagamentos">
-                  <span className="flex items-center gap-1">
-                    {!manualTabFlags.pagamentosOk && <span className="w-1.5 h-1.5 rounded-full bg-red-500" />}
-                    <span>Pagamentos</span>
-                  </span>
-                </TabsTrigger>
-                <TabsTrigger value="totais">
-                  <span className="flex items-center gap-1">
-                    {!manualTabFlags.totaisOk && <span className="w-1.5 h-1.5 rounded-full bg-red-500" />}
-                    <span>Totais &amp; Impostos</span>
-                  </span>
-                </TabsTrigger>
-                <TabsTrigger value="transporte">
-                  <span className="flex items-center gap-1">
-                    {!manualTabFlags.transpOk && <span className="w-1.5 h-1.5 rounded-full bg-red-500" />}
-                    <span>Transporte</span>
-                  </span>
-                </TabsTrigger>
-                <TabsTrigger value="resumo">Resumo &amp; Emissão</TabsTrigger>
-              </TabsList>
+              {/* Navegação por etapas: Select no mobile, abas no desktop */}
+              <div className="flex-1 flex items-center gap-2">
+                {/* Select compacto para mobile */}
+                <div className="w-full sm:hidden">
+                  <Select value={manualStep} onValueChange={setManualStep}>
+                    <SelectTrigger className="h-9 text-xs">
+                      <SelectValue placeholder="Selecionar etapa" />
+                    </SelectTrigger>
+                    <SelectContent className="text-xs">
+                      <SelectItem value="ident">Identificação</SelectItem>
+                      <SelectItem value="produtos">Produtos</SelectItem>
+                      <SelectItem value="pagamentos">Pagamentos</SelectItem>
+                      <SelectItem value="totais">Totais &amp; Impostos</SelectItem>
+                      <SelectItem value="transporte">Transporte</SelectItem>
+                      <SelectItem value="resumo">Resumo &amp; Emissão</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Abas clássicas apenas em desktop/tablet */}
+                <TabsList className="hidden sm:inline-flex">
+                  <TabsTrigger value="ident">
+                    <span className="flex items-center gap-1">
+                      {!manualTabFlags.identOk && <span className="w-1.5 h-1.5 rounded-full bg-red-500" />}
+                      <span>Identificação</span>
+                    </span>
+                  </TabsTrigger>
+                  <TabsTrigger value="produtos">
+                    <span className="flex items-center gap-1">
+                      {!manualTabFlags.produtosOk && <span className="w-1.5 h-1.5 rounded-full bg-red-500" />}
+                      <span>Produtos</span>
+                    </span>
+                  </TabsTrigger>
+                  <TabsTrigger value="pagamentos">
+                    <span className="flex items-center gap-1">
+                      {!manualTabFlags.pagamentosOk && <span className="w-1.5 h-1.5 rounded-full bg-red-500" />}
+                      <span>Pagamentos</span>
+                    </span>
+                  </TabsTrigger>
+                  <TabsTrigger value="totais">
+                    <span className="flex items-center gap-1">
+                      {!manualTabFlags.totaisOk && <span className="w-1.5 h-1.5 rounded-full bg-red-500" />}
+                      <span>Totais &amp; Impostos</span>
+                    </span>
+                  </TabsTrigger>
+                  <TabsTrigger value="transporte">
+                    <span className="flex items-center gap-1">
+                      {!manualTabFlags.transpOk && <span className="w-1.5 h-1.5 rounded-full bg-red-500" />}
+                      <span>Transporte</span>
+                    </span>
+                  </TabsTrigger>
+                  <TabsTrigger value="resumo">Resumo &amp; Emissão</TabsTrigger>
+                </TabsList>
+              </div>
               <Button
                 size="sm"
                 variant="outline"
@@ -3253,7 +4083,8 @@ export default function FiscalHubPage(){
               <div className="space-y-3">
                 <div className="border border-border rounded-md bg-surface p-3">
                   <div className="text-sm font-medium mb-2">Identificação da Nota</div>
-                  <div className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
+                  {/* No mobile usamos 2 colunas para reduzir altura; em md+ mantemos 4 colunas como antes */}
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 items-end">
                     <div className="md:col-span-1 max-w-[210px]">
                       <Label className={isEmpty(manualForm.modelo) ? 'text-red-400' : ''}>Tipo de Documento</Label>
                       <Select value={manualForm.modelo} onValueChange={(v)=>setManualForm(f=>({...f, modelo: v}))}>
@@ -3292,14 +4123,54 @@ export default function FiscalHubPage(){
                         </SelectContent>
                       </Select>
                     </div>
-                    <div className="md:col-span-1">
+                    {/* Natureza da Operação: visível apenas em telas >= sm; no mobile removemos para simplificar */}
+                    <div className="md:col-span-1 col-span-2 hidden sm:block">
                       <Label className={isEmpty(manualForm.natOp) ? 'text-red-400' : ''}>Natureza da Operação</Label>
                       <Input
                         className={`h-8 text-xs ${isEmpty(manualForm.natOp) ? 'border-red-500 text-red-400 placeholder:text-red-400' : ''}`}
                         value={manualForm.natOp}
-                        onChange={(e)=>setManualForm(f=>({...f, natOp: e.target.value}))}
+                        onChange={(e)=>{
+                          const val = e.target.value;
+                          setManualForm(f=>({...f, natOp: val}));
+                        }}
                         placeholder="Ex.: Venda de mercadoria"
                       />
+                    </div>
+                    <div className="md:col-span-1 max-w-[200px]">
+                      <Label className={!manualForm.cfop_padrao ? 'text-red-400' : ''}>CFOP</Label>
+                      <Select
+                        value={manualForm.cfop_padrao || ''}
+                        onValueChange={(v)=>{
+                          if (v === '__novo_cfop__') {
+                            setCfopForm({ codigo: '', descricao: '' });
+                            setCfopModalOpen(true);
+                            return;
+                          }
+                          setManualForm(f=>{
+                            const found = (cfopOptions||[]).find(c => String(c.codigo) === String(v));
+                            const descr = found?.descricao || '';
+                            return {
+                              ...f,
+                              cfop_padrao: v,
+                              natOp: descr || f.natOp || '',
+                            };
+                          });
+                        }}
+                      >
+                        <SelectTrigger className={`h-8 text-xs ${!manualForm.cfop_padrao ? 'border-red-500 text-red-400' : ''}`}>
+                          <span className="truncate">
+                            {manualForm.cfop_padrao || 'Selecione'}
+                          </span>
+                        </SelectTrigger>
+                        <SelectContent className="max-h-72">
+                          {(cfopOptions||[]).map(c => (
+                            <SelectItem key={c.id || c.codigo} value={c.codigo}>
+                              {c.codigo} - {c.descricao}
+                            </SelectItem>
+                          ))}
+                          <SelectItem value="__novo_cfop__">+ Cadastrar novo CFOP…</SelectItem>
+                        </SelectContent>
+                      </Select>
                     </div>
                     <div className="md:col-span-1 max-w-[200px]">
                       <Label className={isEmpty(manualForm.data_emissao) ? 'text-red-400' : ''}>Data de Emissão</Label>
@@ -3370,17 +4241,17 @@ export default function FiscalHubPage(){
                   <div className="flex items-center justify-between mb-2">
                     <div className="text-sm font-medium">Destinatário</div>
                     <div className="flex items-center gap-2">
-                      <div className="flex items-center gap-1">
+                      <div className="flex-1 min-w-0">
                         <Input
-                          className="w-[260px] h-8 text-xs"
+                          className="h-8 text-xs w-full"
                           placeholder="Nome, código, CPF ou CNPJ"
                           value={partyQuery}
                           onChange={(e)=>setPartyQuery(e.target.value)}
                         />
-                        <Button size="icon" variant="outline" className="h-8 w-8" onClick={()=>setPartyPickerOpen(true)}>
-                          <Search className="w-4 h-4" />
-                        </Button>
                       </div>
+                      <Button size="icon" variant="outline" className="h-8 w-8 flex-shrink-0" onClick={()=>setPartyPickerOpen(true)}>
+                        <Search className="w-4 h-4" />
+                      </Button>
                     </div>
                   </div>
                   {(partyQuery||'').trim().length > 0 && filteredPartyList.length > 0 && (
@@ -3402,7 +4273,7 @@ export default function FiscalHubPage(){
                       ))}
                     </div>
                   )}
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                     <div>
                       <Label>Tipo de Pessoa</Label>
                       <Select value={manualForm.tipo_pessoa} onValueChange={(v)=>setManualForm(f=>({...f, tipo_pessoa: v}))}>
@@ -3413,7 +4284,7 @@ export default function FiscalHubPage(){
                         </SelectContent>
                       </Select>
                     </div>
-                    <div>
+                    <div className="col-span-2 md:col-span-1">
                       <Label className={isEmpty(manualForm.cpf_cnpj) ? 'text-red-400' : ''}>{manualForm.tipo_pessoa==='PF' ? 'CPF' : 'CNPJ'}</Label>
                       <Input className={isEmpty(manualForm.cpf_cnpj) ? 'border-red-500 text-red-400 placeholder:text-red-400' : ''} value={manualForm.cpf_cnpj} onChange={(e)=>setManualForm(f=>({...f, cpf_cnpj: e.target.value}))} />
                     </div>
@@ -3432,7 +4303,7 @@ export default function FiscalHubPage(){
                         </SelectContent>
                       </Select>
                     </div>
-                    <div>
+                    <div className="col-span-2 md:col-span-1">
                       <Label>Inscrição Estadual</Label>
                       <div className="flex items-center gap-2">
                         <Input value={manualForm.ie_isento ? 'ISENTO' : (manualForm.inscricao_estadual||'')} onChange={(e)=>setManualForm(f=>({...f, inscricao_estadual: e.target.value, ie_isento: String(e.target.value||'').toUpperCase()==='ISENTO'}))} />
@@ -4157,7 +5028,7 @@ export default function FiscalHubPage(){
                 const isNFe = String(manualForm.modelo) === '55';
 
                 // ide checks (subset available at this stage)
-                const ideOk = !!(manualForm.modelo && manualForm.serie && manualForm.natOp && manualForm.data_emissao && manualForm.tipo_nota && manualForm.idDest && (manualForm.indFinal ?? '') !== '' && (manualForm.indPres ?? '') !== '' && manualForm.finNFe);
+                const ideOk = !!(manualForm.modelo && manualForm.serie && manualForm.natOp && manualForm.data_emissao && manualForm.tipo_nota && manualForm.idDest && (manualForm.indFinal ?? '') !== '' && (manualForm.indPres ?? '') !== '' && manualForm.finNFe && manualForm.cfop_padrao);
 
                 // emit checks (empresa)
                 const empresaIBGE = empresaInfo?.cidade_ibge || empresaInfo?.codigo_municipio_ibge || empresaInfo?.codigo_ibge_municipio || empresaInfo?.ibge || empresaInfo?.cod_municipio || '';

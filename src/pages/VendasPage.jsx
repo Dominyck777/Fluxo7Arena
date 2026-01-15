@@ -1469,7 +1469,9 @@ function VendasPage() {
       const raw = (fin && fin.taxa_percentual != null) ? Number(fin.taxa_percentual) : 0;
       return Number.isFinite(raw) ? (raw / 100) : 0;
     };
+    const getMethod = (id) => (payMethods || []).find(m => String(m.id) === String(id));
     const sumPayments = () => (paymentLines || []).reduce((acc, ln) => acc + parseBRL(ln.value), 0);
+    const [expandedPaymentId, setExpandedPaymentId] = useState(null);
     // Expor setters para sincronização via Realtime
     useEffect(() => {
       payDialogSetLinesRef.current = setPaymentLines;
@@ -1579,20 +1581,11 @@ function VendasPage() {
             return;
           }
 
-          // 4) Sem rascunho: comportamento padrão atual (linha base preenchida automaticamente)
-          // garante método padrão mesmo se payMethods chegar após a abertura
+          // 4) Sem rascunho: linha base preenchida automaticamente usando o TOTAL já com desconto da comanda
+          // `total` já vem de calculateTotal(selectedTable.order, selectedTable), incluindo descontos de item e da comanda
           let defMethod = (payMethods && payMethods[0] && payMethods[0].id) ? payMethods[0].id : null;
           let primaryId = (normalized[0]?.id) || null;
-          let initialValue = '';
-          // auto-preencher SEMPRE com o valor total (independente de quantos clientes)
-          try {
-            const itens = await listarItensDaComanda({ comandaId: selectedTable.comandaId, codigoEmpresa: userProfile?.codigo_empresa });
-            const totalItens = (itens || []).reduce((acc, it) => acc + Number(it.quantidade||0) * Number(it.preco_unitario||0), 0);
-            if (totalItens > 0) {
-              initialValue = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(totalItens);
-            }
-          } catch {}
-          const base = parseBRL(initialValue);
+          const base = total > 0 ? total : 0;
           const ln0 = { id: 1, clientId: primaryId, methodId: defMethod, baseValue: base, chargeFee: true };
           const t0 = taxaForLine(ln0);
           const shown = ln0.chargeFee ? (base * (1 + t0)) : base;
@@ -1794,80 +1787,328 @@ function VendasPage() {
     const uiDiffAbs = Math.abs(uiDiffSigned);
 
     return (
-      <Dialog open={isPayOpen} onOpenChange={setIsPayOpen}>
-        <DialogContent forceMount onOpenAutoFocus={(e) => e.preventDefault()} className="sm:max-w-xl w-[92vw] h-[85vh] min-h-0 animate-none flex flex-col overflow-hidden" onKeyDown={(e) => e.stopPropagation()} onKeyDownCapture={(e) => e.stopPropagation()} onPointerDownOutside={(e) => e.preventDefault()} onInteractOutside={(e) => e.preventDefault()}>
-          <DialogHeader>
-            <DialogTitle className="text-2xl font-bold">Fechar Conta</DialogTitle>
-            <DialogDescription>Divida o pagamento entre clientes e várias finalizadoras, se necessário.</DialogDescription>
+
+      <Dialog
+        open={isPayOpen}
+        onOpenChange={(open) => {
+          // Enquanto o diálogo de desconto da comanda estiver aberto,
+          // ignorar tentativas de fechar/abrir o PayDialog por interações externas
+          if (isDescontoComandaDialogOpen) return;
+          setIsPayOpen(open);
+        }}
+      >
+        <DialogContent
+          onOpenAutoFocus={(e) => e.preventDefault()}
+          className="sm:max-w-xl w-[92vw] max-h-[80vh] min-h-0 animate-none flex flex-col overflow-hidden p-3 sm:p-6"
+          onKeyDown={(e) => e.stopPropagation()}
+          onKeyDownCapture={(e) => e.stopPropagation()}
+        >
+          <DialogHeader className="flex flex-col gap-1 pr-6">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3">
+              <DialogTitle className="text-2xl font-bold">Fechar Conta</DialogTitle>
+              {!isMobileView && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="self-start sm:self-auto"
+                  onClick={() => setIsDescontoComandaDialogOpen(true)}
+                >
+                  Desconto
+                </Button>
+              )}
+            </div>
           </DialogHeader>
           <div className="flex-1 min-h-0 flex flex-col space-y-2">
-            {/* Cálculo de descontos - Compacto */}
+            {/* Resumo compacto: subtotal, desconto de comanda e total já calculado */}
             {(() => {
               let subtotalItens = 0;
               let descontoItens = 0;
-              let descontoComanda = 0;
-              
+
               // Calcular subtotal e descontos por item
               for (const item of (selectedTable?.order || [])) {
                 const valor = (item.price || 0) * (item.quantity || 1);
                 subtotalItens += valor;
-                
+
                 if (item.desconto_tipo === 'percentual' && item.desconto_valor > 0) {
                   descontoItens += valor * (item.desconto_valor / 100);
                 } else if (item.desconto_tipo === 'fixo' && item.desconto_valor > 0) {
                   descontoItens += item.desconto_valor;
                 }
               }
-              
-              // Calcular desconto da comanda
+
+              // Desconto da comanda calculado sobre o subtotal já com desconto de item
               const subtotalComDescItens = subtotalItens - descontoItens;
+              let descontoComanda = 0;
               if (selectedTable?.desconto_tipo === 'percentual' && selectedTable?.desconto_valor > 0) {
                 descontoComanda = subtotalComDescItens * (selectedTable.desconto_valor / 100);
               } else if (selectedTable?.desconto_tipo === 'fixo' && selectedTable?.desconto_valor > 0) {
                 descontoComanda = selectedTable.desconto_valor;
               }
-              
-              const totalDescontos = descontoItens + descontoComanda;
-              
+
               return (
-                <>
-                  <div className="flex items-center gap-8 text-sm">
-                    <div className="flex items-center gap-2">
-                      <span className="text-text-secondary">Subtotal</span>
-                      <span className="font-semibold">R$ {subtotalItens.toFixed(2)}</span>
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between text-sm text-text-secondary">
+                    <span>Subtotal</span>
+                    <span className="font-semibold">R$ {subtotalItens.toFixed(2)}</span>
+                  </div>
+                  {descontoComanda > 0.0005 && (
+                    <div className="flex items-center justify-between text-sm text-destructive">
+                      <span>Desconto da comanda</span>
+                      <span className="font-semibold">-R$ {descontoComanda.toFixed(2)}</span>
                     </div>
-                    {totalDescontos > 0 && (
-                      <div className="flex items-center gap-2 text-destructive">
-                        <span>Descontos</span>
-                        <span className="font-semibold">-R$ {totalDescontos.toFixed(2)}</span>
-                      </div>
-                    )}
+                  )}
+                  <div className="border-t border-border pt-1 mt-1 flex items-center justify-between text-lg font-semibold">
+                    <span>Total com desconto</span>
+                    <span>R$ {total.toFixed(2)}</span>
                   </div>
-                  
-                  <div className="border-t border-border pt-1 flex items-center justify-between">
-                    <div className="font-semibold">Total</div>
-                    <div className="font-bold text-lg">R$ {total.toFixed(2)}</div>
-                  </div>
-                </>
+                </div>
               );
             })()}
-            
-            <div className="flex items-center gap-8 text-xs text-text-muted pt-1">
-              <div className="flex items-center gap-2">
-                <span>Pagamentos</span>
-                <span className="font-semibold">R$ {uiTotalSum.toFixed(2)}</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span>Diferença</span>
-                <span className={uiDiffAbs > 0.009 ? (uiDiffSigned > 0 ? 'font-semibold text-emerald-600' : 'font-semibold text-amber-600') : 'font-semibold'}>
-                  {uiDiffAbs > 0.009
-                    ? `${uiDiffSigned > 0 ? '+' : '-'} R$ ${uiDiffAbs.toFixed(2)}`
-                    : 'R$ 0,00'}
-                </span>
-              </div>
-            </div>
-            <div className="flex-1 space-y-2 overflow-y-auto thin-scroll pr-1">
+
+            {(() => {
+              const totalBase = uiEffTotal; // total dos itens já com descontos
+              const taxas = uiFeeSum;
+              const esperado = uiExpected; // totalBase + taxas
+              const pagamentos = uiTotalSum;
+              let restante = esperado - pagamentos;
+              let troco = 0;
+              if (restante < 0) {
+                troco = Math.abs(restante);
+                restante = 0;
+              }
+
+              return (
+                <div className="space-y-1 text-xs text-text-muted pt-1">
+                  <div className="flex items-center justify-between">
+                    <span>Total a pagar</span>
+                    <span className="font-semibold">R$ {esperado.toFixed(2)}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span>Pagamentos</span>
+                    <span className="font-semibold">R$ {pagamentos.toFixed(2)}</span>
+                  </div>
+                  <div className="flex items-center justify-between font-semibold">
+                    <span>Restante</span>
+                    <span className={Math.abs(restante) < 0.005 ? 'text-emerald-600' : 'text-amber-600'}>
+                      R$ {restante.toFixed(2)}
+                    </span>
+                  </div>
+                  {troco > 0 && (
+                    <div className="flex items-center justify-between font-semibold">
+                      <span>Troco</span>
+                      <span>R$ {troco.toFixed(2)}</span>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+            <div className="flex-1 space-y-2 overflow-y-auto thin-scroll pr-0 sm:pr-1">
               <Label className="block">Pagamentos</Label>
+              {/* Mobile: cartões suspensos (colapsáveis) */}
+              <div className="sm:hidden space-y-2">
+                {(paymentLines || []).map((ln, idx) => {
+                  const resolveClientName = (cid) => {
+                    if (!cid) return 'Cliente';
+                    const byPay = (payClients || []).find(c => String(c.id) === String(cid));
+                    if (byPay?.nome) return byPay.nome;
+                    return 'Cliente';
+                  };
+                  const hasMultiClients = (payClients || []).length > 1;
+                  const primary = (payClients || [])[0] || null;
+                  return (
+                    <div key={'payline-m-' + ln.id} className="space-y-2">
+                      <div className="rounded-md bg-surface-2 border border-border overflow-hidden">
+                        <button
+                          type="button"
+                          className="w-full flex items-center justify-between gap-2 px-3 py-2 text-left"
+                          onClick={() => setExpandedPaymentId(prev => (prev === ln.id ? null : ln.id))}
+                        >
+                          <div className="flex flex-col flex-1 min-w-0">
+                            <span className="text-xs text-text-secondary truncate">
+                              {resolveClientName(primary?.id || ln.clientId)}
+                            </span>
+                            <span className="text-xs font-semibold text-text-primary truncate">
+                              {ln.methodId ? (getMethod(ln.methodId)?.nome || 'Forma não selecionada') : 'Forma não selecionada'} • R$ {ln.value || '0,00'}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1 flex-shrink-0">
+                            {paymentLines.length > 1 && idx > 0 && (
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="icon"
+                                className="h-7 w-7"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  payDirtyRef.current = true;
+                                  setPaymentLines(prev => {
+                                    const newLines = prev.filter(x => x.id !== ln.id);
+                                    if (newLines.length === 0) return [];
+                                    const totalValue = total > 0 ? total : 0;
+                                    const perLine = Math.floor((totalValue / newLines.length) * 100) / 100;
+                                    const remainder = totalValue - (perLine * newLines.length);
+                                    return newLines.map((line, i) => {
+                                      const value = i === newLines.length - 1 ? perLine + remainder : perLine;
+                                      const lnTmp = { ...line };
+                                      const t = taxaForLine(lnTmp);
+                                      const charge = lnTmp.chargeFee !== false;
+                                      const base = charge && t > 0 ? (value / (1 + t)) : value;
+                                      return { ...lnTmp, baseValue: base, value: formatBRL(value) };
+                                    });
+                                  });
+                                }}
+                              >
+                                <Trash2 className="h-3 w-3" />
+                              </Button>
+                            )}
+                          </div>
+                        </button>
+                        {expandedPaymentId === ln.id && (
+                          <div className="px-3 pb-3 pt-1 space-y-2 border-t border-border/60">
+                            <div className="flex items-center gap-2">
+                              <Select value={String(ln.methodId || '')} onValueChange={(v) => {
+                                payDirtyRef.current = true;
+                                const next = (paymentLines || []).map(x => {
+                                  if (x.id !== ln.id) return x;
+                                  const newId = String(v);
+                                  const lnNew = { ...x, methodId: newId };
+                                  const t = taxaForLine(lnNew);
+                                  const shown = (lnNew.chargeFee !== false) ? (Number(lnNew.baseValue || 0) * (1 + t)) : Number(lnNew.baseValue || 0);
+                                  return { ...lnNew, value: formatBRL(shown) };
+                                });
+                                setPaymentLines(next);
+                                try {
+                                  const comandaId = selectedTable?.comandaId;
+                                  const codigoEmpresa = userProfile?.codigo_empresa;
+                                  if (comandaId && codigoEmpresa) {
+                                    const linhas = next.map((ln2) => {
+                                      const v2 = Number(ln2.baseValue || 0);
+                                      const fin2 = (payMethods || []).find(m => String(m.id) === String(ln2.methodId));
+                                      const metodoNome2 = fin2?.tipo || fin2?.nome || 'outros';
+                                      return {
+                                        clienteId: ln2.clientId || null,
+                                        finalizadoraId: ln2.methodId || null,
+                                        metodo: metodoNome2,
+                                        valor: v2,
+                                      };
+                                    });
+                                    lastPaymentsWriteAtRef.current = Date.now();
+                                    salvarRascunhoPagamentosComanda({ comandaId, linhas, codigoEmpresa })
+                                      .then(() => { /* ok */ })
+                                      .catch((e) => {
+                                        console.warn('[PayDialog] Falha ao salvar rascunho após troca de finalizadora (bg):', e);
+                                        payDirtyRef.current = true;
+                                      });
+                                    payDirtyRef.current = false;
+                                  }
+                                } catch (e) {
+                                  console.warn('[PayDialog] Falha ao salvar rascunho após troca de finalizadora:', e);
+                                }
+                              }}>
+                                <SelectTrigger className="flex-1 h-9 truncate text-sm">
+                                  <SelectValue placeholder="Forma de pagamento" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {(payMethods || []).map(m => (
+                                    <SelectItem key={String(m.id)} value={String(m.id)}>{m.nome}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                              <Input
+                                placeholder="0,00"
+                                inputMode="numeric"
+                                value={ln.value}
+                                className="w-28 h-9 text-sm"
+                                onChange={(e) => {
+                                  payDirtyRef.current = true;
+                                  const digits = (e.target.value || '').replace(/\D/g, '');
+                                  const entered = digits ? Number(digits) / 100 : 0;
+                                  setPaymentLines(prev => prev.map(x => {
+                                    if (x.id !== ln.id) return x;
+                                    const t = taxaForLine(x);
+                                    const base = (x.chargeFee !== false && t > 0) ? (entered / (1 + t)) : entered;
+                                    const shown = (x.chargeFee !== false) ? (base * (1 + t)) : base;
+                                    return { ...x, baseValue: base, value: formatBRL(shown) };
+                                  }));
+                                }}
+                                onKeyDown={(e) => {
+                                  e.stopPropagation();
+                                  if (e.key === 'Enter') { e.preventDefault(); focusNextValue(e.currentTarget, ln.id); return; }
+                                  const allowed = ['Backspace','Delete','ArrowLeft','ArrowRight','Tab'];
+                                  if (allowed.includes(e.key)) return;
+                                  if (!/^[0-9]$/.test(e.key)) { e.preventDefault(); }
+                                }}
+                                onBeforeInput={(e) => { const data = e.data ?? ''; if (data && /\D/.test(data)) e.preventDefault(); }}
+                              />
+                            </div>
+                            <div className="-mt-1 pl-1">
+                              {(() => {
+                                const tPct = taxaForLine(ln);
+                                const taxa = tPct * 100;
+                                const active = ln.chargeFee !== false;
+                                const base = ln.baseValue != null ? Number(ln.baseValue) : (() => {
+                                  const raw = (ln.value || '').toString();
+                                  const digits = raw.replace(/\D/g, '');
+                                  const disp = digits ? Number(digits) / 100 : 0;
+                                  return active && tPct > 0 ? (disp / (1 + tPct)) : disp;
+                                })();
+                                if (!taxa || taxa <= 0 || !Number.isFinite(base) || base <= 0) return null;
+                                const fee = active ? (base * tPct) : 0;
+                                return (
+                                  <button
+                                    type="button"
+                                    onClick={async () => {
+                                      payDirtyRef.current = true;
+                                      const next = (paymentLines || []).map(x => {
+                                        if (x.id !== ln.id) return x;
+                                        const t = taxaForLine(x);
+                                        const wasActive = x.chargeFee !== false;
+                                        const base = x.baseValue != null ? Number(x.baseValue) : parseBRL(x.value);
+                                        const shown = (!wasActive ? (base * (1 + t)) : base);
+                                        return { ...x, chargeFee: !wasActive, baseValue: base, value: formatBRL(shown) };
+                                      });
+                                      setPaymentLines(next);
+                                      try {
+                                        const comandaId = selectedTable?.comandaId;
+                                        const codigoEmpresa = userProfile?.codigo_empresa;
+                                        if (comandaId && codigoEmpresa) {
+                                          const linhas = next.map((ln2) => ({
+                                            clienteId: ln2.clientId || null,
+                                            finalizadoraId: ln2.methodId || null,
+                                            metodo: ((payMethods || []).find(m => String(m.id) === String(ln2.methodId))?.tipo) || ((payMethods || []).find(m => String(m.id) === String(ln2.methodId))?.nome) || 'outros',
+                                            valor: Number(ln2.baseValue || 0),
+                                          }));
+                                          lastPaymentsWriteAtRef.current = Date.now();
+                                          await salvarRascunhoPagamentosComanda({ comandaId, linhas, codigoEmpresa });
+                                          payDirtyRef.current = false;
+                                        }
+                                      } catch (e) {
+                                        console.warn('[PayDialog] Falha ao salvar rascunho após alternar taxa:', e);
+                                      }
+                                    }}
+                                    className={[
+                                      "inline-flex items-center gap-2 px-3 py-1 rounded-sm text-xs font-medium border transition-colors",
+                                      active ? "bg-black text-amber-400 border-amber-500" : "bg-surface text-text-secondary border-border hover:border-border-hover"
+                                    ].join(' ')}
+                                    title={active ? 'Desmarcar taxa' : 'Cobrar taxa'}
+                                  >
+                                    <span className={["inline-block h-3 w-3 rounded-sm border",
+                                      active ? "bg-amber-500 border-amber-400" : "bg-transparent border-border"].join(' ')} />
+                                    <span>Taxa R$ {fee.toFixed(2)}</span>
+                                  </button>
+                                );
+                              })()}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Desktop: mantém grid existente */}
               {(paymentLines || []).map((ln, idx) => {
                 const resolveClientName = (cid) => {
                   if (!cid) return 'Cliente';
@@ -1880,7 +2121,7 @@ function VendasPage() {
                 // PERMITIR selecionar o mesmo cliente múltiplas vezes - não filtrar por usados
                 const remaining = (payClients || []).filter(c => String(c.id) !== String(primary?.id || ''));
                 return (
-                  <div key={'payline-' + ln.id} className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-center">
+                  <div key={'payline-' + ln.id} className="hidden sm:grid sm:grid-cols-12 gap-2 items-center">
                     <div className="sm:col-span-1 flex sm:justify-start">
                       {paymentLines.length > 1 && idx > 0 && (
                         <Button type="button" variant="outline" size="sm" className="h-8 w-8" onClick={() => {
@@ -1903,7 +2144,7 @@ function VendasPage() {
                               return { ...lnTmp, baseValue: base, value: formatBRL(value) };
                             });
                           });
-                        }}>×</Button>
+                        }}><Trash2 size={14}/></Button>
                       )}
                     </div>
                     {(idx === 0) ? (
@@ -2104,22 +2345,6 @@ function VendasPage() {
                 }}
                 >Adicionar forma</Button>
               </div>
-              {(() => {
-                const somaExibida = sumPayments();
-                const feeSum = (paymentLines || []).reduce((acc, ln) => {
-                  const base = Number(ln.baseValue || 0);
-                  const t = taxaForLine(ln);
-                  return acc + ((ln.chargeFee !== false && t > 0) ? (base * t) : 0);
-                }, 0);
-                const esperado = (total > 0 ? total : 0) + feeSum;
-                const restante = esperado - somaExibida;
-                return (
-                  <>
-                    <div className="text-sm text-text-secondary flex justify-between"><span>Soma</span><span>R$ {somaExibida.toFixed(2)}</span></div>
-                    <div className="text-sm font-semibold flex justify-between"><span>Restante</span><span className={Math.abs(restante) < 0.005 ? 'text-success' : 'text-warning'}>R$ {restante.toFixed(2)}</span></div>
-                  </>
-                );
-              })()}
             </div>
           </div>
           <DialogFooter className="sticky bottom-0 bg-surface/95 backdrop-blur supports-[backdrop-filter]:bg-surface/75 border-t border-border">
@@ -2517,8 +2742,8 @@ function VendasPage() {
           </div>
         )}
 
-        {/* Desconto da Comanda */}
-        {table.comandaId && (
+        {/* Desconto da Comanda (somente desktop) */}
+        {!isMobileView && table.comandaId && (
           <div className="space-y-2">
             <Label className="text-sm font-semibold">Desconto da Comanda</Label>
             <Button
@@ -5719,18 +5944,25 @@ function VendasPage() {
     if (!selectedTable) return null;
 
     return (
-      <Dialog open={isMobileModalOpen} modal={!isProductDetailsOpen} onOpenChange={(open) => {
-        if (!open && isProductDetailsOpen) return; // não fechar mesa se info estiver aberta
-        setIsMobileModalOpen(open);
-        if (!open) {
-          // Garantir que qualquer modal de desconto de item seja fechado junto com o modal mobile
-          setSelectedItemForDesconto(null);
-        }
-        // Manter focusContext em 'tables' quando modal está aberto para permitir navegação por setas
-        if (open) {
-          setFocusContext('tables');
-        }
-      }}>
+      <Dialog
+        open={isMobileModalOpen}
+        modal={!isProductDetailsOpen}
+        onOpenChange={(open) => {
+          // Enquanto o diálogo de desconto da comanda estiver aberto,
+          // ignorar tentativas de fechar/abrir o modal mobile por interações externas
+          if (isDescontoComandaDialogOpen) return;
+          if (!open && isProductDetailsOpen) return; // não fechar mesa se info estiver aberta
+          setIsMobileModalOpen(open);
+          if (!open) {
+            // Garantir que qualquer modal de desconto de item seja fechado junto com o modal mobile
+            setSelectedItemForDesconto(null);
+          }
+          // Manter focusContext em 'tables' quando modal está aberto para permitir navegação por setas
+          if (open) {
+            setFocusContext('tables');
+          }
+        }}
+      >
         <DialogContent 
           className="w-[95vw] sm:max-w-2xl max-h-[85vh] flex flex-col p-0 gap-0 animate-none"
         >
@@ -6096,16 +6328,51 @@ function VendasPage() {
         />
       )}
 
-      {/* Dialog de Desconto de Comanda */}
-      {selectedTable && isDescontoComandaDialogOpen && (
+      {/* Dialog de Desconto de Comanda (somente desktop) */}
+      {!isMobileView && selectedTable && isDescontoComandaDialogOpen && (
         <DescontoComandaDialog
-          comanda={selectedTable}
-          subtotal={calculateTotal(selectedTable.order || [], selectedTable)}
-          onApply={() => {
-            // Recarregar detalhes completos da mesa selecionada
-            if (selectedTable) {
-              refetchSelectedTableDetails(selectedTable)
+          comanda={{
+            id: selectedTable.comandaId,
+            desconto_tipo: selectedTable.desconto_tipo || null,
+            desconto_valor: Number(selectedTable.desconto_valor || 0),
+            desconto_motivo: selectedTable.desconto_motivo || null,
+          }}
+          // Subtotal para o diálogo: apenas descontos de item, sem aplicar desconto de comanda ainda
+          subtotal={(() => {
+            let subtotal = 0;
+            let descontoItens = 0;
+            for (const item of (selectedTable.order || [])) {
+              const valor = (item.price || 0) * (item.quantity || 1);
+              subtotal += valor;
+              if (item.desconto_tipo === 'percentual' && item.desconto_valor > 0) {
+                descontoItens += valor * (item.desconto_valor / 100);
+              } else if (item.desconto_tipo === 'fixo' && item.desconto_valor > 0) {
+                descontoItens += item.desconto_valor;
+              }
             }
+            return Math.max(0, subtotal - descontoItens);
+          })()}
+          onApply={(updatedComanda) => {
+            (async () => {
+              // Atualizar selectedTable localmente com os dados retornados pela API
+              if (updatedComanda) {
+                setSelectedTable(prev => {
+                  if (!prev) return prev;
+                  if (prev.comandaId !== updatedComanda.id) return prev;
+                  return {
+                    ...prev,
+                    desconto_tipo: updatedComanda.desconto_tipo || null,
+                    desconto_valor: Number(updatedComanda.desconto_valor || 0),
+                    desconto_motivo: updatedComanda.desconto_motivo || null,
+                  };
+                });
+              }
+              // Recarregar detalhes completos da mesa selecionada (itens/clientes), se desejar
+              if (selectedTable) {
+                await refetchSelectedTableDetails(selectedTable);
+              }
+              setIsDescontoComandaDialogOpen(false);
+            })();
           }}
           onClose={() => setIsDescontoComandaDialogOpen(false)}
           codigoEmpresa={userProfile?.codigo_empresa}

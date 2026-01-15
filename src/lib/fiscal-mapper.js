@@ -337,15 +337,80 @@ export async function generateNfcePayloadPreview({ comandaId, codigoEmpresa }) {
     finalizadoras = fins || [];
   }
 
-  // Totais
+  // Totais baseados apenas em descontos de item
   const totalSemDesc = itens.reduce((acc, it) => acc + Number(it.quantidade || 0) * Number(it.preco_unitario || 0), 0);
-  const totalDesc = itens.reduce((acc, it) => acc + Number(it.desconto || 0), 0);
-  const total = totalSemDesc - totalDesc;
+  const totalDescItens = itens.reduce((acc, it) => acc + Number(it.desconto || 0), 0);
+
+  // Desconto de comanda (se existir) calculado sobre a base já com desconto de item
+  const baseComanda = Math.max(0, totalSemDesc - totalDescItens);
+  let descontoComanda = 0;
+  if (comanda?.desconto_tipo === 'percentual' && Number(comanda?.desconto_valor || 0) > 0) {
+    descontoComanda = baseComanda * (Number(comanda.desconto_valor) / 100);
+  } else if (comanda?.desconto_tipo === 'fixo' && Number(comanda?.desconto_valor || 0) > 0) {
+    descontoComanda = Number(comanda.desconto_valor);
+  }
+
+  const totalAposDescontos = Math.max(0, baseComanda - descontoComanda);
 
   // Destinatário (opcional)
   const dest = pickDestinatarioFromComanda(comanda, cliente);
 
   // Monta Dados conforme doc "EnviarNfce"
+  // Monta itens fiscais e, em seguida, aplica desconto global de comanda (se houver)
+  let itensFiscais = itens.map((it, idx) => {
+    const p = produtosMap.get(it.produto_id) || {};
+    const q = Number(it.quantidade || 0);
+    const unit = Number(it.preco_unitario || 0);
+    const vDesc = Number(it.desconto || 0);
+    const vTotal = q * unit - vDesc;
+    const cfop = p.cfop_interno || p.cfop || 5102;
+    const ncm = (p.ncm || '').replace(/\D/g, '').slice(0,8) || '';
+    const unidade = p.unidade || p.unit || 'UN';
+
+    // Impostos básicos (ajuste conforme seu cadastro)
+    const csosn = p.csosn_interno || p.csosn || null;
+    const cstIcms = p.cst_icms_interno || p.cstIcmsInterno || null;
+    const pisCst = p.cst_pis_saida || p.cstPisSaida || '07';
+    const cofinsCst = p.cst_cofins_saida || p.cstCofinsSaida || '07';
+    const icmsOrig = p.icms_origem ?? 0;
+
+    const itemJson = {
+      numero_item: idx + 1,
+      codigo_produto: p.code || p.codigo || p.id,
+      descricao: p.name || p.descricao || it.descricao || 'Item',
+      cfop: Number(cfop),
+      unidade_comercial: unidade,
+      quantidade_comercial: q,
+      valor_unitario_comercial: to2(unit),
+      codigo_ncm: ncm,
+      valor_desconto: vDesc ? to2(vDesc) : '',
+      valor_frete: '',
+      valor_seguro: '',
+      valor_outras_despesas: '',
+      valor_total: to2(vTotal),
+      valor_total_sem_desconto: to2(q * unit),
+
+      icms_csosn: csosn ? Number(csosn) : undefined,
+      icms_orig: Number(icmsOrig) || 0,
+      pis_situacao_tributaria: pisCst,
+      base_calculo_pis: '',
+      aliquota_pis: '',
+      valor_pis: '',
+      cofins_situacao_tributaria: cofinsCst,
+      base_calculo_cofins: '',
+      aliquota_cofins: '',
+      valor_cofins: '',
+    };
+
+    return itemJson;
+  });
+
+  if (descontoComanda > 0.0005) {
+    itensFiscais = distributeGlobalDiscount(itensFiscais, descontoComanda);
+  }
+
+  const totalFiscal = itensFiscais.reduce((acc, it) => acc + Number(it.valor_total || 0), 0);
+
   const dados = {
     tipo_operacao: 1,
     natureza_operacao: 'Venda de mercadoria',
@@ -361,7 +426,7 @@ export async function generateNfcePayloadPreview({ comandaId, codigoEmpresa }) {
     valor_frete: '0',
     valor_seguro: '0',
     valor_ipi: '0',
-    valor_total: to2(total),
+    valor_total: to2(totalFiscal),
     valor_total_sem_desconto: to2(totalSemDesc),
 
     // Destinatário (se existir)
@@ -383,53 +448,7 @@ export async function generateNfcePayloadPreview({ comandaId, codigoEmpresa }) {
       indicador_ie_destinatario: dest.indicador_ie_destinatario,
     } : {}),
 
-    Itens: [ itens.map((it, idx) => {
-      const p = produtosMap.get(it.produto_id) || {};
-      const q = Number(it.quantidade || 0);
-      const unit = Number(it.preco_unitario || 0);
-      const vDesc = Number(it.desconto || 0);
-      const vTotal = q * unit - vDesc;
-      const cfop = p.cfop_interno || p.cfop || 5102;
-      const ncm = (p.ncm || '').replace(/\D/g, '').slice(0,8) || '';
-      const unidade = p.unidade || p.unit || 'UN';
-
-      // Impostos básicos (ajuste conforme seu cadastro)
-      const csosn = p.csosn_interno || p.csosn || null;
-      const cstIcms = p.cst_icms_interno || p.cstIcmsInterno || null;
-      const pisCst = p.cst_pis_saida || p.cstPisSaida || '07';
-      const cofinsCst = p.cst_cofins_saida || p.cstCofinsSaida || '07';
-      const icmsOrig = p.icms_origem ?? 0;
-
-      const itemJson = {
-        numero_item: idx + 1,
-        codigo_produto: p.code || p.codigo || p.id,
-        descricao: p.name || p.descricao || it.descricao || 'Item',
-        cfop: Number(cfop),
-        unidade_comercial: unidade,
-        quantidade_comercial: q,
-        valor_unitario_comercial: to2(unit),
-        codigo_ncm: ncm,
-        valor_desconto: vDesc ? to2(vDesc) : '',
-        valor_frete: '',
-        valor_seguro: '',
-        valor_outras_despesas: '',
-        valor_total: to2(vTotal),
-        valor_total_sem_desconto: to2(q * unit),
-
-        icms_csosn: csosn ? Number(csosn) : undefined,
-        icms_orig: Number(icmsOrig) || 0,
-        pis_situacao_tributaria: pisCst,
-        base_calculo_pis: '',
-        aliquota_pis: '',
-        valor_pis: '',
-        cofins_situacao_tributaria: cofinsCst,
-        base_calculo_cofins: '',
-        aliquota_cofins: '',
-        valor_cofins: '',
-      };
-
-      return itemJson;
-    }) ],
+    Itens: itensFiscais.map(it => [it]),
   };
 
   // Checklist do que pode faltar

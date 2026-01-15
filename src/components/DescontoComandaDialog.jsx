@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { aplicarDescontoComanda, removerDescontoComanda } from '@/lib/store'
 import { useToast } from '@/components/ui/use-toast'
-import { Trash2 } from 'lucide-react'
+import { Trash2, Percent } from 'lucide-react'
 
 export function DescontoComandaDialog({ comanda, subtotal, onApply, onClose, codigoEmpresa }) {
   const { toast } = useToast()
@@ -60,7 +60,7 @@ export function DescontoComandaDialog({ comanda, subtotal, onApply, onClose, cod
       console.log('Resultado comanda:', result)
 
       toast({ title: 'Sucesso', description: 'Desconto aplicado na comanda!', variant: 'success' })
-      onApply()
+      onApply?.(result)
       onClose()
     } catch (err) {
       console.error('Erro ao aplicar desconto:', err)
@@ -73,9 +73,9 @@ export function DescontoComandaDialog({ comanda, subtotal, onApply, onClose, cod
   const handleRemover = async () => {
     try {
       setLoading(true)
-      await removerDescontoComanda({ comandaId: comanda.id, codigoEmpresa })
+      const result = await removerDescontoComanda({ comandaId: comanda.id, codigoEmpresa })
       toast({ title: 'Sucesso', description: 'Desconto removido!', variant: 'success' })
-      onApply()
+      onApply?.(result)
       onClose()
     } catch (err) {
       console.error('Erro ao remover desconto:', err)
@@ -86,15 +86,24 @@ export function DescontoComandaDialog({ comanda, subtotal, onApply, onClose, cod
   }
 
   return (
-    <Dialog open onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-[420px]">
-        <DialogHeader>
-          <DialogTitle className="text-lg font-bold">
+    <Dialog open modal onOpenChange={onClose}>
+      <DialogContent
+        overlayClassName="z-[80]"
+        className="sm:max-w-[420px] w-[92vw] max-h-[75vh] flex flex-col animate-none p-3 sm:p-6"
+        style={{ zIndex: 1000 }}
+        onOpenAutoFocus={(e) => e.preventDefault()}
+        onKeyDown={(e) => e.stopPropagation()}
+        onKeyDownCapture={(e) => e.stopPropagation()}
+        onEscapeKeyDown={(e) => e.stopPropagation()}
+      >
+        <DialogHeader className="pr-6">
+          <DialogTitle className="text-2xl font-bold flex items-center gap-3">
+            <Percent className="w-6 h-6 text-brand" />
             Desconto da Comanda
           </DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-4">
+        <div className="mt-2 space-y-4 flex-1 overflow-y-auto thin-scroll pr-0 sm:pr-1">
           {/* Tipo de Desconto */}
           <div>
             <Label className="text-sm font-semibold mb-2 block">Tipo de Desconto</Label>
@@ -131,27 +140,40 @@ export function DescontoComandaDialog({ comanda, subtotal, onApply, onClose, cod
                 autoComplete="off"
                 autoCorrect="off"
                 spellCheck={false}
-                value={tipo === 'percentual' 
-                  ? (valor === 0 ? '' : valor)
-                  : (valor === 0 ? '' : `R$ ${valor.toFixed(2)}`)
+                value={tipo === 'percentual'
+                  ? (valor === 0 ? '' : String(valor))
+                  : (valor === 0
+                    ? ''
+                    : new Intl.NumberFormat('pt-BR', {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      }).format(valor)
+                    )
                 }
                 onChange={(e) => {
-                  let inputVal = e.target.value.trim()
-                  
-                  if (inputVal === '') {
+                  const raw = e.target.value || ''
+
+                  // Campo vazio zera o valor
+                  if (raw.trim() === '') {
                     setValor(0)
                     return
                   }
-                  
-                  // Remover máscara de R$ se for desconto fixo
+
                   if (tipo === 'fixo') {
-                    inputVal = inputVal.replace(/[^\d.,]/g, '').replace(',', '.')
+                    // Mesma lógica de máscara dos pagamentos:
+                    // mantém só dígitos, converte para centavos e formata depois
+                    const digits = raw.replace(/\D/g, '')
+                    const cents = digits ? Number(digits) / 100 : 0
+                    setValor(cents)
+                    return
                   }
-                  
+
+                  // Percentual: permite número simples (0-100)
+                  let inputVal = raw.replace(/[^\d.,]/g, '').replace(',', '.')
                   let val = Number(inputVal)
                   if (isNaN(val)) val = 0
-                  if (tipo === 'percentual' && val > 100) val = 100
                   if (val < 0) val = 0
+                  if (val > 100) val = 100
                   setValor(val)
                 }}
                 placeholder={tipo === 'percentual' ? '0' : '0,00'}
@@ -208,8 +230,8 @@ export function DescontoComandaDialog({ comanda, subtotal, onApply, onClose, cod
           )}
         </div>
 
-        <DialogFooter className="flex gap-2">
-          <Button variant="outline" onClick={onClose} disabled={loading}>
+        <DialogFooter className="flex flex-col sm:flex-row gap-2 sm:justify-end pt-3 border-t border-border mt-2">
+          <Button variant="outline" onClick={onClose} disabled={loading} className="w-full sm:w-auto">
             Cancelar
           </Button>
 
@@ -219,14 +241,14 @@ export function DescontoComandaDialog({ comanda, subtotal, onApply, onClose, cod
               onClick={handleRemover}
               disabled={loading}
               size="sm"
-              className="gap-2"
+              className="gap-2 w-full sm:w-auto"
             >
               <Trash2 className="w-4 h-4" />
               Remover
             </Button>
           )}
 
-          <Button onClick={handleAplicar} disabled={loading} className="gap-2">
+          <Button onClick={handleAplicar} disabled={loading} className="gap-2 w-full sm:w-auto">
             {loading ? 'Aplicando...' : 'Aplicar Desconto'}
           </Button>
         </DialogFooter>
