@@ -73,6 +73,111 @@ const IsisBookingPageContent = () => {
   const [deferredPrompt, setDeferredPrompt] = useState(null); // Guardar evento de instalação PWA
   // Mostra opcionalmente uma correção de login (telefone/email) no próximo menu apenas uma vez após identificação
   const [correctionOptionOnce, setCorrectionOptionOnce] = useState(null); // 'telefone' | 'email' | null
+
+  // Diagnóstico: por padrão, logs são automáticos (bem verbosos).
+  // Pode ser desativado com ?debug=0 ou localStorage.isis_debug=0.
+  const isisDiagConfig = React.useMemo(() => {
+    try {
+      if (typeof window === 'undefined') return { enabled: false, verbose: false };
+      const params = new URLSearchParams(window.location.search || '');
+      const q = (params.get('debug') || '').toLowerCase();
+      if (q === '0' || q === 'false') return { enabled: false, verbose: false };
+      const ls = String(window.localStorage?.getItem('isis_debug') || '').toLowerCase();
+      if (ls === '0' || ls === 'false') return { enabled: false, verbose: false };
+      return { enabled: true, verbose: true };
+    } catch {
+      return { enabled: true, verbose: true };
+    }
+  }, []);
+
+  const isisDbg = React.useCallback((label, payload, { level = 'info' } = {}) => {
+    try {
+      if (!isisDiagConfig.enabled) return;
+      const ts = new Date().toISOString();
+      const entry = { ts, ...(payload || {}) };
+      const tag = `[Isis][Diag] ${label}`;
+      if (level === 'error') console.error(tag, entry);
+      else if (level === 'warn') console.warn(tag, entry);
+      else console.info(tag, entry);
+    } catch {}
+  }, [isisDiagConfig.enabled, isisDiagConfig.verbose]);
+
+  useEffect(() => {
+    if (!isisDiagConfig.enabled) return;
+    try {
+      const getConn = () => {
+        try {
+          const c = navigator?.connection || navigator?.mozConnection || navigator?.webkitConnection;
+          if (!c) return null;
+          return {
+            effectiveType: c.effectiveType,
+            downlink: c.downlink,
+            rtt: c.rtt,
+            saveData: c.saveData,
+            type: c.type,
+          };
+        } catch {
+          return null;
+        }
+      };
+
+      isisDbg('boot', {
+        href: window.location.href,
+        host: window.location.host,
+        pathname: window.location.pathname,
+        userAgent: navigator?.userAgent,
+        language: navigator?.language,
+        onLine: navigator?.onLine,
+        connection: getConn(),
+      }, { level: 'info' });
+
+      const onOnline = () => isisDbg('online', { onLine: true, connection: getConn() }, { level: 'warn' });
+      const onOffline = () => isisDbg('offline', { onLine: false, connection: getConn() }, { level: 'warn' });
+      const onUnhandled = (e) => {
+        const reason = e?.reason;
+        isisDbg('unhandledrejection', {
+          message: reason?.message || String(reason || ''),
+          stack: reason?.stack,
+          name: reason?.name,
+        }, { level: 'error' });
+      };
+      const onError = (e) => {
+        isisDbg('error', {
+          message: e?.message,
+          filename: e?.filename,
+          lineno: e?.lineno,
+          colno: e?.colno,
+          stack: e?.error?.stack,
+        }, { level: 'error' });
+      };
+
+      window.addEventListener('online', onOnline);
+      window.addEventListener('offline', onOffline);
+      window.addEventListener('unhandledrejection', onUnhandled);
+      window.addEventListener('error', onError);
+      try {
+        const c = navigator?.connection || navigator?.mozConnection || navigator?.webkitConnection;
+        if (c?.addEventListener) {
+          const onChange = () => isisDbg('connection_change', { onLine: navigator?.onLine, connection: getConn() }, { level: 'warn' });
+          c.addEventListener('change', onChange);
+          return () => {
+            window.removeEventListener('online', onOnline);
+            window.removeEventListener('offline', onOffline);
+            window.removeEventListener('unhandledrejection', onUnhandled);
+            window.removeEventListener('error', onError);
+            try { c.removeEventListener('change', onChange); } catch {}
+          };
+        }
+      } catch {}
+
+      return () => {
+        window.removeEventListener('online', onOnline);
+        window.removeEventListener('offline', onOffline);
+        window.removeEventListener('unhandledrejection', onUnhandled);
+        window.removeEventListener('error', onError);
+      };
+    } catch {}
+  }, [isisDiagConfig.enabled, isisDbg]);
   
   // Rota oculta de teste de erro: use ?crash=1 para acionar o ErrorBoundary
   if (typeof window !== 'undefined') {
@@ -475,6 +580,12 @@ const IsisBookingPageContent = () => {
   // Busca cliente por telefone ou email
   const buscarCliente = async (valor) => {
     try {
+      isisDbg('buscarCliente:start', {
+        tipoIdentificacao,
+        valorLen: String(valor || '').length,
+        codigoEmpresa,
+        onLine: navigator?.onLine,
+      }, { level: 'info' });
       console.log('[DEBUG] Buscando cliente com valor:', valor);
       console.log('[DEBUG] Código empresa:', codigoEmpresa);
       
@@ -487,11 +598,20 @@ const IsisBookingPageContent = () => {
         
         // Busca TODOS os clientes ativos da empresa e filtra no JavaScript
         // (mais confiável do que queries complexas com .or())
+        const t0 = performance.now();
         const { data: todosClientes, error } = await supabase
           .from('clientes')
           .select('id, nome, email, telefone, whatsapp, celular1, codigo')
           .eq('codigo_empresa', codigoEmpresa)
           .eq('status', 'active');
+
+        const msTel = Math.round(performance.now() - t0);
+        isisDbg('buscarCliente:clientes_tel_query', {
+          ms: msTel,
+          hasError: !!error,
+          error: error ? { message: error.message, code: error.code, details: error.details, hint: error.hint } : null,
+          count: Array.isArray(todosClientes) ? todosClientes.length : null,
+        }, { level: error ? 'error' : 'info' });
         
         if (error) throw error;
         
@@ -509,22 +629,44 @@ const IsisBookingPageContent = () => {
         });
         
         console.log('[DEBUG] Cliente encontrado:', clienteEncontrado);
+
+        isisDbg('buscarCliente:found_by_tel', {
+          found: !!clienteEncontrado,
+          clienteId: clienteEncontrado?.id || null,
+        }, { level: clienteEncontrado ? 'info' : 'warn' });
         
         return clienteEncontrado || null;
       }
       
       // Se não for número, busca por email
+      const t1 = performance.now();
       const { data: clientes, error } = await supabase
         .from('clientes')
         .select('id, nome, email, telefone, whatsapp, codigo')
         .eq('codigo_empresa', codigoEmpresa)
         .eq('status', 'active')
         .ilike('email', `%${valor}%`);
+
+      const msEmail = Math.round(performance.now() - t1);
+      isisDbg('buscarCliente:clientes_email_query', {
+        ms: msEmail,
+        hasError: !!error,
+        error: error ? { message: error.message, code: error.code, details: error.details, hint: error.hint } : null,
+        count: Array.isArray(clientes) ? clientes.length : null,
+      }, { level: error ? 'error' : 'info' });
       
       if (error) throw error;
+      isisDbg('buscarCliente:found_by_email', { found: !!clientes?.[0], clienteId: clientes?.[0]?.id || null }, { level: clientes?.[0] ? 'info' : 'warn' });
       return clientes?.[0] || null;
     } catch (error) {
       console.error('Erro ao buscar cliente:', error);
+      isisDbg('buscarCliente:error', {
+        message: error?.message || String(error || ''),
+        code: error?.code,
+        details: error?.details,
+        hint: error?.hint,
+        status: error?.status,
+      }, { level: 'error' });
       return null;
     }
   };
@@ -671,6 +813,13 @@ const IsisBookingPageContent = () => {
     if (tipoIdentificacao === 'data_custom') {
       return await handleDataCustomizada(valor);
     }
+
+    isisDbg('identificacao:submit', {
+      tipoIdentificacao,
+      valorLen: String(valor || '').length,
+      codigoEmpresa,
+      onLine: navigator?.onLine,
+    }, { level: 'info' });
     
     if (!valor) {
       addIsisMessage('Por favor, informe seu telefone ou e-mail.', 400);
@@ -685,7 +834,14 @@ const IsisBookingPageContent = () => {
     addUserMessage(valorExibicao);
     // setIsLoading(true); // Removido para usar apenas indicador de digitando
     
+    const t0 = performance.now();
     const cliente = await buscarCliente(valor);
+    const msLookup = Math.round(performance.now() - t0);
+    isisDbg('identificacao:buscarCliente_done', {
+      ms: msLookup,
+      found: !!cliente,
+      clienteId: cliente?.id || null,
+    }, { level: (!cliente ? 'warn' : 'info') });
     
     // setIsLoading(false); // Removido para usar apenas indicador de digitando
     

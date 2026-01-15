@@ -4,7 +4,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { LifeBuoy, MessageCircle, Mail, Bug, ClipboardCopy, CheckCircle2, Phone, Trophy, Download, Smartphone, Share, X, Chrome, Monitor } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
-const APP_VERSION = 'v2.0.2'; // ajuste aqui se tiver uma fonte de versão global
+const APP_VERSION = 'v2.5.0'; // ajuste aqui se tiver uma fonte de versão global
 
 function SectionCard({ title, icon: Icon, children, className = '', collapsible = false, defaultOpen = true }) {
   if (collapsible) {
