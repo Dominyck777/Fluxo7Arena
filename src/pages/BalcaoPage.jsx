@@ -8,10 +8,11 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/components/ui/use-toast';
-import { Search, Plus, CheckCircle, Unlock, Lock, Banknote, X, FileText, ShoppingBag, AlertCircle } from 'lucide-react';
+import { Search, Plus, CheckCircle, Unlock, Lock, Banknote, X, FileText, ShoppingBag, AlertCircle, Trash2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { listProducts } from '@/lib/products';
 import { useAuth } from '@/contexts/AuthContext';
+import { DescontoComandaDialog } from '@/components/DescontoComandaDialog';
 import { getOrCreateComandaBalcao, listarComandaBalcaoAberta, criarComandaBalcao, listarItensDaComanda, adicionarItem, listarFinalizadoras, registrarPagamento, fecharComandaEMesa, listarClientes, adicionarClientesAComanda, atualizarQuantidadeItem, removerItem, listarClientesDaComanda, verificarEstoqueComanda, ensureCaixaAberto, fecharCaixa, listarResumoSessaoCaixaAtual, getCaixaAberto, listarMovimentacoesCaixa, listarComandasAbertas, criarMovimentacaoCaixa, listarItensDeTodasComandasAbertas } from '@/lib/store';
 import { supabase } from '@/lib/supabase';
 
@@ -56,6 +57,9 @@ export default function BalcaoPage() {
   const [paymentLines, setPaymentLines] = useState([]); // {id, clientId, methodId, value}
   const [nextPayLineId, setNextPayLineId] = useState(1);
   const [payClients, setPayClients] = useState([]); // clientes carregados para o modal (id, nome, codigo)
+  const [isDiscountOpen, setIsDiscountOpen] = useState(false);
+  const [comandaDiscount, setComandaDiscount] = useState({ tipo: null, valor: 0, motivo: '' });
+  const [expandedPaymentId, setExpandedPaymentId] = useState(null);
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [isProductDetailsOpen, setIsProductDetailsOpen] = useState(false);
   const [selectedCommandItem, setSelectedCommandItem] = useState(null);
@@ -401,6 +405,29 @@ export default function BalcaoPage() {
     sync();
     return () => { active = false; };
   }, [isPayOpen, selectedClientIds, comandaId, userProfile?.codigo_empresa]);
+  useEffect(() => {
+    let active = true;
+    const loadDiscount = async () => {
+      try {
+        if (!isPayOpen || !comandaId) return;
+        const { data } = await supabase
+          .from('comandas')
+          .select('desconto_tipo, desconto_valor, desconto_motivo')
+          .eq('id', comandaId)
+          .single();
+        if (!active) return;
+        setComandaDiscount({
+          tipo: data?.desconto_tipo || null,
+          valor: Number(data?.desconto_valor || 0),
+          motivo: data?.desconto_motivo || ''
+        });
+      } catch {
+        if (active) setComandaDiscount({ tipo: null, valor: 0, motivo: '' });
+      }
+    };
+    loadDiscount();
+    return () => { active = false; };
+  }, [isPayOpen, comandaId]);
 
   // ===== Helpers de Pagamento (base + taxa) =====
   const parseBRL = (s) => { const d = String(s || '').replace(/\D/g, ''); return d ? Number(d) / 100 : 0; };
@@ -436,13 +463,16 @@ export default function BalcaoPage() {
   useEffect(() => {
     try {
       if (!isPayOpen) return;
-      // total dos itens da comanda
-      let totalBase = 0;
+      // total dos itens da comanda (considerando desconto)
+      let subtotal = 0;
       try {
-        totalBase = (items || []).reduce((acc, it) => acc + Number(it.quantity||0)*Number(it.price||0), 0);
+        subtotal = (items || []).reduce((acc, it) => acc + Number(it.quantity||0)*Number(it.price||0), 0);
       } catch {}
+      const tipo = comandaDiscount?.tipo; const val = Number(comandaDiscount?.valor || 0);
+      let descCmd = 0; if (tipo === 'percentual' && val > 0) descCmd = subtotal * (val/100); else if (tipo === 'fixo' && val > 0) descCmd = val;
+      const discountedBase = Math.max(0, subtotal - descCmd);
       const baseSum = sumBasePayments();
-      const diff = totalBase - baseSum;
+      const diff = discountedBase - baseSum;
       if (Math.abs(diff) > 0.009 && Math.abs(diff) <= 0.05 && Array.isArray(paymentLines) && paymentLines.length > 0) {
         setPaymentLines(prev => prev.map((line, idx, arr) => {
           if (idx !== arr.length - 1) return line;
@@ -499,18 +529,25 @@ export default function BalcaoPage() {
         const digits = String(ln.value || '').replace(/\D/g, '');
         if (!digits) { toast({ title: 'Valor inválido', description: 'Informe valores maiores que zero.', variant: 'warning' }); return; }
       }
-      // Verificar total vs soma (comparar BASE com total de itens)
-      let total = 0;
+      // Verificar total vs soma (comparar BASE com total de itens COM desconto da comanda)
+      let subtotal = 0;
       try {
         const itens = await listarItensDaComanda({ comandaId, codigoEmpresa });
-        total = (itens || []).reduce((acc, it) => acc + Number(it.quantidade || 0) * Number(it.preco_unitario || 0), 0);
+        subtotal = (itens || []).reduce((acc, it) => acc + Number(it.quantidade || 0) * Number(it.preco_unitario || 0), 0);
       } catch {}
+      // desconto da comanda aplicado sobre a base
+      const tipoDesc = comandaDiscount?.tipo;
+      const valDesc = Number(comandaDiscount?.valor || 0);
+      let descCmd = 0;
+      if (tipoDesc === 'percentual' && valDesc > 0) descCmd = subtotal * (valDesc / 100);
+      else if (tipoDesc === 'fixo' && valDesc > 0) descCmd = valDesc;
+      const expectedBase = Math.max(0, subtotal - descCmd);
       const sumBase = sumBasePayments();
-      const diff = Math.abs(sumBase - total);
+      const diff = Math.abs(sumBase - expectedBase);
 
       // Se a diferença for apenas centavos (até 0.05), ajustar automaticamente na última linha
       if (diff > 0.009 && diff <= 0.05) {
-        const adjustment = total - sumBase; // ajuste em BASE
+        const adjustment = expectedBase - sumBase; // ajuste em BASE
         setPaymentLines(prev => prev.map((line, idx, arr) => {
           if (idx !== arr.length - 1) return line;
           const base = lineBase(line) + adjustment;
@@ -520,7 +557,7 @@ export default function BalcaoPage() {
         // Não retornar - continuar com o pagamento após ajuste
       } else if (diff > 0.05) {
         // Diferença maior que 5 centavos - mostrar erro
-        const remaining = total - sumBase;
+        const remaining = expectedBase - sumBase;
         if (remaining > 0) {
           toast({ title: 'Valor insuficiente', description: `Faltam R$ ${remaining.toFixed(2)} para fechar o total.`, variant: 'warning' });
         } else {
@@ -550,7 +587,7 @@ export default function BalcaoPage() {
         localStorage.removeItem(LS_KEY.items);
         localStorage.removeItem(LS_KEY.customerName);
       } catch {}
-      toast({ title: 'Pagamento concluído', description: `Total R$ ${total.toFixed(2)}`, variant: 'success' });
+      toast({ title: 'Pagamento concluído', description: `Total R$ ${expectedBase.toFixed(2)}`, variant: 'success' });
       setIsPayOpen(false);
     } catch (e) {
       toast({ title: 'Falha ao concluir', description: e?.message || 'Tente novamente', variant: 'destructive' });
@@ -1384,6 +1421,17 @@ export default function BalcaoPage() {
   }, [clientSearch, isClientWizardOpen, isCloseCashOpen]);
 
   const total = useMemo(() => items.reduce((acc, it) => acc + Number(it.price || 0) * Number(it.quantity || 0), 0), [items]);
+  const totalWithDiscount = useMemo(() => {
+    try {
+      const subtotal = (items || []).reduce((acc, it) => acc + Number(it.price || 0) * Number(it.quantity || 0), 0);
+      const tipo = comandaDiscount?.tipo;
+      const val = Number(comandaDiscount?.valor || 0);
+      let descCmd = 0;
+      if (tipo === 'percentual' && val > 0) descCmd = subtotal * (val/100);
+      else if (tipo === 'fixo' && val > 0) descCmd = val;
+      return Math.max(0, subtotal - descCmd);
+    } catch { return total; }
+  }, [items, comandaDiscount, total]);
   
   // Mapa de quantidades por produto APENAS da comanda atual (para badge)
   const qtyByProductId = useMemo(() => {
@@ -1632,12 +1680,22 @@ export default function BalcaoPage() {
       const mainClientId = (selectedClientIds && selectedClientIds.length > 0)
         ? selectedClientIds[0]
         : (normalized[0]?.id || null);
-      // Auto-preencher total base (itens) e aplicar taxa se houver
-      let totalBase = 0;
+      // Auto-preencher total base (itens) já considerando desconto de comanda e aplicar taxa se houver
+      let subtotalBase = 0;
       try {
         const itens = await listarItensDaComanda({ comandaId, codigoEmpresa });
-        totalBase = (itens || []).reduce((acc, it) => acc + Number(it.quantidade || 0) * Number(it.preco_unitario || 0), 0);
+        subtotalBase = (itens || []).reduce((acc, it) => acc + Number(it.quantidade || 0) * Number(it.preco_unitario || 0), 0);
       } catch {}
+      // Aplicar desconto da comanda, se existir, para sugerir o valor correto a pagar
+      const descTipo = comandaDiscount?.tipo;
+      const descVal = Number(comandaDiscount?.valor || 0);
+      let descCmd = 0;
+      if (descTipo === 'percentual' && descVal > 0) {
+        descCmd = subtotalBase * (descVal / 100);
+      } else if (descTipo === 'fixo' && descVal > 0) {
+        descCmd = descVal;
+      }
+      const totalBase = Math.max(0, subtotalBase - descCmd);
       const fin0 = (fins || []).find(m => String(m.id) === String(def));
       const pct0 = Number(fin0?.taxa_percentual || 0);
       const charge0 = pct0 > 0;
@@ -1955,18 +2013,27 @@ export default function BalcaoPage() {
 
       {/* Product Picker (mobile e desktop) - lista de produtos em modal */}
       <Dialog open={isProductPickerOpen} onOpenChange={setIsProductPickerOpen}>
-        <DialogContent className="sm:max-w-xl w-[92vw] max-h-[85vh] flex flex-col overflow-hidden animate-none" onOpenAutoFocus={(e) => e.preventDefault()} onKeyDown={(e) => e.stopPropagation()}>
+        <DialogContent
+          className="sm:max-w-xl w-[92vw] sm:w-auto max-h-[85vh] flex flex-col overflow-hidden animate-none p-3 sm:p-6"
+          onOpenAutoFocus={(e) => e.preventDefault()}
+          onKeyDown={(e) => e.stopPropagation()}
+        >
           <DialogHeader>
-            <DialogTitle className="text-xl font-bold">Adicionar Produtos</DialogTitle>
-            <DialogDescription>Busque e adicione produtos à comanda do balcão.</DialogDescription>
+            <DialogTitle className="text-2xl font-bold flex items-center gap-3">
+              <ShoppingBag className="w-6 h-6 text-brand" />
+              Adicionar Produtos
+            </DialogTitle>
+            <DialogDescription className="text-base mt-2">
+              Balcão • Busque e adicione produtos à comanda atual
+            </DialogDescription>
           </DialogHeader>
-          <div className="p-4 pt-0">
+          <div className="px-3 pt-0 pb-3 sm:p-4 sm:pt-0">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted" />
               <Input placeholder="Buscar produto..." className="pl-9" value={pickerSearch} onChange={(e) => setPickerSearch(e.target.value)} />
             </div>
           </div>
-          <div className="flex-1 overflow-y-auto px-4 pb-4 thin-scroll">
+          <div className="flex-1 overflow-y-auto px-0 sm:px-4 pb-3 sm:pb-4 thin-scroll">
             <ul className="space-y-2">
               {(products || [])
                 .filter(p => {
@@ -1986,21 +2053,39 @@ export default function BalcaoPage() {
                   const stock = Number(prod.stock ?? prod.currentStock ?? 0);
                   const remaining = Math.max(0, stock - qty);
                   const price = Number(prod.salePrice ?? prod.price ?? 0);
+                  const isOutOfStock = remaining === 0;
                   return (
-                    <li key={prod.id} className="flex items-center p-2 rounded-md hover:bg-surface-2 transition-colors border border-border/40">
+                    <li
+                      key={prod.id}
+                      className={`flex items-center w-full px-3 sm:px-2 py-2 sm:py-2 rounded-md border border-border/40 transition-colors ${
+                        isOutOfStock ? 'opacity-50 grayscale' : 'hover:bg-surface-2'
+                      }`}
+                    >
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <p className="font-semibold truncate max-w-[200px]" title={`${prod.code ? `[${prod.code}] ` : ''}${prod.name}`}>
+                        <div className="flex items-center gap-2 mb-0.5">
+                          <p
+                            className="font-semibold text-xs sm:text-sm truncate w-full"
+                            title={`${prod.code ? `[${prod.code}] ` : ''}${prod.name}`}
+                          >
                             {prod.code && <span className="text-text-muted">[{prod.code}]</span>} {prod.name}
                           </p>
                           {qty > 0 && (
-                            <span className="inline-flex items-center justify-center text-[11px] px-1.5 py-0.5 rounded-full bg-brand/15 text-brand border border-brand/30 flex-shrink-0">x{qty}</span>
+                            <span className="inline-flex items-center justify-center px-1.5 py-0.5 bg-brand/10 text-brand text-[11px] font-semibold rounded whitespace-nowrap flex-shrink-0">
+                              {qty}x na comanda
+                            </span>
                           )}
-                          <span className="inline-flex items-center justify-center text-[11px] px-1.5 py-0.5 rounded-full bg-surface-2 text-text-secondary border border-border flex-shrink-0">
-                            Qtd {remaining}
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2 text-[11px] sm:text-xs mt-0.5">
+                          <span className={`font-bold ${remaining === 0 ? 'text-text-muted' : 'text-brand'}`}>
+                            R$ {price.toFixed(2)}
+                          </span>
+                          <span className="text-text-muted whitespace-nowrap">
+                            Estoque:{' '}
+                            <span className={`font-semibold ${remaining <= 5 ? 'text-destructive' : 'text-text-secondary'}`}>
+                              {remaining}
+                            </span>
                           </span>
                         </div>
-                        <p className="text-sm text-text-muted">R$ {price.toFixed(2)}</p>
                       </div>
                       <Button size="icon" className="flex-shrink-0 bg-amber-500 hover:bg-amber-400 text-black border border-amber-500/60" onClick={async () => { await addProduct(prod); }} aria-label={`Adicionar ${prod.name}`}>
                         <Plus className="h-4 w-4" />
@@ -2477,25 +2562,59 @@ export default function BalcaoPage() {
           <div className="p-4 border-t border-border">
             <div className="flex justify-between items-center text-lg font-bold mb-3">
               <span>Total</span>
-              <span>R$ {total.toFixed(2)}</span>
+              <span>R$ {totalWithDiscount.toFixed(2)}</span>
             </div>
-            <Button size="lg" className="w-full" onClick={openPay} disabled={total <= 0}>Finalizar Pagamento</Button>
+            <Button size="lg" className="w-full" onClick={openPay} disabled={totalWithDiscount <= 0}>Finalizar Pagamento</Button>
           </div>
         </div>
       </div>
 
       <Dialog open={isPayOpen} onOpenChange={setIsPayOpen}>
-        <DialogContent className="sm:max-w-xl w-[92vw] max-h-[90vh] flex flex-col overflow-hidden animate-none" onKeyDown={(e) => e.stopPropagation()}>
-          <DialogHeader>
-            <DialogTitle className="text-2xl font-bold">Fechar Conta</DialogTitle>
-            <DialogDescription>Divida o pagamento entre clientes e várias finalizadoras, se necessário.</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3">
-            <div className="flex justify-between text-lg font-semibold">
-              <span>Total</span>
-              <span>R$ {total.toFixed(2)}</span>
+        <DialogContent
+          className="sm:max-w-xl w-[92vw] max-h-[80vh] min-h-0 flex flex-col overflow-hidden animate-none p-3 sm:p-6"
+          onKeyDown={(e) => e.stopPropagation()}
+        >
+          <DialogHeader className="flex flex-col gap-1 pr-6">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3">
+              <DialogTitle className="text-2xl font-bold">Fechar Conta</DialogTitle>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="self-start sm:self-auto"
+                onClick={() => setIsDiscountOpen(true)}
+              >
+                Desconto
+              </Button>
             </div>
-            <div className="flex-1 space-y-2 overflow-y-auto thin-scroll pr-1">
+          </DialogHeader>
+          <div className="flex-1 min-h-0 flex flex-col space-y-3">
+            {(() => {
+              const subtotal = (items || []).reduce((acc, it) => acc + Number(it.quantity||0)*Number(it.price||0), 0);
+              const tipo = comandaDiscount?.tipo; const val = Number(comandaDiscount?.valor || 0);
+              let descCmd = 0; if (tipo === 'percentual' && val > 0) descCmd = subtotal * (val/100); else if (tipo === 'fixo' && val > 0) descCmd = val;
+              const totalDisp = Math.max(0, subtotal - descCmd);
+              const hasDiscount = descCmd > 0.0005;
+              return (
+                <div className="space-y-1">
+                  <div className="flex justify-between text-sm text-text-secondary">
+                    <span>Subtotal</span>
+                    <span>R$ {subtotal.toFixed(2)}</span>
+                  </div>
+                  {hasDiscount && (
+                    <div className="flex justify-between text-sm text-destructive">
+                      <span>Desconto da comanda</span>
+                      <span>-R$ {descCmd.toFixed(2)}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between text-lg font-semibold border-t border-border pt-1 mt-1">
+                    <span>Total com desconto</span>
+                    <span>R$ {totalDisp.toFixed(2)}</span>
+                  </div>
+                </div>
+              );
+            })()}
+            <div className="flex-1 min-h-0 space-y-2 overflow-y-auto thin-scroll pr-0 sm:pr-1">
               <Label className="block">Pagamentos</Label>
               {/** Helper para resolver nome do cliente em qualquer cenário */}
               {(() => null)()}
@@ -2523,125 +2642,254 @@ export default function BalcaoPage() {
                 // PERMITIR selecionar o mesmo cliente múltiplas vezes - não filtrar por usados
                 const remaining = (payClients || []).filter(c => String(c.id) !== String(primary?.id || ''));
                 return (
-                <div key={ln.id} className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-start">
-                  {/* Remove button aligned to the LEFT */}
-                  <div className="sm:col-span-1 flex sm:justify-start">
-                    {paymentLines.length > 1 && idx > 0 && (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="icon"
-                        className="h-8 w-8"
-                        onClick={() => {
-                          setPaymentLines(prev => {
-                            const remain = prev.filter(x => x.id !== ln.id);
-                            if (remain.length === 0) return [];
-                            const totalBase = (items || []).reduce((acc, it) => acc + Number(it.quantity||0)*Number(it.price||0), 0);
-                            const basePer = Math.floor((totalBase / remain.length) * 100) / 100; // Arredondar para baixo
-                            const baseRemainder = totalBase - (basePer * remain.length); // Calcular resto
-                            return remain.map((line, i) => {
-                              const base = i === remain.length - 1 ? basePer + baseRemainder : basePer;
-                              return lineWithBase(line, base);
-                            });
-                          });
-                        }}
-                      >
-                        <X className="h-4 w-4" />
-                      </Button>
+                <div key={ln.id} className="space-y-2">
+                  {/* Layout suspenso/colapsável para mobile */}
+                  <div className="sm:hidden rounded-md bg-surface-2 border border-border overflow-hidden">
+                    <button
+                      type="button"
+                      className="w-full flex items-center justify-between gap-2 px-3 py-2 text-left"
+                      onClick={() => setExpandedPaymentId(prev => (prev === ln.id ? null : ln.id))}
+                    >
+                      <div className="flex flex-col flex-1 min-w-0">
+                        <span className="text-xs text-text-secondary truncate">
+                          {resolveClientName(primary?.id || ln.clientId)}
+                        </span>
+                        <span className="text-xs font-semibold text-text-primary truncate">
+                          {ln.methodId ? (getMethod(ln.methodId)?.nome || 'Forma não selecionada') : 'Forma não selecionada'} • R$ {ln.value || '0,00'}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1 flex-shrink-0">
+                        {paymentLines.length > 1 && idx > 0 && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="icon"
+                            className="h-7 w-7"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setPaymentLines(prev => {
+                                const remain = prev.filter(x => x.id !== ln.id);
+                                if (remain.length === 0) return [];
+                                const subtotal = (items || []).reduce((acc, it) => acc + Number(it.quantity||0)*Number(it.price||0), 0);
+                                const tipo = comandaDiscount?.tipo; const val = Number(comandaDiscount?.valor || 0);
+                                let descCmd = 0; if (tipo === 'percentual' && val > 0) descCmd = subtotal * (val/100); else if (tipo === 'fixo' && val > 0) descCmd = val;
+                                const totalBase = Math.max(0, subtotal - descCmd);
+                                const basePer = Math.floor((totalBase / remain.length) * 100) / 100;
+                                const baseRemainder = totalBase - (basePer * remain.length);
+                                return remain.map((line, i) => {
+                                  const base = i === remain.length - 1 ? basePer + baseRemainder : basePer;
+                                  return lineWithBase(line, base);
+                                });
+                              });
+                            }}
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </Button>
+                        )}
+                      </div>
+                    </button>
+                    {expandedPaymentId === ln.id && (
+                      <div className="px-3 pb-3 pt-1 space-y-2 border-t border-border/60">
+                        <div className="flex items-center gap-2">
+                          <Select value={ln.methodId || ''} onValueChange={(v) => setPaymentLines(prev => prev.map(x => {
+                            if (x.id !== ln.id) return x;
+                            const fin = getMethod(v);
+                            const pct = Number(fin?.taxa_percentual || 0);
+                            if (pct > 0) {
+                              const base = lineBase(x);
+                              const totalWithFee = base * (1 + pct/100);
+                              return { ...x, methodId: v, chargeFee: true, value: formatBRL(totalWithFee) };
+                            } else {
+                              const base = lineBase(x);
+                              return { ...x, methodId: v, chargeFee: false, value: formatBRL(base) };
+                            }
+                          }))}>
+                            <SelectTrigger className="flex-1 h-9 truncate text-sm">
+                              <SelectValue placeholder="Forma de pagamento" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {(payMethods || []).map(m => (
+                                <SelectItem key={m.id} value={m.id}>{m.nome}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <Input
+                            placeholder="0,00"
+                            inputMode="numeric"
+                            value={ln.value}
+                            className="w-28 h-9 text-sm"
+                            onChange={(e) => {
+                              const digits = (e.target.value || '').replace(/\D/g, '');
+                              const cents = digits ? Number(digits) / 100 : 0;
+                              const formatted = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(cents);
+                              setPaymentLines(prev => prev.map(x => x.id === ln.id ? { ...x, value: formatted } : x));
+                            }}
+                            onKeyDown={(e) => {
+                              e.stopPropagation();
+                              const allowed = ['Backspace','Delete','ArrowLeft','ArrowRight','Tab'];
+                              if (allowed.includes(e.key)) return;
+                              if (!/^[0-9]$/.test(e.key)) { e.preventDefault(); }
+                            }}
+                            onBeforeInput={(e) => { const data = e.data ?? ''; if (data && /\D/.test(data)) e.preventDefault(); }}
+                          />
+                        </div>
+                        {(() => {
+                          const pct = linePct(ln);
+                          if (!pct) return null;
+                          const fee = lineFee(ln);
+                          const active = !!ln.chargeFee;
+                          return (
+                            <button
+                              type="button"
+                              onClick={() => setPaymentLines(prev => prev.map(x => {
+                                if (x.id !== ln.id) return x;
+                                const base = lineBase(x);
+                                if (!active) {
+                                  const totalWithFee = base * (1 + pct/100);
+                                  return { ...x, chargeFee: true, value: formatBRL(totalWithFee) };
+                                }
+                                return { ...x, chargeFee: false, value: formatBRL(base) };
+                              }))}
+                              className={[
+                                "inline-flex items-center gap-2 px-3 py-1 rounded-sm text-[11px] font-medium border transition-colors w-full justify-between",
+                                active ? "bg-black text-amber-400 border-amber-500" : "bg-surface text-text-secondary border-border hover:border-border-hover"
+                              ].join(' ')}
+                              title={active ? 'Desmarcar taxa' : 'Cobrar taxa'}
+                            >
+                              <span className={["inline-block h-3 w-3 rounded-sm border",
+                                active ? "bg-amber-500 border-amber-400" : "bg-transparent border-border"].join(' ')} />
+                              <span className="text-[11px]">Taxa R$ {fee.toFixed(2)}</span>
+                            </button>
+                          );
+                        })()}
+                      </div>
                     )}
                   </div>
-                  {(idx === 0) ? (
-                    <div className="sm:col-span-4">
-                      <div className="h-9 px-3 rounded-md border border-border bg-surface flex items-center text-sm truncate">{resolveClientName(primary?.id || ln.clientId)}</div>
+
+                  {/* Layout atual mantido para desktop/tablet */}
+                  <div className="hidden sm:grid grid-cols-12 gap-2 items-start">
+                    {/* Remove button aligned to the LEFT */}
+                    <div className="sm:col-span-1 flex sm:justify-start">
+                      {paymentLines.length > 1 && idx > 0 && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon"
+                          className="h-8 w-8"
+                          onClick={() => {
+                            setPaymentLines(prev => {
+                              const remain = prev.filter(x => x.id !== ln.id);
+                              if (remain.length === 0) return [];
+                              const subtotal = (items || []).reduce((acc, it) => acc + Number(it.quantity||0)*Number(it.price||0), 0);
+                              const tipo = comandaDiscount?.tipo; const val = Number(comandaDiscount?.valor || 0);
+                              let descCmd = 0; if (tipo === 'percentual' && val > 0) descCmd = subtotal * (val/100); else if (tipo === 'fixo' && val > 0) descCmd = val;
+                              const totalBase = Math.max(0, subtotal - descCmd);
+                              const basePer = Math.floor((totalBase / remain.length) * 100) / 100; // Arredondar para baixo
+                              const baseRemainder = totalBase - (basePer * remain.length); // Calcular resto
+                              return remain.map((line, i) => {
+                                const base = i === remain.length - 1 ? basePer + baseRemainder : basePer;
+                                return lineWithBase(line, base);
+                              });
+                            });
+                          }}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      )}
                     </div>
-                  ) : hasMultiClients ? (
+                    {(idx === 0) ? (
+                      <div className="sm:col-span-4">
+                        <div className="h-9 px-3 rounded-md border border-border bg-surface flex items-center text-sm truncate">{resolveClientName(primary?.id || ln.clientId)}</div>
+                      </div>
+                    ) : hasMultiClients ? (
+                      <div className="sm:col-span-4">
+                        <Select value={ln.clientId || ''} onValueChange={(v) => setPaymentLines(prev => prev.map(x => x.id === ln.id ? { ...x, clientId: v } : x))}>
+                          <SelectTrigger className="w-full truncate"><SelectValue placeholder="Cliente" /></SelectTrigger>
+                          <SelectContent>
+                            {/* Mostrar TODOS os clientes, incluindo o primary */}
+                            {(payClients || []).map(c => (<SelectItem key={c.id} value={c.id}>{c.nome}</SelectItem>))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    ) : (
+                      <div className="sm:col-span-4">
+                        <div className="h-9 px-3 rounded-md border border-border bg-surface flex items-center text-sm truncate">{resolveClientName(primary?.id || ln.clientId)}</div>
+                      </div>
+                    )}
                     <div className="sm:col-span-4">
-                      <Select value={ln.clientId || ''} onValueChange={(v) => setPaymentLines(prev => prev.map(x => x.id === ln.id ? { ...x, clientId: v } : x))}>
-                        <SelectTrigger className="w-full truncate"><SelectValue placeholder="Cliente" /></SelectTrigger>
+                      <Select value={ln.methodId || ''} onValueChange={(v) => setPaymentLines(prev => prev.map(x => {
+                        if (x.id !== ln.id) return x;
+                        const fin = getMethod(v);
+                        const pct = Number(fin?.taxa_percentual || 0);
+                        if (pct > 0) {
+                          const base = lineBase(x);
+                          const totalWithFee = base * (1 + pct/100);
+                          return { ...x, methodId: v, chargeFee: true, value: formatBRL(totalWithFee) };
+                        } else {
+                          const base = lineBase(x);
+                          return { ...x, methodId: v, chargeFee: false, value: formatBRL(base) };
+                        }
+                      }))}>
+                        <SelectTrigger className="w-full h-9 truncate"><SelectValue placeholder="Forma de pagamento" /></SelectTrigger>
                         <SelectContent>
-                          {/* Mostrar TODOS os clientes, incluindo o primary */}
-                          {(payClients || []).map(c => (<SelectItem key={c.id} value={c.id}>{c.nome}</SelectItem>))}
+                          {(payMethods || []).map(m => (
+                            <SelectItem key={m.id} value={m.id}>{m.nome}</SelectItem>
+                          ))}
                         </SelectContent>
                       </Select>
+                      {(() => {
+                        const pct = linePct(ln);
+                        if (!pct) return null;
+                        const fee = lineFee(ln);
+                        const active = !!ln.chargeFee;
+                        return (
+                          <div className="mt-1">
+                            <button
+                              type="button"
+                              onClick={() => setPaymentLines(prev => prev.map(x => {
+                                if (x.id !== ln.id) return x;
+                                const base = lineBase(x);
+                                if (!active) {
+                                  const totalWithFee = base * (1 + pct/100);
+                                  return { ...x, chargeFee: true, value: formatBRL(totalWithFee) };
+                                }
+                                return { ...x, chargeFee: false, value: formatBRL(base) };
+                              }))}
+                              className={[
+                                "inline-flex items-center gap-2 px-3 py-1 rounded-sm text-xs font-medium border transition-colors",
+                                active ? "bg-black text-amber-400 border-amber-500" : "bg-surface text-text-secondary border-border hover:border-border-hover"
+                              ].join(' ')}
+                              title={active ? 'Desmarcar taxa' : 'Cobrar taxa'}
+                            >
+                              <span className={["inline-block h-3 w-3 rounded-sm border",
+                                active ? "bg-amber-500 border-amber-400" : "bg-transparent border-border"].join(' ')} />
+                              <span>Taxa R$ {fee.toFixed(2)}</span>
+                            </button>
+                          </div>
+                        );
+                      })()}
                     </div>
-                  ) : (
-                    <div className="sm:col-span-4">
-                      <div className="h-9 px-3 rounded-md border border-border bg-surface flex items-center text-sm truncate">{resolveClientName(primary?.id || ln.clientId)}</div>
+                    <div className="sm:col-span-3">
+                      <Input
+                        placeholder="0,00"
+                        inputMode="numeric"
+                        value={ln.value}
+                        className="h-9"
+                        onChange={(e) => {
+                          const digits = (e.target.value || '').replace(/\D/g, '');
+                          const cents = digits ? Number(digits) / 100 : 0;
+                          const formatted = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(cents);
+                          setPaymentLines(prev => prev.map(x => x.id === ln.id ? { ...x, value: formatted } : x));
+                        }}
+                        onKeyDown={(e) => {
+                          e.stopPropagation();
+                          const allowed = ['Backspace','Delete','ArrowLeft','ArrowRight','Tab'];
+                          if (allowed.includes(e.key)) return;
+                          if (!/^[0-9]$/.test(e.key)) { e.preventDefault(); }
+                        }}
+                        onBeforeInput={(e) => { const data = e.data ?? ''; if (data && /\D/.test(data)) e.preventDefault(); }}
+                      />
                     </div>
-                  )}
-                  <div className="sm:col-span-4">
-                    <Select value={ln.methodId || ''} onValueChange={(v) => setPaymentLines(prev => prev.map(x => {
-                      if (x.id !== ln.id) return x;
-                      const fin = getMethod(v);
-                      const pct = Number(fin?.taxa_percentual || 0);
-                      if (pct > 0) {
-                        const base = lineBase(x);
-                        const totalWithFee = base * (1 + pct/100);
-                        return { ...x, methodId: v, chargeFee: true, value: formatBRL(totalWithFee) };
-                      } else {
-                        const base = lineBase(x);
-                        return { ...x, methodId: v, chargeFee: false, value: formatBRL(base) };
-                      }
-                    }))}>
-                      <SelectTrigger className="w-full h-9 truncate"><SelectValue placeholder="Forma de pagamento" /></SelectTrigger>
-                      <SelectContent>
-                        {(payMethods || []).map(m => (
-                          <SelectItem key={m.id} value={m.id}>{m.nome}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    {(() => {
-                      const pct = linePct(ln);
-                      if (!pct) return null;
-                      const fee = lineFee(ln);
-                      const active = !!ln.chargeFee;
-                      return (
-                        <div className="mt-1">
-                          <button
-                            type="button"
-                            onClick={() => setPaymentLines(prev => prev.map(x => {
-                              if (x.id !== ln.id) return x;
-                              const base = lineBase(x);
-                              if (!active) {
-                                const totalWithFee = base * (1 + pct/100);
-                                return { ...x, chargeFee: true, value: formatBRL(totalWithFee) };
-                              }
-                              return { ...x, chargeFee: false, value: formatBRL(base) };
-                            }))}
-                            className={[
-                              "inline-flex items-center gap-2 px-3 py-1 rounded-sm text-xs font-medium border transition-colors",
-                              active ? "bg-black text-amber-400 border-amber-500" : "bg-surface text-text-secondary border-border hover:border-border-hover"
-                            ].join(' ')}
-                            title={active ? 'Desmarcar taxa' : 'Cobrar taxa'}
-                          >
-                            <span className={["inline-block h-3 w-3 rounded-sm border",
-                              active ? "bg-amber-500 border-amber-400" : "bg-transparent border-border"].join(' ')} />
-                            <span>Taxa R$ {fee.toFixed(2)}</span>
-                          </button>
-                        </div>
-                      );
-                    })()}
-                  </div>
-                  <div className="sm:col-span-3">
-                    <Input
-                      placeholder="0,00"
-                      inputMode="numeric"
-                      value={ln.value}
-                      className="h-9"
-                      onChange={(e) => {
-                        const digits = (e.target.value || '').replace(/\D/g, '');
-                        const cents = digits ? Number(digits) / 100 : 0;
-                        const formatted = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(cents);
-                        setPaymentLines(prev => prev.map(x => x.id === ln.id ? { ...x, value: formatted } : x));
-                      }}
-                      onKeyDown={(e) => {
-                        e.stopPropagation();
-                        const allowed = ['Backspace','Delete','ArrowLeft','ArrowRight','Tab'];
-                        if (allowed.includes(e.key)) return;
-                        if (!/^[0-9]$/.test(e.key)) { e.preventDefault(); }
-                      }}
-                      onBeforeInput={(e) => { const data = e.data ?? ''; if (data && /\D/.test(data)) e.preventDefault(); }}
-                    />
                   </div>
                 </div>
                 );
@@ -2663,7 +2911,10 @@ export default function BalcaoPage() {
                       const hasPct = Number(fin?.taxa_percentual || 0) > 0;
                       const newLines = [...prev, { id: nextPayLineId, clientId: clientPick, methodId: defMethod, value: '', chargeFee: hasPct }];
                       // Distribuir BASE
-                      const totalBase = (items || []).reduce((acc, it) => acc + Number(it.quantity||0)*Number(it.price||0), 0);
+                      const subtotal = (items || []).reduce((acc, it) => acc + Number(it.quantity||0)*Number(it.price||0), 0);
+                            const tipo = comandaDiscount?.tipo; const val = Number(comandaDiscount?.valor || 0);
+                            let descCmd = 0; if (tipo === 'percentual' && val > 0) descCmd = subtotal * (val/100); else if (tipo === 'fixo' && val > 0) descCmd = val;
+                            const totalBase = Math.max(0, subtotal - descCmd);
                       const basePer = Math.floor((totalBase / newLines.length) * 100) / 100;
                       const baseRemainder = totalBase - (basePer * newLines.length);
                       return newLines.map((line, idx) => {
@@ -2680,25 +2931,68 @@ export default function BalcaoPage() {
               {(() => {
                 const somaExibida = sumPayments();
                 const feeSum = sumFees();
-                const totalBase = (items || []).reduce((acc, it) => acc + Number(it.quantity||0)*Number(it.price||0), 0);
-                const esperado = totalBase + feeSum;
-                const restante = esperado - somaExibida;
+                const subtotal = (items || []).reduce((acc, it) => acc + Number(it.quantity||0)*Number(it.price||0), 0);
+                const tipo = comandaDiscount?.tipo; const val = Number(comandaDiscount?.valor || 0);
+                let descCmd = 0; if (tipo === 'percentual' && val > 0) descCmd = subtotal * (val/100); else if (tipo === 'fixo' && val > 0) descCmd = val;
+                const totalBase = Math.max(0, subtotal - descCmd);
+                const esperado = Math.max(0, totalBase + feeSum);
+                let restante = esperado - somaExibida;
+                let troco = 0;
+                if (restante < 0) {
+                  troco = Math.abs(restante);
+                  restante = 0;
+                }
                 return (
-                  <>
-                    <div className="text-sm text-text-secondary flex justify-between"><span>Soma</span><span>R$ {somaExibida.toFixed(2)}</span></div>
-                    <div className="text-sm text-text-secondary flex justify-between"><span>Taxas</span><span>R$ {feeSum.toFixed(2)}</span></div>
-                    <div className="text-sm font-semibold flex justify-between"><span>Restante</span><span className={Math.abs(restante) < 0.005 ? 'text-success' : 'text-warning'}>R$ {restante.toFixed(2)}</span></div>
-                  </>
+                  <div className="space-y-1 text-sm">
+                    <div className="flex justify-between font-semibold border-t border-border pt-1 mt-1">
+                      <span>Total a pagar</span>
+                      <span>R$ {esperado.toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between pt-1">
+                      <span className="text-text-secondary">Pagamentos</span>
+                      <span>R$ {somaExibida.toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between font-semibold">
+                      <span>Restante</span>
+                      <span className={Math.abs(restante) < 0.005 ? 'text-success' : 'text-warning'}>R$ {restante.toFixed(2)}</span>
+                    </div>
+                    {troco > 0 && (
+                      <div className="flex justify-between font-semibold text-text-secondary">
+                        <span>Troco</span>
+                        <span>R$ {troco.toFixed(2)}</span>
+                      </div>
+                    )}
+                  </div>
                 );
               })()}
             </div>
           </div>
-          <DialogFooter>
+          <DialogFooter className="sticky bottom-0 bg-surface/95 backdrop-blur supports-[backdrop-filter]:bg-surface/75 border-t border-border">
             <Button variant="outline" onClick={() => setIsPayOpen(false)} disabled={payLoading}>Cancelar</Button>
             <Button onClick={confirmPay} disabled={payLoading}>{payLoading ? 'Processando...' : 'Confirmar Pagamento'}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {isDiscountOpen && (
+        <DescontoComandaDialog
+          comanda={{ id: comandaId, desconto_tipo: comandaDiscount?.tipo, desconto_valor: Number(comandaDiscount?.valor || 0), desconto_motivo: comandaDiscount?.motivo || '' }}
+          subtotal={(items || []).reduce((acc, it) => acc + Number(it.quantity||0)*Number(it.price||0), 0)}
+          onApply={async () => {
+            try {
+              const { data } = await supabase
+                .from('comandas')
+                .select('desconto_tipo, desconto_valor, desconto_motivo')
+                .eq('id', comandaId)
+                .single();
+              setComandaDiscount({ tipo: data?.desconto_tipo || null, valor: Number(data?.desconto_valor || 0), motivo: data?.desconto_motivo || '' });
+            } catch {}
+            setIsDiscountOpen(false);
+          }}
+          onClose={() => setIsDiscountOpen(false)}
+          codigoEmpresa={userProfile?.codigo_empresa}
+        />
+      )}
 
       {/* Wizard de Cliente: obrigatório antes de vender */}
       <Dialog open={isClientWizardOpen} onOpenChange={(open) => setIsClientWizardOpen(open)}>

@@ -271,10 +271,10 @@ Deno.serve(async (req: Request) => {
       json = { raw: text };
     }
 
-    // Para a ação de teste, sempre retornar estrutura padronizada com status
+    // Para a ação de teste, sempre retornar estrutura padronizada com status e URLs utilizadas
     if (acao === "teste_conexao") {
       const ok = res.ok;
-      return jsonResponse({ status: res.status, ok, response: json, via: "edge", ambiente });
+      return jsonResponse({ status: res.status, ok, response: json, via: "edge", ambiente, baseUrl, url });
     }
 
     if (!res.ok) {

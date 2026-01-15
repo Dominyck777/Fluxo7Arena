@@ -878,8 +878,17 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
                 <div className="space-y-3">
                   <p className="text-xs sm:text-sm font-semibold">ICMS - Operação Interna</p>
                   <div className="grid grid-cols-1 sm:grid-cols-4 items-start sm:items-center gap-2 sm:gap-4">
-                    <Label className="text-xs sm:text-right">CFOP</Label>
-                    <Input value={cfopInterno} onChange={(e)=>setCfopInterno(formatCFOP(e.target.value))} className="sm:col-span-3 text-xs sm:text-sm" placeholder="5102" disabled={!editEnabled} />
+                    <Label className="text-xs sm:text-right">CFOP {(!cfopInterno?.trim()) && (<span className="text-danger">*</span>)}</Label>
+                    <Input
+                      value={cfopInterno}
+                      onChange={(e)=>setCfopInterno(formatCFOP(e.target.value))}
+                      className={cn(
+                        "sm:col-span-3 text-xs sm:text-sm",
+                        !cfopInterno?.trim() && "border-danger focus-visible:ring-danger/60"
+                      )}
+                      placeholder="5102"
+                      disabled={!editEnabled}
+                    />
                   </div>
                   {!useCsosn && (
                     <div className="grid grid-cols-1 sm:grid-cols-4 items-start sm:items-center gap-2 sm:gap-4">
@@ -901,8 +910,17 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
                 <div className="space-y-3">
                   <p className="text-xs sm:text-sm font-semibold">ICMS - Operação Externa</p>
                   <div className="grid grid-cols-1 sm:grid-cols-4 items-start sm:items-center gap-2 sm:gap-4">
-                    <Label className="text-xs sm:text-right">CFOP</Label>
-                    <Input value={cfopExterno} onChange={(e)=>setCfopExterno(formatCFOP(e.target.value))} className="sm:col-span-3 text-xs sm:text-sm" placeholder="6102" disabled={!editEnabled} />
+                    <Label className="text-xs sm:text-right">CFOP {(!cfopExterno?.trim()) && (<span className="text-danger">*</span>)}</Label>
+                    <Input
+                      value={cfopExterno}
+                      onChange={(e)=>setCfopExterno(formatCFOP(e.target.value))}
+                      className={cn(
+                        "sm:col-span-3 text-xs sm:text-sm",
+                        !cfopExterno?.trim() && "border-danger focus-visible:ring-danger/60"
+                      )}
+                      placeholder="6102"
+                      disabled={!editEnabled}
+                    />
                   </div>
                   {!useCsosn && (
                     <div className="grid grid-cols-1 sm:grid-cols-4 items-start sm:items-center gap-2 sm:gap-4">
@@ -977,8 +995,17 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
               {/* NCM/CEST */}
               <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 sm:gap-6">
                 <div className="grid grid-cols-1 sm:grid-cols-2 items-start sm:items-center gap-2 sm:gap-4">
-                  <Label className="text-xs sm:text-right">NCM</Label>
-                  <Input value={ncm} onChange={(e)=>setNcm(formatNCM(e.target.value))} placeholder="00000000" disabled={!editEnabled} className="text-xs sm:text-sm" />
+                  <Label className="text-xs sm:text-right">NCM {(!ncm?.trim()) && (<span className="text-danger">*</span>)}</Label>
+                  <Input
+                    value={ncm}
+                    onChange={(e)=>setNcm(formatNCM(e.target.value))}
+                    placeholder="00000000"
+                    disabled={!editEnabled}
+                    className={cn(
+                      "text-xs sm:text-sm",
+                      !ncm?.trim() && "border-danger focus-visible:ring-danger/60"
+                    )}
+                  />
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 items-start sm:items-center gap-2 sm:gap-4">
                   <Label className="text-xs sm:text-right">CEST</Label>

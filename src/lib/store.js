@@ -699,7 +699,7 @@ export async function listarComandasAbertas({ codigoEmpresa } = {}) {
     // CONSULTA MAIS AMPLA: buscar todas as comandas sem fechado_em, independente do status
     let query = supabase
       .from('comandas')
-      .select('id, mesa_id, status, aberto_em, fechado_em, observacoes, observacoes_atualizadas_em')
+      .select('id, mesa_id, status, aberto_em, fechado_em, observacoes, observacoes_atualizadas_em, desconto_tipo, desconto_valor, desconto_motivo, total_com_desconto')
       .is('fechado_em', null)
       .neq('status', 'cancelled')
       .order('aberto_em', { ascending: false })

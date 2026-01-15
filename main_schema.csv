@@ -95,8 +95,8 @@ table,supabase_functions,hooks,null,table,supabase_functions_admin,Supabase Func
 table,public,user_ui_settings,null,table,postgres,null
 table,public,isis_conversas,null,table,postgres,Histórico de conversas da Ísis atreladas à empresa/cliente/agendamento.
 table,realtime,messages_2026_01_13,null,table,supabase_admin,null
-table,public,isis_chat_sessions,null,table,postgres,null
 table,public,notas_fiscais,null,table,postgres,null
+table,public,isis_chat_sessions,null,table,postgres,null
 table,public,isis_chat_messages,null,table,postgres,null
 table,public,comandas,null,table,postgres,null
 table,auth,oauth_client_states,null,table,supabase_auth_admin,Stores OAuth states for third-party provider authentication flows where Supabase acts as the OAuth client.
@@ -781,6 +781,7 @@ column,public,codigo_empresa,idx_compras_empresa,integer default null,null,null
 column,public,fornecedor_id,idx_compras_fornecedor,uuid default null,null,null
 column,public,data_emissao,idx_compras_data_emissao,timestamp with time zone default null,null,null
 column,public,chave_nfe,idx_compras_chave_nfe,character varying(44) default null,null,null
+column,public,ambiente,idx_notas_fiscais_ambiente,text default null,null,null
 column,public,id,movimentos_saldo_pkey,uuid default null,null,null
 column,public,codigo_empresa,idx_mov_saldo_empresa,text default null,null,null
 column,public,cliente_id,idx_mov_saldo_cliente,uuid default null,null,null
@@ -953,6 +954,9 @@ column,public,agendamento_id,idx_agp_agendamento,uuid default null,null,null
 column,public,finalizadora_id,idx_agp_finalizadora,uuid default null,null,null
 column,public,codigo_empresa,finalizadoras_empresa_nome_unique,text default null,null,null
 column,public,nome,finalizadoras_empresa_nome_unique,text default null,null,null
+column,public,codigo_empresa,idx_nf_empresa_modelo_status,text default null,null,null
+column,public,modelo,idx_nf_empresa_modelo_status,text default null,null,null
+column,public,status,idx_nf_empresa_modelo_status,text default null,null,null
 column,public,agendamento_id,v_agendamentos_detalhado,uuid default null,null,null
 column,public,agendamento_codigo,v_agendamentos_detalhado,bigint default null,null,null
 column,public,codigo_empresa,v_agendamentos_detalhado,text default null,null,null
@@ -990,6 +994,9 @@ column,realtime,inserted_at,messages_2026_01_11_pkey,timestamp without time zone
 column,public,xml_chave,idx_produtos_xml_chave,text default null,null,null
 column,realtime,inserted_at,messages_2026_01_11_inserted_at_topic_idx,timestamp without time zone default null,null,null
 column,realtime,topic,messages_2026_01_11_inserted_at_topic_idx,text default null,null,null
+column,public,codigo_empresa,idx_nf_empresa_origem_comanda,text default null,null,null
+column,public,origem,idx_nf_empresa_origem_comanda,text default null,null,null
+column,public,comanda_id,idx_nf_empresa_origem_comanda,uuid default null,null,null
 column,auth,authorization_id,oauth_authorizations_authorization_id_key,text default null,null,null
 column,auth,authorization_code,oauth_authorizations_authorization_code_key,text default null,null,null
 column,auth,expires_at,oauth_auth_pending_exp_idx,timestamp with time zone default null,null,null
@@ -1493,19 +1500,6 @@ column,realtime,private,messages_2026_01_13,boolean default false,null,null
 column,realtime,updated_at,messages_2026_01_13,timestamp without time zone default now(),null,null
 column,realtime,inserted_at,messages_2026_01_13,timestamp without time zone default now(),null,null
 column,realtime,id,messages_2026_01_13,uuid default gen_random_uuid(),null,null
-column,public,id,notas_fiscais_pkey,uuid default null,null,null
-column,public,codigo_empresa,idx_notas_fiscais_empresa,text default null,null,null
-column,public,status,idx_notas_fiscais_status,text default null,null,null
-column,public,criado_em,idx_notas_fiscais_criado_em,timestamp with time zone default null,null,null
-column,public,id,isis_chat_sessions,uuid default gen_random_uuid(),null,null
-column,public,empresa_codigo,isis_chat_sessions,text default null,null,null
-column,public,empresa_id,isis_chat_sessions,uuid default null,null,null
-column,public,cliente_id,isis_chat_sessions,bigint default null,null,null
-column,public,source,isis_chat_sessions,text default 'isis'::text,null,null
-column,public,started_at,isis_chat_sessions,timestamp with time zone default now(),null,null
-column,public,ended_at,isis_chat_sessions,timestamp with time zone default null,null,null
-column,public,meta,isis_chat_sessions,jsonb default null,null,null
-column,public,id,isis_chat_sessions_pkey,uuid default null,null,null
 column,public,id,notas_fiscais,uuid default gen_random_uuid(),null,null
 column,public,codigo_empresa,notas_fiscais,text default null,null,null
 column,public,origem,notas_fiscais,text default null,null,null
@@ -1521,6 +1515,20 @@ column,public,valor_total,notas_fiscais,"numeric(12,2) default null",null,null
 column,public,destinatario,notas_fiscais,jsonb default null,null,null
 column,public,criado_em,notas_fiscais,timestamp with time zone default now(),null,null
 column,public,atualizado_em,notas_fiscais,timestamp with time zone default now(),null,null
+column,public,ambiente,notas_fiscais,text default null,null,null
+column,public,id,notas_fiscais_pkey,uuid default null,null,null
+column,public,codigo_empresa,idx_notas_fiscais_empresa,text default null,null,null
+column,public,status,idx_notas_fiscais_status,text default null,null,null
+column,public,criado_em,idx_notas_fiscais_criado_em,timestamp with time zone default null,null,null
+column,public,id,isis_chat_sessions,uuid default gen_random_uuid(),null,null
+column,public,empresa_codigo,isis_chat_sessions,text default null,null,null
+column,public,empresa_id,isis_chat_sessions,uuid default null,null,null
+column,public,cliente_id,isis_chat_sessions,bigint default null,null,null
+column,public,source,isis_chat_sessions,text default 'isis'::text,null,null
+column,public,started_at,isis_chat_sessions,timestamp with time zone default now(),null,null
+column,public,ended_at,isis_chat_sessions,timestamp with time zone default null,null,null
+column,public,meta,isis_chat_sessions,jsonb default null,null,null
+column,public,id,isis_chat_sessions_pkey,uuid default null,null,null
 column,public,id,isis_chat_messages_pkey,uuid default null,null,null
 column,public,session_id,idx_isis_chat_messages_session_created,uuid default null,null,null
 column,public,created_at,idx_isis_chat_messages_session_created,timestamp with time zone default null,null,null
@@ -1839,9 +1847,9 @@ constraint,public,isis_conversas_agendamento_id_fkey,isis_conversas,FOREIGN KEY 
 constraint,public,isis_conversas_cliente_id_fkey,isis_conversas,FOREIGN KEY (cliente_id) REFERENCES clientes(id),null,null
 constraint,public,isis_conversas_pkey,isis_conversas,PRIMARY KEY (id),null,null
 constraint,realtime,messages_2026_01_13_pkey,messages_2026_01_13,"PRIMARY KEY (id, inserted_at)",null,null
-constraint,public,isis_chat_sessions_pkey,isis_chat_sessions,PRIMARY KEY (id),null,null
 constraint,public,notas_fiscais_origem_check,notas_fiscais,"CHECK ((origem = ANY (ARRAY['comanda'::text, 'manual'::text])))",null,null
 constraint,public,notas_fiscais_pkey,notas_fiscais,PRIMARY KEY (id),null,null
+constraint,public,isis_chat_sessions_pkey,isis_chat_sessions,PRIMARY KEY (id),null,null
 constraint,public,isis_chat_messages_from_role_check,isis_chat_messages,"CHECK ((from_role = ANY (ARRAY['assistant'::text, 'user'::text])))",null,null
 constraint,public,isis_chat_messages_pkey,isis_chat_messages,PRIMARY KEY (id),null,null
 constraint,public,isis_chat_messages_session_id_fkey,isis_chat_messages,FOREIGN KEY (session_id) REFERENCES isis_chat_sessions(id) ON DELETE CASCADE,null,null
@@ -2147,12 +2155,15 @@ index,public,isis_conversas_agendamento_idx,isis_conversas,CREATE INDEX isis_con
 index,public,isis_conversas_cliente_idx,isis_conversas,CREATE INDEX isis_conversas_cliente_idx ON public.isis_conversas USING btree (cliente_id),null,null
 index,realtime,messages_2026_01_13_pkey,messages_2026_01_13,"CREATE UNIQUE INDEX messages_2026_01_13_pkey ON realtime.messages_2026_01_13 USING btree (id, inserted_at)",null,null
 index,realtime,messages_2026_01_13_inserted_at_topic_idx,messages_2026_01_13,"CREATE INDEX messages_2026_01_13_inserted_at_topic_idx ON realtime.messages_2026_01_13 USING btree (inserted_at DESC, topic) WHERE ((extension = 'broadcast'::text) AND (private IS TRUE))",null,null
-index,public,isis_chat_sessions_pkey,isis_chat_sessions,CREATE UNIQUE INDEX isis_chat_sessions_pkey ON public.isis_chat_sessions USING btree (id),null,null
-index,public,idx_isis_chat_sessions_started,isis_chat_sessions,CREATE INDEX idx_isis_chat_sessions_started ON public.isis_chat_sessions USING btree (started_at DESC),null,null
+index,public,idx_nf_empresa_modelo_status,notas_fiscais,"CREATE INDEX idx_nf_empresa_modelo_status ON public.notas_fiscais USING btree (codigo_empresa, modelo, status)",null,null
+index,public,idx_nf_empresa_origem_comanda,notas_fiscais,"CREATE INDEX idx_nf_empresa_origem_comanda ON public.notas_fiscais USING btree (codigo_empresa, origem, comanda_id)",null,null
 index,public,notas_fiscais_pkey,notas_fiscais,CREATE UNIQUE INDEX notas_fiscais_pkey ON public.notas_fiscais USING btree (id),null,null
 index,public,idx_notas_fiscais_empresa,notas_fiscais,CREATE INDEX idx_notas_fiscais_empresa ON public.notas_fiscais USING btree (codigo_empresa),null,null
 index,public,idx_notas_fiscais_status,notas_fiscais,CREATE INDEX idx_notas_fiscais_status ON public.notas_fiscais USING btree (status),null,null
 index,public,idx_notas_fiscais_criado_em,notas_fiscais,CREATE INDEX idx_notas_fiscais_criado_em ON public.notas_fiscais USING btree (criado_em DESC),null,null
+index,public,idx_notas_fiscais_ambiente,notas_fiscais,CREATE INDEX idx_notas_fiscais_ambiente ON public.notas_fiscais USING btree (ambiente),null,null
+index,public,isis_chat_sessions_pkey,isis_chat_sessions,CREATE UNIQUE INDEX isis_chat_sessions_pkey ON public.isis_chat_sessions USING btree (id),null,null
+index,public,idx_isis_chat_sessions_started,isis_chat_sessions,CREATE INDEX idx_isis_chat_sessions_started ON public.isis_chat_sessions USING btree (started_at DESC),null,null
 index,public,isis_chat_messages_pkey,isis_chat_messages,CREATE UNIQUE INDEX isis_chat_messages_pkey ON public.isis_chat_messages USING btree (id),null,null
 index,public,idx_isis_chat_messages_session_created,isis_chat_messages,"CREATE INDEX idx_isis_chat_messages_session_created ON public.isis_chat_messages USING btree (session_id, created_at DESC)",null,null
 index,public,idx_comandas_mesa_status,comandas,"CREATE INDEX idx_comandas_mesa_status ON public.comandas USING btree (mesa_id, status) WHERE (fechado_em IS NULL)",null,null
@@ -2782,6 +2793,7 @@ grant,public,idx_compras_empresa,null,null,postgres,null
 grant,public,idx_compras_fornecedor,null,null,postgres,null
 grant,public,idx_compras_data_emissao,null,null,postgres,null
 grant,public,idx_compras_chave_nfe,null,null,postgres,null
+grant,public,idx_notas_fiscais_ambiente,null,null,postgres,null
 grant,public,movimentos_saldo_pkey,null,null,postgres,null
 grant,public,idx_mov_saldo_empresa,null,null,postgres,null
 grant,public,idx_mov_saldo_cliente,null,null,postgres,null
@@ -2815,10 +2827,12 @@ grant,public,compras_itens,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgr
 grant,public,idx_agp_agendamento,null,null,postgres,null
 grant,public,idx_agp_finalizadora,null,null,postgres,null
 grant,public,finalizadoras_empresa_nome_unique,null,null,postgres,null
+grant,public,idx_nf_empresa_modelo_status,null,null,postgres,null
 grant,public,v_agendamentos_detalhado,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
 grant,realtime,messages_2026_01_11_pkey,null,null,supabase_admin,null
 grant,public,idx_produtos_xml_chave,null,null,postgres,null
 grant,realtime,messages_2026_01_11_inserted_at_topic_idx,null,null,supabase_admin,null
+grant,public,idx_nf_empresa_origem_comanda,null,null,postgres,null
 grant,auth,oauth_authorizations_authorization_id_key,null,null,supabase_auth_admin,null
 grant,auth,oauth_authorizations_authorization_code_key,null,null,supabase_auth_admin,null
 grant,auth,oauth_auth_pending_exp_idx,null,null,supabase_auth_admin,null
@@ -2964,13 +2978,13 @@ grant,public,isis_conversas,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postg
 grant,realtime,messages_2026_01_13_pkey,null,null,supabase_admin,null
 grant,realtime,messages_2026_01_13_inserted_at_topic_idx,null,null,supabase_admin,null
 grant,realtime,messages_2026_01_13,null,"supabase_admin=arwdDxtm/supabase_admin,postgres=arwdDxtm/supabase_admin,dashboard_user=arwdDxtm/supabase_admin",supabase_admin,null
+grant,public,notas_fiscais,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
 grant,public,notas_fiscais_pkey,null,null,postgres,null
 grant,public,idx_notas_fiscais_empresa,null,null,postgres,null
 grant,public,idx_notas_fiscais_status,null,null,postgres,null
 grant,public,idx_notas_fiscais_criado_em,null,null,postgres,null
 grant,public,isis_chat_sessions,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
 grant,public,isis_chat_sessions_pkey,null,null,postgres,null
-grant,public,notas_fiscais,null,"postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres",postgres,null
 grant,public,isis_chat_messages_pkey,null,null,postgres,null
 grant,public,idx_isis_chat_messages_session_created,null,null,postgres,null
 grant,public,idx_isis_chat_sessions_started,null,null,postgres,null
@@ -2995,3 +3009,318 @@ grant,realtime,messages_2026_01_14,null,"supabase_admin=arwdDxtm/supabase_admin,
 grant,realtime,messages_2026_01_15_pkey,null,null,supabase_admin,null
 grant,realtime,messages_2026_01_15_inserted_at_topic_idx,null,null,supabase_admin,null
 grant,realtime,messages_2026_01_15,null,"supabase_admin=arwdDxtm/supabase_admin,postgres=arwdDxtm/supabase_admin,dashboard_user=arwdDxtm/supabase_admin",supabase_admin,null
+policy,public,caixa_resumos_select,caixa_resumos,cmd=SELECT; roles=public; permissive=PERMISSIVE; qual=(codigo_empresa = get_my_company_code()); with_check=,null,null
+policy,public,caixa_resumos_insert,caixa_resumos,cmd=INSERT; roles=public; permissive=PERMISSIVE; qual=; with_check=(codigo_empresa = get_my_company_code()),null,null
+policy,public,comanda_itens_select_by_company,comanda_itens,cmd=SELECT; roles=public; permissive=PERMISSIVE; qual=(codigo_empresa = get_my_company_code()); with_check=,null,null
+policy,public,produto_categorias_select,produto_categorias,cmd=SELECT; roles=public; permissive=PERMISSIVE; qual=(codigo_empresa = get_my_company_code()); with_check=,null,null
+policy,public,produto_categorias_insert,produto_categorias,cmd=INSERT; roles=public; permissive=PERMISSIVE; qual=; with_check=(codigo_empresa = get_my_company_code()),null,null
+policy,public,produto_categorias_update,produto_categorias,cmd=UPDATE; roles=public; permissive=PERMISSIVE; qual=(codigo_empresa = get_my_company_code()); with_check=(codigo_empresa = get_my_company_code()),null,null
+policy,public,produto_categorias_delete,produto_categorias,cmd=DELETE; roles=public; permissive=PERMISSIVE; qual=(codigo_empresa = get_my_company_code()); with_check=,null,null
+policy,public,comanda_itens_insert_by_company,comanda_itens,cmd=INSERT; roles=public; permissive=PERMISSIVE; qual=; with_check=(codigo_empresa = get_my_company_code()),null,null
+policy,public,quadras_select_company,quadras,cmd=SELECT; roles=authenticated; permissive=PERMISSIVE; qual=(codigo_empresa = get_my_company_code()); with_check=,null,null
+policy,public,quadras_insert_company,quadras,cmd=INSERT; roles=authenticated; permissive=PERMISSIVE; qual=; with_check=(codigo_empresa = get_my_company_code()),null,null
+policy,public,quadras_update_company,quadras,cmd=UPDATE; roles=authenticated; permissive=PERMISSIVE; qual=(codigo_empresa = get_my_company_code()); with_check=(codigo_empresa = get_my_company_code()),null,null
+policy,public,quadras_delete_company,quadras,cmd=DELETE; roles=authenticated; permissive=PERMISSIVE; qual=(codigo_empresa = get_my_company_code()); with_check=,null,null
+policy,public,caixa_resumos_update,caixa_resumos,cmd=UPDATE; roles=public; permissive=PERMISSIVE; qual=(codigo_empresa = get_my_company_code()); with_check=(codigo_empresa = get_my_company_code()),null,null
+policy,public,comanda_itens_update_by_company,comanda_itens,cmd=UPDATE; roles=public; permissive=PERMISSIVE; qual=(codigo_empresa = get_my_company_code()); with_check=(codigo_empresa = get_my_company_code()),null,null
+policy,public,caixa_resumos_delete,caixa_resumos,cmd=DELETE; roles=public; permissive=PERMISSIVE; qual=(codigo_empresa = get_my_company_code()); with_check=,null,null
+policy,public,caixa_mov_select,caixa_movimentacoes,cmd=SELECT; roles=public; permissive=PERMISSIVE; qual=(codigo_empresa = get_my_company_code()); with_check=,null,null
+policy,public,comanda_itens_delete_by_company,comanda_itens,cmd=DELETE; roles=public; permissive=PERMISSIVE; qual=(codigo_empresa = get_my_company_code()); with_check=,null,null
+policy,public,caixa_mov_insert,caixa_movimentacoes,cmd=INSERT; roles=public; permissive=PERMISSIVE; qual=; with_check=(codigo_empresa = get_my_company_code()),null,null
+policy,public,pagamentos_select_by_company,pagamentos,cmd=SELECT; roles=public; permissive=PERMISSIVE; qual=(codigo_empresa = get_my_company_code()); with_check=,null,null
+policy,public,pagamentos_insert_by_company,pagamentos,cmd=INSERT; roles=public; permissive=PERMISSIVE; qual=; with_check=(codigo_empresa = get_my_company_code()),null,null
+policy,public,caixa_mov_update,caixa_movimentacoes,cmd=UPDATE; roles=public; permissive=PERMISSIVE; qual=(codigo_empresa = get_my_company_code()); with_check=(codigo_empresa = get_my_company_code()),null,null
+policy,public,caixa_mov_delete,caixa_movimentacoes,cmd=DELETE; roles=public; permissive=PERMISSIVE; qual=(codigo_empresa = get_my_company_code()); with_check=,null,null
+policy,public,pagamentos_update_by_company,pagamentos,cmd=UPDATE; roles=public; permissive=PERMISSIVE; qual=(codigo_empresa = get_my_company_code()); with_check=(codigo_empresa = get_my_company_code()),null,null
+policy,public,pagamentos_delete_by_company,pagamentos,cmd=DELETE; roles=public; permissive=PERMISSIVE; qual=(codigo_empresa = get_my_company_code()); with_check=,null,null
+policy,public,mesas_select_by_company,mesas,cmd=SELECT; roles=public; permissive=PERMISSIVE; qual=(codigo_empresa = get_my_company_code()); with_check=,null,null
+policy,public,colaboradores_delete_company,colaboradores,cmd=DELETE; roles=authenticated; permissive=PERMISSIVE; qual=(codigo_empresa = get_my_company_code()); with_check=,null,null
+policy,public,mesas_insert_by_company,mesas,cmd=INSERT; roles=public; permissive=PERMISSIVE; qual=; with_check=(codigo_empresa = get_my_company_code()),null,null
+policy,public,mesas_update_by_company,mesas,cmd=UPDATE; roles=public; permissive=PERMISSIVE; qual=(codigo_empresa = get_my_company_code()); with_check=(codigo_empresa = get_my_company_code()),null,null
+policy,public,mesas_delete_by_company,mesas,cmd=DELETE; roles=public; permissive=PERMISSIVE; qual=(codigo_empresa = get_my_company_code()); with_check=,null,null
+policy,public,caixa_sessoes_select_by_company,caixa_sessoes,cmd=SELECT; roles=public; permissive=PERMISSIVE; qual=(codigo_empresa = get_my_company_code()); with_check=,null,null
+policy,public,caixa_sessoes_insert_by_company,caixa_sessoes,cmd=INSERT; roles=public; permissive=PERMISSIVE; qual=; with_check=(codigo_empresa = get_my_company_code()),null,null
+policy,public,caixa_sessoes_update_by_company,caixa_sessoes,cmd=UPDATE; roles=public; permissive=PERMISSIVE; qual=(codigo_empresa = get_my_company_code()); with_check=(codigo_empresa = get_my_company_code()),null,null
+policy,public,caixa_sessoes_delete_by_company,caixa_sessoes,cmd=DELETE; roles=public; permissive=PERMISSIVE; qual=(codigo_empresa = get_my_company_code()); with_check=,null,null
+policy,public,caixa_movimentacoes_select_by_company,caixa_movimentacoes,cmd=SELECT; roles=public; permissive=PERMISSIVE; qual=(codigo_empresa = get_my_company_code()); with_check=,null,null
+policy,public,caixa_movimentacoes_insert_by_company,caixa_movimentacoes,cmd=INSERT; roles=public; permissive=PERMISSIVE; qual=; with_check=(codigo_empresa = get_my_company_code()),null,null
+policy,public,caixa_movimentacoes_update_by_company,caixa_movimentacoes,cmd=UPDATE; roles=public; permissive=PERMISSIVE; qual=(codigo_empresa = get_my_company_code()); with_check=(codigo_empresa = get_my_company_code()),null,null
+policy,public,caixa_movimentacoes_delete_by_company,caixa_movimentacoes,cmd=DELETE; roles=public; permissive=PERMISSIVE; qual=(codigo_empresa = get_my_company_code()); with_check=,null,null
+policy,storage,logos_public_read,objects,cmd=SELECT; roles=public; permissive=PERMISSIVE; qual=(bucket_id = 'logos'::text); with_check=,null,null
+policy,public,comanda_clientes_select_by_company,comanda_clientes,cmd=SELECT; roles=public; permissive=PERMISSIVE; qual=(codigo_empresa = get_my_company_code()); with_check=,null,null
+policy,public,comanda_clientes_insert_by_company,comanda_clientes,cmd=INSERT; roles=public; permissive=PERMISSIVE; qual=; with_check=(codigo_empresa = get_my_company_code()),null,null
+policy,public,comanda_clientes_update_by_company,comanda_clientes,cmd=UPDATE; roles=public; permissive=PERMISSIVE; qual=(codigo_empresa = get_my_company_code()); with_check=(codigo_empresa = get_my_company_code()),null,null
+policy,public,comanda_clientes_delete_by_company,comanda_clientes,cmd=DELETE; roles=public; permissive=PERMISSIVE; qual=(codigo_empresa = get_my_company_code()); with_check=,null,null
+policy,public,finalizadoras_select_by_company,finalizadoras,cmd=SELECT; roles=public; permissive=PERMISSIVE; qual=(codigo_empresa = get_my_company_code()); with_check=,null,null
+policy,public,caixa_movimentos_rls_all,caixa_movimentos,cmd=ALL; roles=public; permissive=PERMISSIVE; qual=(codigo_empresa = get_my_company_code()); with_check=(codigo_empresa = get_my_company_code()),null,null
+policy,public,isis_sessions_insert_anon,isis_chat_sessions,cmd=INSERT; roles=anon; permissive=PERMISSIVE; qual=; with_check=true,null,null
+policy,public,Anyone can read companies,empresas,cmd=SELECT; roles=public; permissive=PERMISSIVE; qual=true; with_check=,null,null
+policy,public,empresas_select_user_company,empresas,cmd=SELECT; roles=authenticated; permissive=PERMISSIVE; qual=((codigo_empresa)::text = get_my_company_code()); with_check=,null,null
+policy,public,empresas_update_user_company,empresas,cmd=UPDATE; roles=authenticated; permissive=PERMISSIVE; qual=((codigo_empresa)::text = get_my_company_code()); with_check=((codigo_empresa)::text = get_my_company_code()),null,null
+policy,public,colaboradores_select_company,colaboradores,cmd=SELECT; roles=authenticated; permissive=PERMISSIVE; qual=((codigo_empresa = get_my_company_code()) OR (id = auth.uid())); with_check=,null,null
+policy,public,colaboradores_insert_company,colaboradores,cmd=INSERT; roles=authenticated; permissive=PERMISSIVE; qual=; with_check=(codigo_empresa = get_my_company_code()),null,null
+policy,public,colaboradores_update_company,colaboradores,cmd=UPDATE; roles=authenticated; permissive=PERMISSIVE; qual=((codigo_empresa = get_my_company_code()) OR (id = auth.uid())); with_check=((codigo_empresa = get_my_company_code()) OR (id = auth.uid())),null,null
+policy,public,agenda_settings_select_company,agenda_settings,cmd=SELECT; roles=authenticated; permissive=PERMISSIVE; qual=(empresa_id = get_my_company_id()); with_check=,null,null
+policy,public,agenda_settings_insert_company,agenda_settings,cmd=INSERT; roles=authenticated; permissive=PERMISSIVE; qual=; with_check=(empresa_id = get_my_company_id()),null,null
+policy,public,agenda_settings_update_company,agenda_settings,cmd=UPDATE; roles=authenticated; permissive=PERMISSIVE; qual=(empresa_id = get_my_company_id()); with_check=(empresa_id = get_my_company_id()),null,null
+policy,public,agenda_settings_delete_company,agenda_settings,cmd=DELETE; roles=authenticated; permissive=PERMISSIVE; qual=(empresa_id = get_my_company_id()); with_check=,null,null
+policy,public,finalizadoras_insert_by_company,finalizadoras,cmd=INSERT; roles=public; permissive=PERMISSIVE; qual=; with_check=(codigo_empresa = get_my_company_code()),null,null
+policy,public,finalizadoras_update_by_company,finalizadoras,cmd=UPDATE; roles=public; permissive=PERMISSIVE; qual=(codigo_empresa = get_my_company_code()); with_check=(codigo_empresa = get_my_company_code()),null,null
+policy,public,finalizadoras_delete_by_company,finalizadoras,cmd=DELETE; roles=public; permissive=PERMISSIVE; qual=(codigo_empresa = get_my_company_code()); with_check=,null,null
+policy,storage,Allow authenticated users to upload logos,objects,"cmd=INSERT; roles=authenticated; permissive=PERMISSIVE; qual=; with_check=((bucket_id = 'logos'::text) AND ((storage.foldername(name))[1] = ( SELECT (usuarios.codigo_empresa)::text AS codigo_empresa
+   FROM usuarios
+  WHERE (usuarios.id = auth.uid()))))",null,null
+policy,public,ag_select_by_company,agendamentos,cmd=SELECT; roles=authenticated; permissive=PERMISSIVE; qual=(codigo_empresa = get_my_company_code()); with_check=,null,null
+policy,public,ag_insert_by_company,agendamentos,cmd=INSERT; roles=authenticated; permissive=PERMISSIVE; qual=; with_check=(codigo_empresa = get_my_company_code()),null,null
+policy,public,ag_update_by_company,agendamentos,cmd=UPDATE; roles=authenticated; permissive=PERMISSIVE; qual=(codigo_empresa = get_my_company_code()); with_check=(codigo_empresa = get_my_company_code()),null,null
+policy,public,ag_delete_by_company,agendamentos,cmd=DELETE; roles=authenticated; permissive=PERMISSIVE; qual=(codigo_empresa = get_my_company_code()); with_check=,null,null
+policy,storage,Allow authenticated users to update their logos,objects,"cmd=UPDATE; roles=authenticated; permissive=PERMISSIVE; qual=((bucket_id = 'logos'::text) AND ((storage.foldername(name))[1] = ( SELECT (usuarios.codigo_empresa)::text AS codigo_empresa
+   FROM usuarios
+  WHERE (usuarios.id = auth.uid())))); with_check=((bucket_id = 'logos'::text) AND ((storage.foldername(name))[1] = ( SELECT (usuarios.codigo_empresa)::text AS codigo_empresa
+   FROM usuarios
+  WHERE (usuarios.id = auth.uid()))))",null,null
+policy,storage,Allow public read access to logos,objects,cmd=SELECT; roles=public; permissive=PERMISSIVE; qual=(bucket_id = 'logos'::text); with_check=,null,null
+policy,public,contas_receber_insert,contas_receber,cmd=INSERT; roles=public; permissive=PERMISSIVE; qual=; with_check=(codigo_empresa = get_my_company_code()),null,null
+policy,public,contas_pagar_select,contas_pagar,cmd=SELECT; roles=public; permissive=PERMISSIVE; qual=(codigo_empresa = get_my_company_code()); with_check=,null,null
+policy,public,Allow insert new companies,empresas,cmd=INSERT; roles=public; permissive=PERMISSIVE; qual=; with_check=true,null,null
+policy,public,empresas_by_company,empresas,cmd=SELECT; roles=authenticated; permissive=PERMISSIVE; qual=((codigo_empresa)::text = get_my_company_code()); with_check=,null,null
+policy,storage,Allow authenticated users to delete their logos,objects,"cmd=DELETE; roles=authenticated; permissive=PERMISSIVE; qual=((bucket_id = 'logos'::text) AND ((storage.foldername(name))[1] = ( SELECT (usuarios.codigo_empresa)::text AS codigo_empresa
+   FROM usuarios
+  WHERE (usuarios.id = auth.uid())))); with_check=",null,null
+policy,public,usuarios_select_self,usuarios,cmd=SELECT; roles=authenticated; permissive=PERMISSIVE; qual=(id = auth.uid()); with_check=,null,null
+policy,public,agendamentos_insert_policy,agendamentos,"cmd=INSERT; roles=public; permissive=PERMISSIVE; qual=; with_check=((codigo_empresa = current_setting('app.current_empresa'::text, true)) OR (current_setting('app.current_empresa'::text, true) IS NULL))",null,null
+policy,public,Allow anonymous read access to quadras,quadras,cmd=SELECT; roles=anon; permissive=PERMISSIVE; qual=true; with_check=,null,null
+policy,public,contas_receber_update,contas_receber,cmd=UPDATE; roles=public; permissive=PERMISSIVE; qual=(codigo_empresa = get_my_company_code()); with_check=(codigo_empresa = get_my_company_code()),null,null
+policy,public,Allow public insert agenda_settings,agenda_settings,cmd=INSERT; roles=public; permissive=PERMISSIVE; qual=; with_check=true,null,null
+policy,public,ag_participantes_select_company,agendamento_participantes,cmd=SELECT; roles=authenticated; permissive=PERMISSIVE; qual=((codigo_empresa)::text = get_my_company_code()); with_check=,null,null
+policy,public,ag_participantes_insert_company,agendamento_participantes,cmd=INSERT; roles=authenticated; permissive=PERMISSIVE; qual=; with_check=((codigo_empresa)::text = get_my_company_code()),null,null
+policy,public,ag_participantes_update_company,agendamento_participantes,cmd=UPDATE; roles=authenticated; permissive=PERMISSIVE; qual=((codigo_empresa)::text = get_my_company_code()); with_check=((codigo_empresa)::text = get_my_company_code()),null,null
+policy,public,ag_participantes_delete_company,agendamento_participantes,cmd=DELETE; roles=authenticated; permissive=PERMISSIVE; qual=((codigo_empresa)::text = get_my_company_code()); with_check=,null,null
+policy,public,Allow public read by codigo_empresa,clientes,cmd=SELECT; roles=anon; permissive=PERMISSIVE; qual=(codigo_empresa IS NOT NULL); with_check=,null,null
+policy,public,vendas_select_empresa,vendas,cmd=SELECT; roles=public; permissive=PERMISSIVE; qual=((codigo_empresa)::text = get_my_company_code()); with_check=,null,null
+policy,public,vendas_insert_empresa,vendas,cmd=INSERT; roles=public; permissive=PERMISSIVE; qual=; with_check=((codigo_empresa)::text = get_my_company_code()),null,null
+policy,public,vendas_update_empresa,vendas,cmd=UPDATE; roles=public; permissive=PERMISSIVE; qual=((codigo_empresa)::text = get_my_company_code()); with_check=,null,null
+policy,public,vendas_delete_empresa,vendas,cmd=DELETE; roles=public; permissive=PERMISSIVE; qual=((codigo_empresa)::text = get_my_company_code()); with_check=,null,null
+policy,public,itens_venda_select_empresa,itens_venda,cmd=SELECT; roles=public; permissive=PERMISSIVE; qual=((codigo_empresa)::text = get_my_company_code()); with_check=,null,null
+policy,public,itens_venda_insert_empresa,itens_venda,cmd=INSERT; roles=public; permissive=PERMISSIVE; qual=; with_check=((codigo_empresa)::text = get_my_company_code()),null,null
+policy,public,itens_venda_update_empresa,itens_venda,cmd=UPDATE; roles=public; permissive=PERMISSIVE; qual=((codigo_empresa)::text = get_my_company_code()); with_check=,null,null
+policy,public,itens_venda_delete_empresa,itens_venda,cmd=DELETE; roles=public; permissive=PERMISSIVE; qual=((codigo_empresa)::text = get_my_company_code()); with_check=,null,null
+policy,public,Allow public insert usuarios,usuarios,cmd=INSERT; roles=public; permissive=PERMISSIVE; qual=; with_check=true,null,null
+policy,public,Allow public insert colaboradores,colaboradores,cmd=INSERT; roles=public; permissive=PERMISSIVE; qual=; with_check=true,null,null
+policy,public,Allow public insert quadras,quadras,cmd=INSERT; roles=public; permissive=PERMISSIVE; qual=; with_check=true,null,null
+policy,public,contas_receber_delete,contas_receber,cmd=DELETE; roles=public; permissive=PERMISSIVE; qual=(codigo_empresa = get_my_company_code()); with_check=,null,null
+policy,public,Allow public insert produto_categorias,produto_categorias,cmd=INSERT; roles=public; permissive=PERMISSIVE; qual=; with_check=true,null,null
+policy,public,contas_pagar_insert,contas_pagar,cmd=INSERT; roles=public; permissive=PERMISSIVE; qual=; with_check=(codigo_empresa = get_my_company_code()),null,null
+policy,public,isis_sessions_insert_auth,isis_chat_sessions,cmd=INSERT; roles=authenticated; permissive=PERMISSIVE; qual=; with_check=true,null,null
+policy,public,Allow public read agendamentos by codigo_empresa,agendamentos,cmd=SELECT; roles=anon; permissive=PERMISSIVE; qual=(codigo_empresa IS NOT NULL); with_check=,null,null
+policy,public,agendamentos_update_policy,agendamentos,"cmd=UPDATE; roles=public; permissive=PERMISSIVE; qual=((codigo_empresa = current_setting('app.current_empresa'::text, true)) OR (current_setting('app.current_empresa'::text, true) IS NULL)); with_check=((codigo_empresa = current_setting('app.current_empresa'::text, true)) OR (current_setting('app.current_empresa'::text, true) IS NULL))",null,null
+policy,public,agendamentos_delete_policy,agendamentos,"cmd=DELETE; roles=public; permissive=PERMISSIVE; qual=((codigo_empresa = current_setting('app.current_empresa'::text, true)) OR (current_setting('app.current_empresa'::text, true) IS NULL)); with_check=",null,null
+policy,public,agendamento_participantes_select_policy,agendamento_participantes,"cmd=SELECT; roles=public; permissive=PERMISSIVE; qual=(((codigo_empresa)::text = current_setting('app.current_empresa'::text, true)) OR (current_setting('app.current_empresa'::text, true) IS NULL) OR (current_setting('app.current_empresa'::text, true) = ''::text)); with_check=",null,null
+policy,public,Allow public insert agendamentos by codigo_empresa,agendamentos,cmd=INSERT; roles=anon; permissive=PERMISSIVE; qual=; with_check=(codigo_empresa IS NOT NULL),null,null
+policy,public,Allow public insert agendamento_participantes by codigo_empresa,agendamento_participantes,cmd=INSERT; roles=anon; permissive=PERMISSIVE; qual=; with_check=(codigo_empresa IS NOT NULL),null,null
+policy,public,quadras_select_policy,quadras,"cmd=SELECT; roles=public; permissive=PERMISSIVE; qual=((codigo_empresa = current_setting('app.current_empresa'::text, true)) OR (current_setting('app.current_empresa'::text, true) IS NULL) OR (current_setting('app.current_empresa'::text, true) = ''::text)); with_check=",null,null
+policy,public,quadras_insert_policy,quadras,"cmd=INSERT; roles=public; permissive=PERMISSIVE; qual=; with_check=((codigo_empresa = current_setting('app.current_empresa'::text, true)) OR (current_setting('app.current_empresa'::text, true) IS NULL))",null,null
+policy,public,Isis pode ler dias funcionamento,quadras_dias_funcionamento,"cmd=SELECT; roles=anon,authenticated; permissive=PERMISSIVE; qual=(codigo_empresa IS NOT NULL); with_check=",null,null
+policy,public,Isis pode ler quadras,quadras,"cmd=SELECT; roles=anon,authenticated; permissive=PERMISSIVE; qual=(codigo_empresa IS NOT NULL); with_check=",null,null
+policy,public,contas_receber_baixas_select,contas_receber_baixas,cmd=SELECT; roles=public; permissive=PERMISSIVE; qual=(codigo_empresa = get_my_company_code()); with_check=,null,null
+policy,public,contas_receber_baixas_insert,contas_receber_baixas,cmd=INSERT; roles=public; permissive=PERMISSIVE; qual=; with_check=(codigo_empresa = get_my_company_code()),null,null
+policy,public,contas_receber_baixas_update,contas_receber_baixas,cmd=UPDATE; roles=public; permissive=PERMISSIVE; qual=(codigo_empresa = get_my_company_code()); with_check=(codigo_empresa = get_my_company_code()),null,null
+policy,public,contas_receber_baixas_delete,contas_receber_baixas,cmd=DELETE; roles=public; permissive=PERMISSIVE; qual=(codigo_empresa = get_my_company_code()); with_check=,null,null
+policy,public,contas_pagar_baixas_select,contas_pagar_baixas,cmd=SELECT; roles=public; permissive=PERMISSIVE; qual=(codigo_empresa = get_my_company_code()); with_check=,null,null
+policy,public,contas_pagar_baixas_insert,contas_pagar_baixas,cmd=INSERT; roles=public; permissive=PERMISSIVE; qual=; with_check=(codigo_empresa = get_my_company_code()),null,null
+policy,public,contas_pagar_baixas_update,contas_pagar_baixas,cmd=UPDATE; roles=public; permissive=PERMISSIVE; qual=(codigo_empresa = get_my_company_code()); with_check=(codigo_empresa = get_my_company_code()),null,null
+policy,public,Usuários podem ver compras da própria empresa,compras,cmd=SELECT; roles=public; permissive=PERMISSIVE; qual=(codigo_empresa = (( SELECT get_my_company_code() AS get_my_company_code))::integer); with_check=,null,null
+policy,public,Usuários podem inserir compras na própria empresa,compras,cmd=INSERT; roles=public; permissive=PERMISSIVE; qual=; with_check=(codigo_empresa = (( SELECT get_my_company_code() AS get_my_company_code))::integer),null,null
+policy,public,Usuários podem atualizar compras da própria empresa,compras,cmd=UPDATE; roles=public; permissive=PERMISSIVE; qual=(codigo_empresa = (( SELECT get_my_company_code() AS get_my_company_code))::integer); with_check=,null,null
+policy,public,Usuários podem deletar compras da própria empresa,compras,cmd=DELETE; roles=public; permissive=PERMISSIVE; qual=(codigo_empresa = (( SELECT get_my_company_code() AS get_my_company_code))::integer); with_check=,null,null
+policy,public,Usuários podem ver itens de compras da própria empresa,compras_itens,"cmd=SELECT; roles=public; permissive=PERMISSIVE; qual=(EXISTS ( SELECT 1
+   FROM compras
+  WHERE ((compras.id = compras_itens.compra_id) AND (compras.codigo_empresa = (( SELECT get_my_company_code() AS get_my_company_code))::integer)))); with_check=",null,null
+policy,public,Usuários podem inserir itens de compras da própria empresa,compras_itens,"cmd=INSERT; roles=public; permissive=PERMISSIVE; qual=; with_check=(EXISTS ( SELECT 1
+   FROM compras
+  WHERE ((compras.id = compras_itens.compra_id) AND (compras.codigo_empresa = (( SELECT get_my_company_code() AS get_my_company_code))::integer))))",null,null
+policy,public,Usuários podem atualizar itens de compras da própria empresa,compras_itens,"cmd=UPDATE; roles=public; permissive=PERMISSIVE; qual=(EXISTS ( SELECT 1
+   FROM compras
+  WHERE ((compras.id = compras_itens.compra_id) AND (compras.codigo_empresa = (( SELECT get_my_company_code() AS get_my_company_code))::integer)))); with_check=",null,null
+policy,public,Usuários podem deletar itens de compras da própria empresa,compras_itens,"cmd=DELETE; roles=public; permissive=PERMISSIVE; qual=(EXISTS ( SELECT 1
+   FROM compras
+  WHERE ((compras.id = compras_itens.compra_id) AND (compras.codigo_empresa = (( SELECT get_my_company_code() AS get_my_company_code))::integer)))); with_check=",null,null
+policy,public,Users can manage own ui settings,user_ui_settings,cmd=ALL; roles=public; permissive=PERMISSIVE; qual=(auth.uid() = user_id); with_check=(auth.uid() = user_id),null,null
+policy,public,Usuarios podem ler counters da propria empresa,empresa_counters,"cmd=SELECT; roles=public; permissive=PERMISSIVE; qual=(empresa_id IN ( SELECT e.id
+   FROM (empresas e
+     JOIN usuarios u ON (((u.codigo_empresa)::text = (e.codigo_empresa)::text)))
+  WHERE (u.id = auth.uid()))); with_check=",null,null
+policy,public,Usuarios podem atualizar counters da propria empresa,empresa_counters,"cmd=UPDATE; roles=public; permissive=PERMISSIVE; qual=(empresa_id IN ( SELECT e.id
+   FROM (empresas e
+     JOIN usuarios u ON (((u.codigo_empresa)::text = (e.codigo_empresa)::text)))
+  WHERE (u.id = auth.uid()))); with_check=(empresa_id IN ( SELECT e.id
+   FROM (empresas e
+     JOIN usuarios u ON (((u.codigo_empresa)::text = (e.codigo_empresa)::text)))
+  WHERE (u.id = auth.uid())))",null,null
+policy,public,Usuarios podem criar counters da propria empresa,empresa_counters,"cmd=INSERT; roles=public; permissive=PERMISSIVE; qual=; with_check=(empresa_id IN ( SELECT e.id
+   FROM (empresas e
+     JOIN usuarios u ON (((u.codigo_empresa)::text = (e.codigo_empresa)::text)))
+  WHERE (u.id = auth.uid())))",null,null
+policy,public,quadras_update_policy,quadras,"cmd=UPDATE; roles=public; permissive=PERMISSIVE; qual=((codigo_empresa = current_setting('app.current_empresa'::text, true)) OR (current_setting('app.current_empresa'::text, true) IS NULL)); with_check=((codigo_empresa = current_setting('app.current_empresa'::text, true)) OR (current_setting('app.current_empresa'::text, true) IS NULL))",null,null
+policy,public,quadras_delete_policy,quadras,"cmd=DELETE; roles=public; permissive=PERMISSIVE; qual=((codigo_empresa = current_setting('app.current_empresa'::text, true)) OR (current_setting('app.current_empresa'::text, true) IS NULL)); with_check=",null,null
+policy,public,clientes_select_policy,clientes,"cmd=SELECT; roles=public; permissive=PERMISSIVE; qual=((codigo_empresa = current_setting('app.current_empresa'::text, true)) OR (current_setting('app.current_empresa'::text, true) IS NULL) OR (current_setting('app.current_empresa'::text, true) = ''::text)); with_check=",null,null
+policy,public,clientes_insert_policy,clientes,"cmd=INSERT; roles=public; permissive=PERMISSIVE; qual=; with_check=((codigo_empresa = current_setting('app.current_empresa'::text, true)) OR (current_setting('app.current_empresa'::text, true) IS NULL))",null,null
+policy,public,contas_receber_select,contas_receber,cmd=SELECT; roles=public; permissive=PERMISSIVE; qual=(codigo_empresa = get_my_company_code()); with_check=,null,null
+policy,public,Usuários podem ver movimentações de caixa da sua empresa,caixa_movimentacoes,cmd=SELECT; roles=public; permissive=PERMISSIVE; qual=(codigo_empresa = get_my_company_code()); with_check=,null,null
+policy,public,Usuários podem criar movimentações de caixa na sua empresa,caixa_movimentacoes,cmd=INSERT; roles=public; permissive=PERMISSIVE; qual=; with_check=(codigo_empresa = get_my_company_code()),null,null
+policy,public,Usuários podem atualizar movimentações de caixa da sua empre,caixa_movimentacoes,cmd=UPDATE; roles=public; permissive=PERMISSIVE; qual=(codigo_empresa = get_my_company_code()); with_check=(codigo_empresa = get_my_company_code()),null,null
+policy,public,Usuários podem deletar movimentações de caixa da sua empresa,caixa_movimentacoes,cmd=DELETE; roles=public; permissive=PERMISSIVE; qual=(codigo_empresa = get_my_company_code()); with_check=,null,null
+policy,public,Usuários podem ver resumos de caixa da sua empresa,caixa_resumos,cmd=SELECT; roles=public; permissive=PERMISSIVE; qual=(codigo_empresa = get_my_company_code()); with_check=,null,null
+policy,public,Usuários podem criar resumos de caixa na sua empresa,caixa_resumos,cmd=INSERT; roles=public; permissive=PERMISSIVE; qual=; with_check=(codigo_empresa = get_my_company_code()),null,null
+policy,public,Usuários podem atualizar resumos de caixa da sua empresa,caixa_resumos,cmd=UPDATE; roles=public; permissive=PERMISSIVE; qual=(codigo_empresa = get_my_company_code()); with_check=(codigo_empresa = get_my_company_code()),null,null
+policy,public,Usuários podem deletar resumos de caixa da sua empresa,caixa_resumos,cmd=DELETE; roles=public; permissive=PERMISSIVE; qual=(codigo_empresa = get_my_company_code()); with_check=,null,null
+policy,public,Users can view their company agenda settings,agenda_settings,"cmd=SELECT; roles=authenticated; permissive=PERMISSIVE; qual=(empresa_id IN ( SELECT empresas.id
+   FROM empresas
+  WHERE ((empresas.codigo_empresa)::text = ( SELECT colaboradores.codigo_empresa
+           FROM colaboradores
+          WHERE (colaboradores.id = auth.uid()))))); with_check=",null,null
+policy,public,Users can create their company agenda settings,agenda_settings,"cmd=INSERT; roles=authenticated; permissive=PERMISSIVE; qual=; with_check=(empresa_id IN ( SELECT empresas.id
+   FROM empresas
+  WHERE ((empresas.codigo_empresa)::text = ( SELECT colaboradores.codigo_empresa
+           FROM colaboradores
+          WHERE (colaboradores.id = auth.uid())))))",null,null
+policy,public,Isis pode buscar clientes,clientes,"cmd=SELECT; roles=anon,authenticated; permissive=PERMISSIVE; qual=true; with_check=",null,null
+policy,public,Isis pode criar clientes,clientes,"cmd=INSERT; roles=anon,authenticated; permissive=PERMISSIVE; qual=; with_check=true",null,null
+policy,public,Users can update their company agenda settings,agenda_settings,"cmd=UPDATE; roles=authenticated; permissive=PERMISSIVE; qual=(empresa_id IN ( SELECT empresas.id
+   FROM empresas
+  WHERE ((empresas.codigo_empresa)::text = ( SELECT colaboradores.codigo_empresa
+           FROM colaboradores
+          WHERE (colaboradores.id = auth.uid()))))); with_check=(empresa_id IN ( SELECT empresas.id
+   FROM empresas
+  WHERE ((empresas.codigo_empresa)::text = ( SELECT colaboradores.codigo_empresa
+           FROM colaboradores
+          WHERE (colaboradores.id = auth.uid())))))",null,null
+policy,public,Users can delete their company agenda settings,agenda_settings,"cmd=DELETE; roles=authenticated; permissive=PERMISSIVE; qual=(empresa_id IN ( SELECT empresas.id
+   FROM empresas
+  WHERE ((empresas.codigo_empresa)::text = ( SELECT colaboradores.codigo_empresa
+           FROM colaboradores
+          WHERE (colaboradores.id = auth.uid()))))); with_check=",null,null
+policy,public,Acesso publico empresa_counters,empresa_counters,"cmd=ALL; roles=anon,authenticated; permissive=PERMISSIVE; qual=true; with_check=true",null,null
+policy,public,clientes_update_policy,clientes,"cmd=UPDATE; roles=public; permissive=PERMISSIVE; qual=((codigo_empresa = current_setting('app.current_empresa'::text, true)) OR (current_setting('app.current_empresa'::text, true) IS NULL)); with_check=((codigo_empresa = current_setting('app.current_empresa'::text, true)) OR (current_setting('app.current_empresa'::text, true) IS NULL))",null,null
+policy,public,clientes_delete_policy,clientes,"cmd=DELETE; roles=public; permissive=PERMISSIVE; qual=((codigo_empresa = current_setting('app.current_empresa'::text, true)) OR (current_setting('app.current_empresa'::text, true) IS NULL)); with_check=",null,null
+policy,public,agendamentos_select_policy,agendamentos,"cmd=SELECT; roles=public; permissive=PERMISSIVE; qual=((codigo_empresa = current_setting('app.current_empresa'::text, true)) OR (current_setting('app.current_empresa'::text, true) IS NULL) OR (current_setting('app.current_empresa'::text, true) = ''::text)); with_check=",null,null
+policy,public,agendamento_participantes_insert_policy,agendamento_participantes,"cmd=INSERT; roles=public; permissive=PERMISSIVE; qual=; with_check=(((codigo_empresa)::text = current_setting('app.current_empresa'::text, true)) OR (current_setting('app.current_empresa'::text, true) IS NULL))",null,null
+policy,public,agendamento_participantes_update_policy,agendamento_participantes,"cmd=UPDATE; roles=public; permissive=PERMISSIVE; qual=(((codigo_empresa)::text = current_setting('app.current_empresa'::text, true)) OR (current_setting('app.current_empresa'::text, true) IS NULL)); with_check=(((codigo_empresa)::text = current_setting('app.current_empresa'::text, true)) OR (current_setting('app.current_empresa'::text, true) IS NULL))",null,null
+policy,public,agendamento_participantes_delete_policy,agendamento_participantes,"cmd=DELETE; roles=public; permissive=PERMISSIVE; qual=(((codigo_empresa)::text = current_setting('app.current_empresa'::text, true)) OR (current_setting('app.current_empresa'::text, true) IS NULL)); with_check=",null,null
+policy,public,Usuarios podem gerenciar dias de funcionamento da propria empre,quadras_dias_funcionamento,"cmd=ALL; roles=public; permissive=PERMISSIVE; qual=(codigo_empresa IN ( SELECT u.codigo_empresa
+   FROM usuarios u
+  WHERE (u.id = auth.uid()))); with_check=(codigo_empresa IN ( SELECT u.codigo_empresa
+   FROM usuarios u
+  WHERE (u.id = auth.uid())))",null,null
+policy,public,contas_pagar_update,contas_pagar,cmd=UPDATE; roles=public; permissive=PERMISSIVE; qual=(codigo_empresa = get_my_company_code()); with_check=(codigo_empresa = get_my_company_code()),null,null
+policy,public,contas_pagar_delete,contas_pagar,cmd=DELETE; roles=public; permissive=PERMISSIVE; qual=(codigo_empresa = get_my_company_code()); with_check=,null,null
+policy,public,contas_pagar_baixas_delete,contas_pagar_baixas,cmd=DELETE; roles=public; permissive=PERMISSIVE; qual=(codigo_empresa = get_my_company_code()); with_check=,null,null
+policy,public,comandas_select_by_company,comandas,cmd=SELECT; roles=authenticated; permissive=PERMISSIVE; qual=(codigo_empresa = get_my_company_code()); with_check=,null,null
+policy,public,comandas_insert_by_company,comandas,cmd=INSERT; roles=authenticated; permissive=PERMISSIVE; qual=; with_check=(codigo_empresa = get_my_company_code()),null,null
+policy,public,comandas_update_by_company,comandas,cmd=UPDATE; roles=authenticated; permissive=PERMISSIVE; qual=(codigo_empresa = get_my_company_code()); with_check=(codigo_empresa = get_my_company_code()),null,null
+policy,public,comandas_delete_by_company,comandas,cmd=DELETE; roles=authenticated; permissive=PERMISSIVE; qual=(codigo_empresa = get_my_company_code()); with_check=,null,null
+policy,public,agp_select_company,agendamento_participantes,"cmd=SELECT; roles=anon,authenticated; permissive=PERMISSIVE; qual=(((codigo_empresa)::text = app_current_empresa()) OR (EXISTS ( SELECT 1
+   FROM agendamentos a
+  WHERE ((a.id = agendamento_participantes.agendamento_id) AND (a.codigo_empresa = app_current_empresa()))))); with_check=",null,null
+policy,public,rt select agendamentos by company,agendamentos,"cmd=SELECT; roles=authenticated; permissive=PERMISSIVE; qual=(codigo_empresa = COALESCE((auth.jwt() ->> 'codigo_empresa'::text), ''::text)); with_check=",null,null
+policy,public,rt select participantes by company,agendamento_participantes,"cmd=SELECT; roles=authenticated; permissive=PERMISSIVE; qual=((codigo_empresa)::text = COALESCE((auth.jwt() ->> 'codigo_empresa'::text), ''::text)); with_check=",null,null
+policy,public,comandas_select_company,comandas,cmd=SELECT; roles=authenticated; permissive=PERMISSIVE; qual=(codigo_empresa = fx_claim_text('codigo_empresa'::text)); with_check=,null,null
+policy,public,comandas_ins_company,comandas,cmd=INSERT; roles=authenticated; permissive=PERMISSIVE; qual=; with_check=(codigo_empresa = fx_claim_text('codigo_empresa'::text)),null,null
+policy,public,comandas_upd_company,comandas,cmd=UPDATE; roles=authenticated; permissive=PERMISSIVE; qual=(codigo_empresa = fx_claim_text('codigo_empresa'::text)); with_check=(codigo_empresa = fx_claim_text('codigo_empresa'::text)),null,null
+policy,public,comandas_del_company,comandas,cmd=DELETE; roles=authenticated; permissive=PERMISSIVE; qual=(codigo_empresa = fx_claim_text('codigo_empresa'::text)); with_check=,null,null
+policy,public,ci_select_company,comanda_itens,cmd=SELECT; roles=authenticated; permissive=PERMISSIVE; qual=(codigo_empresa = fx_claim_text('codigo_empresa'::text)); with_check=,null,null
+policy,public,ci_ins_company,comanda_itens,cmd=INSERT; roles=authenticated; permissive=PERMISSIVE; qual=; with_check=(codigo_empresa = fx_claim_text('codigo_empresa'::text)),null,null
+policy,public,ci_upd_company,comanda_itens,cmd=UPDATE; roles=authenticated; permissive=PERMISSIVE; qual=(codigo_empresa = fx_claim_text('codigo_empresa'::text)); with_check=(codigo_empresa = fx_claim_text('codigo_empresa'::text)),null,null
+policy,public,ci_del_company,comanda_itens,cmd=DELETE; roles=authenticated; permissive=PERMISSIVE; qual=(codigo_empresa = fx_claim_text('codigo_empresa'::text)); with_check=,null,null
+policy,public,cc_select_company,comanda_clientes,cmd=SELECT; roles=authenticated; permissive=PERMISSIVE; qual=(codigo_empresa = fx_claim_text('codigo_empresa'::text)); with_check=,null,null
+policy,public,cc_ins_company,comanda_clientes,cmd=INSERT; roles=authenticated; permissive=PERMISSIVE; qual=; with_check=(codigo_empresa = fx_claim_text('codigo_empresa'::text)),null,null
+policy,public,ch_select_company,comanda_historico,cmd=SELECT; roles=authenticated; permissive=PERMISSIVE; qual=(codigo_empresa = fx_claim_int('codigo_empresa'::text)); with_check=,null,null
+policy,public,cc_upd_company,comanda_clientes,cmd=UPDATE; roles=authenticated; permissive=PERMISSIVE; qual=(codigo_empresa = fx_claim_text('codigo_empresa'::text)); with_check=(codigo_empresa = fx_claim_text('codigo_empresa'::text)),null,null
+policy,public,cc_del_company,comanda_clientes,cmd=DELETE; roles=authenticated; permissive=PERMISSIVE; qual=(codigo_empresa = fx_claim_text('codigo_empresa'::text)); with_check=,null,null
+policy,public,pgto_select_company,pagamentos,cmd=SELECT; roles=authenticated; permissive=PERMISSIVE; qual=(codigo_empresa = fx_claim_text('codigo_empresa'::text)); with_check=,null,null
+policy,public,pgto_ins_company,pagamentos,cmd=INSERT; roles=authenticated; permissive=PERMISSIVE; qual=; with_check=(codigo_empresa = fx_claim_text('codigo_empresa'::text)),null,null
+policy,public,pgto_upd_company,pagamentos,cmd=UPDATE; roles=authenticated; permissive=PERMISSIVE; qual=(codigo_empresa = fx_claim_text('codigo_empresa'::text)); with_check=(codigo_empresa = fx_claim_text('codigo_empresa'::text)),null,null
+policy,public,pgto_del_company,pagamentos,cmd=DELETE; roles=authenticated; permissive=PERMISSIVE; qual=(codigo_empresa = fx_claim_text('codigo_empresa'::text)); with_check=,null,null
+policy,public,mesas_select_company,mesas,cmd=SELECT; roles=authenticated; permissive=PERMISSIVE; qual=(codigo_empresa = fx_claim_text('codigo_empresa'::text)); with_check=,null,null
+policy,public,mesas_ins_company,mesas,cmd=INSERT; roles=authenticated; permissive=PERMISSIVE; qual=; with_check=(codigo_empresa = fx_claim_text('codigo_empresa'::text)),null,null
+policy,public,mesas_upd_company,mesas,cmd=UPDATE; roles=authenticated; permissive=PERMISSIVE; qual=(codigo_empresa = fx_claim_text('codigo_empresa'::text)); with_check=(codigo_empresa = fx_claim_text('codigo_empresa'::text)),null,null
+policy,public,mesas_del_company,mesas,cmd=DELETE; roles=authenticated; permissive=PERMISSIVE; qual=(codigo_empresa = fx_claim_text('codigo_empresa'::text)); with_check=,null,null
+policy,public,cs_select_company,caixa_sessoes,cmd=SELECT; roles=authenticated; permissive=PERMISSIVE; qual=(codigo_empresa = fx_claim_text('codigo_empresa'::text)); with_check=,null,null
+policy,public,cs_ins_company,caixa_sessoes,cmd=INSERT; roles=authenticated; permissive=PERMISSIVE; qual=; with_check=(codigo_empresa = fx_claim_text('codigo_empresa'::text)),null,null
+policy,public,cs_upd_company,caixa_sessoes,cmd=UPDATE; roles=authenticated; permissive=PERMISSIVE; qual=(codigo_empresa = fx_claim_text('codigo_empresa'::text)); with_check=(codigo_empresa = fx_claim_text('codigo_empresa'::text)),null,null
+policy,public,cs_del_company,caixa_sessoes,cmd=DELETE; roles=authenticated; permissive=PERMISSIVE; qual=(codigo_empresa = fx_claim_text('codigo_empresa'::text)); with_check=,null,null
+policy,public,cm_select_company,caixa_movimentacoes,cmd=SELECT; roles=authenticated; permissive=PERMISSIVE; qual=(codigo_empresa = fx_claim_text('codigo_empresa'::text)); with_check=,null,null
+policy,public,cm_ins_company,caixa_movimentacoes,cmd=INSERT; roles=authenticated; permissive=PERMISSIVE; qual=; with_check=(codigo_empresa = fx_claim_text('codigo_empresa'::text)),null,null
+policy,public,isis_sessions_update_anon,isis_chat_sessions,cmd=UPDATE; roles=anon; permissive=PERMISSIVE; qual=true; with_check=true,null,null
+policy,public,cm_upd_company,caixa_movimentacoes,cmd=UPDATE; roles=authenticated; permissive=PERMISSIVE; qual=(codigo_empresa = fx_claim_text('codigo_empresa'::text)); with_check=(codigo_empresa = fx_claim_text('codigo_empresa'::text)),null,null
+policy,public,cm_del_company,caixa_movimentacoes,cmd=DELETE; roles=authenticated; permissive=PERMISSIVE; qual=(codigo_empresa = fx_claim_text('codigo_empresa'::text)); with_check=,null,null
+policy,public,ms_select_company,movimentos_saldo,cmd=SELECT; roles=authenticated; permissive=PERMISSIVE; qual=(codigo_empresa = fx_claim_text('codigo_empresa'::text)); with_check=,null,null
+policy,public,prod_select_company,produtos,cmd=SELECT; roles=authenticated; permissive=PERMISSIVE; qual=((codigo_empresa)::text = fx_claim_text('codigo_empresa'::text)); with_check=,null,null
+policy,public,cli_select_company,clientes,cmd=SELECT; roles=authenticated; permissive=PERMISSIVE; qual=(codigo_empresa = fx_claim_text('codigo_empresa'::text)); with_check=,null,null
+policy,public,quad_select_company,quadras,cmd=SELECT; roles=authenticated; permissive=PERMISSIVE; qual=(codigo_empresa = fx_claim_text('codigo_empresa'::text)); with_check=,null,null
+policy,public,qdf_select_company,quadras_dias_funcionamento,"cmd=SELECT; roles=authenticated; permissive=PERMISSIVE; qual=(EXISTS ( SELECT 1
+   FROM quadras q
+  WHERE ((q.id = quadras_dias_funcionamento.quadra_id) AND (q.codigo_empresa = fx_claim_text('codigo_empresa'::text))))); with_check=",null,null
+policy,public,cp_select_company,contas_pagar,cmd=SELECT; roles=authenticated; permissive=PERMISSIVE; qual=(codigo_empresa = fx_claim_text('codigo_empresa'::text)); with_check=,null,null
+policy,public,isis_sessions_update_auth,isis_chat_sessions,cmd=UPDATE; roles=authenticated; permissive=PERMISSIVE; qual=true; with_check=true,null,null
+policy,public,cpb_select_company,contas_pagar_baixas,"cmd=SELECT; roles=authenticated; permissive=PERMISSIVE; qual=(EXISTS ( SELECT 1
+   FROM contas_pagar cp
+  WHERE ((cp.id = contas_pagar_baixas.conta_id) AND (cp.codigo_empresa = fx_claim_text('codigo_empresa'::text))))); with_check=",null,null
+policy,public,cr_select_company,contas_receber,cmd=SELECT; roles=authenticated; permissive=PERMISSIVE; qual=(codigo_empresa = fx_claim_text('codigo_empresa'::text)); with_check=,null,null
+policy,public,crb_select_company,contas_receber_baixas,cmd=SELECT; roles=authenticated; permissive=PERMISSIVE; qual=(codigo_empresa = fx_claim_text('codigo_empresa'::text)); with_check=,null,null
+policy,public,compras_select_company,compras,cmd=SELECT; roles=authenticated; permissive=PERMISSIVE; qual=(codigo_empresa = fx_claim_int('codigo_empresa'::text)); with_check=,null,null
+policy,public,compras_ins_company,compras,cmd=INSERT; roles=authenticated; permissive=PERMISSIVE; qual=; with_check=(codigo_empresa = fx_claim_int('codigo_empresa'::text)),null,null
+policy,public,compras_upd_company,compras,cmd=UPDATE; roles=authenticated; permissive=PERMISSIVE; qual=(codigo_empresa = fx_claim_int('codigo_empresa'::text)); with_check=(codigo_empresa = fx_claim_int('codigo_empresa'::text)),null,null
+policy,public,compras_del_company,compras,cmd=DELETE; roles=authenticated; permissive=PERMISSIVE; qual=(codigo_empresa = fx_claim_int('codigo_empresa'::text)); with_check=,null,null
+policy,public,ci2_select_company,compras_itens,"cmd=SELECT; roles=authenticated; permissive=PERMISSIVE; qual=(EXISTS ( SELECT 1
+   FROM compras c
+  WHERE ((c.id = compras_itens.compra_id) AND (c.codigo_empresa = fx_claim_int('codigo_empresa'::text))))); with_check=",null,null
+policy,public,ci2_ins_company,compras_itens,"cmd=INSERT; roles=authenticated; permissive=PERMISSIVE; qual=; with_check=(EXISTS ( SELECT 1
+   FROM compras c
+  WHERE ((c.id = compras_itens.compra_id) AND (c.codigo_empresa = fx_claim_int('codigo_empresa'::text)))))",null,null
+policy,public,ci2_upd_company,compras_itens,"cmd=UPDATE; roles=authenticated; permissive=PERMISSIVE; qual=(EXISTS ( SELECT 1
+   FROM compras c
+  WHERE ((c.id = compras_itens.compra_id) AND (c.codigo_empresa = fx_claim_int('codigo_empresa'::text))))); with_check=(EXISTS ( SELECT 1
+   FROM compras c
+  WHERE ((c.id = compras_itens.compra_id) AND (c.codigo_empresa = fx_claim_int('codigo_empresa'::text)))))",null,null
+policy,public,ci2_del_company,compras_itens,"cmd=DELETE; roles=authenticated; permissive=PERMISSIVE; qual=(EXISTS ( SELECT 1
+   FROM compras c
+  WHERE ((c.id = compras_itens.compra_id) AND (c.codigo_empresa = fx_claim_int('codigo_empresa'::text))))); with_check=",null,null
+policy,public,er_select_company,estoque_reservado,cmd=SELECT; roles=authenticated; permissive=PERMISSIVE; qual=(codigo_empresa = fx_claim_int('codigo_empresa'::text)); with_check=,null,null
+policy,public,ebl_select_company,estoque_baixa_log,"cmd=SELECT; roles=authenticated; permissive=PERMISSIVE; qual=(EXISTS ( SELECT 1
+   FROM comandas c
+  WHERE ((c.id = estoque_baixa_log.comanda_id) AND (c.codigo_empresa = fx_claim_text('codigo_empresa'::text))))); with_check=",null,null
+policy,public,uis_select_own,user_ui_settings,cmd=SELECT; roles=authenticated; permissive=PERMISSIVE; qual=(user_id = app_user_id()); with_check=,null,null
+policy,public,uis_insert_own,user_ui_settings,cmd=INSERT; roles=authenticated; permissive=PERMISSIVE; qual=; with_check=(user_id = app_user_id()),null,null
+policy,public,uis_update_own,user_ui_settings,cmd=UPDATE; roles=authenticated; permissive=PERMISSIVE; qual=(user_id = app_user_id()); with_check=(user_id = app_user_id()),null,null
+policy,public,isis_conversas_select,isis_conversas,"cmd=SELECT; roles=public; permissive=PERMISSIVE; qual=(codigo_empresa = current_setting('app.codigo_empresa'::text, true)); with_check=",null,null
+policy,public,isis_conversas_mod,isis_conversas,"cmd=ALL; roles=public; permissive=PERMISSIVE; qual=(codigo_empresa = current_setting('app.codigo_empresa'::text, true)); with_check=(codigo_empresa = current_setting('app.codigo_empresa'::text, true))",null,null
+policy,storage,logos_read_public,objects,cmd=SELECT; roles=public; permissive=PERMISSIVE; qual=(bucket_id = 'logos'::text); with_check=,null,null
+policy,storage,logos_insert_any,objects,cmd=INSERT; roles=authenticated; permissive=PERMISSIVE; qual=; with_check=(bucket_id = 'logos'::text),null,null
+policy,storage,logos_update_any,objects,cmd=UPDATE; roles=authenticated; permissive=PERMISSIVE; qual=(bucket_id = 'logos'::text); with_check=(bucket_id = 'logos'::text),null,null
+policy,public,isis_messages_insert_anon,isis_chat_messages,"cmd=INSERT; roles=anon; permissive=PERMISSIVE; qual=; with_check=(EXISTS ( SELECT 1
+   FROM isis_chat_sessions s
+  WHERE ((s.id = isis_chat_messages.session_id) AND ((s.empresa_codigo IS NULL) OR (s.empresa_codigo = current_setting('app.empresa_codigo'::text, true))))))",null,null
+policy,public,isis_messages_insert_auth,isis_chat_messages,"cmd=INSERT; roles=authenticated; permissive=PERMISSIVE; qual=; with_check=(EXISTS ( SELECT 1
+   FROM isis_chat_sessions s
+  WHERE ((s.id = isis_chat_messages.session_id) AND ((s.empresa_codigo IS NULL) OR (s.empresa_codigo = current_setting('app.empresa_codigo'::text, true))))))",null,null
+policy,public,notas_fiscais_select,notas_fiscais,cmd=SELECT; roles=public; permissive=PERMISSIVE; qual=(codigo_empresa = get_my_company_code()); with_check=,null,null
+policy,public,notas_fiscais_insert,notas_fiscais,cmd=INSERT; roles=public; permissive=PERMISSIVE; qual=; with_check=(codigo_empresa = get_my_company_code()),null,null
+policy,public,notas_fiscais_update,notas_fiscais,cmd=UPDATE; roles=public; permissive=PERMISSIVE; qual=(codigo_empresa = get_my_company_code()); with_check=(codigo_empresa = get_my_company_code()),null,null
+policy,public,notas_fiscais_delete,notas_fiscais,cmd=DELETE; roles=public; permissive=PERMISSIVE; qual=(codigo_empresa = get_my_company_code()); with_check=,null,null
+policy,public,produtos_insert_company,produtos,"cmd=INSERT; roles=authenticated; permissive=PERMISSIVE; qual=; with_check=((codigo_empresa)::text = COALESCE(fx_claim_text('codigo_empresa'::text), get_my_company_code()))",null,null
+policy,public,clientes_delete_company,clientes,cmd=DELETE; roles=authenticated; permissive=PERMISSIVE; qual=(codigo_empresa = fx_claim_text('codigo_empresa'::text)); with_check=,null,null
+policy,public,clientes_insert_company,clientes,cmd=INSERT; roles=authenticated; permissive=PERMISSIVE; qual=; with_check=(codigo_empresa = fx_claim_text('codigo_empresa'::text)),null,null
+policy,public,clientes_update_company,clientes,cmd=UPDATE; roles=authenticated; permissive=PERMISSIVE; qual=(codigo_empresa = fx_claim_text('codigo_empresa'::text)); with_check=(codigo_empresa = fx_claim_text('codigo_empresa'::text)),null,null
+policy,public,fin_select_company,finalizadoras,cmd=SELECT; roles=authenticated; permissive=PERMISSIVE; qual=(codigo_empresa = fx_claim_text('codigo_empresa'::text)); with_check=,null,null
+policy,public,finalizadoras_select_company,finalizadoras,cmd=SELECT; roles=authenticated; permissive=PERMISSIVE; qual=(codigo_empresa = fx_claim_text('codigo_empresa'::text)); with_check=,null,null
+policy,public,finalizadoras_insert_company,finalizadoras,cmd=INSERT; roles=authenticated; permissive=PERMISSIVE; qual=; with_check=(codigo_empresa = fx_claim_text('codigo_empresa'::text)),null,null
+policy,public,finalizadoras_update_company,finalizadoras,cmd=UPDATE; roles=authenticated; permissive=PERMISSIVE; qual=(codigo_empresa = fx_claim_text('codigo_empresa'::text)); with_check=(codigo_empresa = fx_claim_text('codigo_empresa'::text)),null,null
+policy,public,finalizadoras_delete_company,finalizadoras,cmd=DELETE; roles=authenticated; permissive=PERMISSIVE; qual=(codigo_empresa = fx_claim_text('codigo_empresa'::text)); with_check=,null,null
+policy,public,emp_select_company,empresas,cmd=SELECT; roles=authenticated; permissive=PERMISSIVE; qual=((codigo_empresa)::text = fx_claim_text('codigo_empresa'::text)); with_check=,null,null
+policy,public,empresas_insert_company,empresas,cmd=INSERT; roles=authenticated; permissive=PERMISSIVE; qual=; with_check=((codigo_empresa)::text = fx_claim_text('codigo_empresa'::text)),null,null
+policy,public,empresas_update_company,empresas,cmd=UPDATE; roles=authenticated; permissive=PERMISSIVE; qual=((codigo_empresa)::text = fx_claim_text('codigo_empresa'::text)); with_check=((codigo_empresa)::text = fx_claim_text('codigo_empresa'::text)),null,null
+policy,public,empresas_delete_company,empresas,cmd=DELETE; roles=authenticated; permissive=PERMISSIVE; qual=((codigo_empresa)::text = fx_claim_text('codigo_empresa'::text)); with_check=,null,null
+policy,public,produtos_select_company,produtos,"cmd=SELECT; roles=authenticated; permissive=PERMISSIVE; qual=((codigo_empresa)::text = COALESCE(fx_claim_text('codigo_empresa'::text), get_my_company_code())); with_check=",null,null
+policy,public,produtos_delete_company,produtos,"cmd=DELETE; roles=authenticated; permissive=PERMISSIVE; qual=((codigo_empresa)::text = COALESCE(fx_claim_text('codigo_empresa'::text), get_my_company_code())); with_check=",null,null
+policy,public,produtos_update_company,produtos,"cmd=UPDATE; roles=authenticated; permissive=PERMISSIVE; qual=((codigo_empresa)::text = COALESCE(fx_claim_text('codigo_empresa'::text), get_my_company_code())); with_check=((codigo_empresa)::text = COALESCE(fx_claim_text('codigo_empresa'::text), get_my_company_code()))",null,null
