@@ -244,7 +244,7 @@ const LoginPage = () => {
 
           {/* Subtle copyright */}
           <p className="mt-4 text-center text-xs text-text-muted opacity-70">
-            © 2025 Fluxo7 Arena — Todos os direitos reservados.
+            © 2026 Fluxo7 Arena — Todos os direitos reservados.
           </p>
 
         </motion.div>

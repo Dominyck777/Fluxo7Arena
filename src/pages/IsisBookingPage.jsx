@@ -373,7 +373,6 @@ const IsisBookingPageContent = () => {
   useEffect(() => {
     const initializeApp = async () => {
       if (!codigoEmpresa) {
-        setLoadingEmpresa(false);
         return;
       }
       
@@ -3731,6 +3730,7 @@ ${listaNomes}
         cliente_codigo: selections?.cliente?.codigo ?? null,
         cliente_nome: selections?.cliente?.nome || selections?.cliente?.name || null,
         empresa_nome: empresa?.nome_fantasia || empresa?.razao_social || 'Desconhecida',
+        sessionId,
         conversaArray,
       });
       

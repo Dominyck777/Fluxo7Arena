@@ -301,7 +301,7 @@ export const IsisProvider = ({ children }) => {
   // Persiste mensagem no banco
   const persistMessage = useCallback(async (msg) => {
     try {
-      try { console.info('[Isis][Chat] persistMessage: incoming=%o', { from: msg.from, text: msg.text }); } catch {}
+      try { console.info('[Isis][Chat] persistMessage: incoming=%o', { sessionId, from: msg.from, text: msg.text }); } catch {}
 
       // Identidade atual (empresa/cliente) para estruturar por cliente no bin
       const empresaSel = selections?.empresa || null;
@@ -309,6 +309,7 @@ export const IsisProvider = ({ children }) => {
       const clienteSel = selections?.cliente || null;
 
       // 1) Novo fluxo: salvar conversa na tabela 'isis' do projeto Supabase dedicado
+      // Regra: 1 sessão = 1 row (id=sessionId). Novas mensagens = UPSERT atualizando conversa (jsonb array).
       try {
         const from = msg.from === 'isis' ? 'assistant' : 'user';
         // Nome da empresa com fallback robusto para evitar null (coluna NOT NULL no projeto ISIS)
@@ -319,22 +320,67 @@ export const IsisProvider = ({ children }) => {
           empresaSel?.razao_social ||
           'Desconhecida'
         );
+
+        // Carrega conversa atual (se existir) para fazer append
+        let conversaAtual = [];
+        try {
+          const { data: convData, error: convErr } = await supabaseIsis
+            .from('isis')
+            .select('conversa')
+            .eq('id', sessionId);
+          if (convErr) {
+            try {
+              console.error('[Isis][Chat] supabase-isis select conversa error:', {
+                sessionId,
+                status: convErr?.status,
+                message: convErr?.message,
+                code: convErr?.code,
+              });
+            } catch {}
+          }
+          if (!convErr && Array.isArray(convData) && convData[0]?.conversa) {
+            conversaAtual = Array.isArray(convData[0].conversa) ? convData[0].conversa : [];
+          }
+        } catch {}
+
+        const novaConversa = [
+          ...(Array.isArray(conversaAtual) ? conversaAtual : []),
+          {
+            ts: new Date().toISOString(),
+            from,
+            text: String(msg.text ?? ''),
+          },
+        ];
+
         const row = {
-          id: `${Date.now()}${Math.random().toString(36).slice(2, 10)}`,
+          id: String(sessionId),
           cod_cliente: clienteSel?.id ? String(clienteSel.id) : null,
           nome_cliente: clienteSel?.nome || clienteSel?.name || null,
           empresa: empresaNomeSafe,
           projeto: 'fluxo7arena',
-          nota: null,
-          comentario: null,
-          conversa: JSON.stringify({ session_id: sessionId, from, text: String(msg.text ?? '') }),
+          conversa: novaConversa,
           timestamp: new Date().toISOString(),
         };
-        const { error: isisError } = await supabaseIsis.from('isis').insert(row);
+
+        const { error: isisError } = await supabaseIsis.from('isis').upsert(row, { onConflict: 'id' });
         if (isisError) {
-          try { console.error('[Isis][Chat] supabase-isis insert error:', isisError); } catch {}
+          try {
+            console.error('[Isis][Chat] supabase-isis upsert error:', {
+              sessionId,
+              status: isisError?.status,
+              message: isisError?.message,
+              code: isisError?.code,
+            });
+          } catch {}
         } else {
-          try { console.debug('[Isis][Chat] supabase-isis inserted'); } catch {}
+          try {
+            console.info('[Isis][Chat] supabase-isis upsert ok:', {
+              sessionId,
+              conversaLen: Array.isArray(novaConversa) ? novaConversa.length : null,
+              hasCliente: !!clienteSel?.id,
+              empresa: empresaNomeSafe,
+            });
+          } catch {}
         }
       } catch (e) {
         try { console.error('[Isis][Chat] supabase-isis exception:', e); } catch {}
@@ -408,7 +454,7 @@ export const IsisProvider = ({ children }) => {
     }, 100);
     // Persistência assíncrona (best-effort)
     try { persistMessage(message); } catch {}
-  }, []);
+  }, [persistMessage]);
   
   // Simula digitação da Isis
   const addIsisMessage = useCallback((textOrMessage, delay = 2000, color = null) => {

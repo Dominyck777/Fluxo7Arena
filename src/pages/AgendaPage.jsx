@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
-import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Plus, Lock, Search, SlidersHorizontal, Clock, CheckCircle, XCircle, CalendarPlus, Users, DollarSign, Repeat, Trash2, GripVertical, Sparkles, Ban, AlertTriangle, ChevronDown, Play, PlayCircle, Flag, UserX, X, Settings, Maximize2, Minimize2, Link as LinkIcon, Copy, Loader2 } from 'lucide-react';
+import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Plus, Lock, Search, SlidersHorizontal, Clock, CheckCircle, XCircle, CalendarPlus, Users, DollarSign, Repeat, Trash2, GripVertical, Sparkles, Ban, AlertTriangle, ChevronDown, Play, PlayCircle, Flag, UserX, X, Settings, Maximize2, Minimize2, Link as LinkIcon, Copy, Loader2, Share2, Download, Instagram, MessageCircle } from 'lucide-react';
 import { useToast } from "@/components/ui/use-toast";
 import { format, addDays, subDays, startOfDay, addHours, getHours, getMinutes, setHours, setMinutes, addMinutes, startOfWeek, isSameDay } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -321,6 +321,26 @@ function AgendaPage({ sidebarVisible = false }) {
   // (moved bootstrap fetch below, after bookings state)
   
   // Helpers: montar link público de agendamento da empresa e copiar
+  const [isisSubdomain, setIsisSubdomain] = useState('');
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        if (!authReady || !company?.id) return;
+        const { data, error } = await supabase
+          .from('agenda_settings')
+          .select('isis_subdomain')
+          .eq('empresa_id', company.id)
+          .single();
+        if (cancelled) return;
+        if (error && error.code !== 'PGRST116') return;
+        const sub = (data?.isis_subdomain || '').toLowerCase().replace(/[^a-z0-9]+/g, '').trim();
+        setIsisSubdomain(sub);
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, [authReady, company?.id]);
+
   const companySlug = useMemo(() => {
     const base = company?.nome_fantasia || company?.nome || company?.razao_social || company?.codigoEmpresa || '';
     return String(base)
@@ -330,7 +350,11 @@ function AgendaPage({ sidebarVisible = false }) {
       .replace(/[^a-z0-9]+/g, '')
       .trim();
   }, [company?.nome_fantasia, company?.nome, company?.razao_social, company?.codigoEmpresa]);
-  const agendaPublicUrl = useMemo(() => companySlug ? `https://${companySlug}.f7arena.com` : '', [companySlug]);
+  const agendaPublicUrl = useMemo(() => {
+    const slug = isisSubdomain || companySlug;
+    return slug ? `https://${slug}.f7arena.com` : '';
+  }, [isisSubdomain, companySlug]);
+
   const copyTextWithFallback = useCallback(async (text) => {
     try {
       if (navigator.clipboard && window.isSecureContext) {
@@ -353,6 +377,635 @@ function AgendaPage({ sidebarVisible = false }) {
       return false;
     }
   }, []);
+
+  // Share modal (estilo YouTube)
+  const [isShareAgendaOpen, setIsShareAgendaOpen] = useState(false);
+  const [shareGenerating, setShareGenerating] = useState(false);
+  const [shareImageDataUrl, setShareImageDataUrl] = useState('');
+  const shareImageBlobRef = useRef(null);
+  const [shareOptionsOpen, setShareOptionsOpen] = useState(false);
+  const [shareDate, setShareDate] = useState(new Date());
+  const shareGeneratingRef = useRef(false);
+  const shareImageDataUrlRef = useRef('');
+
+  // Refs para evitar TDZ (activeCourtFilter/selectedCourts/etc são declarados mais abaixo)
+  const shareActiveCourtFilterRef = useRef(null);
+  const shareSelectedCourtsRef = useRef([]);
+  const shareCourtsMapRef = useRef({});
+  const shareBookingsRef = useRef([]);
+  const shareDayStartHourRef = useRef(START_HOUR);
+  const shareDayEndHourExclusiveRef = useRef(END_HOUR);
+  const shareCurrentDateRef = useRef(new Date());
+  useEffect(() => {
+    try {
+      // Mantém o seletor do modal sincronizado com a agenda quando o modal está fechado
+      if (!isShareAgendaOpen) setShareDate(currentDate || new Date());
+    } catch {}
+  }, [currentDate, isShareAgendaOpen]);
+
+  useEffect(() => {
+    try { shareCurrentDateRef.current = shareDate || new Date(); } catch {}
+  }, [shareDate]);
+
+  const getShareCourtName = useCallback(() => {
+    try {
+      return shareActiveCourtFilterRef.current || shareSelectedCourtsRef.current?.[0] || '';
+    } catch {
+      return '';
+    }
+  }, []);
+
+  const getFreeIntervalsForShare = useCallback((dateOverride = null) => {
+    try {
+      const court = getShareCourtName();
+      if (!court) return [];
+      const courtsMap = shareCourtsMapRef.current || {};
+      const bookings = shareBookingsRef.current || [];
+      const dayStartHour = shareDayStartHourRef.current;
+      const dayEndHourExclusive = shareDayEndHourExclusiveRef.current;
+      const currentDate = dateOverride || shareDate || new Date();
+
+      const courtStart = (() => {
+        const t = courtsMap?.[court]?.hora_inicio;
+        if (!t) return dayStartHour * 60;
+        const [h, m] = String(t).split(':').map(Number);
+        return h * 60 + (m || 0);
+      })();
+      const courtEnd = (() => {
+        const t = courtsMap?.[court]?.hora_fim;
+        if (!t) return dayEndHourExclusive * 60;
+        const [h, m] = String(t).split(':').map(Number);
+        const hours = (h === 0 && m === 0) ? 24 : h;
+        return hours * 60 + (m || 0);
+      })();
+      const toMinutes = (d) => {
+        const h = getHours(d);
+        const m = getMinutes(d);
+        if (h === 0 && m === 0) return 1440;
+        return h * 60 + m;
+      };
+      const dayStr = format(currentDate, 'yyyy-MM-dd');
+      const courtId = courtsMap?.[court]?.id;
+      const intervals = (bookings || [])
+        .filter(b => {
+          const byName = b.court === court;
+          const byId = courtId != null && String(b.court_id || '') === String(courtId);
+          return (byName || byId) && format(b.start, 'yyyy-MM-dd') === dayStr && b.status !== 'canceled';
+        })
+        .map(b => [toMinutes(b.start), toMinutes(b.end)])
+        .sort((a, b) => a[0] - b[0]);
+      const free = [];
+      let cursor = courtStart;
+      for (const [s, e] of intervals) {
+        if (s > cursor) free.push([cursor, s]);
+        cursor = Math.max(cursor, e);
+      }
+      if (cursor < courtEnd) free.push([cursor, courtEnd]);
+      // Ajustar para mostrar apenas horários a partir de agora (como Isis cliente)
+      const now = new Date();
+      const nowStr = format(now, 'yyyy-MM-dd');
+      let nowMinutes = 0;
+      if (nowStr === dayStr) {
+        const nh = getHours(now);
+        const nm = getMinutes(now);
+        // Arredonda para o próximo múltiplo de 30min para manter alinhado ao grid
+        const raw = nh * 60 + nm;
+        const slotSize = SLOT_MINUTES || 30;
+        nowMinutes = Math.ceil(raw / slotSize) * slotSize;
+      } else if (now > currentDate) {
+        // data do story já passou → sem horários
+        return [];
+      }
+
+      // Se o "agora" estiver fora da janela da quadra, mantém todos ou nenhum conforme o caso
+      if (nowMinutes <= courtStart) return free;
+      if (nowMinutes >= courtEnd) return [];
+
+      return free
+        .map(([s, e]) => [Math.max(s, nowMinutes), e])
+        .filter(([s, e]) => e > s)
+        // Não mostrar intervalos de apenas 30min (ou menores). Mínimo: 60min.
+        .filter(([s, e]) => (e - s) >= 60);
+    } catch {
+      return [];
+    }
+  }, [getShareCourtName, shareDate]);
+
+  const shareCaption = useMemo(() => {
+    const url = agendaPublicUrl || '';
+    const imgDate = shareDate || new Date();
+    const weekday = format(imgDate, 'EEEE', { locale: ptBR }).replace(/-feira\b/gi, '').trim();
+    const weekdayLabel = weekday ? `${weekday.charAt(0).toUpperCase()}${weekday.slice(1)}` : '';
+    const dateLabel = `${weekdayLabel}${weekdayLabel ? ', ' : ''}${format(imgDate, "dd/MM", { locale: ptBR })}`;
+
+    const fmt = (mins) => {
+      let h = Math.floor(mins / 60);
+      let m = mins % 60;
+      if (h >= 24) h = h % 24;
+      return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+    };
+
+    const free = getFreeIntervalsForShare(imgDate);
+    const lines = (free || []).map(([s, e]) => `${fmt(s)}–${fmt(e)}`);
+
+    if (lines.length === 0) {
+      return `No momento não temos horários disponíveis para ${dateLabel}.\nConfira novamente mais tarde e agende pelo link abaixo 👇\n\n${url}`.trim();
+    }
+
+    const horarios = lines.join('\n');
+    return `Horários disponíveis (${dateLabel}):\n${horarios}\n\nAgende pelo link abaixo 👇\n\n${url}`.trim();
+  }, [agendaPublicUrl, shareDate, getFreeIntervalsForShare]);
+
+  const openShareAgenda = useCallback(async () => {
+    if (!agendaPublicUrl) return;
+    setShareImageDataUrl('');
+    try { shareImageBlobRef.current = null; } catch {}
+    try { setShareDate(currentDate || new Date()); } catch {}
+    setIsShareAgendaOpen(true);
+  }, [agendaPublicUrl, currentDate]);
+
+  const closeShareAgenda = useCallback(() => {
+    setIsShareAgendaOpen(false);
+  }, []);
+
+  useEffect(() => {
+    if (!isShareAgendaOpen) setShareOptionsOpen(false);
+  }, [isShareAgendaOpen]);
+
+  const loadImageForCanvas = useCallback((src) => {
+    return new Promise((resolve, reject) => {
+      try {
+        if (!src) return resolve(null);
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = () => resolve(img);
+        img.onerror = () => resolve(null);
+        img.src = src;
+      } catch (e) {
+        resolve(null);
+      }
+    });
+  }, []);
+
+  const dataUrlToBlob = useCallback(async (dataUrl) => {
+    const res = await fetch(dataUrl);
+    return await res.blob();
+  }, []);
+
+  const generateShareStoryImage = useCallback(async () => {
+    const W = 1080;
+    // Altura um pouco menor para a arte ficar mais compacta
+    const H = 1680;
+    const canvas = document.createElement('canvas');
+    canvas.width = W;
+    canvas.height = H;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('Canvas indisponível');
+
+    // Fundo (Fluxo7Arena: preto + laranja)
+    const grd = ctx.createLinearGradient(0, 0, W, H);
+    grd.addColorStop(0, '#07070A');
+    grd.addColorStop(1, '#0B0B10');
+    ctx.fillStyle = grd;
+    ctx.fillRect(0, 0, W, H);
+
+    // Glow laranja
+    try {
+      ctx.save();
+      ctx.globalAlpha = 0.55;
+      const g2 = ctx.createRadialGradient(Math.round(W * 0.55), Math.round(H * 0.22), 40, Math.round(W * 0.55), Math.round(H * 0.22), 760);
+      g2.addColorStop(0, 'rgba(249,115,22,0.55)');
+      g2.addColorStop(1, 'rgba(249,115,22,0)');
+      ctx.fillStyle = g2;
+      ctx.fillRect(0, 0, W, H);
+      ctx.restore();
+    } catch {}
+
+    // Imagens / Header
+    const logoUrl = company?.logo_url || '';
+    const logoImg = await loadImageForCanvas(logoUrl);
+
+    const headerCenterX = W / 2;
+    let headerBottomY = 220;
+
+    // Logo (topo)
+    if (logoImg) {
+      const maxW = 640;
+      const maxH = 260;
+      const scale = Math.min(maxW / logoImg.width, maxH / logoImg.height);
+      const dw = Math.round(logoImg.width * scale);
+      const dh = Math.round(logoImg.height * scale);
+      const x = Math.round(headerCenterX - dw / 2);
+      const y = 130;
+      ctx.save();
+      ctx.globalAlpha = 0.98;
+      ctx.drawImage(logoImg, x, y, dw, dh);
+      ctx.restore();
+      headerBottomY = y + dh;
+    } else {
+      // Placeholder discreto se não houver logo
+      ctx.save();
+      ctx.globalAlpha = 0.2;
+      ctx.fillStyle = 'white';
+      ctx.fillRect(Math.round(W * 0.22), 190, Math.round(W * 0.56), 10);
+      ctx.restore();
+      headerBottomY = 230;
+    }
+
+    // Nome da empresa logo abaixo da logo
+    const companyName = (company?.nome_fantasia || company?.nome || company?.razao_social || '').toString().trim();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    if (companyName) {
+      // 1️⃣ Nome da empresa em cinza claro para não roubar o foco
+      ctx.fillStyle = '#E0E0E0';
+      ctx.font = '600 40px system-ui, -apple-system, Segoe UI, Roboto, Arial';
+      ctx.fillText(companyName, headerCenterX, headerBottomY + 28);
+      headerBottomY += 28 + 44; // espaço + altura aproximada do texto
+    }
+
+    // Textos principais (sem nome da quadra)
+    const title = 'Horários disponíveis';
+    const imgDate = shareCurrentDateRef.current || new Date();
+    const weekday = format(imgDate, 'EEEE', { locale: ptBR }).replace(/-feira\b/gi, '').trim();
+    const weekdayLabel = weekday ? `${weekday.charAt(0).toUpperCase()}${weekday.slice(1)}` : '';
+    const dateLabel = `${weekdayLabel}${weekdayLabel ? ' • ' : ''}${format(imgDate, 'dd/MM', { locale: ptBR })}`;
+
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+
+    const titleY = headerBottomY + 40;
+    // 2️⃣ Título quase branco (#F8F8F8) para um look premium
+    ctx.fillStyle = '#F8F8F8';
+    ctx.font = 'bold 72px system-ui, -apple-system, Segoe UI, Roboto, Arial';
+    ctx.fillText(title, headerCenterX, titleY);
+
+    // 🧩 Linha fina em amarelo sob o título (ancora visual)
+    const titleMetrics = ctx.measureText(title);
+    const titleWidth = titleMetrics.width;
+    const underlineWidth = titleWidth * 0.5; // ~50% da largura do texto
+    const underlineY = titleY + 72 + 10; // base do texto + pequeno espaçamento
+    const underlineX = headerCenterX - underlineWidth / 2;
+    ctx.save();
+    ctx.fillStyle = '#F5A623';
+    ctx.fillRect(underlineX, underlineY, underlineWidth, 2); // 2px de altura
+    ctx.restore();
+
+    // 3️⃣ Data em amarelo da marca logo abaixo
+    const dateY = underlineY + 22;
+    ctx.font = '700 52px system-ui, -apple-system, Segoe UI, Roboto, Arial';
+    ctx.fillStyle = '#F5A623';
+    ctx.fillText(dateLabel, headerCenterX, dateY);
+
+    // Pequena linha brilhante sob a data para um brilho sutil
+    const dateTextWidth = ctx.measureText(dateLabel).width;
+    const lineMargin = 24;
+    const lineY = dateY + 56;
+    const lineX = headerCenterX - dateTextWidth / 2 - lineMargin / 2;
+    const lineW = dateTextWidth + lineMargin;
+    ctx.save();
+    const lineGrad = ctx.createLinearGradient(lineX, lineY, lineX + lineW, lineY);
+    lineGrad.addColorStop(0, 'rgba(249,115,22,0.0)');
+    lineGrad.addColorStop(0.5, 'rgba(249,115,22,0.9)');
+    lineGrad.addColorStop(1, 'rgba(249,115,22,0.0)');
+    ctx.strokeStyle = lineGrad;
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(lineX, lineY);
+    ctx.lineTo(lineX + lineW, lineY);
+    ctx.stroke();
+    ctx.restore();
+
+    // Card com intervalos livres
+    const free = getFreeIntervalsForShare();
+    const cardX = 120;
+    const cardY = 700;
+    const cardW = W - 240;
+    const cardH = 720;
+    ctx.save();
+    ctx.fillStyle = 'rgba(0,0,0,0.38)';
+    ctx.strokeStyle = 'rgba(255,255,255,0.10)';
+    ctx.lineWidth = 2;
+    const r = 28;
+    const roundRect = (x, y, w, h, radius) => {
+      ctx.beginPath();
+      ctx.moveTo(x + radius, y);
+      ctx.lineTo(x + w - radius, y);
+      ctx.quadraticCurveTo(x + w, y, x + w, y + radius);
+      ctx.lineTo(x + w, y + h - radius);
+      ctx.quadraticCurveTo(x + w, y + h, x + w - radius, y + h);
+      ctx.lineTo(x + radius, y + h);
+      ctx.quadraticCurveTo(x, y + h, x, y + h - radius);
+      ctx.lineTo(x, y + radius);
+      ctx.quadraticCurveTo(x, y, x + radius, y);
+      ctx.closePath();
+    };
+    roundRect(cardX, cardY, cardW, cardH, r);
+    ctx.fill();
+    ctx.stroke();
+
+    const fmt = (mins) => {
+      let h = Math.floor(mins / 60);
+      let m = mins % 60;
+      if (h >= 24) h = h % 24;
+      return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+    };
+    const lines = (free || []).map(([s, e]) => `${fmt(s)}–${fmt(e)}`);
+    const maxLines = 10;
+    const visible = lines.slice(0, maxLines);
+    const remaining = lines.length - visible.length;
+
+    // 4️⃣ Horários em branco puro com sombra para "saltar" no story
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = '700 54px system-ui, -apple-system, Segoe UI, Roboto, Arial';
+    ctx.shadowColor = 'rgba(0,0,0,0.6)';
+    ctx.shadowBlur = 12;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 4;
+    let y = cardY + 96;
+    const lineH = 80;
+    if (visible.length === 0) {
+      ctx.fillText('Sem horários disponíveis', W / 2, y);
+    } else if (lines.length === 1) {
+      // Um único intervalo: apenas o horário, em destaque
+      ctx.fillStyle = '#FFFFFF';
+      ctx.font = '800 76px system-ui, -apple-system, Segoe UI, Roboto, Arial';
+      ctx.fillText(lines[0], W / 2, y + 12);
+    } else {
+      for (const t of visible) {
+        ctx.fillText(t, W / 2, y);
+        y += lineH;
+      }
+      if (remaining > 0) {
+        ctx.fillStyle = 'rgba(255,255,255,0.80)';
+        ctx.font = '600 34px system-ui, -apple-system, Segoe UI, Roboto, Arial';
+        ctx.fillText(`+${remaining} intervalos`, W / 2, y + 10);
+      }
+    }
+    ctx.restore();
+
+    // Link do agendamento (rodapé)
+    try {
+      const url = (agendaPublicUrl || '').replace(/^https?:\/\//, '').trim();
+      if (url) {
+        const padX = 30;
+        const pillH = 64;
+        const pillY = H - 120;
+        ctx.save();
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.font = '700 32px system-ui, -apple-system, Segoe UI, Roboto, Arial';
+        const textW = ctx.measureText(url).width;
+        const pillW = Math.min(W - 200, Math.max(520, textW + padX * 2));
+        const pillX = (W - pillW) / 2;
+
+        // pill background
+        ctx.fillStyle = 'rgba(0,0,0,0.55)';
+        ctx.strokeStyle = 'rgba(245,166,35,0.55)';
+        ctx.lineWidth = 2;
+        const r2 = 24;
+        ctx.beginPath();
+        ctx.moveTo(pillX + r2, pillY);
+        ctx.lineTo(pillX + pillW - r2, pillY);
+        ctx.quadraticCurveTo(pillX + pillW, pillY, pillX + pillW, pillY + r2);
+        ctx.lineTo(pillX + pillW, pillY + pillH - r2);
+        ctx.quadraticCurveTo(pillX + pillW, pillY + pillH, pillX + pillW - r2, pillY + pillH);
+        ctx.lineTo(pillX + r2, pillY + pillH);
+        ctx.quadraticCurveTo(pillX, pillY + pillH, pillX, pillY + pillH - r2);
+        ctx.lineTo(pillX, pillY + r2);
+        ctx.quadraticCurveTo(pillX, pillY, pillX + r2, pillY);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = '#F5A623';
+        ctx.shadowColor = 'rgba(0,0,0,0.55)';
+        ctx.shadowBlur = 10;
+        ctx.shadowOffsetX = 0;
+        ctx.shadowOffsetY = 4;
+        ctx.fillText(url, W / 2, pillY + pillH / 2);
+        ctx.restore();
+      }
+    } catch {}
+
+    return canvas.toDataURL('image/png');
+  }, [company?.logo_url, loadImageForCanvas, getShareCourtName, getFreeIntervalsForShare, agendaPublicUrl]);
+
+  useEffect(() => {
+    shareGeneratingRef.current = !!shareGenerating;
+  }, [shareGenerating]);
+
+  useEffect(() => {
+    shareImageDataUrlRef.current = shareImageDataUrl || '';
+  }, [shareImageDataUrl]);
+
+  const ensureShareImage = useCallback(async () => {
+    if (shareGeneratingRef.current) return;
+    if (shareImageDataUrlRef.current) return shareImageDataUrlRef.current;
+    shareGeneratingRef.current = true;
+    setShareGenerating(true);
+    try {
+      const dataUrl = await generateShareStoryImage();
+      shareImageDataUrlRef.current = dataUrl;
+      setShareImageDataUrl(dataUrl);
+      try {
+        shareImageBlobRef.current = await dataUrlToBlob(dataUrl);
+      } catch {
+        shareImageBlobRef.current = null;
+      }
+      return dataUrl;
+    } finally {
+      shareGeneratingRef.current = false;
+      setShareGenerating(false);
+    }
+  }, [generateShareStoryImage, dataUrlToBlob]);
+
+  useEffect(() => {
+    if (!isShareAgendaOpen) return;
+    // Trocar a data no modal deve regenerar a imagem/preview
+    try { shareImageBlobRef.current = null; } catch {}
+    setShareImageDataUrl('');
+    try { shareImageDataUrlRef.current = ''; } catch {}
+    try { shareGeneratingRef.current = false; } catch {}
+    ensureShareImage();
+  }, [shareDate, isShareAgendaOpen, ensureShareImage]);
+
+  useEffect(() => {
+    if (!isShareAgendaOpen) return;
+    ensureShareImage();
+  }, [isShareAgendaOpen, ensureShareImage]);
+
+  const handleCopyShareCaption = useCallback(async () => {
+    const copyToClipboard = async (text) => {
+      try {
+        if (navigator.clipboard && window.isSecureContext) {
+          await navigator.clipboard.writeText(text);
+        } else {
+          const ta = document.createElement('textarea');
+          ta.value = text;
+          ta.style.position = 'fixed';
+          ta.style.top = '0';
+          ta.style.left = '0';
+          ta.style.opacity = '0';
+          document.body.appendChild(ta);
+          ta.focus();
+          ta.select();
+          document.execCommand('copy');
+          document.body.removeChild(ta);
+        }
+        return true;
+      } catch {
+        return false;
+      }
+    };
+
+    const ok = await copyToClipboard(shareCaption);
+    toast({
+      title: ok ? 'Legenda copiada' : 'Não foi possível copiar',
+      description: ok ? 'Cole no story/status.' : 'Tente novamente.',
+      variant: ok ? 'success' : 'destructive',
+    });
+  }, [shareCaption, toast]);
+
+  const handleCopyShareLink = useCallback(async () => {
+    const ok = await copyTextWithFallback(agendaPublicUrl);
+    const displayUrl = (agendaPublicUrl || '').replace(/^https?:\/\//, '');
+    toast({
+      title: ok ? 'Link copiado' : 'Não foi possível copiar',
+      description: displayUrl,
+      variant: ok ? 'success' : 'destructive',
+    });
+  }, [copyTextWithFallback, agendaPublicUrl, toast]);
+
+  const handleDownloadShareImage = useCallback(async () => {
+    try {
+      const dataUrl = shareImageDataUrl || (await generateShareStoryImage());
+      const a = document.createElement('a');
+      a.href = dataUrl;
+      const now = new Date();
+      const stamp = format(now, 'yyyy-MM-dd-HH-mm');
+      a.download = `horarios-${stamp}.png`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      toast({ title: 'Imagem baixada', description: 'Agora é só postar no story/status.', variant: 'success' });
+    } catch {
+      toast({ title: 'Erro ao baixar imagem', description: 'Tente novamente.', variant: 'destructive' });
+    }
+  }, [shareImageDataUrl, generateShareStoryImage, toast]);
+
+  const handleOpenWhatsAppShare = useCallback(async () => {
+    try {
+      // Compartilhar SOMENTE a imagem (Status/Story)
+      if (typeof window !== 'undefined' && window.isSecureContext && navigator.share) {
+        const dataUrl = (await ensureShareImage()) || shareImageDataUrl || (await generateShareStoryImage());
+        const blob = shareImageBlobRef.current || (await dataUrlToBlob(dataUrl));
+        const now = new Date();
+        const stamp = format(now, 'yyyy-MM-dd-HH-mm');
+        const file = new File([blob], `horarios-${stamp}.png`, { type: 'image/png' });
+        const shareFileOnly = { files: [file] };
+
+        try {
+          if (!navigator.canShare || navigator.canShare(shareFileOnly)) {
+            await navigator.share(shareFileOnly);
+            try { window.location.href = 'whatsapp://app'; } catch {}
+            return;
+          }
+        } catch {}
+      }
+
+      // Fallback universal
+      await handleDownloadShareImage();
+      try {
+        const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
+        if (isMobile) {
+          window.location.href = 'whatsapp://app';
+        } else {
+          window.open('https://web.whatsapp.com/', '_blank', 'noopener,noreferrer');
+        }
+      } catch {}
+
+      toast({
+        title: 'Imagem pronta',
+        description: 'Imagem baixada. Abra o WhatsApp e envie no Status.',
+        variant: 'success',
+      });
+    } catch {
+      await handleDownloadShareImage();
+    }
+  }, [shareImageDataUrl, ensureShareImage, generateShareStoryImage, dataUrlToBlob, handleDownloadShareImage, toast]);
+
+  const handleInstagramFlow = useCallback(async () => {
+    try {
+      // Compartilhar SOMENTE a imagem (Story)
+      if (typeof window !== 'undefined' && window.isSecureContext && navigator.share) {
+        const dataUrl = (await ensureShareImage()) || shareImageDataUrl || (await generateShareStoryImage());
+        const blob = shareImageBlobRef.current || (await dataUrlToBlob(dataUrl));
+        const now = new Date();
+        const stamp = format(now, 'yyyy-MM-dd-HH-mm');
+        const file = new File([blob], `horarios-${stamp}.png`, { type: 'image/png' });
+        const shareFileOnly = { files: [file] };
+        try {
+          if (!navigator.canShare || navigator.canShare(shareFileOnly)) {
+            await navigator.share(shareFileOnly);
+          } else {
+            await handleDownloadShareImage();
+          }
+        } catch {
+          await handleDownloadShareImage();
+        }
+      } else {
+        await handleDownloadShareImage();
+      }
+
+      try {
+        const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
+        if (isMobile) {
+          window.location.href = 'instagram://story-camera';
+        } else {
+          window.open('https://www.instagram.com/', '_blank', 'noopener,noreferrer');
+        }
+      } catch {}
+    } catch {
+      await handleDownloadShareImage();
+    }
+  }, [shareImageDataUrl, ensureShareImage, generateShareStoryImage, dataUrlToBlob, handleDownloadShareImage]);
+
+  const handleSystemShare = useCallback(async () => {
+    try {
+      const dataUrl = shareImageDataUrl || (await generateShareStoryImage());
+      const blob = shareImageBlobRef.current || (await dataUrlToBlob(dataUrl));
+      const now = new Date();
+      const stamp = format(now, 'yyyy-MM-dd-HH-mm');
+      const file = new File([blob], `horarios-${stamp}.png`, { type: 'image/png' });
+      const shareDataWithFile = { text: shareCaption, files: [file] };
+
+      // 1) Tenta Web Share com arquivo (melhor experiência em mobile moderno)
+      if (navigator.share && navigator.canShare && navigator.canShare(shareDataWithFile)) {
+        await navigator.share(shareDataWithFile);
+        return;
+      }
+
+      // 2) Se não suportar arquivo, tenta compartilhar só texto + link
+      if (navigator.share) {
+        await navigator.share({ text: shareCaption, url: agendaPublicUrl });
+        return;
+      }
+
+      // 3) Sem Web Share: abre WhatsApp Web com a legenda preenchida
+      const waText = encodeURIComponent(shareCaption);
+      const waUrl = `https://wa.me/?text=${waText}`;
+      window.open(waUrl, '_blank', 'noopener,noreferrer');
+
+      // 4) Além disso, mantém o fallback de copiar legenda + baixar imagem
+      await handleCopyShareCaption();
+      await handleDownloadShareImage();
+    } catch {
+      // Em caso de erro inesperado, pelo menos garante copiar + baixar
+      await handleCopyShareCaption();
+      await handleDownloadShareImage();
+    }
+  }, [agendaPublicUrl, shareCaption, shareImageDataUrl, generateShareStoryImage, dataUrlToBlob, handleCopyShareCaption, handleDownloadShareImage]);
   
   // Listener de teclado: Escape fecha expandido • F10 alterna modo expandir
   useEffect(() => {
@@ -612,6 +1265,20 @@ function AgendaPage({ sidebarVisible = false }) {
   
   // Estado para navegação mobile
   const [mobileCourtIndex, setMobileCourtIndex] = useState(0);
+
+  // Sync refs usadas pelo modal de compartilhamento (evita TDZ e mantém dados atualizados)
+  useEffect(() => {
+    try { shareActiveCourtFilterRef.current = activeCourtFilter; } catch {}
+  }, [activeCourtFilter]);
+  useEffect(() => {
+    try { shareSelectedCourtsRef.current = Array.isArray(selectedCourts) ? selectedCourts : []; } catch {}
+  }, [selectedCourts]);
+  useEffect(() => {
+    try { shareCourtsMapRef.current = courtsMap || {}; } catch {}
+  }, [courtsMap]);
+  useEffect(() => {
+    try { shareBookingsRef.current = Array.isArray(bookings) ? bookings : []; } catch {}
+  }, [bookings]);
   
   // useEffect para selecionar primeira quadra automaticamente
   useEffect(() => {
@@ -2316,6 +2983,14 @@ function AgendaPage({ sidebarVisible = false }) {
     return Math.ceil(maxEndMin / 60); // exclusivo
   }, [selectedCourts, courtsMap]);
 
+  // Sync refs de janela do grid para a imagem (precisa estar após a definição de dayStartHour/dayEndHourExclusive)
+  useEffect(() => {
+    try { shareDayStartHourRef.current = dayStartHour; } catch {}
+  }, [dayStartHour]);
+  useEffect(() => {
+    try { shareDayEndHourExclusiveRef.current = dayEndHourExclusive; } catch {}
+  }, [dayEndHourExclusive]);
+
   // Scroll inicial para próximo do horário atual
   useEffect(() => {
     const now = new Date();
@@ -2469,18 +3144,14 @@ function AgendaPage({ sidebarVisible = false }) {
         <div className={cn("absolute left-0 top-0 h-full w-[6px] rounded-l-md", config.accent)} />
 
         {/* Conteúdo (centralizado verticalmente) */}
-        <div
-          className={cn("h-full flex", isHalfHour ? "px-3 py-3" : "px-4 py-4")}
-          style={{ paddingLeft: padX, paddingRight: padX, paddingTop: padY, paddingBottom: padY }}
-        >
-          <div className="flex-1 flex flex-col justify-center">
-            {/* Linha 1: Nome do cliente */}
-            <div className="flex items-center gap-2 mb-0.5">
-              <p className="font-semibold text-text-primary truncate text-base" style={{ fontSize: namePx, lineHeight: 1.15 }}>{shortName(booking.customer)}</p>
-              {isHalfHour && (
-                <span className="text-xs font-bold text-white truncate bg-gradient-to-r from-slate-700 to-slate-800 border border-slate-600/60 rounded-md px-2 py-0.5 whitespace-nowrap shadow-md" style={{ fontSize: smallPx }}>
-                  {booking.modality}
-                </span>
+        <motion.div className="flex-1 flex flex-col overflow-hidden pl-4 pr-3 py-2.5 md:pr-4 md:py-3">
+          {/* Linha 1: Nome do cliente */}
+          <div className="flex items-center gap-2 mb-0.5">
+            <p className="font-semibold text-text-primary truncate text-base" style={{ fontSize: namePx, lineHeight: 1.15 }}>{shortName(booking.customer)}</p>
+            {isHalfHour && (
+              <span className="text-xs font-bold text-white truncate bg-gradient-to-r from-slate-700 to-slate-800 border border-slate-600/60 rounded-md px-2 py-0.5 whitespace-nowrap shadow-md" style={{ fontSize: smallPx }}>
+                {booking.modality}
+              </span>
               )}
             </div>
             
@@ -2548,8 +3219,7 @@ function AgendaPage({ sidebarVisible = false }) {
                 </div>
               )}
             </div>
-          </div>
-        </div>
+          </motion.div>
       </motion.div>
     );
   };
@@ -6861,9 +7531,9 @@ function AgendaPage({ sidebarVisible = false }) {
                 </Button>
               </div>
 
-              {/* Linha 3 (Mobile): Select de Quadras */}
+              {/* Linha 3 (Mobile): Select de Quadras + Compartilhar */}
               {selectedCourts.length > 0 && (
-                <div className="md:hidden flex justify-center">
+                <div className="md:hidden flex items-center justify-center gap-2">
                   {selectedCourts.length === 1 ? (
                     // Badge quando há apenas uma quadra (mesmo estilo do select)
                     <div className="inline-flex items-center justify-center gap-3 px-4 py-2 rounded-lg w-auto h-10 max-w-full border-2 border-brand/30 bg-gradient-to-r from-brand/5 to-brand/10">
@@ -6903,6 +7573,21 @@ function AgendaPage({ sidebarVisible = false }) {
                         })}
                       </SelectContent>
                     </Select>
+                  )}
+
+                  {agendaPublicUrl && (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try { if (navigator.vibrate) navigator.vibrate(30); } catch {}
+                        openShareAgenda();
+                      }}
+                      className="inline-flex items-center justify-center p-2 rounded-md border border-white/10 bg-surface/60 hover:bg-surface-2/70 hover:border-white/20 transition-colors"
+                      aria-label="Compartilhar"
+                      title="Compartilhar"
+                    >
+                      <Share2 className="w-4 h-4" />
+                    </button>
                   )}
                 </div>
               )}
@@ -7432,29 +8117,18 @@ function AgendaPage({ sidebarVisible = false }) {
                       <button
                         type="button"
                         onClick={async () => {
-                          const ok = await copyTextWithFallback(agendaPublicUrl);
-                          const displayUrl = agendaPublicUrl.replace(/^https?:\/\//, '');
-                          // Feedback háptico quando disponível
-                          try { if (navigator.vibrate) navigator.vibrate(50); } catch {}
-                          if (ok) {
-                            // Em mobile, o toast pode não ficar visível; usa alert como fallback imediato
-                            const isMobile = typeof window !== 'undefined' && window.innerWidth < 640;
-                            if (isMobile) {
-                              try { alert(`Link copiado: ${displayUrl}`); } catch {}
-                            } else {
-                              toast({ title: 'Link copiado', description: displayUrl });
-                            }
-                          } else {
-                            toast({ title: 'Não foi possível copiar', description: displayUrl, variant: 'destructive' });
-                          }
+                          try { if (navigator.vibrate) navigator.vibrate(30); } catch {}
+                          openShareAgenda();
                         }}
-                        className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-xs border border-white/10 bg-surface/60 hover:bg-surface-2/70 hover:border-white/20 transition-colors"
-                        aria-label="Copiar link de agendamento"
-                        title="Copiar link de agendamento"
+                        className={cn(
+                          "inline-flex items-center rounded-md text-xs border border-white/10 bg-surface/60 hover:bg-surface-2/70 hover:border-white/20 transition-colors",
+                          isMobile ? "p-2" : "gap-2 px-3 py-1.5"
+                        )}
+                        aria-label="Compartilhar"
+                        title="Compartilhar"
                       >
-                        <LinkIcon className="w-4 h-4" />
-                        <span className="hidden sm:inline">link Agendamento</span>
-                        <span className="sm:hidden"><Copy className="w-4 h-4" /></span>
+                        <Share2 className="w-4 h-4" />
+                        {!isMobile && <span className="hidden sm:inline">Compartilhar</span>}
                       </button>
                     )}
                   </div>
@@ -7716,6 +8390,129 @@ function AgendaPage({ sidebarVisible = false }) {
       
       {/* AddBookingModal - chamado como função */}
       {AddBookingModal()}
+
+      <Dialog open={isShareAgendaOpen} onOpenChange={(open) => { if (!open) closeShareAgenda(); }}>
+        <DialogContent className="w-[calc(100vw-24px)] sm:w-full max-w-[980px] max-h-[85vh] overflow-y-auto mx-auto p-4 sm:p-6">
+          <DialogHeader>
+            <DialogTitle>Compartilhar</DialogTitle>
+            <DialogDescription>
+              Gere uma imagem pronta para Story/Status.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex items-center justify-center gap-2 mb-4">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-9 w-9"
+              onClick={() => setShareDate((d) => subDays(d || new Date(), 1))}
+              aria-label="Dia anterior"
+              title="Dia anterior"
+            >
+              <ChevronLeft className="h-5 w-5" />
+            </Button>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="ghost" className="w-full sm:w-auto max-w-full justify-center text-base font-semibold whitespace-nowrap truncate">
+                  <CalendarIcon className="mr-2 h-5 w-5" />
+                  <span className="sm:hidden">{`${format(shareDate || new Date(), 'EEEE', { locale: ptBR }).replace(/-feira\b/gi, '').trim()}, ${format(shareDate || new Date(), 'dd/MM', { locale: ptBR })}`}</span>
+                  <span className="hidden sm:inline">{`${format(shareDate || new Date(), 'EEEE', { locale: ptBR }).replace(/-feira\b/gi, '').trim()}, ${format(shareDate || new Date(), "dd 'de' MMMM 'de' yyyy", { locale: ptBR })}`}</span>
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0">
+                <Calendar mode="single" selected={shareDate || new Date()} onSelect={(date) => date && setShareDate(date)} initialFocus />
+              </PopoverContent>
+            </Popover>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-9 w-9"
+              onClick={() => setShareDate((d) => addDays(d || new Date(), 1))}
+              aria-label="Próximo dia"
+              title="Próximo dia"
+            >
+              <ChevronRight className="h-5 w-5" />
+            </Button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            <div className="w-full">
+              <div className="w-full rounded-xl border border-white/10 bg-black/25 overflow-hidden shadow-[0_0_0_1px_rgba(255,255,255,0.06)]">
+                <div className="w-full aspect-[9/16] flex items-center justify-center">
+                  {shareImageDataUrl ? (
+                    <img src={shareImageDataUrl} alt="Prévia" className="w-full h-full object-cover" />
+                  ) : (
+                    <div className="flex flex-col items-center justify-center gap-2 text-text-muted">
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                      <span className="text-sm">Gerando imagem…</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <div className="text-xs text-text-muted">Legenda</div>
+                  <button
+                    type="button"
+                    onClick={handleCopyShareCaption}
+                    className="inline-flex items-center gap-2 px-2 py-1 rounded-md border border-white/10 bg-black/10 hover:bg-black/20 transition-colors"
+                    aria-label="Copiar legenda"
+                    title="Copiar legenda"
+                  >
+                    <Copy className="w-4 h-4" />
+                    <span className="text-xs">Copiar</span>
+                  </button>
+                </div>
+                <pre className="whitespace-pre-wrap text-sm text-text-primary font-sans leading-relaxed">{shareCaption}</pre>
+              </div>
+
+              <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+                <div className="text-xs text-text-muted mb-3">Compartilhar</div>
+                <div className="flex items-center gap-3 overflow-x-auto pb-1">
+                  <button type="button" onClick={handleDownloadShareImage} className="shrink-0 flex flex-col items-center gap-2">
+                    <span className="w-12 h-12 rounded-full bg-white/10 border border-white/10 flex items-center justify-center">
+                      <img src="/imagem.png" alt="Imagem" className="w-9 h-9 object-contain" />
+                    </span>
+                    <span className="text-[11px] text-text-secondary">Imagem</span>
+                  </button>
+
+                  <button type="button" onClick={handleOpenWhatsAppShare} className="shrink-0 flex flex-col items-center gap-2">
+                    <span className="w-12 h-12 rounded-full bg-emerald-500/15 border border-emerald-400/20 flex items-center justify-center">
+                      <img src="/whattsapp.png" alt="WhatsApp" className="w-9 h-9 object-contain" />
+                    </span>
+                    <span className="text-[11px] text-text-secondary">WhatsApp</span>
+                  </button>
+
+                  <button type="button" onClick={handleInstagramFlow} className="shrink-0 flex flex-col items-center gap-2">
+                    <span className="w-12 h-12 rounded-full bg-fuchsia-500/15 border border-fuchsia-400/20 flex items-center justify-center">
+                      <img src="/instagram.png" alt="Instagram" className="w-9 h-9 object-contain" />
+                    </span>
+                    <span className="text-[11px] text-text-secondary">Instagram</span>
+                  </button>
+
+                  <button type="button" onClick={handleCopyShareLink} className="shrink-0 flex flex-col items-center gap-2">
+                    <span className="w-12 h-12 rounded-full bg-white/10 border border-white/10 flex items-center justify-center">
+                      <LinkIcon className="w-6 h-6" />
+                    </span>
+                    <span className="text-[11px] text-text-secondary">Link</span>
+                  </button>
+
+                </div>
+              </div>
+
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={closeShareAgenda}>Fechar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

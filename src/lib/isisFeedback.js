@@ -28,7 +28,8 @@ export const adicionarFeedbackIsis = async (feedbackData) => {
 
   try {
     const row = {
-      id: feedback.id,
+      // No novo fluxo, a PK (id) é o ID da sessão. Se não vier, cai no id gerado.
+      id: String(feedbackData?.sessionId || feedbackData?.session_id || feedback.id),
       // Preferir código do cadastro (numero visível) em vez do UUID
       cod_cliente: feedbackData?.cliente_codigo ?? feedbackData?.cliente_id ?? feedbackData?.cod_cliente ?? null,
       nome_cliente: feedbackData?.cliente_nome || null,
@@ -36,12 +37,13 @@ export const adicionarFeedbackIsis = async (feedbackData) => {
       projeto: 'fluxo7arena',
       nota: feedbackData?.rating ?? null,
       comentario: feedbackData?.comentario || null,
+      // Salvar como JSONB real (array/obj), sem stringify
       conversa: Array.isArray(feedbackData?.conversaArray)
-        ? JSON.stringify(feedbackData.conversaArray)
-        : (typeof feedbackData?.conversa === 'string' ? feedbackData.conversa : null),
+        ? feedbackData.conversaArray
+        : (feedbackData?.conversa && typeof feedbackData.conversa === 'object' ? feedbackData.conversa : null),
       timestamp: feedback.timestamp,
     }
-    const { error } = await supabaseIsis.from('isis').insert(row)
+    const { error } = await supabaseIsis.from('isis').upsert(row, { onConflict: 'id' })
     if (error) {
       console.error('[Supabase ISIS] Erro ao inserir feedback:', error)
       return salvarFeedbackLocal({ ...feedback, projeto: 'fluxo7arena' })

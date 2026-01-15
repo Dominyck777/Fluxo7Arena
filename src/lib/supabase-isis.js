@@ -13,11 +13,11 @@ const buildHeaders = () => ({
   'X-Client-Info': 'fluxo7-isis-web',
 })
 
-const fetchJson = async (path, { method = 'GET', body } = {}) => {
+const fetchJson = async (path, { method = 'GET', body, headers: extraHeaders } = {}) => {
   const fullUrl = `${url}${path}`
   const res = await fetch(fullUrl, {
     method,
-    headers: buildHeaders(),
+    headers: { ...buildHeaders(), ...(extraHeaders || {}) },
     body: body ? JSON.stringify(body) : undefined,
   })
 
@@ -72,6 +72,46 @@ class IsisQueryBuilder {
     return fetchJson(`/rest/v1/${this.table}`, {
       method: 'POST',
       body: row,
+    })
+  }
+
+  // PostgREST upsert (merge duplicates) using primary key conflict resolution
+  async upsert(row, { onConflict } = {}) {
+    const params = new URLSearchParams()
+    if (onConflict) params.set('on_conflict', onConflict)
+    const q = params.toString()
+    return fetchJson(`/rest/v1/${this.table}${q ? `?${q}` : ''}`, {
+      method: 'POST',
+      body: row,
+      headers: {
+        // Merge when PK already exists
+        'Prefer': 'resolution=merge-duplicates,return=minimal',
+      },
+    })
+  }
+
+  async update(fields) {
+    const params = new URLSearchParams()
+    params.set('select', this._select)
+
+    for (const [col, op, val] of this._filters) {
+      if (op === 'is' && val === null) {
+        params.set(col, 'is.null')
+      } else {
+        params.set(col, `${op}.${val}`)
+      }
+    }
+
+    if (this._order?.column) {
+      params.set('order', `${this._order.column}.${this._order.ascending ? 'asc' : 'desc'}`)
+    }
+
+    return fetchJson(`/rest/v1/${this.table}?${params.toString()}`, {
+      method: 'PATCH',
+      body: fields,
+      headers: {
+        'Prefer': 'return=minimal',
+      },
     })
   }
 
