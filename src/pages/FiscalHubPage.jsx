@@ -1893,7 +1893,7 @@ export default function FiscalHubPage(){
   );
   const eligibleConsultIds = useMemo(
     () => selectedRows
-      .filter(r => ['processando','rejeitada','pendente','erro'].includes(String(r.nf_status||'').toLowerCase()))
+      .filter(r => ['processando','rejeitada','pendente','erro','autorizada'].includes(String(r.nf_status||'').toLowerCase()))
       .map(r=>r.id),
     [selectedRows]
   );
@@ -2290,7 +2290,7 @@ export default function FiscalHubPage(){
       const xml = resp?.xml_url || resp?.XmlUrl || null;
       const protocolo = resp?.protocolo || resp?.Protocolo || null;
       const searchKeyResp = resp?.searchkey || resp?.SearchKey || resp?.searchKey || null;
-      const authorized = !!(resp?.autorizada || resp?.Autorizada || resp?.sucesso || resp?.Sucesso || chave);
+      const authorized = !!(resp?.autorizada || resp?.Autorizada || resp?.sucesso || resp?.Sucesso || pdf || xml);
       await updateComanda(id, { nf_status: authorized ? 'autorizada' : 'processando', xml_chave: chave, nf_numero: numero, nf_serie: serie, nf_pdf_url: pdf, nf_xml_url: xml, xml_protocolo: protocolo || searchKeyResp });
       try { await supabase.from('auditoria_fiscal').insert({ codigo_empresa: codigoEmpresa, acao: 'emitir', modelo: '65', comanda_id: id, status: 'success', response: resp || null }); } catch {}
       toast({ title: authorized ? 'NFC-e autorizada' : 'Emissão enviada', description: authorized ? 'Documento autorizado.' : 'Aguardando autorização.' });
@@ -2327,6 +2327,15 @@ export default function FiscalHubPage(){
           console.log('[FiscalHub][NFC-e consulta] resposta completa:', resp);
           rawStatus = String(resp?.status || resp?.Status || resp?.cStat || '').toLowerCase();
           msg = resp?.xMotivo || resp?.mensagem || resp?.message || msg;
+          const resultado = resp?.resultado || resp?.Resultado || null;
+          if (resultado) {
+            if (resultado.status) {
+              rawStatus = String(resultado.status).toLowerCase();
+            }
+            if (resultado.motivo || resultado.Motivo) {
+              msg = resultado.motivo || resultado.Motivo || msg;
+            }
+          }
           authorized = !!(resp?.autorizada || resp?.Autorizada || resp?.sucesso || resp?.Sucesso || rawStatus === '100');
           pdf = resp?.pdf_url || resp?.PdfUrl || pdf;
           xml = resp?.xml_url || resp?.XmlUrl || xml;
@@ -2362,7 +2371,7 @@ export default function FiscalHubPage(){
 
       let finalStatus = row.nf_status || 'processando';
       if (authorized) finalStatus = 'autorizada';
-      else if (rawStatus && rawStatus.includes && rawStatus.includes('rejeit')) finalStatus = 'rejeitada';
+      else if ((rawStatus && rawStatus.includes && rawStatus.includes('rejeit')) || (typeof msg === 'string' && msg.toLowerCase().includes('rejeicao'))) finalStatus = 'rejeitada';
       else if (rawStatus === 'erro') finalStatus = row.nf_status || 'pendente'; // não degradar para rejeitada sem evidência
       else if (typeof rawStatus === 'string' && rawStatus) finalStatus = rawStatus;
 
