@@ -29,6 +29,8 @@ const itemVariants = { hidden: { opacity: 0, y: 20 }, visible: { opacity: 1, y: 
 
 const PRODUTOS_SETTINGS_KEY = 'produtosPage:settings';
 
+const CSOSN_OPTIONS = ['101','102','103','201','202','203','300','400','500','900'];
+
 // ===== Export Helpers =====
 
 function downloadProductsCsv(rows) {
@@ -477,6 +479,7 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
     if (!unit?.trim()) errors.push('Unidade');
     if (!type) errors.push('Tipo de Produto');
     if (currencyToNumber(salePrice) <= 0) errors.push('Preço de Venda');
+    if (useCsosn && !csosnInterno?.trim()) errors.push('CSOSN Interno (Simples Nacional)');
     if (errors.length) {
       toast({ title: 'Preencha os campos obrigatórios', description: errors.join(', '), variant: 'destructive' });
       return;
@@ -890,18 +893,38 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
                       disabled={!editEnabled}
                     />
                   </div>
-                  {!useCsosn && (
-                    <div className="grid grid-cols-1 sm:grid-cols-4 items-start sm:items-center gap-2 sm:gap-4">
-                      <Label className="text-xs sm:text-right">CST</Label>
-                      <Input value={cstIcmsInterno} onChange={(e)=>setCstIcmsInterno(e.target.value.toUpperCase())} className="sm:col-span-3 text-xs sm:text-sm" placeholder="00, 20, 40..." disabled={!editEnabled} />
-                    </div>
-                  )}
-                  {useCsosn && (
-                    <div className="grid grid-cols-1 sm:grid-cols-4 items-start sm:items-center gap-2 sm:gap-4">
-                      <Label className="text-xs sm:text-right">CSOSN</Label>
-                      <Input value={csosnInterno} onChange={(e)=>setCsosnInterno(e.target.value.toUpperCase())} className="sm:col-span-3 text-xs sm:text-sm" placeholder="101, 102..." disabled={!editEnabled} />
-                    </div>
-                  )}
+                  <div className="grid grid-cols-1 sm:grid-cols-4 items-start sm:items-center gap-2 sm:gap-4">
+                    <Label className="text-xs sm:text-right">CST</Label>
+                    <Input
+                      value={cstIcmsInterno}
+                      onChange={(e)=>setCstIcmsInterno(e.target.value.toUpperCase())}
+                      className="sm:col-span-3 text-xs sm:text-sm"
+                      placeholder="00, 20, 40..."
+                      disabled={!editEnabled || useCsosn}
+                    />
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-4 items-start sm:items-center gap-2 sm:gap-4">
+                    <Label className="text-xs sm:text-right">CSOSN {useCsosn && !csosnInterno?.trim() && (<span className="text-danger">*</span>)}</Label>
+                    <Select
+                      value={csosnInterno}
+                      onValueChange={(v)=> editEnabled && setCsosnInterno(v)}
+                      disabled={!editEnabled || !useCsosn}
+                    >
+                      <SelectTrigger
+                        className={cn(
+                          "sm:col-span-3 text-xs sm:text-sm",
+                          useCsosn && !csosnInterno?.trim() && "border-danger focus-visible:ring-danger/60"
+                        )}
+                      >
+                        <SelectValue placeholder="Selecione..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {CSOSN_OPTIONS.map(code => (
+                          <SelectItem key={code} value={code}>{code}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
                   <div className="grid grid-cols-1 sm:grid-cols-4 items-start sm:items-center gap-2 sm:gap-4">
                     <Label className="text-xs sm:text-right">Alíquota ICMS (%)</Label>
                     <Input value={`${aliqIcmsInterno || ''}`} onChange={(e)=>setAliqIcmsInterno(formatPercent(e.target.value))} className="sm:col-span-3 text-xs sm:text-sm" placeholder="0,00" disabled={!editEnabled} />
@@ -922,18 +945,33 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
                       disabled={!editEnabled}
                     />
                   </div>
-                  {!useCsosn && (
-                    <div className="grid grid-cols-1 sm:grid-cols-4 items-start sm:items-center gap-2 sm:gap-4">
-                      <Label className="text-xs sm:text-right">CST</Label>
-                      <Input value={cstIcmsExterno} onChange={(e)=>setCstIcmsExterno(e.target.value.toUpperCase())} className="sm:col-span-3 text-xs sm:text-sm" placeholder="00, 20, 40..." disabled={!editEnabled} />
-                    </div>
-                  )}
-                  {useCsosn && (
-                    <div className="grid grid-cols-1 sm:grid-cols-4 items-start sm:items-center gap-2 sm:gap-4">
-                      <Label className="text-xs sm:text-right">CSOSN</Label>
-                      <Input value={csosnExterno} onChange={(e)=>setCsosnExterno(e.target.value.toUpperCase())} className="sm:col-span-3 text-xs sm:text-sm" placeholder="101, 102..." disabled={!editEnabled} />
-                    </div>
-                  )}
+                  <div className="grid grid-cols-1 sm:grid-cols-4 items-start sm:items-center gap-2 sm:gap-4">
+                    <Label className="text-xs sm:text-right">CST</Label>
+                    <Input
+                      value={cstIcmsExterno}
+                      onChange={(e)=>setCstIcmsExterno(e.target.value.toUpperCase())}
+                      className="sm:col-span-3 text-xs sm:text-sm"
+                      placeholder="00, 20, 40..."
+                      disabled={!editEnabled || useCsosn}
+                    />
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-4 items-start sm:items-center gap-2 sm:gap-4">
+                    <Label className="text-xs sm:text-right">CSOSN</Label>
+                    <Select
+                      value={csosnExterno}
+                      onValueChange={(v)=> editEnabled && setCsosnExterno(v)}
+                      disabled={!editEnabled || !useCsosn}
+                    >
+                      <SelectTrigger className="sm:col-span-3 text-xs sm:text-sm">
+                        <SelectValue placeholder="Selecione..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {CSOSN_OPTIONS.map(code => (
+                          <SelectItem key={code} value={code}>{code}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
                   <div className="grid grid-cols-1 sm:grid-cols-4 items-start sm:items-center gap-2 sm:gap-4">
                     <Label className="text-xs sm:text-right">Alíquota ICMS (%)</Label>
                     <Input value={`${aliqIcmsExterno || ''}`} onChange={(e)=>setAliqIcmsExterno(formatPercent(e.target.value))} className="sm:col-span-3 text-xs sm:text-sm" placeholder="0,00" disabled={!editEnabled} />

@@ -466,6 +466,8 @@ export async function generateNfcePayloadPreview({ comandaId, codigoEmpresa }) {
     const ncmDigits = onlyDigits(p.ncm || '').slice(0,8);
     if (!ncmDigits || /^0+$/.test(ncmDigits)) missing.push(`Produto ${p.name || p.id}: NCM válido`);
     if (!p.cfop_interno && !p.cfop) missing.push(`Produto ${p.name || p.id}: CFOP interno`);
+    const csosn = p.csosn_interno || p.csosn;
+    if (!csosn) missing.push(`Produto ${p.name || p.id}: CSOSN (icms_csosn)`);
   });
 
   const payload = {
