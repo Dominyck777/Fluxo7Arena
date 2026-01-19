@@ -286,21 +286,41 @@ export default function FiscalHubPage(){
       if (!empresaInfo) { toast({ title: 'Empresa não carregada', variant: 'warning' }); return; }
       const { baseUrl, cnpj } = getTransmiteNotaConfigFromEmpresa(empresaInfo);
       if (!cnpj) { toast({ title: 'CNPJ ausente', description: 'Preencha o CNPJ na Configuração Fiscal', variant: 'warning' }); return; }
-      let dados;
+      // 1) Primeira tentativa: obter SearchKey via consulta
+      let searchKey = r.xml_protocolo || r.searchkey || r.SearchKey || null;
+      let dadosBase;
       if (r.xml_chave) {
         const chave = r.xml_chave;
-        dados = { chave_nota: chave, chave, searchkey: chave, SearchKey: chave, motivo };
+        dadosBase = { chave_nota: chave, chave };
       } else if (r.numero && r.serie) {
-        const searchKey = String(r.numero);
-        dados = { numero: r.numero, serie: r.serie, searchkey: searchKey, SearchKey: searchKey, motivo };
+        dadosBase = { numero: r.numero, serie: r.serie };
       } else {
         toast({ title: 'Sem referência para cancelar', description: 'NF-e sem chave ou número/série para envio ao provedor.', variant: 'warning' });
         return;
       }
 
+      if (!searchKey) {
+        try {
+          const consulta = await consultarEmissaoNfe({ baseUrl, cnpj, dados: dadosBase });
+          const resultado = consulta?.resultado || consulta?.Resultado || null;
+          searchKey = resultado?.searchkey || resultado?.SearchKey || consulta?.searchkey || consulta?.SearchKey || consulta?.searchKey || null;
+        } catch {}
+      }
+
+      if (!searchKey) {
+        toast({
+          title: 'SearchKey não localizada',
+          description: 'O provedor fiscal exige a SearchKey da NF-e para cancelamento, mas a consulta não retornou esse identificador.',
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      // 2) Cancelar usando SearchKey obrigatória
+      const dados = { searchkey: searchKey, SearchKey: searchKey, motivo };
       const resp = await cancelarNfe({ baseUrl, cnpj, dados });
 
-      // A TransmiteNota retorna erros de negócio em 200 com { status: 'Erro', codigo, campo, descricao }
+      // 3) Avaliar resposta final: se ainda for Erro, não marcar como cancelada
       if (resp && typeof resp.status === 'string' && /erro/i.test(resp.status)) {
         const cod = resp.codigo || resp.Codigo || '';
         const campo = resp.campo || resp.Campo || '';
