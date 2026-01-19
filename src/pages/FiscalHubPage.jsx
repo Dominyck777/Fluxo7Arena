@@ -1006,6 +1006,12 @@ export default function FiscalHubPage(){
           const cstCof = String(cof.cst||'').trim();
           if (cstPis === '01' && String(pis.aliquota||'').trim()==='') errs.push(`Item ${idx+1}: preencha alíquota de PIS (CST 01)`);
           if (cstCof === '01' && String(cof.aliquota||'').trim()==='') errs.push(`Item ${idx+1}: preencha alíquota de COFINS (CST 01)`);
+          // ICMS-ST (CSOSN 500) exige CEST preenchido — evitamos rejeição da SEFAZ por falta de CEST
+          const csosnStr = String(ic.csosn || '').trim();
+          const cestStr = String(it?.cest || '').trim();
+          if (csosnStr === '500' && !cestStr) {
+            errs.push(`Item ${idx+1}: informe o CEST para operação com ICMS-ST (CSOSN 500)`);
+          }
         });
         // Ajuste de consistência PIS/COFINS no payload (se CST=01 e aliquota<=0, trocar para 07 e limpar bases/valores)
         try {
@@ -1063,6 +1069,7 @@ export default function FiscalHubPage(){
         try { await supabase.from('notas_fiscais').update({ status: 'processando' }).eq('id', draftId).eq('codigo_empresa', codigoEmpresa); } catch {}
       }
 
+      setManualEmitting(true);
       toast({ title: 'Enviando nota...', description: `Modelo ${form.modelo}` });
       try {
         if (isNFCe && Array.isArray(Dados?.Itens) && !Array.isArray(Dados.Itens[0])) {
@@ -1092,6 +1099,7 @@ export default function FiscalHubPage(){
         if (draftId && codigoEmpresa) {
           try { await supabase.from('notas_fiscais').update({ status: 'erro' }).eq('id', draftId).eq('codigo_empresa', codigoEmpresa); await loadNfeRows(); } catch {}
         }
+        setManualEmitting(false);
         return;
       }
 
@@ -1151,8 +1159,19 @@ export default function FiscalHubPage(){
         } catch {}
       }
 
-      const st = String(consulta?.status || consulta?.cStat || '');
-      const msg = consulta?.xMotivo || consulta?.mensagem || consulta?.message || 'Status retornado';
+      // Interpretar status/motivo da consulta, incluindo bloco "resultado" quando presente (TransmiteNota)
+      let rawStatus = String(consulta?.status || consulta?.cStat || '');
+      let msg = consulta?.xMotivo || consulta?.mensagem || consulta?.message || 'Status retornado';
+      const resultado = consulta?.resultado || consulta?.Resultado || null;
+      if (resultado) {
+        if (resultado.status) {
+          rawStatus = String(resultado.status);
+        }
+        if (resultado.motivo || resultado.Motivo) {
+          msg = resultado.motivo || resultado.Motivo || msg;
+        }
+      }
+      const st = rawStatus;
       const autorizada = (st === '100' || /autorizad/i.test(msg));
       if (autorizada) {
         toast({ title: 'Autorizada', description: msg, variant: 'success' });
@@ -3522,16 +3541,14 @@ export default function FiscalHubPage(){
                           })()}
                           {s==='rascunho' && (
                             <>
-                              {false && (
-                                <button
-                                  type="button"
-                                  className="inline-flex items-center justify-center w-5 h-5 rounded hover:bg-surface-2 text-text-secondary hover:text-text-primary"
-                                  onClick={(e)=>{ e.stopPropagation(); handleEditDraft(r); }}
-                                  title="Editar rascunho"
-                                >
-                                  <Pencil className="w-3 h-3" />
-                                </button>
-                              )}
+                              <button
+                                type="button"
+                                className="inline-flex items-center justify-center w-5 h-5 rounded hover:bg-surface-2 text-text-secondary hover:text-text-primary"
+                                onClick={(e)=>{ e.stopPropagation(); handleEditDraft(r); }}
+                                title="Editar rascunho"
+                              >
+                                <Pencil className="w-3 h-3" />
+                              </button>
                               <button
                                 type="button"
                                 className="inline-flex items-center justify-center w-5 h-5 rounded hover:bg-surface-2 text-text-secondary hover:text-destructive"
@@ -4019,7 +4036,7 @@ export default function FiscalHubPage(){
       </Dialog>
 
       <Dialog open={manualOpen} onOpenChange={setManualOpen}>
-        <DialogContent className="w-[960px] max-w-[96vw] h-[85vh] overflow-hidden flex flex-col">
+        <DialogContent className="relative w-[960px] max-w-[96vw] h-[85vh] overflow-hidden flex flex-col">
           <DialogHeader>
             <DialogTitle>Criar NF-e (manual)</DialogTitle>
             <DialogDescription>Vamos montar do zero.</DialogDescription>
@@ -5169,6 +5186,15 @@ export default function FiscalHubPage(){
             <Button onClick={saveDraft} disabled={manualSaving}>{manualSaving ? 'Salvando...' : 'Salvar rascunho'}</Button>
             <Button variant="outline" onClick={()=>setManualOpen(false)}>Fechar</Button>
           </div>
+          {manualEmitting && (
+            <div className="absolute inset-0 bg-black/40 flex items-center justify-center z-50">
+              <div className="bg-surface px-6 py-4 rounded-md shadow-lg flex flex-col items-center gap-2 max-w-xs text-center">
+                <Loader2 className="h-6 w-6 animate-spin text-primary" />
+                <div className="text-sm font-medium text-text-primary">Emitindo NF-e…</div>
+                <div className="text-xs text-text-secondary">Enviando dados para a SEFAZ e aguardando retorno. Por favor, não feche esta janela.</div>
+              </div>
+            </div>
+          )}
           {false && manualXml && (
             <div className="mt-4">
               <div className="flex items-center justify-between mb-2">
