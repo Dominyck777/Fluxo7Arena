@@ -219,8 +219,25 @@ export default function FiscalHubPage(){
       try {
         res = await consultarEmissaoNfe({ baseUrl, cnpj, dados });
         st = String(res?.status || res?.cStat || '');
-        msg = res?.xMotivo || res?.mensagem || res?.message || 'Retorno da consulta';
-        autorizada = (st === '100' || /autorizad/i.test(msg));
+        msg = res?.xMotivo || res?.mensagem || res?.message || res?.descricao || res?.Descricao || 'Retorno da consulta';
+
+        // Alguns provedores retornam bloco "resultado" com status/motivo detalhados
+        const resultado = res?.resultado || res?.Resultado || null;
+        if (resultado) {
+          if (resultado.status != null) st = String(resultado.status);
+          if (resultado.motivo || resultado.Motivo || resultado.descricao || resultado.Descricao) {
+            msg = resultado.motivo || resultado.Motivo || resultado.descricao || resultado.Descricao || msg;
+          }
+          xmlUrl = resultado.link_xml || resultado.url_xml || resultado.xml_url || xmlUrl;
+          pdfUrl = resultado.link_pdf || resultado.url_pdf || resultado.pdf_url || pdfUrl;
+          chaveResp = resultado.chave || resultado.chave_nota || resultado.Chave || chaveResp;
+          numeroResp = resultado.numero || resultado.Numero || numeroResp;
+          serieResp = resultado.serie || resultado.Serie || serieResp;
+        }
+
+        // Mesmo que o status numérico não seja 100, tratar textos APROVADA/AUTORIZADA como sucesso
+        autorizada = (st === '100' || /autorizad|aprovad/i.test(msg) || /aprovad/i.test(st));
+
         xmlUrl = res?.url_xml || res?.xml_url || xmlUrl;
         pdfUrl = res?.url_pdf || res?.pdf_url || pdfUrl;
         chaveResp = res?.chave_nota || res?.chave || res?.Chave || chaveResp;
@@ -243,10 +260,19 @@ export default function FiscalHubPage(){
         } catch {}
         if (pdfUrl || xmlUrl) autorizada = true;
       }
-      const newStatus = autorizada ? 'autorizada' : (/rejeit/i.test(msg) ? 'rejeitada' : (st || r.status || 'pendente'));
+
+      const newStatus = autorizada
+        ? 'autorizada'
+        : (/rejeit/i.test(msg) ? 'rejeitada' : (st || r.status || 'pendente'));
       await supabase.from('notas_fiscais').update({ status: newStatus, xml_url: xmlUrl, pdf_url: pdfUrl, xml_chave: chaveResp, numero: numeroResp, serie: serieResp }).eq('id', r.id).eq('codigo_empresa', codigoEmpresa);
       await loadNfeRows();
-      toast({ title: autorizada ? 'Autorizada' : `Status ${st || ''}`.trim(), description: msg || 'Consulta concluída', variant: autorizada ? 'success' : 'default' });
+      // Evitar mostrar toast de "erro" quando a mensagem da API é claramente de sucesso
+      const isSucessoTexto = /sucesso/i.test(msg || '') && !/erro/i.test(msg || '');
+      if (autorizada || isSucessoTexto) {
+        toast({ title: 'Consulta realizada', description: msg || 'Consulta concluída', variant: autorizada ? 'success' : 'default' });
+      } else {
+        toast({ title: `Status ${st || ''}`.trim(), description: msg || 'Consulta concluída', variant: /erro|rejei/i.test(msg||'') ? 'destructive' : 'warning' });
+      }
     } catch (e) {
       toast({ title: 'Falha ao consultar', description: e?.message || String(e), variant: 'destructive' });
     }
@@ -260,8 +286,30 @@ export default function FiscalHubPage(){
       if (!empresaInfo) { toast({ title: 'Empresa não carregada', variant: 'warning' }); return; }
       const { baseUrl, cnpj } = getTransmiteNotaConfigFromEmpresa(empresaInfo);
       if (!cnpj) { toast({ title: 'CNPJ ausente', description: 'Preencha o CNPJ na Configuração Fiscal', variant: 'warning' }); return; }
-      const dados = r.xml_chave ? { chave_nota: r.xml_chave, chave: r.xml_chave, motivo } : { numero: r.numero, serie: r.serie, motivo };
-      await cancelarNfe({ baseUrl, cnpj, dados });
+      let dados;
+      if (r.xml_chave) {
+        const chave = r.xml_chave;
+        dados = { chave_nota: chave, chave, searchkey: chave, SearchKey: chave, motivo };
+      } else if (r.numero && r.serie) {
+        const searchKey = String(r.numero);
+        dados = { numero: r.numero, serie: r.serie, searchkey: searchKey, SearchKey: searchKey, motivo };
+      } else {
+        toast({ title: 'Sem referência para cancelar', description: 'NF-e sem chave ou número/série para envio ao provedor.', variant: 'warning' });
+        return;
+      }
+
+      const resp = await cancelarNfe({ baseUrl, cnpj, dados });
+
+      // A TransmiteNota retorna erros de negócio em 200 com { status: 'Erro', codigo, campo, descricao }
+      if (resp && typeof resp.status === 'string' && /erro/i.test(resp.status)) {
+        const cod = resp.codigo || resp.Codigo || '';
+        const campo = resp.campo || resp.Campo || '';
+        const descr = resp.descricao || resp.Descricao || resp.mensagem || resp.message || 'Falha ao cancelar NF-e';
+        const msgErr = [campo, descr].filter(Boolean).join(' • ');
+        toast({ title: `Erro ao cancelar${cod ? ` ${cod}` : ''}`, description: msgErr, variant: 'destructive' });
+        return;
+      }
+
       await supabase.from('notas_fiscais').update({ status: 'cancelada' }).eq('id', r.id).eq('codigo_empresa', codigoEmpresa);
       await loadNfeRows();
       toast({ title: 'NF-e cancelada' });
@@ -3572,6 +3620,7 @@ export default function FiscalHubPage(){
                           if (prev.length === 1 && prev[0] === r.id) return prev;
                           return prev;
                         });
+                        toggleDetails(r.id);
                       }}
                     >
                       <td className="px-3 py-2" onClick={(e)=>e.stopPropagation()}>
@@ -3585,14 +3634,6 @@ export default function FiscalHubPage(){
                           >
                             {s}
                           </span>
-                          {(() => {
-                            const ambVal = String(r.ambiente || (getTransmiteNotaConfigFromEmpresa(empresaInfo||{}).ambiente) || 'homologacao');
-                            const clsAmb = ambVal === 'producao' ? 'bg-emerald-500/15 text-emerald-600 border border-emerald-600/30' : 'bg-amber-500/15 text-amber-700 border border-amber-600/30';
-                            const labelAmb = ambVal === 'producao' ? 'Produção' : 'Homologação';
-                            return (
-                              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] ${clsAmb}`}>{labelAmb}</span>
-                            );
-                          })()}
                           {canEdit && (
                             <>
                               <button
@@ -3638,6 +3679,41 @@ export default function FiscalHubPage(){
                       </td>
                       <td className="px-3 py-2 text-right whitespace-nowrap">R$ {fmtMoney(r.valor_total || 0)}</td>
                     </tr>
+                    {isOpenDetails(r.id) && (
+                      <tr>
+                        <td colSpan={7} className="px-3 py-3 bg-surface-2/40 border-t border-border">
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+                            <div className="space-y-1">
+                              <div><span className="text-text-secondary">Destinatário: </span><span className="text-text-primary">{r.destinatario?.nome || '—'}</span></div>
+                            </div>
+                            <div className="space-y-1">
+                              <div className="flex flex-wrap items-center justify-between gap-4">
+                                <span><span className="text-text-secondary">Número/Série: </span><span className="text-text-primary">{(r.numero ?? '—')}/{(r.serie ?? '—')}</span></span>
+                                <span><span className="text-text-secondary">Total: </span><span className="text-text-primary">R$ {fmtMoney(r.valor_total || 0)}</span></span>
+                              </div>
+                              <div className="flex items-start gap-2">
+                                <span className="text-text-secondary mt-0.5">Chave: </span>
+                                <span className="text-text-primary break-all" title={r.xml_chave || ''}>{r.xml_chave || '—'}</span>
+                              </div>
+                            </div>
+                            <div className="space-y-2">
+                              <div className="flex flex-wrap gap-2">
+                                {r.pdf_url && (
+                                  <a className="inline-flex" href={r.pdf_url} target="_blank" rel="noreferrer">
+                                    <Button size="sm" variant="outline">Abrir DANFE</Button>
+                                  </a>
+                                )}
+                                {r.xml_url && (
+                                  <a className="inline-flex" href={r.xml_url} target="_blank" rel="noreferrer">
+                                    <Button size="sm" variant="outline">Baixar XML</Button>
+                                  </a>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
                     </React.Fragment>
                   );
                 })}
