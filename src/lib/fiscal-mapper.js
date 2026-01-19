@@ -32,6 +32,7 @@ function buildItensFromManual(form){
     const ic = imp.icms || {};
     const pis = imp.pis || {};
     const cof = imp.cofins || {};
+    const ipi = imp.ipi || {};
 
     const data = {
       numero_item: idx + 1,
@@ -50,8 +51,20 @@ function buildItensFromManual(form){
       valor_total_sem_desconto: to2(bruto),
       icms_orig: Number(imp.origem || 0),
     };
-    if (ic.csosn) data.icms_csosn = Number(ic.csosn);
-    if (ic.cst) data.icms_cst = Number(ic.cst);
+    if (ic.csosn) {
+      data.icms_csosn = Number(ic.csosn);
+    }
+    if (ic.cst) {
+      data.icms_cst = Number(ic.cst);
+      const bc = vTotal;
+      const aliqNum = parseDecBR(ic.aliquota || 0);
+      if (bc > 0 && aliqNum >= 0) {
+        data.icms_mod_base_calculo = 3; // valor da operação
+        data.icms_base_calculo = to2(bc);
+        data.icms_aliquota = to4(aliqNum / 100);
+        data.icms_valor = to2(bc * aliqNum / 100);
+      }
+    }
     if (pis.cst) data.pis_situacao_tributaria = pis.cst;
     if (cof.cst) data.cofins_situacao_tributaria = cof.cst;
     if (pis.aliquota){
@@ -65,6 +78,15 @@ function buildItensFromManual(form){
       data.base_calculo_cofins = to2(vTotal);
       data.aliquota_cofins = to4(aliq/100);
       data.valor_cofins = to2(vTotal * aliq/100);
+    }
+    if (ipi.cst) {
+      data.ipi_situacao_tributaria = ipi.cst;
+      const aliqIpi = parseDecBR(ipi.aliquota);
+      if (aliqIpi > 0) {
+        data.base_calculo_ipi = to2(vTotal);
+        data.aliquota_ipi = to4(aliqIpi / 100);
+        data.valor_ipi = to2(vTotal * aliqIpi / 100);
+      }
     }
     return data;
   });
@@ -123,7 +145,7 @@ export function generateNfcePayloadFromManual({ form, finalizadoras = [] }){
       municipio_destinatario: form?.cidade || '',
       codigo_cidade: form?.codigo_municipio_ibge || '',
       uf_destinatario: form?.uf || '',
-      pais_destinatario: 'Brasil',
+      pais_destinatario: 1058,
       cep_destinatario: onlyDigits(form?.cep || ''),
       indicador_ie_destinatario: Number(form?.indIEDest || 9),
     } : {}),
@@ -151,9 +173,9 @@ export function generateNfePayloadFromManual({ form }){
     finalidade_emissao: Number(form?.finNFe || 1),
     modalidade_frete: Number(form?.transporte?.tipo_frete ?? 9),
 
-    valor_frete: vFrete ? to2(vFrete) : '0',
-    valor_seguro: '0',
-    valor_ipi: '0',
+    valor_frete: to2(vFrete || 0),
+    valor_seguro: to2(0),
+    valor_ipi: to2(0),
     valor_total: to2(valor_total),
     valor_total_sem_desconto: to2(soma),
 
