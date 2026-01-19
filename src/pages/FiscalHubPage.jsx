@@ -198,14 +198,29 @@ export default function FiscalHubPage(){
 
   const handleConsultRow = async (r) => {
     try {
+      if (!r) return;
       if (!empresaInfo) { toast({ title: 'Empresa não carregada', variant: 'warning' }); return; }
       const { baseUrl, cnpj } = getTransmiteNotaConfigFromEmpresa(empresaInfo);
       if (!cnpj) { toast({ title: 'CNPJ ausente', description: 'Preencha o CNPJ na Configuração Fiscal', variant: 'warning' }); return; }
       const chave = r.xml_chave || '';
       let dados;
-      if (chave) dados = { chave_nota: chave, chave };
-      else if (r.numero && r.serie) dados = { numero: r.numero, serie: r.serie };
-      else { toast({ title: 'Sem referência para consultar', description: 'Preencha número/série ou emita para obter a chave', variant: 'warning' }); return; }
+      let searchKey = null;
+      if (String(r.modelo) === '55') {
+        searchKey = getNfeSearchKeyFromRow(r);
+        if (!searchKey) {
+          toast({
+            title: 'SearchKey não localizada',
+            description: 'O provedor fiscal exige a SearchKey da NF-e para consulta desta nota e não foi possível derivá-la a partir do retorno de emissão.',
+            variant: 'destructive',
+          });
+          return;
+        }
+        dados = { searchkey: searchKey, SearchKey: searchKey };
+      } else {
+        if (chave) dados = { chave_nota: chave, chave };
+        else if (r.numero && r.serie) dados = { numero: r.numero, serie: r.serie };
+        else { toast({ title: 'Sem referência para consultar', description: 'Preencha número/série ou emita para obter a chave', variant: 'warning' }); return; }
+      }
       toast({ title: 'Consultando status...', description: `NF-e ${r.numero || '—'}/${r.serie || '—'}` });
       let res = null;
       let st = '';
@@ -233,6 +248,9 @@ export default function FiscalHubPage(){
           chaveResp = resultado.chave || resultado.chave_nota || resultado.Chave || chaveResp;
           numeroResp = resultado.numero || resultado.Numero || numeroResp;
           serieResp = resultado.serie || resultado.Serie || serieResp;
+          if (String(r.modelo) === '55') {
+            searchKey = searchKey || resultado.searchkey || resultado.SearchKey || null;
+          }
         }
 
         // Mesmo que o status numérico não seja 100, tratar textos APROVADA/AUTORIZADA como sucesso
@@ -243,8 +261,15 @@ export default function FiscalHubPage(){
         chaveResp = res?.chave_nota || res?.chave || res?.Chave || chaveResp;
         numeroResp = res?.numero || res?.Numero || numeroResp;
         serieResp = res?.serie || res?.Serie || serieResp;
+        if (String(r.modelo) === '55') {
+          searchKey = searchKey || res?.searchkey || res?.SearchKey || res?.searchKey || null;
+        }
       } catch (e) {
         msg = e?.message || String(e);
+      }
+      if (String(r.modelo) === '55') {
+        // Último fallback: tentar extrair SearchKey dos URLs retornados
+        searchKey = searchKey || extractSearchKeyFromUrl(xmlUrl) || extractSearchKeyFromUrl(pdfUrl) || getNfeSearchKeyFromRow({ ...r, xml_url: xmlUrl, pdf_url: pdfUrl }) || null;
       }
       // Fallback: tentar PDF/XML quando consulta não autoriza ou não retorna URLs
       if (!autorizada || (!pdfUrl && !xmlUrl)) {
@@ -264,7 +289,11 @@ export default function FiscalHubPage(){
       const newStatus = autorizada
         ? 'autorizada'
         : (/rejeit/i.test(msg) ? 'rejeitada' : (st || r.status || 'pendente'));
-      await supabase.from('notas_fiscais').update({ status: newStatus, xml_url: xmlUrl, pdf_url: pdfUrl, xml_chave: chaveResp, numero: numeroResp, serie: serieResp }).eq('id', r.id).eq('codigo_empresa', codigoEmpresa);
+      const patch = { status: newStatus, xml_url: xmlUrl, pdf_url: pdfUrl, xml_chave: chaveResp, numero: numeroResp, serie: serieResp };
+      if (String(r.modelo) === '55') {
+        patch.searchkey = searchKey || getNfeSearchKeyFromRow({ ...r, xml_url: xmlUrl, pdf_url: pdfUrl }) || null;
+      }
+      await supabase.from('notas_fiscais').update(patch).eq('id', r.id).eq('codigo_empresa', codigoEmpresa);
       await loadNfeRows();
       // Evitar mostrar toast de "erro" quando a mensagem da API é claramente de sucesso
       const isSucessoTexto = /sucesso/i.test(msg || '') && !/erro/i.test(msg || '');
@@ -286,36 +315,16 @@ export default function FiscalHubPage(){
       if (!empresaInfo) { toast({ title: 'Empresa não carregada', variant: 'warning' }); return; }
       const { baseUrl, cnpj } = getTransmiteNotaConfigFromEmpresa(empresaInfo);
       if (!cnpj) { toast({ title: 'CNPJ ausente', description: 'Preencha o CNPJ na Configuração Fiscal', variant: 'warning' }); return; }
-      // 1) Primeira tentativa: obter SearchKey via consulta
-      let searchKey = r.xml_protocolo || r.searchkey || r.SearchKey || null;
-      let dadosBase;
-      if (r.xml_chave) {
-        const chave = r.xml_chave;
-        dadosBase = { chave_nota: chave, chave };
-      } else if (r.numero && r.serie) {
-        dadosBase = { numero: r.numero, serie: r.serie };
-      } else {
-        toast({ title: 'Sem referência para cancelar', description: 'NF-e sem chave ou número/série para envio ao provedor.', variant: 'warning' });
-        return;
-      }
-
-      if (!searchKey) {
-        try {
-          const consulta = await consultarEmissaoNfe({ baseUrl, cnpj, dados: dadosBase });
-          const resultado = consulta?.resultado || consulta?.Resultado || null;
-          searchKey = resultado?.searchkey || resultado?.SearchKey || consulta?.searchkey || consulta?.SearchKey || consulta?.searchKey || null;
-        } catch {}
-      }
-
+      // 1) Obter SearchKey associada a esta NF-e (informada no retorno de envio, embutida nos links PDF/XML)
+      let searchKey = getNfeSearchKeyFromRow(r) || r.xml_protocolo || r.searchkey || r.SearchKey || null;
       if (!searchKey) {
         toast({
           title: 'SearchKey não localizada',
-          description: 'O provedor fiscal exige a SearchKey da NF-e para cancelamento, mas a consulta não retornou esse identificador.',
+          description: 'O provedor fiscal exige a SearchKey da NF-e para cancelamento, mas não foi possível derivá-la a partir do retorno de emissão.',
           variant: 'destructive',
         });
         return;
       }
-
       // 2) Cancelar usando SearchKey obrigatória
       const dados = { searchkey: searchKey, SearchKey: searchKey, motivo };
       const resp = await cancelarNfe({ baseUrl, cnpj, dados });
@@ -963,6 +972,35 @@ export default function FiscalHubPage(){
     const digits = String(raw || '').replace(/\D/g, '');
     const cents = digits ? Number(digits) / 100 : 0;
     return new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(cents);
+  };
+
+  const extractSearchKeyFromUrl = (url) => {
+    try {
+      const s = String(url || '').trim();
+      if (!s) return null;
+      const qIndex = s.indexOf('?');
+      if (qIndex >= 0 && qIndex + 1 < s.length) {
+        const query = s.slice(qIndex + 1);
+        const params = new URLSearchParams(query);
+        const sk = params.get('s') || params.get('searchkey') || params.get('SearchKey');
+        if (sk) return sk;
+      }
+      const m = s.match(/[?&]s=([^&#]+)/i);
+      if (m && m[1]) return decodeURIComponent(m[1]);
+    } catch {}
+    return null;
+  };
+
+  const getNfeSearchKeyFromRow = (row) => {
+    if (!row) return null;
+    const d = row.draft_data || {};
+    const direct = row.searchkey || row.SearchKey || row.xml_protocolo || d.searchkey || d.SearchKey || d.xml_protocolo || d.tn_searchkey;
+    if (direct) return direct;
+    const skXml = extractSearchKeyFromUrl(row.xml_url);
+    if (skXml) return skXml;
+    const skPdf = extractSearchKeyFromUrl(row.pdf_url);
+    if (skPdf) return skPdf;
+    return null;
   };
 
   const emitirNota = async (formOverride = null, draftIdOverride = null) => {
