@@ -231,6 +231,8 @@ export default function FiscalHubPage(){
       let chaveResp = r.xml_chave || null;
       let numeroResp = r.numero || null;
       let serieResp = r.serie || null;
+      let resultadoStatus = '';
+      let resultadoCodStatus = '';
       try {
         res = await consultarEmissaoNfe({ baseUrl, cnpj, dados });
         st = String(res?.status || res?.cStat || '');
@@ -239,6 +241,8 @@ export default function FiscalHubPage(){
         // Alguns provedores retornam bloco "resultado" com status/motivo detalhados
         const resultado = res?.resultado || res?.Resultado || null;
         if (resultado) {
+          resultadoStatus = String(resultado.status || '');
+          resultadoCodStatus = String(resultado.cod_status || resultado.CodStatus || '').trim();
           if (resultado.status != null) st = String(resultado.status);
           if (resultado.motivo || resultado.Motivo || resultado.descricao || resultado.Descricao) {
             msg = resultado.motivo || resultado.Motivo || resultado.descricao || resultado.Descricao || msg;
@@ -283,12 +287,35 @@ export default function FiscalHubPage(){
           xmlUrl = rxml?.url_xml || rxml?.xml_url || xmlUrl;
           chaveResp = chaveResp || rxml?.chave || rxml?.Chave || chaveResp;
         } catch {}
-        if (pdfUrl || xmlUrl) autorizada = true;
+        // Para NF-e cancelada, não interpretar presença de PDF/XML como "autorizada"
+        if (pdfUrl || xmlUrl) {
+          const isNfe = String(r.modelo) === '55';
+          const statusLower = (resultadoStatus || st || '').toString().toLowerCase();
+          const msgLower = (msg || '').toString().toLowerCase();
+          const isCanceled = isNfe && (statusLower.includes('cancelad') || msgLower.includes('cancelad') || resultadoCodStatus === '005');
+          if (!isCanceled) {
+            autorizada = true;
+          }
+        }
       }
+      const isNfe = String(r.modelo) === '55';
+      const statusLower = (resultadoStatus || st || '').toString().toLowerCase();
+      const msgLower = (msg || '').toString().toLowerCase();
+      const isCanceledNfe = isNfe && (statusLower.includes('cancelad') || msgLower.includes('cancelad') || resultadoCodStatus === '005');
+      const isRejectedNfe = isNfe && (statusLower.includes('rejeit') || msgLower.includes('rejeit'));
+      const isAuthorizedNfe = isNfe && (autorizada || statusLower.match(/aprovad|autorizad/));
 
-      const newStatus = autorizada
-        ? 'autorizada'
-        : (/rejeit/i.test(msg) ? 'rejeitada' : (st || r.status || 'pendente'));
+      let newStatus;
+      if (isNfe) {
+        if (isCanceledNfe) newStatus = 'cancelada';
+        else if (isRejectedNfe) newStatus = 'rejeitada';
+        else if (isAuthorizedNfe) newStatus = 'autorizada';
+        else newStatus = st || r.status || 'pendente';
+      } else {
+        newStatus = autorizada
+          ? 'autorizada'
+          : (/rejeit/i.test(msg) ? 'rejeitada' : (st || r.status || 'pendente'));
+      }
       const patch = { status: newStatus, xml_url: xmlUrl, pdf_url: pdfUrl, xml_chave: chaveResp, numero: numeroResp, serie: serieResp };
       if (String(r.modelo) === '55') {
         patch.searchkey = searchKey || getNfeSearchKeyFromRow({ ...r, xml_url: xmlUrl, pdf_url: pdfUrl }) || null;
@@ -297,8 +324,10 @@ export default function FiscalHubPage(){
       await loadNfeRows();
       // Evitar mostrar toast de "erro" quando a mensagem da API é claramente de sucesso
       const isSucessoTexto = /sucesso/i.test(msg || '') && !/erro/i.test(msg || '');
-      if (autorizada || isSucessoTexto) {
-        toast({ title: 'Consulta realizada', description: msg || 'Consulta concluída', variant: autorizada ? 'success' : 'default' });
+      if (isNfe && newStatus === 'cancelada') {
+        toast({ title: 'NF-e cancelada', description: msg || 'Cancelamento confirmado pela SEFAZ.', variant: 'success' });
+      } else if (newStatus === 'autorizada' || isSucessoTexto) {
+        toast({ title: 'Consulta realizada', description: msg || 'Consulta concluída', variant: 'success' });
       } else {
         toast({ title: `Status ${st || ''}`.trim(), description: msg || 'Consulta concluída', variant: /erro|rejei/i.test(msg||'') ? 'destructive' : 'warning' });
       }
@@ -315,6 +344,7 @@ export default function FiscalHubPage(){
       if (!empresaInfo) { toast({ title: 'Empresa não carregada', variant: 'warning' }); return; }
       const { baseUrl, cnpj } = getTransmiteNotaConfigFromEmpresa(empresaInfo);
       if (!cnpj) { toast({ title: 'CNPJ ausente', description: 'Preencha o CNPJ na Configuração Fiscal', variant: 'warning' }); return; }
+      setCancelNfeLoading(true);
       // 1) Obter SearchKey associada a esta NF-e (informada no retorno de envio, embutida nos links PDF/XML)
       let searchKey = getNfeSearchKeyFromRow(r) || r.xml_protocolo || r.searchkey || r.SearchKey || null;
       if (!searchKey) {
@@ -329,23 +359,38 @@ export default function FiscalHubPage(){
       const dados = { searchkey: searchKey, SearchKey: searchKey, motivo };
       const resp = await cancelarNfe({ baseUrl, cnpj, dados });
 
-      // 3) Avaliar resposta final: se ainda for Erro, não marcar como cancelada
-      if (resp && typeof resp.status === 'string' && /erro/i.test(resp.status)) {
-        const cod = resp.codigo || resp.Codigo || '';
-        const campo = resp.campo || resp.Campo || '';
-        const descr = resp.descricao || resp.Descricao || resp.mensagem || resp.message || 'Falha ao cancelar NF-e';
-        const msgErr = [campo, descr].filter(Boolean).join(' • ');
+      const statusStr = String(resp?.status || resp?.Status || '');
+      const cod = resp?.codigo || resp?.Codigo || '';
+      const campo = resp?.campo || resp?.Campo || '';
+      const descr = resp?.descricao || resp?.Descricao || resp?.mensagem || resp?.message || '';
+
+      // 3) Avaliar resposta final: se for Erro de negócio, não marcar como cancelada
+      if (statusStr && /erro/i.test(statusStr)) {
+        const msgErr = [campo, descr || 'Falha ao cancelar NF-e'].filter(Boolean).join(' • ');
         toast({ title: `Erro ao cancelar${cod ? ` ${cod}` : ''}`, description: msgErr, variant: 'destructive' });
         return;
       }
 
-      await supabase.from('notas_fiscais').update({ status: 'cancelada' }).eq('id', r.id).eq('codigo_empresa', codigoEmpresa);
-      await loadNfeRows();
-      toast({ title: 'NF-e cancelada' });
+      // Código 1304: cancelamento registrado e aguardando aprovação na SEFAZ
+      const pending = cod === '1304' || /aguardando aprova[çc][aã]o/i.test(descr || '');
+      if (pending) {
+        await supabase.from('notas_fiscais').update({ status: 'processando' }).eq('id', r.id).eq('codigo_empresa', codigoEmpresa);
+        await loadNfeRows();
+        toast({
+          title: 'Cancelamento em processamento',
+          description: descr || 'Solicitação de cancelamento registrada. Aguarde alguns instantes e clique em Consultar para confirmar o status.',
+        });
+      } else {
+        await supabase.from('notas_fiscais').update({ status: 'cancelada' }).eq('id', r.id).eq('codigo_empresa', codigoEmpresa);
+        await loadNfeRows();
+        toast({ title: 'NF-e cancelada', description: descr || 'Cancelamento confirmado pela SEFAZ.', variant: 'success' });
+      }
       setCancelNfeRow(null);
       setCancelNfeMotivo('');
     } catch (e) {
       toast({ title: 'Falha ao cancelar', description: e?.message || String(e), variant: 'destructive' });
+    } finally {
+      setCancelNfeLoading(false);
     }
   };
 
@@ -736,6 +781,7 @@ export default function FiscalHubPage(){
   const [deleteDraftId, setDeleteDraftId] = useState(null);
   const [cancelNfeRow, setCancelNfeRow] = useState(null);
   const [cancelNfeMotivo, setCancelNfeMotivo] = useState('');
+  const [cancelNfeLoading, setCancelNfeLoading] = useState(false);
   const [partyPickerOpen, setPartyPickerOpen] = useState(false);
   const [partyQuickOpen, setPartyQuickOpen] = useState(false);
   const [partyQuery, setPartyQuery] = useState('');
