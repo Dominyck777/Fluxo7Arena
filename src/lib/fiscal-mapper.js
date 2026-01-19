@@ -43,8 +43,8 @@ function buildItensFromManual(form){
       quantidade_comercial: q,
       valor_unitario_comercial: to2(unit),
       codigo_ncm: onlyDigits(it.ncm).slice(0,8) || '',
-      // CEST (quando informado no item). Mantemos apenas dígitos e limitamos a 7 posições.
-      codigo_cest: onlyDigits(it.cest).slice(0,7) || '',
+      // CEST: enviado em operações com ST quando informado no formulário/produto
+      cest: it.cest ? String(it.cest) : undefined,
       valor_desconto: vDesc ? to2(vDesc) : '',
       valor_frete: frete ? to2(frete) : '',
       valor_seguro: seguro ? to2(seguro) : '',
@@ -213,7 +213,8 @@ export function generateNfePayloadFromManual({ form }){
     cep_destinatario: onlyDigits(form?.cep || ''),
     indicador_ie_destinatario: Number(form?.indIEDest ?? 1),
 
-    Itens: itens.map(it => [it]),
+    // Itens em array simples; o front decide se precisa envelopar em [[...]]
+    Itens: itens,
   };
 }
 
