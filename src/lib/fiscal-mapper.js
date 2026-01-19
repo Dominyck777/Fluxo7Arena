@@ -58,14 +58,16 @@ function buildItensFromManual(form){
     }
     if (ic.cst) {
       data.icms_cst = Number(ic.cst);
+    }
+    // ICMS: alinhar com exemplo da TransmiteNota, preenchendo base/aliquota/valor
+    if (ic.cst || ic.csosn) {
       const bc = vTotal;
       const aliqNum = parseDecBR(ic.aliquota || 0);
-      if (bc > 0 && aliqNum >= 0) {
-        data.icms_mod_base_calculo = 3; // valor da operação
-        data.icms_base_calculo = to2(bc);
-        data.icms_aliquota = to4(aliqNum / 100);
-        data.icms_valor = to2(bc * aliqNum / 100);
-      }
+      data.icms_mod_base_calculo = 3; // valor da operação
+      data.icms_base_calculo = to2(bc);
+      data.icms_reducao_base_calculo = '';
+      data.icms_aliquota = to4(aliqNum / 100);
+      data.icms_valor = aliqNum > 0 ? to2(bc * aliqNum / 100) : '0.00';
     }
     if (pis.cst) data.pis_situacao_tributaria = pis.cst;
     if (cof.cst) data.cofins_situacao_tributaria = cof.cst;
@@ -166,7 +168,8 @@ export function generateNfePayloadFromManual({ form }){
 
   return {
     tipo_operacao: form?.tipo_nota === 'entrada' ? 0 : 1,
-    natureza_operacao: form?.natOp || 'Venda de mercadoria',
+    // Usar padrão em maiúsculas quando não houver natOp customizada, alinhado ao exemplo
+    natureza_operacao: form?.natOp || 'VENDA DE MERCADORIA',
     forma_pagamento: 0,
     meio_pagamento: '01',
     data_emissao: form?.data_emissao ? new Date(form.data_emissao+'T00:00:00').toLocaleDateString('pt-BR') : new Date().toLocaleDateString('pt-BR'),
@@ -209,12 +212,13 @@ export function generateNfePayloadFromManual({ form }){
     bairro_destinatario: form?.bairro || '',
     municipio_destinatario: form?.cidade || '',
     uf_destinatario: form?.uf || '',
-    pais_destinatario: 'Brasil',
+    // Código numérico do Brasil (1058), conforme exemplo da TransmiteNota
+    pais_destinatario: 1058,
     cep_destinatario: onlyDigits(form?.cep || ''),
     indicador_ie_destinatario: Number(form?.indIEDest ?? 1),
 
-    // Itens em array simples; o front decide se precisa envelopar em [[...]]
-    Itens: itens,
+    // Para NF-e, alinhar estrutura com o exemplo: Itens como [[ ... ]]
+    Itens: [ itens ],
   };
 }
 

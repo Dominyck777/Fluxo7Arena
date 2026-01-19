@@ -1133,8 +1133,13 @@ export default function FiscalHubPage(){
       let pdfUrl = consulta?.url_pdf || consulta?.pdf_url || resp?.url_pdf || null;
       let chaveResp = chave || consulta?.chave_nota || consulta?.chave || consulta?.Chave || '';
       if (!pdfUrl || !xmlUrl) {
-        const dadosFallback = chaveResp ? { chave_nota: chaveResp, chave: chaveResp } : { numero: formAdj?.nNF, serie: formAdj?.serie };
-        try {
+        // Só montar dadosFallback se tivermos chave ou número válido; evita chamadas com numero=""
+        const hasNumero = !!(formAdj?.nNF && String(formAdj.nNF).trim());
+        if (!chaveResp && !hasNumero) {
+          // Sem referência para PDF/XML, não tentar fallback
+        } else {
+          const dadosFallback = chaveResp ? { chave_nota: chaveResp, chave: chaveResp } : { numero: formAdj?.nNF, serie: formAdj?.serie };
+          try {
           if (isNFCe) {
             const rpdf = await consultarPdfNfce({ baseUrl, cnpj, dados: dadosFallback });
             pdfUrl = pdfUrl || rpdf?.url_pdf || rpdf?.pdf_url || null;
@@ -1156,6 +1161,7 @@ export default function FiscalHubPage(){
             chaveResp = chaveResp || rxml?.chave || rxml?.Chave || '';
           }
         } catch {}
+        }
       }
 
       let st = String(consulta?.status || consulta?.cStat || '');
