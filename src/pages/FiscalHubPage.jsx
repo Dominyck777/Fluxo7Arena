@@ -316,7 +316,12 @@ export default function FiscalHubPage(){
         toast({ title: 'Rascunho incompleto', description: 'Abra o rascunho para revisar e emitir.', variant: 'warning' });
         return;
       }
-      await emitirNota(form, row.id);
+      setManualEmitting(true);
+      try {
+        await emitirNota(form, row.id);
+      } finally {
+        setManualEmitting(false);
+      }
     } catch (e) {
       toast({ title: 'Falha ao emitir NF-e', description: e?.message || String(e), variant: 'destructive' });
     }
@@ -909,6 +914,9 @@ export default function FiscalHubPage(){
       let Dados = isNFCe
         ? generateNfcePayloadFromManual({ form: formAdj, finalizadoras: payMethods || [] })
         : generateNfePayloadFromManual({ form: formAdj });
+      // Número/série efetivamente usados na NF-e (apenas modelo 55)
+      let numeroUsado = null;
+      let serieUsada = null;
       try { console.log('[FiscalHub][emitirNota] payload gerado (antes do preflight)', { isNFCe, Dados }); } catch {}
       // Mantém Itens em array simples durante as validações; será envelopado em [[...]] antes do envio
       if (!isNFCe) {
@@ -940,12 +948,19 @@ export default function FiscalHubPage(){
         }
         // Garantir Série e Número: reservar automaticamente se não informado
         let serieNum = Number(formAdj?.serie || 1) || 1;
-        if (!formAdj?.nNF) {
+        serieUsada = serieNum;
+        const numeroAtual = formAdj?.nNF ? Number(formAdj.nNF) : 0;
+        if (!numeroAtual) {
           try {
             try { await supabase.from('auditoria_fiscal').insert({ codigo_empresa: codigoEmpresa, acao: 'reservar_numero', modelo: '55', status: 'start', mensagem: `serie=${serieNum}` }); } catch {}
             const { data: nr, error: nrErr } = await supabase.rpc('reservar_numero_fiscal', { p_modelo: '55', p_serie: serieNum, p_codigo_empresa: codigoEmpresa });
             if (nrErr) throw nrErr;
             const numeroReservado = Number(nr);
+            numeroUsado = numeroReservado;
+            serieUsada = serieNum;
+            // propagar para o formulário em tela e para o form ajustado usado nas consultas
+            formAdj.nNF = String(numeroReservado);
+            formAdj.serie = String(serieNum);
             setManualForm(f => ({ ...f, nNF: String(numeroReservado), serie: String(serieNum) }));
             Dados.Numero = numeroReservado;
             Dados.Serie = serieNum;
@@ -956,8 +971,10 @@ export default function FiscalHubPage(){
             return;
           }
         } else {
-          Dados.Numero = Number(formAdj.nNF);
-          Dados.Serie = serieNum;
+          numeroUsado = numeroAtual;
+          serieUsada = serieNum;
+          Dados.Numero = numeroUsado;
+          Dados.Serie = serieUsada;
         }
         // Ajustar indicador_ie_destinatario conforme doc/IE
         try {
@@ -1113,11 +1130,27 @@ export default function FiscalHubPage(){
         toast({ title: 'Envio solicitado', description: 'Consultando status...' });
       }
 
-      const chave = resp?.chave_nota || resp?.chave || resp?.Chave || '';
+      // Algumas respostas já trazem o resultado completo dentro de "resultado"
+      const respResultado = resp?.resultado || resp?.Resultado || null;
+      let chave = resp?.chave_nota || resp?.chave || resp?.Chave || '';
+      let numeroResp = resp?.numero || resp?.Numero || null;
+      let serieResp = resp?.serie || resp?.Serie || null;
+      let xmlUrlFromResp = resp?.url_xml || resp?.xml_url || null;
+      let pdfUrlFromResp = resp?.url_pdf || resp?.pdf_url || null;
+      if (respResultado) {
+        chave = chave || respResultado.chave || respResultado.chave_nota || respResultado.Chave || '';
+        numeroResp = numeroResp || respResultado.numero || respResultado.Numero || null;
+        serieResp = serieResp || respResultado.serie || respResultado.Serie || null;
+        xmlUrlFromResp = xmlUrlFromResp || respResultado.link_xml || respResultado.url_xml || respResultado.xml_url || null;
+        pdfUrlFromResp = pdfUrlFromResp || respResultado.link_pdf || respResultado.url_pdf || respResultado.pdf_url || null;
+      }
+
       let consulta = null;
       const sleep = (ms) => new Promise(r => setTimeout(r, ms));
       for (let i = 0; i < 5; i++) {
-        const dadosConsulta = chave ? { chave_nota: chave, chave } : { numero: formAdj?.nNF, serie: formAdj?.serie };
+        const dadosConsulta = chave
+          ? { chave_nota: chave, chave }
+          : { numero: numeroUsado || formAdj?.nNF, serie: serieUsada || formAdj?.serie };
         try {
           if (isNFCe) consulta = await consultarEmissaoNfce({ baseUrl, cnpj, dados: dadosConsulta });
           else consulta = await consultarEmissaoNfe({ baseUrl, cnpj, dados: dadosConsulta });
@@ -1129,16 +1162,19 @@ export default function FiscalHubPage(){
       }
 
       // Se ainda não autorizado ou sem URLs, tentar endpoints diretos de PDF/XML
-      let xmlUrl = consulta?.url_xml || consulta?.xml_url || resp?.url_xml || null;
-      let pdfUrl = consulta?.url_pdf || consulta?.pdf_url || resp?.url_pdf || null;
+      let xmlUrl = consulta?.url_xml || consulta?.xml_url || xmlUrlFromResp || null;
+      let pdfUrl = consulta?.url_pdf || consulta?.pdf_url || pdfUrlFromResp || null;
       let chaveResp = chave || consulta?.chave_nota || consulta?.chave || consulta?.Chave || '';
       if (!pdfUrl || !xmlUrl) {
         // Só montar dadosFallback se tivermos chave ou número válido; evita chamadas com numero=""
-        const hasNumero = !!(formAdj?.nNF && String(formAdj.nNF).trim());
+        const baseNumero = numeroUsado || formAdj?.nNF;
+        const hasNumero = !!(baseNumero && String(baseNumero).trim());
         if (!chaveResp && !hasNumero) {
           // Sem referência para PDF/XML, não tentar fallback
         } else {
-          const dadosFallback = chaveResp ? { chave_nota: chaveResp, chave: chaveResp } : { numero: formAdj?.nNF, serie: formAdj?.serie };
+          const dadosFallback = chaveResp
+            ? { chave_nota: chaveResp, chave: chaveResp }
+            : { numero: baseNumero, serie: serieUsada || formAdj?.serie };
           try {
           if (isNFCe) {
             const rpdf = await consultarPdfNfce({ baseUrl, cnpj, dados: dadosFallback });
@@ -1163,22 +1199,32 @@ export default function FiscalHubPage(){
         } catch {}
         }
       }
-
       let st = String(consulta?.status || consulta?.cStat || '');
       let msg = consulta?.xMotivo || consulta?.mensagem || consulta?.message || 'Status retornado';
 
-      // Alguns retornos trazem o status/motivo dentro de um bloco "resultado"
+      // Alguns retornos trazem o status/motivo e URLs dentro de um bloco "resultado"
       const resultado = consulta?.resultado || consulta?.Resultado || null;
       if (resultado) {
         if (resultado.status != null) {
           st = String(resultado.status);
         }
-        if (resultado.motivo || resultado.Motivo) {
-          msg = resultado.motivo || resultado.Motivo || msg;
+        if (resultado.motivo || resultado.Motivo || resultado.descricao || resultado.Descricao) {
+          msg = resultado.motivo || resultado.Motivo || resultado.descricao || resultado.Descricao || msg;
         }
+        if (!xmlUrl) xmlUrl = resultado.link_xml || resultado.url_xml || resultado.xml_url || xmlUrl;
+        if (!pdfUrl) pdfUrl = resultado.link_pdf || resultado.url_pdf || resultado.pdf_url || pdfUrl;
+        if (!chaveResp) chaveResp = resultado.chave || resultado.chave_nota || resultado.Chave || chaveResp;
       }
 
-      const autorizada = (st === '100' || /autorizad/i.test(msg));
+      // Fallback: usar também o bloco resultado da resposta de envio quando a consulta não trouxer tudo
+      if (!st && respResultado?.status != null) {
+        st = String(respResultado.status);
+      }
+      if ((!msg || msg === 'Status retornado') && respResultado) {
+        msg = respResultado.motivo || respResultado.Motivo || respResultado.descricao || respResultado.Descricao || resp?.descricao || resp?.Descricao || msg;
+      }
+
+      const autorizada = (st === '100' || /autorizad|aprovad/i.test(msg) || /aprovad/i.test(st));
       if (autorizada) {
         toast({ title: 'Autorizada', description: msg, variant: 'success' });
       } else if (st) {
@@ -1196,8 +1242,8 @@ export default function FiscalHubPage(){
             xml_chave: (chaveResp || chave || null),
             xml_url: xmlUrl || null,
             pdf_url: pdfUrl || null,
-            numero: form?.nNF ? Number(form.nNF) : null,
-            serie: form?.serie ? Number(form.serie) : null,
+            numero: numeroUsado != null ? Number(numeroUsado) : (form?.nNF ? Number(form.nNF) : null),
+            serie: serieUsada != null ? Number(serieUsada) : (form?.serie ? Number(form.serie) : null),
             ambiente: (getTransmiteNotaConfigFromEmpresa(empresaInfo||{}).ambiente || null),
           }).eq('id', draftId).eq('codigo_empresa', codigoEmpresa);
           await loadNfeRows();
@@ -5293,6 +5339,22 @@ export default function FiscalHubPage(){
               </datalist>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Loading simples durante emissão manual de NF-e/NFC-e */}
+      <Dialog open={manualEmitting} onOpenChange={() => {}}>
+        <DialogContent className="max-w-xs">
+          <DialogHeader>
+            <DialogTitle>Emitindo NF-e...</DialogTitle>
+            <DialogDescription>Aguarde enquanto consultamos o status na SEFAZ.</DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col items-center gap-3 py-3">
+            <Loader2 className="h-6 w-6 animate-spin text-primary" />
+            <span className="text-xs text-text-secondary text-center">
+              Este processo pode levar alguns segundos. Não feche esta tela.
+            </span>
+          </div>
         </DialogContent>
       </Dialog>
 

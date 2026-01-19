@@ -44,7 +44,9 @@ function buildItensFromManual(form){
       valor_unitario_comercial: to2(unit),
       codigo_ncm: onlyDigits(it.ncm).slice(0,8) || '',
       // CEST: enviado em operações com ST quando informado no formulário/produto
+      // Alguns provedores utilizam a chave "codigo_cest"; enviamos as duas para máxima compatibilidade
       cest: it.cest ? String(it.cest) : undefined,
+      codigo_cest: it.cest ? String(it.cest) : undefined,
       valor_desconto: vDesc ? to2(vDesc) : '',
       valor_frete: frete ? to2(frete) : '',
       valor_seguro: seguro ? to2(seguro) : '',
