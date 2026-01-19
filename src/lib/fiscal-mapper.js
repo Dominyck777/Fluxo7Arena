@@ -352,8 +352,10 @@ export async function generateNfcePayloadPreview({ comandaId, codigoEmpresa }) {
 
   const totalAposDescontos = Math.max(0, baseComanda - descontoComanda);
 
-  // Destinatário (opcional)
+  // Destinatário (opcional). Para NFC-e, só enviaremos destinatário se houver CPF/CNPJ,
+  // para evitar gerar <dest> inválido no XML (consumidor não identificado não deve ter dest).
   const dest = pickDestinatarioFromComanda(comanda, cliente);
+  const hasDestDoc = !!(dest && dest.cpf_cnpj);
 
   // Monta Dados conforme doc "EnviarNfce"
   // Monta itens fiscais e, em seguida, aplica desconto global de comanda (se houver)
@@ -429,8 +431,8 @@ export async function generateNfcePayloadPreview({ comandaId, codigoEmpresa }) {
     valor_total: to2(totalFiscal),
     valor_total_sem_desconto: to2(totalSemDesc),
 
-    // Destinatário (se existir)
-    ...(dest ? {
+    // Destinatário (apenas se houver CPF/CNPJ)
+    ...(hasDestDoc ? {
       nome_destinatario: dest.nome,
       cnpj_destinatario: dest.cpf_cnpj,
       inscricao_estadual_destinatario: dest.ie,
