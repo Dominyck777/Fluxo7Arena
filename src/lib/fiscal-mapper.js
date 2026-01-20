@@ -416,24 +416,19 @@ export async function generateNfcePayloadPreview({ comandaId, codigoEmpresa }) {
       quantidade_comercial: q,
       valor_unitario_comercial: to2(unit),
       codigo_ncm: ncm,
-      valor_desconto: vDesc ? to2(vDesc) : '',
-      valor_frete: '',
-      valor_seguro: '',
-      valor_outras_despesas: '',
       valor_total: to2(vTotal),
       valor_total_sem_desconto: to2(q * unit),
 
       icms_csosn: csosn ? Number(csosn) : undefined,
       icms_orig: Number(icmsOrig) || 0,
       pis_situacao_tributaria: pisCst,
-      base_calculo_pis: '',
-      aliquota_pis: '',
-      valor_pis: '',
       cofins_situacao_tributaria: cofinsCst,
-      base_calculo_cofins: '',
-      aliquota_cofins: '',
-      valor_cofins: '',
     };
+
+    // Só envia desconto se houver valor, para evitar campos numéricos vazios no XML
+    if (vDesc > 0) {
+      itemJson.valor_desconto = to2(vDesc);
+    }
 
     return itemJson;
   });
