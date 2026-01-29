@@ -4871,7 +4871,7 @@ export default function FiscalHubPage(){
                       <DateInput label="Selecione" value={manualForm.data_emissao} onChange={(v)=>setManualForm(f=>({...f, data_emissao: v}))} />
                     </div>
                     <div className="md:col-span-1 max-w-[200px]">
-                      <Label>Data Saída/Entrada</Label>
+                      <Label>{String(manualForm.tipo_nota || '').toLowerCase() === 'entrada' ? 'Entrada' : 'Saída'}</Label>
                       <DateInput label="Selecione" value={manualForm.data_saida} onChange={(v)=>setManualForm(f=>({...f, data_saida: v}))} />
                     </div>
                     <div className="md:col-span-1 max-w-[120px]">
