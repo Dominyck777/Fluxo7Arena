@@ -322,6 +322,7 @@ function AgendaPage({ sidebarVisible = false }) {
   
   // Helpers: montar link público de agendamento da empresa e copiar
   const [isisSubdomain, setIsisSubdomain] = useState('');
+  const [isisDisplayName, setIsisDisplayName] = useState('');
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -329,13 +330,15 @@ function AgendaPage({ sidebarVisible = false }) {
         if (!authReady || !company?.id) return;
         const { data, error } = await supabase
           .from('agenda_settings')
-          .select('isis_subdomain')
+          .select('isis_subdomain, isis_display_name')
           .eq('empresa_id', company.id)
           .single();
         if (cancelled) return;
         if (error && error.code !== 'PGRST116') return;
         const sub = (data?.isis_subdomain || '').toLowerCase().replace(/[^a-z0-9]+/g, '').trim();
         setIsisSubdomain(sub);
+        const disp = (data?.isis_display_name || '').toString().trim();
+        setIsisDisplayName(disp);
       } catch {}
     })();
     return () => { cancelled = true; };
@@ -612,8 +615,8 @@ function AgendaPage({ sidebarVisible = false }) {
       headerBottomY = 230;
     }
 
-    // Nome da empresa logo abaixo da logo
-    const companyName = (company?.nome_fantasia || company?.nome || company?.razao_social || '').toString().trim();
+    // Nome da empresa logo abaixo da logo (prioridade: nome de exibição do Isis Analytics)
+    const companyName = (isisDisplayName || company?.nome_fantasia || company?.nome || company?.razao_social || '').toString().trim();
     ctx.textAlign = 'center';
     ctx.textBaseline = 'top';
     if (companyName) {
@@ -749,12 +752,12 @@ function AgendaPage({ sidebarVisible = false }) {
       const url = (agendaPublicUrl || '').replace(/^https?:\/\//, '').trim();
       if (url) {
         const padX = 30;
-        const pillH = 64;
-        const pillY = H - 120;
+        const pillH = 78;
+        const pillY = H - 230;
         ctx.save();
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.font = '700 32px system-ui, -apple-system, Segoe UI, Roboto, Arial';
+        ctx.font = '800 40px system-ui, -apple-system, Segoe UI, Roboto, Arial';
         const textW = ctx.measureText(url).width;
         const pillW = Math.min(W - 200, Math.max(520, textW + padX * 2));
         const pillX = (W - pillW) / 2;
@@ -789,7 +792,7 @@ function AgendaPage({ sidebarVisible = false }) {
     } catch {}
 
     return canvas.toDataURL('image/png');
-  }, [company?.logo_url, loadImageForCanvas, getShareCourtName, getFreeIntervalsForShare, agendaPublicUrl]);
+  }, [company?.logo_url, isisDisplayName, loadImageForCanvas, getShareCourtName, getFreeIntervalsForShare, agendaPublicUrl]);
 
   useEffect(() => {
     shareGeneratingRef.current = !!shareGenerating;
@@ -4167,8 +4170,9 @@ function AgendaPage({ sidebarVisible = false }) {
         let houveMudancaDeOrdem = false;
         if (editingBooking?.id) {
           const participantesDoAgendamento = participantsByAgendamento[editingBooking.id] || [];
-          const refIds = participantesDoAgendamento.map(p => String(p?.cliente_id ?? ''));
-          const curIds = selNowSnapshot.map(c => String(c?.id ?? ''));
+          const norm = (v) => String(v || '').trim().toLowerCase();
+          const refIds = participantesDoAgendamento.map(p => `${String(p?.cliente_id ?? '')}::${norm(p?.nome)}`);
+          const curIds = selNowSnapshot.map(c => `${String(c?.id ?? '')}::${norm(c?.nome)}`);
           const refKey = refIds.join('|');
           const curKey = curIds.join('|');
           houveMudancaDeOrdem = refKey !== curKey;
@@ -8502,6 +8506,10 @@ function AgendaPage({ sidebarVisible = false }) {
                     <span className="text-[11px] text-text-secondary">Link</span>
                   </button>
 
+                </div>
+
+                <div className="mt-3 text-xs text-text-muted">
+                  Recomendamos compartilhar pelo celular para melhor experiência.
                 </div>
               </div>
 

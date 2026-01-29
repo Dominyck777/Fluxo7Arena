@@ -18,7 +18,7 @@ import { adicionarFeedbackIsis } from '@/lib/isisFeedback';
 import { format, addDays, startOfDay, setHours, setMinutes, addMinutes } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { toast } from '@/components/ui/use-toast';
-import { ArrowLeft, Calendar, Clock, Users, MapPin, Bot, Trophy, Building2 } from 'lucide-react';
+import { ArrowLeft, Calendar, Clock, Users, MapPin, Bot, Building2 } from 'lucide-react';
 
 /**
  * Página principal do agendamento via Isis
@@ -4668,16 +4668,17 @@ ${listaNomes}
             transition={{ duration: 0.5, delay: 0.6 }}
             className="mt-12 flex items-center justify-center"
           >
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-brand rounded-xl flex items-center justify-center shadow-lg">
-                <Trophy className="w-6 h-6 text-primary-foreground" />
-              </div>
-              <div className="flex items-baseline">
-                <span className="font-extrabold text-2xl" style={{ color: '#FF6600' }}>Fluxo</span>
-                <span className="font-extrabold text-2xl" style={{ color: '#FFAA33' }}>7</span>
-                <span className="font-medium text-2xl" style={{ color: '#B0B0B0' }}> Arena</span>
-              </div>
-            </div>
+            <img
+              src="/fluxo7arena-removebg.png"
+              alt="Fluxo7 Arena"
+              className="h-10 w-auto object-contain"
+              loading="eager"
+              decoding="async"
+              draggable={false}
+              onError={(e) => {
+                e.currentTarget.style.display = 'none';
+              }}
+            />
           </motion.div>
         </motion.div>
       </div>
@@ -4754,16 +4755,17 @@ ${listaNomes}
             transition={{ duration: 0.5, delay: 0.6 }}
             className="mt-12 flex items-center justify-center"
           >
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-brand rounded-xl flex items-center justify-center shadow-lg">
-                <Trophy className="w-6 h-6 text-primary-foreground" />
-              </div>
-              <div className="flex items-baseline">
-                <span className="font-extrabold text-2xl" style={{ color: '#FF6600' }}>Fluxo</span>
-                <span className="font-extrabold text-2xl" style={{ color: '#FFAA33' }}>7</span>
-                <span className="font-medium text-2xl" style={{ color: '#B0B0B0' }}> Arena</span>
-              </div>
-            </div>
+            <img
+              src="/fluxo7arena-removebg.png"
+              alt="Fluxo7 Arena"
+              className="h-10 w-auto object-contain"
+              loading="eager"
+              decoding="async"
+              draggable={false}
+              onError={(e) => {
+                e.currentTarget.style.display = 'none';
+              }}
+            />
           </motion.div>
         </motion.div>
       </div>
@@ -4863,14 +4865,17 @@ ${listaNomes}
           
           {/* Logo F7 Arena - Apenas Desktop */}
           <div className="hidden md:flex items-center gap-3">
-            <div className="w-12 h-12 bg-brand rounded-xl flex items-center justify-center flex-shrink-0">
-              <Trophy className="w-7 h-7 text-primary-foreground" />
-            </div>
-            <div className="hidden lg:flex items-baseline">
-              <span className="font-extrabold text-xl" style={{ color: '#FF6600' }}>Fluxo</span>
-              <span className="font-extrabold text-xl" style={{ color: '#FFAA33' }}>7</span>
-              <span className="font-medium text-xl" style={{ color: '#B0B0B0' }}> Arena</span>
-            </div>
+            <img
+              src="/fluxo7arena-removebg.png"
+              alt="Fluxo7 Arena"
+              className="h-10 lg:h-11 w-auto object-contain max-w-[180px]"
+              loading="eager"
+              decoding="async"
+              draggable={false}
+              onError={(e) => {
+                e.currentTarget.style.display = 'none';
+              }}
+            />
           </div>
         </div>
       </motion.header>
@@ -4893,16 +4898,17 @@ ${listaNomes}
         className="md:hidden fixed bottom-0 left-0 right-0 bg-surface/90 backdrop-blur-xl border-t border-white/10 z-20 shadow-lg"
       >
         <div className="flex items-center justify-center py-2">
-          <div className="flex items-center gap-2">
-            <div className="w-6 h-6 bg-brand rounded-lg flex items-center justify-center">
-              <Trophy className="w-4 h-4 text-primary-foreground" />
-            </div>
-            <div className="flex items-baseline">
-              <span className="font-extrabold text-sm" style={{ color: '#FF6600' }}>Fluxo</span>
-              <span className="font-extrabold text-sm" style={{ color: '#FFAA33' }}>7</span>
-              <span className="font-medium text-sm" style={{ color: '#B0B0B0' }}> Arena</span>
-            </div>
-          </div>
+          <img
+            src="/fluxo7arena-removebg.png"
+            alt="Fluxo7 Arena"
+            className="h-7 w-auto object-contain max-w-[150px]"
+            loading="eager"
+            decoding="async"
+            draggable={false}
+            onError={(e) => {
+              e.currentTarget.style.display = 'none';
+            }}
+          />
         </div>
       </motion.footer>
     </div>
@@ -5032,13 +5038,14 @@ function IsisErrorBoundaryWrapper({ children }) {
 class ErrorBoundaryIsis extends React.Component {
   constructor(props) {
     super(props);
-    this.state = { hasError: false, companyName: '', companyPhone: '' };
+    this.state = { hasError: false, companyName: '', companyPhone: '', showDetails: false, error: null, errorInfo: null };
   }
   static getDerivedStateFromError() {
     return { hasError: true };
   }
   componentDidCatch(error, info) {
     try { console.error('[Isis] Uncaught error:', error, info); } catch {}
+    try { this.setState({ error, errorInfo: info }); } catch {}
     // Se props não trouxerem meta, tenta resolver por conta própria (outer boundary)
     if (!this.props.companyName || !this.props.companyPhone) {
       (async () => {
@@ -5131,6 +5138,55 @@ class ErrorBoundaryIsis extends React.Component {
       const companyName = this.props.companyName || this.state.companyName || fallbackName || 'a arena';
       const companyPhone = formatPhone(this.props.companyPhone || this.state.companyPhone || '');
 
+      const errorMessage = (() => {
+        try {
+          const e = this.state.error;
+          if (!e) return '';
+          return e.message || String(e);
+        } catch {
+          return '';
+        }
+      })();
+
+      const errorStack = (() => {
+        try {
+          const e = this.state.error;
+          return e?.stack ? String(e.stack) : '';
+        } catch {
+          return '';
+        }
+      })();
+
+      const componentStack = (() => {
+        try {
+          const cs = this.state.errorInfo?.componentStack;
+          return cs ? String(cs) : '';
+        } catch {
+          return '';
+        }
+      })();
+
+      const runtimeContext = (() => {
+        try {
+          const conn = navigator?.connection || navigator?.mozConnection || navigator?.webkitConnection;
+          const connObj = conn ? {
+            effectiveType: conn.effectiveType,
+            downlink: conn.downlink,
+            rtt: conn.rtt,
+            saveData: conn.saveData,
+            type: conn.type,
+          } : null;
+          return {
+            href: typeof window !== 'undefined' ? window.location.href : '',
+            onLine: navigator?.onLine,
+            userAgent: navigator?.userAgent,
+            connection: connObj,
+          };
+        } catch {
+          return null;
+        }
+      })();
+
       return (
         <div className="min-h-screen w-full flex items-center justify-center bg-background text-text-primary p-6">
           <div className="w-full max-w-xl mx-auto rounded-3xl border border-white/10 bg-surface/80 backdrop-blur-md shadow-2xl p-8 text-center">
@@ -5157,7 +5213,27 @@ class ErrorBoundaryIsis extends React.Component {
               >
                 🔄 Recarregar página
               </button>
+              <button
+                onClick={() => { try { this.setState((s) => ({ ...s, showDetails: !s.showDetails })); } catch {} }}
+                className="inline-flex items-center justify-center rounded-xl px-5 py-3 bg-surface-2/70 border border-white/10 text-text-primary font-semibold shadow-lg hover:shadow-xl transition-all"
+              >
+                {this.state.showDetails ? 'Ocultar erro' : 'Ver erro'}
+              </button>
             </div>
+
+            {this.state.showDetails ? (
+              <div className="mt-6 text-left">
+                <div className="rounded-2xl border border-white/10 bg-background/40 p-4">
+                  <div className="text-sm font-semibold mb-2">Detalhes do erro</div>
+                  <pre className="text-xs whitespace-pre-wrap break-words opacity-90">{JSON.stringify({
+                    message: errorMessage,
+                    stack: errorStack,
+                    componentStack,
+                    context: runtimeContext,
+                  }, null, 2)}</pre>
+                </div>
+              </div>
+            ) : null}
           </div>
         </div>
       );

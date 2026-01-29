@@ -477,7 +477,11 @@ export default function PaymentModal({
   
   const handleEditParticipant = (participantIndex, participantName) => {
     // Passar o índice do participante na lista, não o cliente_id
-    openEditParticipantModal(participantIndex, participantName);
+    // IMPORTANTE: em cenários com consumidores duplicados, confiar no nome vindo da linha renderizada pode desalinhar.
+    // Então buscar o nome diretamente da fonte de verdade (localParticipantsForm) pelo índice.
+    const current = (localParticipantsForm || [])[participantIndex];
+    const resolvedName = current?.nome || participantName || '';
+    openEditParticipantModal(participantIndex, resolvedName);
   };
   
   // Funções para editar valor total
@@ -535,7 +539,20 @@ export default function PaymentModal({
       }
       
       // Usar APENAS participantes visíveis como fonte da verdade (itens ocultos são tratados como removidos)
-      const effectiveParticipants = (localParticipantsForm || []).filter((_, idx) => !(paymentHiddenIndexes || []).includes(idx));
+      // Respeitar a ordem do banco quando disponível (campo ordem)
+      const effectiveParticipants = (localParticipantsForm || [])
+        .filter((_, idx) => !(paymentHiddenIndexes || []).includes(idx))
+        .slice()
+        .sort((a, b) => {
+          const ao = Number(a?.ordem);
+          const bo = Number(b?.ordem);
+          const aHas = Number.isFinite(ao);
+          const bHas = Number.isFinite(bo);
+          if (aHas && bHas) return ao - bo;
+          if (aHas && !bHas) return -1;
+          if (!aHas && bHas) return 1;
+          return 0;
+        });
 
       // Se o total estiver em modo edição, salvar o valor atual do input.
       const totalStrToSave = (isEditingTotal ? editingTotalValue : paymentTotal);
@@ -610,57 +627,100 @@ export default function PaymentModal({
         console.log(`  #${i + 1} (novo): ${p.nome}`);
       });
 
-      console.log('✅ Fazendo recriação completa de participantes (soft-delete + insert)');
+      // Evitar alterar ordem sem o usuário mudar a lista.
+      // Se o usuário NÃO mudou os participantes (mesmos ids na mesma sequência), atualizar apenas os campos.
+      const originalRowIds = (originalParticipants || []).map(p => String(p?.id || ''));
+      const effectiveRowIds = (effectiveParticipants || []).map(p => String(p?.participante_row_id || ''));
+      const canUpdateInPlace =
+        originalRowIds.length > 0 &&
+        originalRowIds.length === effectiveRowIds.length &&
+        effectiveRowIds.every(Boolean) &&
+        originalRowIds.every((id, idx) => id === effectiveRowIds[idx]);
 
-      // 1) Soft-delete de todos os participantes ativos atuais
-      try {
-        const { error: softErr } = await supabase
-          .from('agendamento_participantes')
-          .update({ deleted_at: new Date().toISOString(), is_representante: false })
-          .eq('codigo_empresa', codigo)
-          .eq('agendamento_id', agendamentoId)
-          .is('deleted_at', null);
-        if (softErr) {
-          console.error('❌ Erro ao aplicar soft-delete nos participantes atuais:', softErr);
-          throw softErr;
-        }
-      } catch (e) {
-        console.error('❌ Falha ao soft-deletar participantes antes de recriar:', e);
-        throw e;
-      }
-
-      // 2) Inserir nova lista de participantes a partir de effectiveParticipants
-      if (effectiveParticipants.length > 0) {
-        const rowsToInsert = effectiveParticipants.map((novo, idx) => {
+      if (canUpdateInPlace) {
+        console.log('✅ Atualizando participantes existentes (sem recriar / sem mexer na ordem)');
+        for (let idx = 0; idx < effectiveParticipants.length; idx++) {
+          const novo = effectiveParticipants[idx];
           const valor = parseBRL(novo.valor_cota);
           const defaultMethod = getDefaultPayMethod();
           const finId = novo.finalizadora_id || (defaultMethod?.id ? String(defaultMethod.id) : null);
-          return {
-            codigo_empresa: codigo,
-            agendamento_id: agendamentoId,
-            cliente_id: novo.cliente_id,
-            nome: ((novo?.nome || '').trim() || 'Cliente Consumidor'),
-            valor_cota: Number.isFinite(valor) ? valor : 0,
-            status_pagamento: novo.status_pagamento || 'Pendente',
-            finalizadora_id: finId,
-            aplicar_taxa: novo.aplicar_taxa || false,
-            ordem: idx + 1,
-            is_representante: idx === 0,
-            deleted_at: null,
-          };
-        });
+          const ordemToPersist = Number.isFinite(Number(novo?.ordem)) ? Number(novo.ordem) : (idx + 1);
 
-        const { error: insertErr } = await supabase
-          .from('agendamento_participantes')
-          .insert(rowsToInsert);
-        if (insertErr) {
-          console.error('❌ Erro ao inserir participantes recriados:', insertErr);
-          throw insertErr;
+          const { error: updErr } = await supabase
+            .from('agendamento_participantes')
+            .update({
+              nome: ((novo?.nome || '').trim() || 'Cliente Consumidor'),
+              valor_cota: Number.isFinite(valor) ? valor : 0,
+              status_pagamento: novo.status_pagamento || 'Pendente',
+              finalizadora_id: finId,
+              aplicar_taxa: novo.aplicar_taxa || false,
+              ordem: ordemToPersist,
+              is_representante: idx === 0,
+              deleted_at: null,
+            })
+            .eq('codigo_empresa', codigo)
+            .eq('agendamento_id', agendamentoId)
+            .eq('id', String(novo.participante_row_id));
+
+          if (updErr) {
+            console.error('❌ Erro ao atualizar participante existente:', updErr);
+            throw updErr;
+          }
+        }
+      } else {
+        console.log('✅ Fazendo recriação completa de participantes (soft-delete + insert)');
+
+        // 1) Soft-delete de todos os participantes ativos atuais
+        try {
+          const { error: softErr } = await supabase
+            .from('agendamento_participantes')
+            .update({ deleted_at: new Date().toISOString(), is_representante: false })
+            .eq('codigo_empresa', codigo)
+            .eq('agendamento_id', agendamentoId)
+            .is('deleted_at', null);
+          if (softErr) {
+            console.error('❌ Erro ao aplicar soft-delete nos participantes atuais:', softErr);
+            throw softErr;
+          }
+        } catch (e) {
+          console.error('❌ Falha ao soft-deletar participantes antes de recriar:', e);
+          throw e;
+        }
+
+        // 2) Inserir nova lista de participantes a partir de effectiveParticipants
+        if (effectiveParticipants.length > 0) {
+          const rowsToInsert = effectiveParticipants.map((novo, idx) => {
+            const valor = parseBRL(novo.valor_cota);
+            const defaultMethod = getDefaultPayMethod();
+            const finId = novo.finalizadora_id || (defaultMethod?.id ? String(defaultMethod.id) : null);
+            const ordemToPersist = Number.isFinite(Number(novo?.ordem)) ? Number(novo.ordem) : (idx + 1);
+            return {
+              codigo_empresa: codigo,
+              agendamento_id: agendamentoId,
+              cliente_id: novo.cliente_id,
+              nome: ((novo?.nome || '').trim() || 'Cliente Consumidor'),
+              valor_cota: Number.isFinite(valor) ? valor : 0,
+              status_pagamento: novo.status_pagamento || 'Pendente',
+              finalizadora_id: finId,
+              aplicar_taxa: novo.aplicar_taxa || false,
+              ordem: ordemToPersist,
+              is_representante: idx === 0,
+              deleted_at: null,
+            };
+          });
+
+          const { error: insertErr } = await supabase
+            .from('agendamento_participantes')
+            .insert(rowsToInsert);
+          if (insertErr) {
+            console.error('❌ Erro ao inserir participantes recriados:', insertErr);
+            throw insertErr;
+          }
         }
       }
 
-      console.log('✅ Recriação completa de participantes concluída');
-      console.log('========== SALVAMENTO CONCLUÍDO ==========\n\n');
+      console.log('✅ Salvamento de participantes concluído');
+      console.log('========== SALVAMENTO CONCLUÍDO ==========');
       
       // Atualizar form.selectedClients com base em participantsForm (inclui substituições)
       const newSelectedClients = effectiveParticipants.map(p => ({
@@ -993,14 +1053,28 @@ export default function PaymentModal({
               if (error) {
                 console.error('❌ Erro ao buscar participantes:', error);
               } else if (dbParticipants && dbParticipants.length > 0) {
-                sourceData = dbParticipants.map(p => ({
+                const sortedDb = [...dbParticipants].sort((a, b) => {
+                  const ao = Number(a?.ordem);
+                  const bo = Number(b?.ordem);
+                  const aHas = Number.isFinite(ao);
+                  const bHas = Number.isFinite(bo);
+                  if (aHas && bHas && ao !== bo) return ao - bo;
+                  if (aHas && !bHas) return -1;
+                  if (!aHas && bHas) return 1;
+                  const aid = String(a?.id ?? '');
+                  const bid = String(b?.id ?? '');
+                  return aid.localeCompare(bid);
+                });
+                sourceData = sortedDb.map(p => ({
+                  participante_row_id: p.id,
                   cliente_id: p.cliente_id,
                   nome: p.nome,
                   codigo: null, // Será preenchido abaixo
                   valor_cota: p.valor_cota ? maskBRL(String(Number(p.valor_cota).toFixed(2))) : '0,00',
                   status_pagamento: p.status_pagamento || 'Pendente',
                   finalizadora_id: p.finalizadora_id ? String(p.finalizadora_id) : defaultFinalizadoraId,
-                  aplicar_taxa: p.aplicar_taxa || false
+                  aplicar_taxa: p.aplicar_taxa || false,
+                  ordem: p.ordem ?? null
                 }));
                 dataSource = 'banco de dados';
               } else {
@@ -1063,6 +1137,14 @@ export default function PaymentModal({
           try {
             const chips = (form?.selectedClients || []).slice();
             if (chips.length > 0 && withCodes.length > 0) {
+              // Se existem duplicados (ex.: múltiplos consumidores com o mesmo cliente_id),
+              // os chips não conseguem identificar unicamente cada ocorrência.
+              // Nesse caso, manter a ordem do banco para evitar embaralhar nomes/valores.
+              const chipIds = chips.map(c => String(c?.id ?? ''));
+              const hasDuplicateChipIds = new Set(chipIds).size !== chipIds.length;
+              if (hasDuplicateChipIds && String(dataSource).startsWith('banco de dados')) {
+                // manter withCodes como está
+              } else {
               // Buckets por cliente_id preservando múltiplas ocorrências
               const buckets = new Map();
               withCodes.forEach((p) => {
@@ -1084,6 +1166,7 @@ export default function PaymentModal({
                   const defaultMethod = getDefaultPayMethod();
                   const defaultFinalizadoraId = defaultMethod?.id ? String(defaultMethod.id) : null;
                   reordered.push({
+                    participante_row_id: null,
                     cliente_id: c.id,
                     nome: c.nome,
                     codigo: c.codigo ?? null,
@@ -1091,6 +1174,7 @@ export default function PaymentModal({
                     status_pagamento: 'Pendente',
                     finalizadora_id: defaultFinalizadoraId,
                     aplicar_taxa: Number(defaultMethod?.taxa_percentual || 0) > 0,
+                    ordem: null,
                   });
                 }
               }
@@ -1098,6 +1182,7 @@ export default function PaymentModal({
               // Qualquer participante extra será removido na próxima gravação (soft-delete + insert)
               sourceData = reordered;
               dataSource = dataSource + ' (reordenado pelos chips)';
+              }
             }
           } catch (e) {
             console.error('[PaymentModal] Falha ao reordenar por chips:', e);
@@ -1145,6 +1230,12 @@ export default function PaymentModal({
           if (withCodes.length > 0 || !editingBooking?.id) {
             // Não sobrescrever se o usuário já começou a editar localmente
             if (Array.isArray(localParticipantsForm) && localParticipantsForm.length > 0) {
+              const missingRowIds = (localParticipantsForm || []).some(p => !p?.participante_row_id);
+              const hasDbRowIds = (withCodes || []).some(p => !!p?.participante_row_id);
+              const loadedFromDb = String(dataSource).startsWith('banco de dados');
+              if (loadedFromDb && hasDbRowIds && missingRowIds) {
+                setLocalParticipantsForm(withCodes);
+              }
               initializedRef.current = Date.now();
             } else {
               setLocalParticipantsForm(withCodes);
@@ -1298,6 +1389,12 @@ export default function PaymentModal({
     const chips = (form?.selectedClients || []).slice();
     if (chips.length === 0) return;
     if (!localParticipantsForm || localParticipantsForm.length === 0) return;
+    // Se a lista já veio do banco (tem participante_row_id), respeitar a ordem persistida.
+    if ((localParticipantsForm || []).some(p => !!p?.participante_row_id)) return;
+    // Se há duplicados (ex.: vários consumidores com o mesmo id), chips não identificam unicamente.
+    const chipIds = chips.map(c => String(c?.id ?? ''));
+    const hasDuplicateChipIds = new Set(chipIds).size !== chipIds.length;
+    if (hasDuplicateChipIds) return;
     // Evitar reordenar enquanto o usuário está editando um nome de consumidor
     if (focusedInputIndex !== null) return;
     // Se já há pagamentos/valores, não reordenar para manter alinhamento com duplicados
@@ -1767,12 +1864,18 @@ export default function PaymentModal({
           const now = Date.now();
           const timeSinceInit = initializedRef.current ? now - initializedRef.current : 0;
           const timeSinceVisibility = now - lastVisibilityChangeTime;
+          const originalType = e?.detail?.originalEvent?.type;
+          const isFocusRestoreEvent = originalType === 'focusin' || originalType === 'focusout';
+          const isJustBecameVisible = typeof document !== 'undefined' && document.visibilityState === 'visible' && timeSinceVisibility < 8000;
           
           console.log('🔍 [PaymentModal] onInteractOutside disparado:', {
             target: e.target?.tagName,
             className: e.target?.className?.substring?.(0, 50),
             timeSinceInit: `${timeSinceInit}ms`,
             timeSinceVisibility: `${timeSinceVisibility}ms`,
+            originalType,
+            isFocusRestoreEvent,
+            isJustBecameVisible,
             isAddParticipantOpen,
             isDownloadModalOpen,
             statusConfirmationOpen: statusConfirmationModal.isOpen,
@@ -1797,6 +1900,14 @@ export default function PaymentModal({
           // 🛡️ PROTEÇÃO PRINCIPAL: Verificar se modal está protegido (modalProtectionRef)
           if (isModalProtected) {
             console.log('🛡️ [PaymentModal] Bloqueado: modal protegido (protectPaymentModal ativo)');
+            e.preventDefault();
+            return;
+          }
+
+          // 🛡️ PROTEÇÃO: ao trocar de aba e voltar, o Radix pode disparar onInteractOutside por restauração de foco
+          // Isso não deve fechar o modal.
+          if (isFocusRestoreEvent || isJustBecameVisible) {
+            console.log('🛡️ [PaymentModal] Bloqueado: retorno de foco/aba (ignorar onInteractOutside)');
             e.preventDefault();
             return;
           }

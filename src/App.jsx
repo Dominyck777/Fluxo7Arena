@@ -34,6 +34,8 @@ import PrintComandaPage from '@/pages/PrintComandaPage';
 import CreateCompanyPage from '@/pages/CreateCompanyPage';
 import IsisBookingPage from '@/pages/IsisBookingPage';
 import MaintenancePage from '@/pages/MaintenancePage';
+import ReleaseNotesPreviewPage from '@/pages/ReleaseNotesPreviewPage';
+import ReleaseNotesGate from '@/components/ReleaseNotesGate';
 import { Helmet } from 'react-helmet';
 import { FORCE_MAINTENANCE } from '@/lib/maintenanceConfig';
 
@@ -99,6 +101,7 @@ function PrivateApp() {
       <AlertsProvider>
         <AgendaProvider>
           <div className="relative flex h-screen bg-background text-text-primary">
+            <ReleaseNotesGate />
             <Helmet>
               <title>F7 Arena</title>
               <meta name="description" content="Software para gestão de quadras esportivas." />
@@ -140,6 +143,7 @@ function PrivateApp() {
                   <Route path="/test-page" element={<TestPage />} />
                   <Route path="/historico" element={<HistoricoComandasPage />} />
                   <Route path="/suporte" element={<SuportePage />} />
+                  <Route path="/__release-notes-preview" element={<ReleaseNotesPreviewPage />} />
                 </Routes>
               </main>
             </div>

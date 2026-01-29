@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/components/ui/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
-import { Trophy, Eye, EyeOff, Mail, Lock, LogIn } from 'lucide-react';
+import { Eye, EyeOff, Mail, Lock, LogIn } from 'lucide-react';
 
 // Traduções de erros comuns do Supabase
 const translateError = (errorMessage) => {
@@ -148,16 +148,17 @@ const LoginPage = () => {
             {/* Header inside card */}
             <div className="text-center mb-6">
               <div className="flex items-center justify-center mb-4">
-                <div className="w-16 h-16 bg-brand rounded-xl flex items-center justify-center mr-4">
-                  <Trophy className="w-8 h-8 text-primary-foreground" />
-                </div>
-                <div>
-                  <h1 className="text-5xl font-extrabold">
-                    <span style={{ color: '#FF6600' }}>Fluxo</span>
-                    <span style={{ color: '#FFAA33' }}>7</span>
-                  </h1>
-                  <p className="text-2xl font-semibold" style={{ color: '#B0B0B0' }}>Arena</p>
-                </div>
+                <img
+                  src="/fluxo7arena-removebg.png"
+                  alt="Fluxo7 Arena"
+                  className="h-16 sm:h-20 w-auto object-contain"
+                  loading="eager"
+                  decoding="async"
+                  draggable={false}
+                  onError={(e) => {
+                    e.currentTarget.style.display = 'none';
+                  }}
+                />
               </div>
             </div>
 

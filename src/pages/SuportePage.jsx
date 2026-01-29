@@ -1,10 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
-import { LifeBuoy, MessageCircle, Mail, Bug, ClipboardCopy, CheckCircle2, Phone, Trophy, Download, Smartphone, Share, X, Chrome, Monitor } from 'lucide-react';
+import { LifeBuoy, MessageCircle, Mail, Bug, ClipboardCopy, CheckCircle2, Phone, Download, Smartphone, Share, X, Chrome, Monitor } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
-const APP_VERSION = 'v2.5.0'; // ajuste aqui se tiver uma fonte de versão global
+const APP_VERSION = 'v2.5.1'; // ajuste aqui se tiver uma fonte de versão global
 
 function SectionCard({ title, icon: Icon, children, className = '', collapsible = false, defaultOpen = true }) {
   if (collapsible) {
@@ -49,6 +49,8 @@ export default function SuportePage() {
   const { userProfile, company, authReady, loading } = useAuth();
   const { pathname } = useLocation();
 
+  const [appVersionLabel, setAppVersionLabel] = useState(APP_VERSION);
+
   // Formulário simples de report (sem backend)
   const [categoria, setCategoria] = useState('Agenda');
   const [severidade, setSeveridade] = useState('Média');
@@ -79,6 +81,29 @@ export default function SuportePage() {
     } catch {
       setIsDesktop(true);
     }
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    (async () => {
+      try {
+        const res = await fetch('/release-notes.json', {
+          cache: 'no-store',
+          signal: controller.signal,
+        });
+
+        if (!res.ok) return;
+
+        const json = await res.json();
+        const version = typeof json?.versionLabel === 'string' ? json.versionLabel.trim() : '';
+        if (version) setAppVersionLabel(version);
+      } catch {
+        // fallback mantém APP_VERSION
+      }
+    })();
+
+    return () => controller.abort();
   }, []);
 
   // PWA Install Detection
@@ -223,18 +248,21 @@ export default function SuportePage() {
               <p className="text-sm text-text-secondary">Precisa de ajuda? Fale com a gente ou consulte as respostas rápidas abaixo.</p>
             </div>
           </div>
-          <div className="text-right">
-            <div className="flex items-center justify-end gap-2">
-              <div className="w-10 h-10 bg-brand rounded-xl flex items-center justify-center">
-                <Trophy className="w-6 h-6 text-primary-foreground" />
-              </div>
-              <div className="flex items-baseline">
-                <span className="font-extrabold text-base md:text-xl" style={{ color: '#FF6600' }}>Fluxo</span>
-                <span className="font-extrabold text-base md:text-xl" style={{ color: '#FFAA33' }}>7</span>
-                <span className="font-medium text-base md:text-xl" style={{ color: '#B0B0B0' }}> Arena</span>
-              </div>
+          <div className="flex flex-col items-end">
+            <div className="inline-flex flex-col items-center">
+              <img
+                src="/fluxo7arena-removebg.png"
+                alt="Fluxo7 Arena"
+                className="h-10 md:h-12 w-auto object-contain"
+                loading="eager"
+                decoding="async"
+                draggable={false}
+                onError={(e) => {
+                  e.currentTarget.style.display = 'none';
+                }}
+              />
+              <div className="text-xs text-text-secondary mt-1 text-center">Versão {appVersionLabel}</div>
             </div>
-            <div className="text-xs text-text-secondary mt-1">Versão {APP_VERSION}</div>
           </div>
         </div>
 
