@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
@@ -64,10 +64,18 @@ function KpiCard({ icon: Icon, label, value, delta, positive = true, color = 'br
 }
 
 export default function FinanceiroPage() {
-  const { toast } = useToast();
   const { userProfile } = useAuth();
+  const { toast } = useToast();
   const [searchParams, setSearchParams] = useSearchParams();
-  
+
+  const debugFinanceOn = useMemo(() => {
+    try { return typeof window !== 'undefined' && localStorage.getItem('debug:financeiro') === '1'; } catch { return false; }
+  }, []);
+  const finDbg = useCallback((...args) => {
+    if (!debugFinanceOn) return;
+    try { console.log('[FinanceiroDbg]', ...args); } catch {}
+  }, [debugFinanceOn]);
+
   // Tab ativa (pode vir da URL)
   const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'visao-geral');
   
@@ -888,39 +896,77 @@ export default function FinanceiroPage() {
       const codigo = userProfile?.codigo_empresa;
       const fromISO = mkStart(startDate) || undefined;
       const toISO = mkEnd(endDate) || undefined;
-      let q = supabase
-        .from('v_agendamentos_detalhado')
-        .select('agendamento_id, agendamento_codigo, inicio, fim, quadra_nome, participante_nome, cliente_id, valor_cota, finalizadora_nome, status_pagamento')
+      finDbg('loadAgendamentos:start', { codigo, fromISO, toISO });
+      // Fonte de verdade: agendamentos + agendamento_participantes (igual PaymentModal)
+      let qAg = supabase
+        .from('agendamentos')
+        .select('id, codigo, inicio, fim, quadra:quadras(id, nome)')
         .eq('codigo_empresa', codigo)
         .order('inicio', { ascending: false });
-      if (fromISO) q = q.gte('inicio', fromISO);
-      if (toISO) q = q.lte('inicio', toISO);
-      const { data } = await q;
-      
-      // Buscar dados dos clientes para identificar consumidores finais
-      const clienteIds = [...new Set((data || []).map(r => r.cliente_id).filter(Boolean))];
-      let clientesMap = {};
-      
-      if (clienteIds.length > 0) {
-        const { data: clientes } = await supabase
-          .from('clientes')
-          .select('id, is_consumidor_final, codigo')
-          .in('id', clienteIds)
-          .eq('codigo_empresa', codigo);
-        
-        if (clientes) {
-          clientesMap = Object.fromEntries(clientes.map(c => [c.id, c]));
-        }
+      if (fromISO) qAg = qAg.gte('inicio', fromISO);
+      if (toISO) qAg = qAg.lte('inicio', toISO);
+      const { data: agRows } = await qAg;
+      const agList = Array.isArray(agRows) ? agRows : [];
+      const agIds = agList.map(a => a.id).filter(Boolean);
+
+      finDbg('loadAgendamentos:agendamentos', {
+        count: agList.length,
+        agendamentoIds: agIds.length,
+      });
+
+      if (agIds.length === 0) {
+        setAgAgendamentos([]);
+        return;
       }
-      
-      // Adicionar informação de consumidor final e código aos dados
-      const dataComClientes = (data || []).map(r => ({
-        ...r,
-        is_consumidor_final: clientesMap[r.cliente_id]?.is_consumidor_final || false,
-        cliente_codigo: clientesMap[r.cliente_id]?.codigo || null
-      }));
-      
-      setAgAgendamentos(dataComClientes);
+
+      const agById = new Map(agList.map(a => [a.id, a]));
+
+      const { data: partsRows } = await supabase
+        .from('agendamento_participantes')
+        .select('id, agendamento_id, cliente_id, nome, valor_cota, status_pagamento, finalizadora:finalizadoras(id, nome), ordem, is_representante, deleted_at, cliente:clientes!agendamento_participantes_cliente_id_fkey(id, codigo, is_consumidor_final, nome)')
+        .eq('codigo_empresa', codigo)
+        .in('agendamento_id', agIds)
+        .is('deleted_at', null)
+        .order('ordem', { ascending: true })
+        .order('id', { ascending: true });
+
+      finDbg('loadAgendamentos:participants', {
+        count: Array.isArray(partsRows) ? partsRows.length : null,
+        nullClienteIdCount: (partsRows || []).filter(p => p?.cliente_id == null).length,
+      });
+
+      const rows = (partsRows || []).map(p => {
+        const ag = agById.get(p.agendamento_id) || {};
+        const quadraNome = (Array.isArray(ag?.quadra) ? ag.quadra[0]?.nome : ag?.quadra?.nome) || null;
+        const clienteObj = Array.isArray(p?.cliente) ? p.cliente[0] : p?.cliente;
+        const participanteNome = (p?.nome || clienteObj?.nome || '').toString();
+        const finalizadoraNome = (Array.isArray(p?.finalizadora) ? p.finalizadora[0]?.nome : p?.finalizadora?.nome) || null;
+        const isConsumidor = !!clienteObj?.is_consumidor_final;
+        return {
+          agendamento_id: p.agendamento_id,
+          agendamento_codigo: ag?.codigo ?? null,
+          inicio: ag?.inicio ?? null,
+          fim: ag?.fim ?? null,
+          quadra_nome: quadraNome,
+          participante_nome: participanteNome,
+          cliente_id: p.cliente_id,
+          valor_cota: p.valor_cota,
+          finalizadora_nome: finalizadoraNome,
+          status_pagamento: p.status_pagamento || 'Pendente',
+          is_consumidor_final: isConsumidor,
+          cliente_codigo: isConsumidor ? 0 : (clienteObj?.codigo ?? null),
+          ordem: p.ordem ?? null,
+          is_representante: p.is_representante ?? null,
+          participante_row_id: p.id,
+        };
+      });
+
+      finDbg('loadAgendamentos:rowsBuilt', {
+        count: rows.length,
+        nullOrdemCount: rows.filter(r => r?.ordem == null).length,
+      });
+
+      setAgAgendamentos(rows);
     } catch (e) {
       toast({ title: 'Falha ao carregar agendamentos', description: e?.message, variant: 'destructive' });
     } finally {
@@ -1087,6 +1133,8 @@ export default function FinanceiroPage() {
           fim: r.fim,
           quadra_nome: r.quadra_nome,
           participantes: [],
+          participantesMap: new Map(),
+          rawRows: 0,
           total: 0,
           totalPago: 0,
           totalPendente: 0,
@@ -1097,13 +1145,57 @@ export default function FinanceiroPage() {
           isRepresentanteConsumidor: false // Se o representante é consumidor final
         };
       }
-      grupos[key].participantes.push(r);
-      grupos[key].total += Number(r.valor_cota || 0);
-      if (r.status_pagamento === 'Pago') {
-        grupos[key].totalPago += Number(r.valor_cota || 0);
+      grupos[key].rawRows += 1;
+      const ordemKey = Number.isFinite(Number(r?.ordem)) ? String(Number(r.ordem)) : '';
+      const partKey = `${ordemKey}::${r.cliente_id != null ? String(r.cliente_id) : ''}::${String(r.participante_nome || '').trim().toLowerCase()}`;
+      const existing = grupos[key].participantesMap.get(partKey);
+      if (!existing) {
+        grupos[key].participantesMap.set(partKey, r);
+        grupos[key].participantes.push(r);
+        const v = Number(r.valor_cota || 0);
+        grupos[key].total += v;
+        if (r.status_pagamento === 'Pago') {
+          grupos[key].totalPago += v;
+        } else {
+          grupos[key].totalPendente += v;
+        }
       } else {
-        grupos[key].totalPendente += Number(r.valor_cota || 0);
+        const prevStatus = String(existing.status_pagamento || '');
+        const nextStatus = String(r.status_pagamento || '');
+        const prevIsPaid = prevStatus === 'Pago';
+        const nextIsPaid = nextStatus === 'Pago';
+        const prevVal = Number(existing.valor_cota || 0);
+        const nextVal = Number(r.valor_cota || 0);
+        if (!prevIsPaid && nextIsPaid) {
+          grupos[key].participantesMap.set(partKey, r);
+          const idx = grupos[key].participantes.indexOf(existing);
+          if (idx >= 0) grupos[key].participantes[idx] = r;
+          grupos[key].totalPendente -= prevVal;
+          grupos[key].totalPago += nextVal;
+          grupos[key].total += (nextVal - prevVal);
+        } else if (prevIsPaid === nextIsPaid && nextVal > prevVal) {
+          grupos[key].participantesMap.set(partKey, r);
+          const idx = grupos[key].participantes.indexOf(existing);
+          if (idx >= 0) grupos[key].participantes[idx] = r;
+          if (prevIsPaid) grupos[key].totalPago += (nextVal - prevVal);
+          else grupos[key].totalPendente += (nextVal - prevVal);
+          grupos[key].total += (nextVal - prevVal);
+        }
       }
+    });
+
+    // Ordenar participantes pela ordem do banco (agendamento_participantes.ordem)
+    Object.values(grupos).forEach(g => {
+      try {
+        g.participantes.sort((a, b) => {
+          const ao = Number.isFinite(Number(a?.ordem)) ? Number(a.ordem) : Infinity;
+          const bo = Number.isFinite(Number(b?.ordem)) ? Number(b.ordem) : Infinity;
+          if (ao !== bo) return ao - bo;
+          const an = String(a?.participante_nome || '').toLowerCase();
+          const bn = String(b?.participante_nome || '').toLowerCase();
+          return an.localeCompare(bn);
+        });
+      } catch {}
     });
     
     // Determinar status geral e representante de cada agendamento
@@ -1153,8 +1245,26 @@ export default function FinanceiroPage() {
       }
     });
     
-    return Object.values(grupos).sort((a, b) => new Date(b.inicio) - new Date(a.inicio));
-  }, [agAgendamentos]);
+    return Object.values(grupos).map(g => {
+      if (debugFinanceOn && (g.rawRows !== g.participantes.length)) {
+        finDbg('group:dedupe', {
+          agendamento_id: g.agendamento_id,
+          agendamento_codigo: g.agendamento_codigo,
+          rawRows: g.rawRows,
+          uniqueParticipants: g.participantes.length,
+          participantes: g.participantes.map(p => ({
+            ordem: p.ordem ?? null,
+            cliente_id: p.cliente_id ?? null,
+            nome: p.participante_nome ?? null,
+            valor: p.valor_cota ?? null,
+            status: p.status_pagamento ?? null,
+          })),
+        });
+      }
+      const { participantesMap, rawRows, ...rest } = g;
+      return rest;
+    }).sort((a, b) => new Date(b.inicio) - new Date(a.inicio));
+  }, [agAgendamentos, debugFinanceOn, finDbg]);
   
   const filteredAg = useMemo(() => {
     const q = agSearch.toLowerCase().trim();
@@ -1545,8 +1655,10 @@ export default function FinanceiroPage() {
                             const participantesUnicos = new Map();
                             agAgendamentos.forEach(ag => {
                               const nome = ag.participante_nome;
-                              if (nome && !participantesUnicos.has(nome)) {
-                                participantesUnicos.set(nome, {
+                              const ordemKey = Number.isFinite(Number(ag?.ordem)) ? String(Number(ag.ordem)) : '';
+                              const key = `${ordemKey}::${ag?.cliente_id != null ? String(ag.cliente_id) : ''}::${String(nome || '').trim().toLowerCase()}`;
+                              if (nome && !participantesUnicos.has(key)) {
+                                participantesUnicos.set(key, {
                                   nome,
                                   codigo: ag.cliente_codigo || 0,
                                   is_consumidor: ag.is_consumidor_final || false

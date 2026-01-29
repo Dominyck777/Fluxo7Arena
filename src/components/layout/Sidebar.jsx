@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Calendar, ShoppingCart, Users, UserCog, LifeBuoy, Trophy, Package, Wallet, ChevronDown, Layers, Building2, Banknote, Folder, CreditCard, ShoppingBag, Bot, Settings } from 'lucide-react';
+import { LayoutDashboard, Calendar, ShoppingCart, Users, UserCog, LifeBuoy, Package, Wallet, ChevronDown, Layers, Building2, Banknote, Folder, CreditCard, ShoppingBag, Bot, Settings } from 'lucide-react';
 import { IsisAvatar } from '@/components/isis/IsisAvatar';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from '@/components/ui/button';
@@ -149,14 +149,17 @@ function Sidebar({ onNavigate, isVisible, setIsVisible, sidebarPinned }) {
         transition={{ delay: 0.2, duration: 0.4 }}
         className="flex items-center px-6 pt-8 pb-6 h-[120px] flex-shrink-0"
       >
-        <div className="w-14 h-14 bg-brand rounded-xl flex items-center justify-center mr-4">
-            <Trophy className="w-8 h-8 text-primary-foreground" />
-        </div>
-        <div className="flex items-baseline">
-            <span className="font-extrabold text-2xl" style={{ color: '#FF6600' }}>Fluxo</span>
-            <span className="font-extrabold text-2xl" style={{ color: '#FFAA33' }}>7</span>
-            <span className="font-medium text-2xl" style={{ color: '#B0B0B0' }}> Arena</span>
-        </div>
+        <img
+          src="/fluxo7arena-removebg.png"
+          alt="Fluxo7 Arena"
+          className="h-14 w-auto object-contain"
+          loading="eager"
+          decoding="async"
+          draggable={false}
+          onError={(e) => {
+            e.currentTarget.style.display = 'none';
+          }}
+        />
       </motion.div>
 
       <nav className="flex-1 overflow-y-auto px-6 py-2 scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent hover:scrollbar-thumb-border-hover">

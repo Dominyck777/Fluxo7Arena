@@ -1,10 +1,18 @@
 # deploy.ps1
 # Requisitos: Node/NPM, PowerShell, OpenSSH (ssh/scp) no PATH
-# Uso: .\deploy.ps1 [-SkipInstall]
+# Uso: .\deploy.ps1 [-SkipInstall] [-SkipReleaseNotes]
 
 param(
-  [switch]$SkipInstall
+  [switch]$SkipInstall,
+  [switch]$SkipReleaseNotes
 )
+
+# Forçar UTF-8 no console para evitar caracteres quebrados (ex: 'pós-login')
+try {
+  [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+  [Console]::InputEncoding = [System.Text.Encoding]::UTF8
+  $OutputEncoding = [System.Text.Encoding]::UTF8
+} catch {}
 
 $VPS_IP   = "72.61.222.166"
 $VPS_USER = "root"
@@ -35,12 +43,74 @@ if (!(Test-Path -Path "dist")) { throw "Pasta 'dist' não encontrada." }
 # Remover artefatos indesejados
 try { Remove-Item -Force -ErrorAction SilentlyContinue "dist\OneDrive - Personal - Atalho.lnk" } catch {}
 
-# Versão do deploy (vai junto no scp)
+# Identificador único do deploy/release
+$releaseName = Get-Date -Format "yyyyMMddHHmmss"
 $ts = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-try { Set-Content -Path "dist\DEPLOY_VERSION.txt" -Value "Build: $ts" -Encoding UTF8 } catch {}
+
+# Coletar versionLabel e itens do modal de novidades (interativo)
+$versionLabel = ""
+try {
+  $rnPath = Join-Path $PSScriptRoot "src\lib\releaseNotes.js"
+  if (Test-Path $rnPath) {
+    $raw = Get-Content $rnPath -Raw -ErrorAction SilentlyContinue
+    if ($raw) {
+      $m = [regex]::Match($raw, "APP_VERSION\s*=\s*'([^']+)'", "IgnoreCase")
+      if ($m.Success) { $versionLabel = $m.Groups[1].Value }
+    }
+  }
+} catch {}
+
+$items = @()
+if (-not $SkipReleaseNotes) {
+  Write-Host "\n=== Release Notes (Modal pós-login) ===" -ForegroundColor Cyan
+  if ($versionLabel) {
+    $versionInput = Read-Host "Versão para exibir (Enter mantém '$versionLabel')"
+    if ($versionInput -and $versionInput.Trim()) { $versionLabel = $versionInput.Trim() }
+  } else {
+    $versionInput = Read-Host "Versão para exibir (ex: v2.5.1)"
+    if ($versionInput -and $versionInput.Trim()) { $versionLabel = $versionInput.Trim() }
+  }
+
+  Write-Host "Digite os itens (1 por linha). Digite 'ok' ou deixe vazio para finalizar." -ForegroundColor Yellow
+  while ($true) {
+    $line = Read-Host "Item"
+    if (-not $line) { break }
+    $t = $line.Trim()
+    if (-not $t) { break }
+    if ($t.ToLower() -eq 'ok') { break }
+    $items += $t
+  }
+}
+
+if (-not $versionLabel) { $versionLabel = "v?" }
+
+# Gerar release-notes.json dentro do dist (vai junto no scp)
+try {
+  $releaseObj = [ordered]@{
+    releaseId = $releaseName
+    builtAt = $ts
+    versionLabel = $versionLabel
+    items = $items
+  }
+  $json = $releaseObj | ConvertTo-Json -Depth 8
+  Set-Content -Path "dist\release-notes.json" -Value $json -Encoding UTF8
+  Write-Host "Release notes gerado: dist\\release-notes.json (releaseId=$releaseName)" -ForegroundColor Green
+} catch {
+  Write-Host "Falha ao gerar dist\\release-notes.json: $($_.Exception.Message)" -ForegroundColor Red
+  throw
+}
+
+# Versão do deploy (vai junto no scp)
+try {
+  $deployInfo = @(
+    "ReleaseId: $releaseName",
+    "Version: $versionLabel",
+    "BuiltAt: $ts"
+  ) -join "`n"
+  Set-Content -Path "dist\DEPLOY_VERSION.txt" -Value $deployInfo -Encoding UTF8
+} catch {}
 
 # Fase 1: preparar pastas remotas e enviar tudo para INCOMING/<release>
-$releaseName = Get-Date -Format "yyyyMMddHHmmss"
 $remoteIncoming = "$INCOMING/$releaseName"
 
 Write-Host "Preparando pastas remotas..." -ForegroundColor Cyan

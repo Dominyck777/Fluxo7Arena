@@ -42,9 +42,16 @@ export default function EditParticipantModal({
   // Função para substituir participante
   const handleSelectParticipant = (cliente) => {
     const oldIndex = editParticipantData.participantId; // Agora é o índice
-    
+
+    const localParticipantsMaybe = (setParticipantsForm.getLocal && setParticipantsForm.updateLocal)
+      ? (setParticipantsForm.getLocal() || [])
+      : null;
+    const currentAtIndex = Array.isArray(localParticipantsMaybe)
+      ? localParticipantsMaybe[oldIndex]
+      : participantsForm[oldIndex];
+
     // Verificar se é o mesmo cliente na mesma posição
-    if (participantsForm[oldIndex]?.cliente_id === cliente.id) {
+    if (currentAtIndex?.cliente_id === cliente.id) {
       return; // Já é o participante atual
     }
     
@@ -56,7 +63,11 @@ export default function EditParticipantModal({
     });
     
     // Pegar dados de pagamento do participante antigo usando índice
-    const oldPaymentData = participantsForm[oldIndex];
+    // IMPORTANTE: quando o PaymentModal está aberto, participantsForm (contexto) pode estar fora de sincronia.
+    // Então, usar o estado local do PaymentModal como fonte da verdade.
+    const oldPaymentData = Array.isArray(localParticipantsMaybe)
+      ? localParticipantsMaybe[oldIndex]
+      : participantsForm[oldIndex];
     
     // NÃO atualizar form.selectedClients aqui - isso será feito ao salvar pagamentos
     // Apenas atualizar participantsForm (estado temporário do modal de pagamentos)
@@ -72,6 +83,8 @@ export default function EditParticipantModal({
           cliente_id: cliente.id,
           nome: cliente.nome,
           codigo: cliente.codigo,
+          participante_row_id: null,
+          ordem: oldPaymentData?.ordem ?? (oldIndex + 1),
           valor_cota: oldPaymentData?.valor_cota || '',
           status_pagamento: oldPaymentData?.status_pagamento || 'Pendente',
           finalizadora_id: oldPaymentData?.finalizadora_id || 
@@ -87,16 +100,18 @@ export default function EditParticipantModal({
       // PaymentModal não está aberto - atualizar contexto normalmente
       setParticipantsForm(prev => {
         if (oldIndex < 0 || oldIndex >= prev.length) return prev;
-        
+        const prevOldPaymentData = prev[oldIndex];
         const newParticipant = {
           cliente_id: cliente.id,
           nome: cliente.nome,
           codigo: cliente.codigo,
-          valor_cota: oldPaymentData?.valor_cota || '',
-          status_pagamento: oldPaymentData?.status_pagamento || 'Pendente',
-          finalizadora_id: oldPaymentData?.finalizadora_id || 
+          participante_row_id: null,
+          ordem: prevOldPaymentData?.ordem ?? (oldIndex + 1),
+          valor_cota: prevOldPaymentData?.valor_cota || '',
+          status_pagamento: prevOldPaymentData?.status_pagamento || 'Pendente',
+          finalizadora_id: prevOldPaymentData?.finalizadora_id || 
             (payMethods[0]?.id ? String(payMethods[0].id) : null),
-          aplicar_taxa: oldPaymentData?.aplicar_taxa || false
+          aplicar_taxa: prevOldPaymentData?.aplicar_taxa || false
         };
         
         const newList = [...prev];
@@ -124,6 +139,50 @@ export default function EditParticipantModal({
       setEditParticipantSearch('');
       setEditParticipantLoading(false);
       setFocusedIndex(0);
+
+      try {
+        if (localStorage.getItem('debug:agenda') === '1') {
+          const idx = editParticipantData?.participantId;
+          const localList = (setParticipantsForm.getLocal && setParticipantsForm.updateLocal)
+            ? (setParticipantsForm.getLocal() || [])
+            : null;
+          const ctxList = Array.isArray(participantsForm) ? participantsForm : [];
+          const localAt = Array.isArray(localList) ? localList[idx] : undefined;
+          const ctxAt = ctxList[idx];
+
+          console.log('🧩 [EditParticipantModal][OPEN] alvo', {
+            idx,
+            editParticipantData,
+            localCount: Array.isArray(localList) ? localList.length : null,
+            ctxCount: ctxList.length,
+            localAt: localAt
+              ? { cliente_id: localAt?.cliente_id, nome: localAt?.nome, ordem: localAt?.ordem, participante_row_id: localAt?.participante_row_id }
+              : null,
+            ctxAt: ctxAt
+              ? { cliente_id: ctxAt?.cliente_id, nome: ctxAt?.nome, ordem: ctxAt?.ordem, participante_row_id: ctxAt?.participante_row_id }
+              : null,
+          });
+
+          if (Array.isArray(localList)) {
+            console.log('🧩 [EditParticipantModal][OPEN] localList snapshot', localList.map((p, i) => ({
+              i,
+              cliente_id: p?.cliente_id,
+              nome: p?.nome,
+              ordem: p?.ordem,
+              participante_row_id: p?.participante_row_id,
+            })));
+          }
+          console.log('🧩 [EditParticipantModal][OPEN] ctxList snapshot', ctxList.map((p, i) => ({
+            i,
+            cliente_id: p?.cliente_id,
+            nome: p?.nome,
+            ordem: p?.ordem,
+            participante_row_id: p?.participante_row_id,
+          })));
+        }
+      } catch (e) {
+        console.warn('🧩 [EditParticipantModal][OPEN] falha ao logar debug:', e);
+      }
     }
   }, [isEditParticipantModalOpen]);
   
@@ -248,8 +307,15 @@ export default function EditParticipantModal({
             ) : (
               filtered.map((cliente, listIndex) => {
                 // Verificar se é o mesmo cliente na posição atual
+                // IMPORTANTE: quando o PaymentModal está aberto, usar a lista local como fonte da verdade.
                 const oldIndex = editParticipantData.participantId;
-                const isCurrentParticipant = participantsForm[oldIndex]?.cliente_id === cliente.id;
+                const localList = (setParticipantsForm.getLocal && setParticipantsForm.updateLocal)
+                  ? (setParticipantsForm.getLocal() || [])
+                  : null;
+                const currentAtIndex = Array.isArray(localList)
+                  ? localList[oldIndex]
+                  : participantsForm[oldIndex];
+                const isCurrentParticipant = currentAtIndex?.cliente_id === cliente.id;
                 const isConsumidorFinal = cliente?.is_consumidor_final === true;
                 const isFocused = listIndex === focusedIndex;
                 
