@@ -32,6 +32,7 @@ function buildItensFromManual(form){
     const ic = imp.icms || {};
     const pis = imp.pis || {};
     const cof = imp.cofins || {};
+    const ipi = imp.ipi || {};
 
     const data = {
       numero_item: idx + 1,
@@ -42,6 +43,10 @@ function buildItensFromManual(form){
       quantidade_comercial: q,
       valor_unitario_comercial: to2(unit),
       codigo_ncm: onlyDigits(it.ncm).slice(0,8) || '',
+      // CEST: enviado em operações com ST quando informado no formulário/produto
+      // Alguns provedores utilizam a chave "codigo_cest"; enviamos as duas para máxima compatibilidade
+      cest: it.cest ? String(it.cest) : undefined,
+      codigo_cest: it.cest ? String(it.cest) : undefined,
       valor_desconto: vDesc ? to2(vDesc) : '',
       valor_frete: frete ? to2(frete) : '',
       valor_seguro: seguro ? to2(seguro) : '',
@@ -50,8 +55,22 @@ function buildItensFromManual(form){
       valor_total_sem_desconto: to2(bruto),
       icms_orig: Number(imp.origem || 0),
     };
-    if (ic.csosn) data.icms_csosn = Number(ic.csosn);
-    if (ic.cst) data.icms_cst = Number(ic.cst);
+    if (ic.csosn) {
+      data.icms_csosn = Number(ic.csosn);
+    }
+    if (ic.cst) {
+      data.icms_cst = Number(ic.cst);
+    }
+    // ICMS: alinhar com exemplo da TransmiteNota, preenchendo base/aliquota/valor
+    if (ic.cst || ic.csosn) {
+      const bc = vTotal;
+      const aliqNum = parseDecBR(ic.aliquota || 0);
+      data.icms_mod_base_calculo = 3; // valor da operação
+      data.icms_base_calculo = to2(bc);
+      data.icms_reducao_base_calculo = '';
+      data.icms_aliquota = to4(aliqNum / 100);
+      data.icms_valor = aliqNum > 0 ? to2(bc * aliqNum / 100) : '0.00';
+    }
     if (pis.cst) data.pis_situacao_tributaria = pis.cst;
     if (cof.cst) data.cofins_situacao_tributaria = cof.cst;
     if (pis.aliquota){
@@ -65,6 +84,15 @@ function buildItensFromManual(form){
       data.base_calculo_cofins = to2(vTotal);
       data.aliquota_cofins = to4(aliq/100);
       data.valor_cofins = to2(vTotal * aliq/100);
+    }
+    if (ipi.cst) {
+      data.ipi_situacao_tributaria = ipi.cst;
+      const aliqIpi = parseDecBR(ipi.aliquota);
+      if (aliqIpi > 0) {
+        data.base_calculo_ipi = to2(vTotal);
+        data.aliquota_ipi = to4(aliqIpi / 100);
+        data.valor_ipi = to2(vTotal * aliqIpi / 100);
+      }
     }
     return data;
   });
@@ -123,7 +151,7 @@ export function generateNfcePayloadFromManual({ form, finalizadoras = [] }){
       municipio_destinatario: form?.cidade || '',
       codigo_cidade: form?.codigo_municipio_ibge || '',
       uf_destinatario: form?.uf || '',
-      pais_destinatario: 'Brasil',
+      pais_destinatario: 1058,
       cep_destinatario: onlyDigits(form?.cep || ''),
       indicador_ie_destinatario: Number(form?.indIEDest || 9),
     } : {}),
@@ -142,7 +170,8 @@ export function generateNfePayloadFromManual({ form }){
 
   return {
     tipo_operacao: form?.tipo_nota === 'entrada' ? 0 : 1,
-    natureza_operacao: form?.natOp || 'Venda de mercadoria',
+    // Usar padrão em maiúsculas quando não houver natOp customizada, alinhado ao exemplo
+    natureza_operacao: form?.natOp || 'VENDA DE MERCADORIA',
     forma_pagamento: 0,
     meio_pagamento: '01',
     data_emissao: form?.data_emissao ? new Date(form.data_emissao+'T00:00:00').toLocaleDateString('pt-BR') : new Date().toLocaleDateString('pt-BR'),
@@ -151,9 +180,9 @@ export function generateNfePayloadFromManual({ form }){
     finalidade_emissao: Number(form?.finNFe || 1),
     modalidade_frete: Number(form?.transporte?.tipo_frete ?? 9),
 
-    valor_frete: vFrete ? to2(vFrete) : '0',
-    valor_seguro: '0',
-    valor_ipi: '0',
+    valor_frete: to2(vFrete || 0),
+    valor_seguro: to2(0),
+    valor_ipi: to2(0),
     valor_total: to2(valor_total),
     valor_total_sem_desconto: to2(soma),
 
@@ -185,11 +214,13 @@ export function generateNfePayloadFromManual({ form }){
     bairro_destinatario: form?.bairro || '',
     municipio_destinatario: form?.cidade || '',
     uf_destinatario: form?.uf || '',
-    pais_destinatario: 'Brasil',
+    // Código numérico do Brasil (1058), conforme exemplo da TransmiteNota
+    pais_destinatario: 1058,
     cep_destinatario: onlyDigits(form?.cep || ''),
     indicador_ie_destinatario: Number(form?.indIEDest ?? 1),
 
-    Itens: itens.map(it => [it]),
+    // Para NF-e, alinhar estrutura com o exemplo: Itens como [[ ... ]]
+    Itens: [ itens ],
   };
 }
 
@@ -352,8 +383,10 @@ export async function generateNfcePayloadPreview({ comandaId, codigoEmpresa }) {
 
   const totalAposDescontos = Math.max(0, baseComanda - descontoComanda);
 
-  // Destinatário (opcional)
+  // Destinatário (opcional). Para NFC-e, só enviaremos destinatário se houver CPF/CNPJ,
+  // para evitar gerar <dest> inválido no XML (consumidor não identificado não deve ter dest).
   const dest = pickDestinatarioFromComanda(comanda, cliente);
+  const hasDestDoc = !!(dest && dest.cpf_cnpj);
 
   // Monta Dados conforme doc "EnviarNfce"
   // Monta itens fiscais e, em seguida, aplica desconto global de comanda (se houver)
@@ -383,24 +416,19 @@ export async function generateNfcePayloadPreview({ comandaId, codigoEmpresa }) {
       quantidade_comercial: q,
       valor_unitario_comercial: to2(unit),
       codigo_ncm: ncm,
-      valor_desconto: vDesc ? to2(vDesc) : '',
-      valor_frete: '',
-      valor_seguro: '',
-      valor_outras_despesas: '',
       valor_total: to2(vTotal),
       valor_total_sem_desconto: to2(q * unit),
 
       icms_csosn: csosn ? Number(csosn) : undefined,
       icms_orig: Number(icmsOrig) || 0,
       pis_situacao_tributaria: pisCst,
-      base_calculo_pis: '',
-      aliquota_pis: '',
-      valor_pis: '',
       cofins_situacao_tributaria: cofinsCst,
-      base_calculo_cofins: '',
-      aliquota_cofins: '',
-      valor_cofins: '',
     };
+
+    // Só envia desconto se houver valor, para evitar campos numéricos vazios no XML
+    if (vDesc > 0) {
+      itemJson.valor_desconto = to2(vDesc);
+    }
 
     return itemJson;
   });
@@ -429,8 +457,8 @@ export async function generateNfcePayloadPreview({ comandaId, codigoEmpresa }) {
     valor_total: to2(totalFiscal),
     valor_total_sem_desconto: to2(totalSemDesc),
 
-    // Destinatário (se existir)
-    ...(dest ? {
+    // Destinatário (apenas se houver CPF/CNPJ)
+    ...(hasDestDoc ? {
       nome_destinatario: dest.nome,
       cnpj_destinatario: dest.cpf_cnpj,
       inscricao_estadual_destinatario: dest.ie,
@@ -466,6 +494,8 @@ export async function generateNfcePayloadPreview({ comandaId, codigoEmpresa }) {
     const ncmDigits = onlyDigits(p.ncm || '').slice(0,8);
     if (!ncmDigits || /^0+$/.test(ncmDigits)) missing.push(`Produto ${p.name || p.id}: NCM válido`);
     if (!p.cfop_interno && !p.cfop) missing.push(`Produto ${p.name || p.id}: CFOP interno`);
+    const csosn = p.csosn_interno || p.csosn;
+    if (!csosn) missing.push(`Produto ${p.name || p.id}: CSOSN (icms_csosn)`);
   });
 
   const payload = {

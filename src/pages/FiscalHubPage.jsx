@@ -198,14 +198,29 @@ export default function FiscalHubPage(){
 
   const handleConsultRow = async (r) => {
     try {
+      if (!r) return;
       if (!empresaInfo) { toast({ title: 'Empresa não carregada', variant: 'warning' }); return; }
       const { baseUrl, cnpj } = getTransmiteNotaConfigFromEmpresa(empresaInfo);
       if (!cnpj) { toast({ title: 'CNPJ ausente', description: 'Preencha o CNPJ na Configuração Fiscal', variant: 'warning' }); return; }
       const chave = r.xml_chave || '';
       let dados;
-      if (chave) dados = { chave_nota: chave, chave };
-      else if (r.numero && r.serie) dados = { numero: r.numero, serie: r.serie };
-      else { toast({ title: 'Sem referência para consultar', description: 'Preencha número/série ou emita para obter a chave', variant: 'warning' }); return; }
+      let searchKey = null;
+      if (String(r.modelo) === '55') {
+        searchKey = getNfeSearchKeyFromRow(r);
+        if (!searchKey) {
+          toast({
+            title: 'SearchKey não localizada',
+            description: 'O provedor fiscal exige a SearchKey da NF-e para consulta desta nota e não foi possível derivá-la a partir do retorno de emissão.',
+            variant: 'destructive',
+          });
+          return;
+        }
+        dados = { searchkey: searchKey, SearchKey: searchKey };
+      } else {
+        if (chave) dados = { chave_nota: chave, chave };
+        else if (r.numero && r.serie) dados = { numero: r.numero, serie: r.serie };
+        else { toast({ title: 'Sem referência para consultar', description: 'Preencha número/série ou emita para obter a chave', variant: 'warning' }); return; }
+      }
       toast({ title: 'Consultando status...', description: `NF-e ${r.numero || '—'}/${r.serie || '—'}` });
       let res = null;
       let st = '';
@@ -216,18 +231,49 @@ export default function FiscalHubPage(){
       let chaveResp = r.xml_chave || null;
       let numeroResp = r.numero || null;
       let serieResp = r.serie || null;
+      let resultadoStatus = '';
+      let resultadoCodStatus = '';
       try {
         res = await consultarEmissaoNfe({ baseUrl, cnpj, dados });
         st = String(res?.status || res?.cStat || '');
-        msg = res?.xMotivo || res?.mensagem || res?.message || 'Retorno da consulta';
-        autorizada = (st === '100' || /autorizad/i.test(msg));
+        msg = res?.xMotivo || res?.mensagem || res?.message || res?.descricao || res?.Descricao || 'Retorno da consulta';
+
+        // Alguns provedores retornam bloco "resultado" com status/motivo detalhados
+        const resultado = res?.resultado || res?.Resultado || null;
+        if (resultado) {
+          resultadoStatus = String(resultado.status || '');
+          resultadoCodStatus = String(resultado.cod_status || resultado.CodStatus || '').trim();
+          if (resultado.status != null) st = String(resultado.status);
+          if (resultado.motivo || resultado.Motivo || resultado.descricao || resultado.Descricao) {
+            msg = resultado.motivo || resultado.Motivo || resultado.descricao || resultado.Descricao || msg;
+          }
+          xmlUrl = resultado.link_xml || resultado.url_xml || resultado.xml_url || xmlUrl;
+          pdfUrl = resultado.link_pdf || resultado.url_pdf || resultado.pdf_url || pdfUrl;
+          chaveResp = resultado.chave || resultado.chave_nota || resultado.Chave || chaveResp;
+          numeroResp = resultado.numero || resultado.Numero || numeroResp;
+          serieResp = resultado.serie || resultado.Serie || serieResp;
+          if (String(r.modelo) === '55') {
+            searchKey = searchKey || resultado.searchkey || resultado.SearchKey || null;
+          }
+        }
+
+        // Mesmo que o status numérico não seja 100, tratar textos APROVADA/AUTORIZADA como sucesso
+        autorizada = (st === '100' || /autorizad|aprovad/i.test(msg) || /aprovad/i.test(st));
+
         xmlUrl = res?.url_xml || res?.xml_url || xmlUrl;
         pdfUrl = res?.url_pdf || res?.pdf_url || pdfUrl;
         chaveResp = res?.chave_nota || res?.chave || res?.Chave || chaveResp;
         numeroResp = res?.numero || res?.Numero || numeroResp;
         serieResp = res?.serie || res?.Serie || serieResp;
+        if (String(r.modelo) === '55') {
+          searchKey = searchKey || res?.searchkey || res?.SearchKey || res?.searchKey || null;
+        }
       } catch (e) {
         msg = e?.message || String(e);
+      }
+      if (String(r.modelo) === '55') {
+        // Último fallback: tentar extrair SearchKey dos URLs retornados
+        searchKey = searchKey || extractSearchKeyFromUrl(xmlUrl) || extractSearchKeyFromUrl(pdfUrl) || getNfeSearchKeyFromRow({ ...r, xml_url: xmlUrl, pdf_url: pdfUrl }) || null;
       }
       // Fallback: tentar PDF/XML quando consulta não autoriza ou não retorna URLs
       if (!autorizada || (!pdfUrl && !xmlUrl)) {
@@ -241,12 +287,50 @@ export default function FiscalHubPage(){
           xmlUrl = rxml?.url_xml || rxml?.xml_url || xmlUrl;
           chaveResp = chaveResp || rxml?.chave || rxml?.Chave || chaveResp;
         } catch {}
-        if (pdfUrl || xmlUrl) autorizada = true;
+        // Para NF-e cancelada, não interpretar presença de PDF/XML como "autorizada"
+        if (pdfUrl || xmlUrl) {
+          const isNfe = String(r.modelo) === '55';
+          const statusLower = (resultadoStatus || st || '').toString().toLowerCase();
+          const msgLower = (msg || '').toString().toLowerCase();
+          const isCanceled = isNfe && (statusLower.includes('cancelad') || msgLower.includes('cancelad') || resultadoCodStatus === '005');
+          if (!isCanceled) {
+            autorizada = true;
+          }
+        }
       }
-      const newStatus = autorizada ? 'autorizada' : (/rejeit/i.test(msg) ? 'rejeitada' : (st || r.status || 'pendente'));
-      await supabase.from('notas_fiscais').update({ status: newStatus, xml_url: xmlUrl, pdf_url: pdfUrl, xml_chave: chaveResp, numero: numeroResp, serie: serieResp }).eq('id', r.id).eq('codigo_empresa', codigoEmpresa);
+      const isNfe = String(r.modelo) === '55';
+      const statusLower = (resultadoStatus || st || '').toString().toLowerCase();
+      const msgLower = (msg || '').toString().toLowerCase();
+      const isCanceledNfe = isNfe && (statusLower.includes('cancelad') || msgLower.includes('cancelad') || resultadoCodStatus === '005');
+      const isRejectedNfe = isNfe && (statusLower.includes('rejeit') || msgLower.includes('rejeit'));
+      const isAuthorizedNfe = isNfe && (autorizada || statusLower.match(/aprovad|autorizad/));
+
+      let newStatus;
+      if (isNfe) {
+        if (isCanceledNfe) newStatus = 'cancelada';
+        else if (isRejectedNfe) newStatus = 'rejeitada';
+        else if (isAuthorizedNfe) newStatus = 'autorizada';
+        else newStatus = st || r.status || 'pendente';
+      } else {
+        newStatus = autorizada
+          ? 'autorizada'
+          : (/rejeit/i.test(msg) ? 'rejeitada' : (st || r.status || 'pendente'));
+      }
+      const patch = { status: newStatus, xml_url: xmlUrl, pdf_url: pdfUrl, xml_chave: chaveResp, numero: numeroResp, serie: serieResp };
+      if (String(r.modelo) === '55') {
+        patch.searchkey = searchKey || getNfeSearchKeyFromRow({ ...r, xml_url: xmlUrl, pdf_url: pdfUrl }) || null;
+      }
+      await supabase.from('notas_fiscais').update(patch).eq('id', r.id).eq('codigo_empresa', codigoEmpresa);
       await loadNfeRows();
-      toast({ title: autorizada ? 'Autorizada' : `Status ${st || ''}`.trim(), description: msg || 'Consulta concluída', variant: autorizada ? 'success' : 'default' });
+      // Evitar mostrar toast de "erro" quando a mensagem da API é claramente de sucesso
+      const isSucessoTexto = /sucesso/i.test(msg || '') && !/erro/i.test(msg || '');
+      if (isNfe && newStatus === 'cancelada') {
+        toast({ title: 'NF-e cancelada', description: msg || 'Cancelamento confirmado pela SEFAZ.', variant: 'success' });
+      } else if (newStatus === 'autorizada' || isSucessoTexto) {
+        toast({ title: 'Consulta realizada', description: msg || 'Consulta concluída', variant: 'success' });
+      } else {
+        toast({ title: `Status ${st || ''}`.trim(), description: msg || 'Consulta concluída', variant: /erro|rejei/i.test(msg||'') ? 'destructive' : 'warning' });
+      }
     } catch (e) {
       toast({ title: 'Falha ao consultar', description: e?.message || String(e), variant: 'destructive' });
     }
@@ -260,15 +344,53 @@ export default function FiscalHubPage(){
       if (!empresaInfo) { toast({ title: 'Empresa não carregada', variant: 'warning' }); return; }
       const { baseUrl, cnpj } = getTransmiteNotaConfigFromEmpresa(empresaInfo);
       if (!cnpj) { toast({ title: 'CNPJ ausente', description: 'Preencha o CNPJ na Configuração Fiscal', variant: 'warning' }); return; }
-      const dados = r.xml_chave ? { chave_nota: r.xml_chave, chave: r.xml_chave, motivo } : { numero: r.numero, serie: r.serie, motivo };
-      await cancelarNfe({ baseUrl, cnpj, dados });
-      await supabase.from('notas_fiscais').update({ status: 'cancelada' }).eq('id', r.id).eq('codigo_empresa', codigoEmpresa);
-      await loadNfeRows();
-      toast({ title: 'NF-e cancelada' });
+      setCancelNfeLoading(true);
+      // 1) Obter SearchKey associada a esta NF-e (informada no retorno de envio, embutida nos links PDF/XML)
+      let searchKey = getNfeSearchKeyFromRow(r) || r.xml_protocolo || r.searchkey || r.SearchKey || null;
+      if (!searchKey) {
+        toast({
+          title: 'SearchKey não localizada',
+          description: 'O provedor fiscal exige a SearchKey da NF-e para cancelamento, mas não foi possível derivá-la a partir do retorno de emissão.',
+          variant: 'destructive',
+        });
+        return;
+      }
+      // 2) Cancelar usando SearchKey obrigatória
+      const dados = { searchkey: searchKey, SearchKey: searchKey, motivo };
+      const resp = await cancelarNfe({ baseUrl, cnpj, dados });
+
+      const statusStr = String(resp?.status || resp?.Status || '');
+      const cod = resp?.codigo || resp?.Codigo || '';
+      const campo = resp?.campo || resp?.Campo || '';
+      const descr = resp?.descricao || resp?.Descricao || resp?.mensagem || resp?.message || '';
+
+      // 3) Avaliar resposta final: se for Erro de negócio, não marcar como cancelada
+      if (statusStr && /erro/i.test(statusStr)) {
+        const msgErr = [campo, descr || 'Falha ao cancelar NF-e'].filter(Boolean).join(' • ');
+        toast({ title: `Erro ao cancelar${cod ? ` ${cod}` : ''}`, description: msgErr, variant: 'destructive' });
+        return;
+      }
+
+      // Código 1304: cancelamento registrado e aguardando aprovação na SEFAZ
+      const pending = cod === '1304' || /aguardando aprova[çc][aã]o/i.test(descr || '');
+      if (pending) {
+        await supabase.from('notas_fiscais').update({ status: 'processando' }).eq('id', r.id).eq('codigo_empresa', codigoEmpresa);
+        await loadNfeRows();
+        toast({
+          title: 'Cancelamento em processamento',
+          description: descr || 'Solicitação de cancelamento registrada. Aguarde alguns instantes e clique em Consultar para confirmar o status.',
+        });
+      } else {
+        await supabase.from('notas_fiscais').update({ status: 'cancelada' }).eq('id', r.id).eq('codigo_empresa', codigoEmpresa);
+        await loadNfeRows();
+        toast({ title: 'NF-e cancelada', description: descr || 'Cancelamento confirmado pela SEFAZ.', variant: 'success' });
+      }
       setCancelNfeRow(null);
       setCancelNfeMotivo('');
     } catch (e) {
       toast({ title: 'Falha ao cancelar', description: e?.message || String(e), variant: 'destructive' });
+    } finally {
+      setCancelNfeLoading(false);
     }
   };
 
@@ -316,7 +438,12 @@ export default function FiscalHubPage(){
         toast({ title: 'Rascunho incompleto', description: 'Abra o rascunho para revisar e emitir.', variant: 'warning' });
         return;
       }
-      await emitirNota(form, row.id);
+      setManualEmitting(true);
+      try {
+        await emitirNota(form, row.id);
+      } finally {
+        setManualEmitting(false);
+      }
     } catch (e) {
       toast({ title: 'Falha ao emitir NF-e', description: e?.message || String(e), variant: 'destructive' });
     }
@@ -654,6 +781,7 @@ export default function FiscalHubPage(){
   const [deleteDraftId, setDeleteDraftId] = useState(null);
   const [cancelNfeRow, setCancelNfeRow] = useState(null);
   const [cancelNfeMotivo, setCancelNfeMotivo] = useState('');
+  const [cancelNfeLoading, setCancelNfeLoading] = useState(false);
   const [partyPickerOpen, setPartyPickerOpen] = useState(false);
   const [partyQuickOpen, setPartyQuickOpen] = useState(false);
   const [partyQuery, setPartyQuery] = useState('');
@@ -892,6 +1020,35 @@ export default function FiscalHubPage(){
     return new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(cents);
   };
 
+  const extractSearchKeyFromUrl = (url) => {
+    try {
+      const s = String(url || '').trim();
+      if (!s) return null;
+      const qIndex = s.indexOf('?');
+      if (qIndex >= 0 && qIndex + 1 < s.length) {
+        const query = s.slice(qIndex + 1);
+        const params = new URLSearchParams(query);
+        const sk = params.get('s') || params.get('searchkey') || params.get('SearchKey');
+        if (sk) return sk;
+      }
+      const m = s.match(/[?&]s=([^&#]+)/i);
+      if (m && m[1]) return decodeURIComponent(m[1]);
+    } catch {}
+    return null;
+  };
+
+  const getNfeSearchKeyFromRow = (row) => {
+    if (!row) return null;
+    const d = row.draft_data || {};
+    const direct = row.searchkey || row.SearchKey || row.xml_protocolo || d.searchkey || d.SearchKey || d.xml_protocolo || d.tn_searchkey;
+    if (direct) return direct;
+    const skXml = extractSearchKeyFromUrl(row.xml_url);
+    if (skXml) return skXml;
+    const skPdf = extractSearchKeyFromUrl(row.pdf_url);
+    if (skPdf) return skPdf;
+    return null;
+  };
+
   const emitirNota = async (formOverride = null, draftIdOverride = null) => {
     try {
       const isEventLike = formOverride && typeof formOverride === 'object' && (('nativeEvent' in formOverride) || ('preventDefault' in formOverride) || ('target' in formOverride));
@@ -909,6 +1066,9 @@ export default function FiscalHubPage(){
       let Dados = isNFCe
         ? generateNfcePayloadFromManual({ form: formAdj, finalizadoras: payMethods || [] })
         : generateNfePayloadFromManual({ form: formAdj });
+      // Número/série efetivamente usados na NF-e (apenas modelo 55)
+      let numeroUsado = null;
+      let serieUsada = null;
       try { console.log('[FiscalHub][emitirNota] payload gerado (antes do preflight)', { isNFCe, Dados }); } catch {}
       // Mantém Itens em array simples durante as validações; será envelopado em [[...]] antes do envio
       if (!isNFCe) {
@@ -940,12 +1100,19 @@ export default function FiscalHubPage(){
         }
         // Garantir Série e Número: reservar automaticamente se não informado
         let serieNum = Number(formAdj?.serie || 1) || 1;
-        if (!formAdj?.nNF) {
+        serieUsada = serieNum;
+        const numeroAtual = formAdj?.nNF ? Number(formAdj.nNF) : 0;
+        if (!numeroAtual) {
           try {
             try { await supabase.from('auditoria_fiscal').insert({ codigo_empresa: codigoEmpresa, acao: 'reservar_numero', modelo: '55', status: 'start', mensagem: `serie=${serieNum}` }); } catch {}
             const { data: nr, error: nrErr } = await supabase.rpc('reservar_numero_fiscal', { p_modelo: '55', p_serie: serieNum, p_codigo_empresa: codigoEmpresa });
             if (nrErr) throw nrErr;
             const numeroReservado = Number(nr);
+            numeroUsado = numeroReservado;
+            serieUsada = serieNum;
+            // propagar para o formulário em tela e para o form ajustado usado nas consultas
+            formAdj.nNF = String(numeroReservado);
+            formAdj.serie = String(serieNum);
             setManualForm(f => ({ ...f, nNF: String(numeroReservado), serie: String(serieNum) }));
             Dados.Numero = numeroReservado;
             Dados.Serie = serieNum;
@@ -956,8 +1123,10 @@ export default function FiscalHubPage(){
             return;
           }
         } else {
-          Dados.Numero = Number(formAdj.nNF);
-          Dados.Serie = serieNum;
+          numeroUsado = numeroAtual;
+          serieUsada = serieNum;
+          Dados.Numero = numeroUsado;
+          Dados.Serie = serieUsada;
         }
         // Ajustar indicador_ie_destinatario conforme doc/IE
         try {
@@ -1002,6 +1171,13 @@ export default function FiscalHubPage(){
           if (!qtd || qtd<=0) errs.push(`Item ${idx+1}: quantidade inválida`);
           if (preco === '' || preco == null) errs.push(`Item ${idx+1}: preço unitário obrigatório`);
           if (!(ic.cst || ic.csosn)) errs.push(`Item ${idx+1}: preencha ICMS (CST/CSOSN)`);
+
+          const csosnStr = String(ic.csosn || '').trim();
+          const cestStr = String(it.cest || '').trim();
+          if (csosnStr === '500' && !cestStr) {
+            errs.push(`Item ${idx+1}: CEST obrigatório para operação com ICMS-ST (CSOSN 500)`);
+          }
+
           const cstPis = String(pis.cst||'').trim();
           const cstCof = String(cof.cst||'').trim();
           if (cstPis === '01' && String(pis.aliquota||'').trim()==='') errs.push(`Item ${idx+1}: preencha alíquota de PIS (CST 01)`);
@@ -1106,11 +1282,27 @@ export default function FiscalHubPage(){
         toast({ title: 'Envio solicitado', description: 'Consultando status...' });
       }
 
-      const chave = resp?.chave_nota || resp?.chave || resp?.Chave || '';
+      // Algumas respostas já trazem o resultado completo dentro de "resultado"
+      const respResultado = resp?.resultado || resp?.Resultado || null;
+      let chave = resp?.chave_nota || resp?.chave || resp?.Chave || '';
+      let numeroResp = resp?.numero || resp?.Numero || null;
+      let serieResp = resp?.serie || resp?.Serie || null;
+      let xmlUrlFromResp = resp?.url_xml || resp?.xml_url || null;
+      let pdfUrlFromResp = resp?.url_pdf || resp?.pdf_url || null;
+      if (respResultado) {
+        chave = chave || respResultado.chave || respResultado.chave_nota || respResultado.Chave || '';
+        numeroResp = numeroResp || respResultado.numero || respResultado.Numero || null;
+        serieResp = serieResp || respResultado.serie || respResultado.Serie || null;
+        xmlUrlFromResp = xmlUrlFromResp || respResultado.link_xml || respResultado.url_xml || respResultado.xml_url || null;
+        pdfUrlFromResp = pdfUrlFromResp || respResultado.link_pdf || respResultado.url_pdf || respResultado.pdf_url || null;
+      }
+
       let consulta = null;
       const sleep = (ms) => new Promise(r => setTimeout(r, ms));
       for (let i = 0; i < 5; i++) {
-        const dadosConsulta = chave ? { chave_nota: chave, chave } : { numero: formAdj?.nNF, serie: formAdj?.serie };
+        const dadosConsulta = chave
+          ? { chave_nota: chave, chave }
+          : { numero: numeroUsado || formAdj?.nNF, serie: serieUsada || formAdj?.serie };
         try {
           if (isNFCe) consulta = await consultarEmissaoNfce({ baseUrl, cnpj, dados: dadosConsulta });
           else consulta = await consultarEmissaoNfe({ baseUrl, cnpj, dados: dadosConsulta });
@@ -1122,12 +1314,20 @@ export default function FiscalHubPage(){
       }
 
       // Se ainda não autorizado ou sem URLs, tentar endpoints diretos de PDF/XML
-      let xmlUrl = consulta?.url_xml || consulta?.xml_url || resp?.url_xml || null;
-      let pdfUrl = consulta?.url_pdf || consulta?.pdf_url || resp?.url_pdf || null;
+      let xmlUrl = consulta?.url_xml || consulta?.xml_url || xmlUrlFromResp || null;
+      let pdfUrl = consulta?.url_pdf || consulta?.pdf_url || pdfUrlFromResp || null;
       let chaveResp = chave || consulta?.chave_nota || consulta?.chave || consulta?.Chave || '';
       if (!pdfUrl || !xmlUrl) {
-        const dadosFallback = chaveResp ? { chave_nota: chaveResp, chave: chaveResp } : { numero: formAdj?.nNF, serie: formAdj?.serie };
-        try {
+        // Só montar dadosFallback se tivermos chave ou número válido; evita chamadas com numero=""
+        const baseNumero = numeroUsado || formAdj?.nNF;
+        const hasNumero = !!(baseNumero && String(baseNumero).trim());
+        if (!chaveResp && !hasNumero) {
+          // Sem referência para PDF/XML, não tentar fallback
+        } else {
+          const dadosFallback = chaveResp
+            ? { chave_nota: chaveResp, chave: chaveResp }
+            : { numero: baseNumero, serie: serieUsada || formAdj?.serie };
+          try {
           if (isNFCe) {
             const rpdf = await consultarPdfNfce({ baseUrl, cnpj, dados: dadosFallback });
             pdfUrl = pdfUrl || rpdf?.url_pdf || rpdf?.pdf_url || null;
@@ -1149,11 +1349,34 @@ export default function FiscalHubPage(){
             chaveResp = chaveResp || rxml?.chave || rxml?.Chave || '';
           }
         } catch {}
+        }
+      }
+      let st = String(consulta?.status || consulta?.cStat || '');
+      let msg = consulta?.xMotivo || consulta?.mensagem || consulta?.message || 'Status retornado';
+
+      // Alguns retornos trazem o status/motivo e URLs dentro de um bloco "resultado"
+      const resultado = consulta?.resultado || consulta?.Resultado || null;
+      if (resultado) {
+        if (resultado.status != null) {
+          st = String(resultado.status);
+        }
+        if (resultado.motivo || resultado.Motivo || resultado.descricao || resultado.Descricao) {
+          msg = resultado.motivo || resultado.Motivo || resultado.descricao || resultado.Descricao || msg;
+        }
+        if (!xmlUrl) xmlUrl = resultado.link_xml || resultado.url_xml || resultado.xml_url || xmlUrl;
+        if (!pdfUrl) pdfUrl = resultado.link_pdf || resultado.url_pdf || resultado.pdf_url || pdfUrl;
+        if (!chaveResp) chaveResp = resultado.chave || resultado.chave_nota || resultado.Chave || chaveResp;
       }
 
-      const st = String(consulta?.status || consulta?.cStat || '');
-      const msg = consulta?.xMotivo || consulta?.mensagem || consulta?.message || 'Status retornado';
-      const autorizada = (st === '100' || /autorizad/i.test(msg));
+      // Fallback: usar também o bloco resultado da resposta de envio quando a consulta não trouxer tudo
+      if (!st && respResultado?.status != null) {
+        st = String(respResultado.status);
+      }
+      if ((!msg || msg === 'Status retornado') && respResultado) {
+        msg = respResultado.motivo || respResultado.Motivo || respResultado.descricao || respResultado.Descricao || resp?.descricao || resp?.Descricao || msg;
+      }
+
+      const autorizada = (st === '100' || /autorizad|aprovad/i.test(msg) || /aprovad/i.test(st));
       if (autorizada) {
         toast({ title: 'Autorizada', description: msg, variant: 'success' });
       } else if (st) {
@@ -1171,8 +1394,8 @@ export default function FiscalHubPage(){
             xml_chave: (chaveResp || chave || null),
             xml_url: xmlUrl || null,
             pdf_url: pdfUrl || null,
-            numero: form?.nNF ? Number(form.nNF) : null,
-            serie: form?.serie ? Number(form.serie) : null,
+            numero: numeroUsado != null ? Number(numeroUsado) : (form?.nNF ? Number(form.nNF) : null),
+            serie: serieUsada != null ? Number(serieUsada) : (form?.serie ? Number(form.serie) : null),
             ambiente: (getTransmiteNotaConfigFromEmpresa(empresaInfo||{}).ambiente || null),
           }).eq('id', draftId).eq('codigo_empresa', codigoEmpresa);
           await loadNfeRows();
@@ -1893,7 +2116,7 @@ export default function FiscalHubPage(){
   );
   const eligibleConsultIds = useMemo(
     () => selectedRows
-      .filter(r => ['processando','rejeitada','pendente','erro'].includes(String(r.nf_status||'').toLowerCase()))
+      .filter(r => ['processando','rejeitada','pendente','erro','autorizada'].includes(String(r.nf_status||'').toLowerCase()))
       .map(r=>r.id),
     [selectedRows]
   );
@@ -2290,7 +2513,7 @@ export default function FiscalHubPage(){
       const xml = resp?.xml_url || resp?.XmlUrl || null;
       const protocolo = resp?.protocolo || resp?.Protocolo || null;
       const searchKeyResp = resp?.searchkey || resp?.SearchKey || resp?.searchKey || null;
-      const authorized = !!(resp?.autorizada || resp?.Autorizada || resp?.sucesso || resp?.Sucesso || chave);
+      const authorized = !!(resp?.autorizada || resp?.Autorizada || resp?.sucesso || resp?.Sucesso || pdf || xml);
       await updateComanda(id, { nf_status: authorized ? 'autorizada' : 'processando', xml_chave: chave, nf_numero: numero, nf_serie: serie, nf_pdf_url: pdf, nf_xml_url: xml, xml_protocolo: protocolo || searchKeyResp });
       try { await supabase.from('auditoria_fiscal').insert({ codigo_empresa: codigoEmpresa, acao: 'emitir', modelo: '65', comanda_id: id, status: 'success', response: resp || null }); } catch {}
       toast({ title: authorized ? 'NFC-e autorizada' : 'Emissão enviada', description: authorized ? 'Documento autorizado.' : 'Aguardando autorização.' });
@@ -2327,6 +2550,15 @@ export default function FiscalHubPage(){
           console.log('[FiscalHub][NFC-e consulta] resposta completa:', resp);
           rawStatus = String(resp?.status || resp?.Status || resp?.cStat || '').toLowerCase();
           msg = resp?.xMotivo || resp?.mensagem || resp?.message || msg;
+          const resultado = resp?.resultado || resp?.Resultado || null;
+          if (resultado) {
+            if (resultado.status) {
+              rawStatus = String(resultado.status).toLowerCase();
+            }
+            if (resultado.motivo || resultado.Motivo) {
+              msg = resultado.motivo || resultado.Motivo || msg;
+            }
+          }
           authorized = !!(resp?.autorizada || resp?.Autorizada || resp?.sucesso || resp?.Sucesso || rawStatus === '100');
           pdf = resp?.pdf_url || resp?.PdfUrl || pdf;
           xml = resp?.xml_url || resp?.XmlUrl || xml;
@@ -2362,7 +2594,7 @@ export default function FiscalHubPage(){
 
       let finalStatus = row.nf_status || 'processando';
       if (authorized) finalStatus = 'autorizada';
-      else if (rawStatus && rawStatus.includes && rawStatus.includes('rejeit')) finalStatus = 'rejeitada';
+      else if ((rawStatus && rawStatus.includes && rawStatus.includes('rejeit')) || (typeof msg === 'string' && msg.toLowerCase().includes('rejeicao'))) finalStatus = 'rejeitada';
       else if (rawStatus === 'erro') finalStatus = row.nf_status || 'pendente'; // não degradar para rejeitada sem evidência
       else if (typeof rawStatus === 'string' && rawStatus) finalStatus = rawStatus;
 
@@ -3477,7 +3709,9 @@ export default function FiscalHubPage(){
                 )}
                 {nfePaged.map(r => {
                   const s = String(r.status || 'rascunho').toLowerCase();
-                  const bcls = statusBadge(s === 'emitida' ? 'autorizada' : s);
+                  const sForBadge = (s === 'emitida') ? 'autorizada' : s;
+                  const bcls = statusBadge(sForBadge);
+                  const canEdit = ['rascunho','pendente','rejeitada'].includes(s);
                   const dataRef = r.data_emissao || r.criado_em || r.created_at || null;
                   return (
                     <React.Fragment key={r.id}>
@@ -3490,6 +3724,7 @@ export default function FiscalHubPage(){
                           if (prev.length === 1 && prev[0] === r.id) return prev;
                           return prev;
                         });
+                        toggleDetails(r.id);
                       }}
                     >
                       <td className="px-3 py-2" onClick={(e)=>e.stopPropagation()}>
@@ -3503,34 +3738,26 @@ export default function FiscalHubPage(){
                           >
                             {s}
                           </span>
-                          {(() => {
-                            const ambVal = String(r.ambiente || (getTransmiteNotaConfigFromEmpresa(empresaInfo||{}).ambiente) || 'homologacao');
-                            const clsAmb = ambVal === 'producao' ? 'bg-emerald-500/15 text-emerald-600 border border-emerald-600/30' : 'bg-amber-500/15 text-amber-700 border border-amber-600/30';
-                            const labelAmb = ambVal === 'producao' ? 'Produção' : 'Homologação';
-                            return (
-                              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] ${clsAmb}`}>{labelAmb}</span>
-                            );
-                          })()}
-                          {s==='rascunho' && (
+                          {canEdit && (
                             <>
-                              {false && (
-                                <button
-                                  type="button"
-                                  className="inline-flex items-center justify-center w-5 h-5 rounded hover:bg-surface-2 text-text-secondary hover:text-text-primary"
-                                  onClick={(e)=>{ e.stopPropagation(); handleEditDraft(r); }}
-                                  title="Editar rascunho"
-                                >
-                                  <Pencil className="w-3 h-3" />
-                                </button>
-                              )}
                               <button
                                 type="button"
-                                className="inline-flex items-center justify-center w-5 h-5 rounded hover:bg-surface-2 text-text-secondary hover:text-destructive"
-                                onClick={(e)=>{ e.stopPropagation(); setDeleteDraftId(r.id); }}
-                                title="Excluir rascunho"
+                                className="inline-flex items-center justify-center w-5 h-5 rounded hover:bg-surface-2 text-text-secondary hover:text-text-primary"
+                                onClick={(e)=>{ e.stopPropagation(); handleEditDraft(r); }}
+                                title="Editar rascunho"
                               >
-                                <Trash2 className="w-3 h-3" />
+                                <Pencil className="w-3 h-3" />
                               </button>
+                              {s === 'rascunho' && (
+                                <button
+                                  type="button"
+                                  className="inline-flex items-center justify-center w-5 h-5 rounded hover:bg-surface-2 text-text-secondary hover:text-destructive"
+                                  onClick={(e)=>{ e.stopPropagation(); setDeleteDraftId(r.id); }}
+                                  title="Excluir rascunho"
+                                >
+                                  <Trash2 className="w-3 h-3" />
+                                </button>
+                              )}
                             </>
                           )}
                         </div>
@@ -3556,6 +3783,41 @@ export default function FiscalHubPage(){
                       </td>
                       <td className="px-3 py-2 text-right whitespace-nowrap">R$ {fmtMoney(r.valor_total || 0)}</td>
                     </tr>
+                    {isOpenDetails(r.id) && (
+                      <tr>
+                        <td colSpan={7} className="px-3 py-3 bg-surface-2/40 border-t border-border">
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+                            <div className="space-y-1">
+                              <div><span className="text-text-secondary">Destinatário: </span><span className="text-text-primary">{r.destinatario?.nome || '—'}</span></div>
+                            </div>
+                            <div className="space-y-1">
+                              <div className="flex flex-wrap items-center justify-between gap-4">
+                                <span><span className="text-text-secondary">Número/Série: </span><span className="text-text-primary">{(r.numero ?? '—')}/{(r.serie ?? '—')}</span></span>
+                                <span><span className="text-text-secondary">Total: </span><span className="text-text-primary">R$ {fmtMoney(r.valor_total || 0)}</span></span>
+                              </div>
+                              <div className="flex items-start gap-2">
+                                <span className="text-text-secondary mt-0.5">Chave: </span>
+                                <span className="text-text-primary break-all" title={r.xml_chave || ''}>{r.xml_chave || '—'}</span>
+                              </div>
+                            </div>
+                            <div className="space-y-2">
+                              <div className="flex flex-wrap gap-2">
+                                {r.pdf_url && (
+                                  <a className="inline-flex" href={r.pdf_url} target="_blank" rel="noreferrer">
+                                    <Button size="sm" variant="outline">Abrir DANFE</Button>
+                                  </a>
+                                )}
+                                {r.xml_url && (
+                                  <a className="inline-flex" href={r.xml_url} target="_blank" rel="noreferrer">
+                                    <Button size="sm" variant="outline">Baixar XML</Button>
+                                  </a>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
                     </React.Fragment>
                   );
                 })}
@@ -5257,6 +5519,22 @@ export default function FiscalHubPage(){
               </datalist>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Loading simples durante emissão manual de NF-e/NFC-e */}
+      <Dialog open={manualEmitting} onOpenChange={() => {}}>
+        <DialogContent className="max-w-xs">
+          <DialogHeader>
+            <DialogTitle>Emitindo NF-e...</DialogTitle>
+            <DialogDescription>Aguarde enquanto consultamos o status na SEFAZ.</DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col items-center gap-3 py-3">
+            <Loader2 className="h-6 w-6 animate-spin text-primary" />
+            <span className="text-xs text-text-secondary text-center">
+              Este processo pode levar alguns segundos. Não feche esta tela.
+            </span>
+          </div>
         </DialogContent>
       </Dialog>
 
