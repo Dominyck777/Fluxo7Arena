@@ -3,6 +3,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 // Hint TS in local IDE about Deno global (Supabase provides it at runtime)
 declare const Deno: any;
 import { JSZip } from "https://deno.land/x/jszip@0.11.0/mod.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 // Simple CORS helper
 function corsHeaders() {
@@ -198,6 +199,54 @@ interface ReqBody {
   dados?: unknown;
 }
 
+async function resolveEmpresaFromAuth(req: Request): Promise<{ userId: string; codigo_empresa: string | null; cnpj: string | null } | null> {
+  try {
+    const authHeader = req.headers.get("Authorization") || "";
+    if (!authHeader) return null;
+
+    const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
+    const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") || "";
+    const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+    if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !SERVICE_ROLE) return null;
+
+    const sbJwt = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      auth: { autoRefreshToken: false, persistSession: false },
+      global: { headers: { Authorization: authHeader } },
+    });
+    const { data: userData } = await sbJwt.auth.getUser();
+    const userId = userData?.user?.id || null;
+    if (!userId) return null;
+
+    const admin = createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { autoRefreshToken: false, persistSession: false } });
+
+    let codigo_empresa: string | null = null;
+    try {
+      const { data: colab } = await admin.from("colaboradores").select("codigo_empresa").eq("id", userId).maybeSingle();
+      if (colab?.codigo_empresa != null) codigo_empresa = String(colab.codigo_empresa);
+    } catch {}
+
+    if (!codigo_empresa) {
+      try {
+        const { data: usu } = await admin.from("usuarios").select("codigo_empresa").eq("id", userId).maybeSingle();
+        if (usu?.codigo_empresa != null) codigo_empresa = String(usu.codigo_empresa);
+      } catch {}
+    }
+
+    let cnpj: string | null = null;
+    if (codigo_empresa) {
+      try {
+        const { data: emp } = await admin.from("empresas").select("cnpj").eq("codigo_empresa", codigo_empresa).maybeSingle();
+        const raw = (emp as any)?.cnpj || null;
+        if (raw) cnpj = String(raw).replace(/\D/g, "");
+      } catch {}
+    }
+
+    return { userId, codigo_empresa, cnpj };
+  } catch {
+    return null;
+  }
+}
+
 console.info("[emissor] edge function started");
 
 Deno.serve(async (req: Request) => {
@@ -210,15 +259,46 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ message: "Método não permitido" }, { status: 405 });
     }
 
-    let body: ReqBody | null = null;
+    const reqClone = req.clone();
+    let body: ReqBody | any | null = null;
+    let rawBody = "";
     try {
       body = await req.json();
-    } catch {}
+    } catch {
+      try {
+        rawBody = await reqClone.text();
+        try { body = rawBody ? JSON.parse(rawBody) : null; } catch { body = null; }
+      } catch {
+        body = null;
+      }
+    }
 
-    const acao = body?.acao || "";
+    const acaoRaw = String(body?.acao ?? body?.Acao ?? body?.action ?? "");
+    const acaoNorm = acaoRaw.trim().toLowerCase();
+    const acaoAliases: Record<string, string> = {
+      "testar_conexao": "teste_conexao",
+      "test_connection": "teste_conexao",
+      "test_connection_nfe": "teste_conexao",
+      "test_connection_nfce": "teste_conexao",
+    };
+    const acao = acaoAliases[acaoNorm] || acaoNorm;
+
     const ambiente = (body?.ambiente || "homologacao") as "homologacao" | "producao";
-    const cnpj = String(body?.cnpj || "").replace(/\D/g, "");
+    const cnpjBody = String(body?.cnpj || "").replace(/\D/g, "");
     const dados = body?.dados ?? {};
+
+    const authHeader = req.headers.get("Authorization") || "";
+    if (!authHeader) {
+      return jsonResponse({ message: "Unauthorized" }, { status: 401 });
+    }
+    const resolved = await resolveEmpresaFromAuth(req);
+    if (!resolved) {
+      return jsonResponse({ message: "Unauthorized" }, { status: 401 });
+    }
+    if (!resolved?.cnpj) {
+      return jsonResponse({ message: "Empresa do usuário não resolvida" }, { status: 403 });
+    }
+    const cnpj = resolved.cnpj;
 
     // Rota customizada: exportação de ZIP (não mapeada em rotaPorAcao)
     if (acao === "export_zip") {
@@ -234,7 +314,10 @@ Deno.serve(async (req: Request) => {
     }
 
     if (!acao || !rotaPorAcao[acao]) {
-      return jsonResponse({ message: "Ação inválida" }, { status: 400 });
+      return jsonResponse(
+        { message: "Ação inválida", acaoRecebida: acaoRaw || null },
+        { status: 400 },
+      );
     }
 
     if (!cnpj) {
@@ -253,7 +336,7 @@ Deno.serve(async (req: Request) => {
 
     const url = joinUrl(baseUrl, rotaPorAcao[acao]);
 
-    const safeReq = { ApiKey: "***", Cnpj: cnpj, Dados: dados } as any;
+    const safeReq = { ApiKey: "***", Cnpj: cnpj, Dados: dados, _cnpj_body: cnpjBody || undefined } as any;
     try { console.log("[emissor] request", acao, url, JSON.stringify(safeReq)); } catch {}
 
     const res = await fetch(url, {

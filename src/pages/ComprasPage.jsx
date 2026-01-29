@@ -69,9 +69,15 @@ export default function ComprasPage() {
       const dfrom = dateFrom ? format(dateFrom, 'yyyy-MM-dd') : '';
       const dto = dateTo ? format(dateTo, 'yyyy-MM-dd') : '';
       const zipName = `nfe-entrada-filtrados-${safe(dfrom)}_a_${safe(dto)}-xml.zip`;
+      let extraHeaders = undefined;
+      try {
+        const t = localStorage.getItem('custom-auth-token');
+        if (t && t.trim()) extraHeaders = { Authorization: `Bearer ${t.trim()}` };
+      } catch {}
       const { data, error } = await supabase.functions.invoke('emissor', {
         body: { acao: 'export_zip', ambiente: 'homologacao', cnpj: '', dados: { items, includePdf: false, zipName } },
         responseType: 'arrayBuffer',
+        headers: extraHeaders,
       });
       if (error) throw error;
       const blob = new Blob([data], { type: 'application/zip' });

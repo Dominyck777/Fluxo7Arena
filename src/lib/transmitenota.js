@@ -30,7 +30,12 @@ function deriveAmbienteFromBaseUrl(baseUrl) {
 
 async function edgeInvoke({ acao, ambiente, cnpj, dados }) {
   const payload = { acao, ambiente: ambiente || 'homologacao', cnpj: (cnpj || '').replace(/\D/g, ''), dados: dados || {} };
-  const { data, error } = await supabase.functions.invoke('emissor', { body: payload });
+  let headers = undefined;
+  try {
+    const t = localStorage.getItem('custom-auth-token');
+    if (t && t.trim()) headers = { Authorization: `Bearer ${t.trim()}` };
+  } catch {}
+  const { data, error } = await supabase.functions.invoke('emissor', { body: payload, headers });
   if (error) {
     const e = new Error(error.message || 'Erro na API fiscal');
     e.response = error;

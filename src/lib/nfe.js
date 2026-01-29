@@ -12,47 +12,118 @@ export async function gerarXMLNFe({ comandaId, codigoEmpresa, modelo = '65', ove
   if (!codigoEmpresa) throw new Error('Código da empresa é obrigatório');
 
   // 1. Buscar dados da comanda
-  const { data: comanda, error: comandaError } = await supabase
-    .from('vendas')
-    .select('*')
-    .eq('id', comandaId)
-    .eq('codigo_empresa', codigoEmpresa)
-    .single();
+  let comanda = null;
+  let comandaError = null;
+  try {
+    const r = await supabase
+      .from('comandas')
+      .select('*')
+      .eq('id', comandaId)
+      .eq('codigo_empresa', codigoEmpresa)
+      .single();
+    comanda = r?.data || null;
+    comandaError = r?.error || null;
+  } catch (e) {
+    comandaError = e;
+  }
+  if (comandaError || !comanda) {
+    const r2 = await supabase
+      .from('vendas')
+      .select('*')
+      .eq('id', comandaId)
+      .eq('codigo_empresa', codigoEmpresa)
+      .single();
+    if (r2?.error) throw new Error(`Erro ao buscar comanda: ${r2.error.message}`);
+    comanda = r2?.data || null;
+  }
 
-  if (comandaError) throw new Error(`Erro ao buscar comanda: ${comandaError.message}`);
   if (!comanda) throw new Error('Comanda não encontrada');
 
   // 2. Buscar itens da venda
-  const { data: itens, error: itensError } = await supabase
-    .from('itens_venda')
-    .select(`
-      *,
-      produtos!itens_venda_produto_id_fkey (
-        id,
-        nome,
-        codigo,
-        ncm,
-        cest,
-        cfopInterno,
-        cfopExterno,
-        cstIcmsInterno,
-        cstIcmsExterno,
-        csosnInterno,
-        csosnExterno,
-        aliqIcmsInterno,
-        aliqIcmsExterno,
-        cstPisEntrada,
-        cstPisSaida,
-        aliqPisPercent,
-        aliqCofinsPercent,
-        cstIpi,
-        aliqIpiPercent
-      )
-    `)
-    .eq('comanda_id', comandaId)
-    .eq('codigo_empresa', codigoEmpresa);
-
-  if (itensError) throw new Error(`Erro ao buscar itens: ${itensError.message}`);
+  let itens = [];
+  let itensError = null;
+  try {
+    const { data: itensCmd, error: cmdErr } = await supabase
+      .from('comanda_itens')
+      .select('*')
+      .eq('comanda_id', comandaId)
+      .eq('codigo_empresa', codigoEmpresa);
+    if (cmdErr) throw cmdErr;
+    const baseItens = itensCmd || [];
+    const produtoIds = Array.from(new Set(baseItens.map(i => i.produto_id).filter(Boolean)));
+    let produtosMap = new Map();
+    if (produtoIds.length) {
+      const { data: prods } = await supabase
+        .from('produtos')
+        .select('id, nome, codigo_produto, ncm, cest, cfop_interno, cfop_externo, cst_icms_interno, cst_icms_externo, csosn_interno, csosn_externo, aliquota_icms_interno, aliquota_icms_externo, cst_pis_entrada, cst_pis_saida, aliquota_pis_percent, aliquota_cofins_percent, cst_ipi, aliquota_ipi_percent')
+        .in('id', produtoIds)
+        .eq('codigo_empresa', codigoEmpresa);
+      (prods || []).forEach(p => produtosMap.set(p.id, p));
+    }
+    itens = baseItens.map((it) => {
+      const p = produtosMap.get(it.produto_id) || {};
+      const prod = {
+        id: p.id || it.produto_id,
+        nome: p.nome || it.descricao || 'Produto',
+        codigo: p.codigo_produto || p.codigo || it.produto_id,
+        ncm: p.ncm || '',
+        cest: p.cest || '',
+        cfopInterno: p.cfop_interno || p.cfopInterno,
+        cfopExterno: p.cfop_externo || p.cfopExterno,
+        cstIcmsInterno: p.cst_icms_interno || p.cstIcmsInterno,
+        cstIcmsExterno: p.cst_icms_externo || p.cstIcmsExterno,
+        csosnInterno: p.csosn_interno || p.csosnInterno,
+        csosnExterno: p.csosn_externo || p.csosnExterno,
+        aliqIcmsInterno: p.aliquota_icms_interno ?? p.aliqIcmsInterno,
+        aliqIcmsExterno: p.aliquota_icms_externo ?? p.aliqIcmsExterno,
+        cstPisEntrada: p.cst_pis_entrada || p.cstPisEntrada,
+        cstPisSaida: p.cst_pis_saida || p.cstPisSaida,
+        aliqPisPercent: p.aliquota_pis_percent ?? p.aliqPisPercent,
+        aliqCofinsPercent: p.aliquota_cofins_percent ?? p.aliqCofinsPercent,
+        cstIpi: p.cst_ipi || p.cstIpi,
+        aliqIpiPercent: p.aliquota_ipi_percent ?? p.aliqIpiPercent,
+      };
+      const quantidade = Number(it.quantidade ?? 1) || 1;
+      const preco_unitario = Number(it.preco_unitario ?? it.preco ?? 0) || 0;
+      const desconto = Number(it.desconto ?? 0) || 0;
+      const preco_total = Number(it.preco_total ?? (preco_unitario * quantidade - desconto));
+      return { ...it, quantidade, preco_unitario, desconto, preco_total, produtos: prod };
+    });
+  } catch (e) {
+    itensError = e;
+  }
+  if (itensError) {
+    const { data: itensVenda, error: itensVendaError } = await supabase
+      .from('itens_venda')
+      .select(`
+        *,
+        produtos!itens_venda_produto_id_fkey (
+          id,
+          nome,
+          codigo,
+          ncm,
+          cest,
+          cfopInterno,
+          cfopExterno,
+          cstIcmsInterno,
+          cstIcmsExterno,
+          csosnInterno,
+          csosnExterno,
+          aliqIcmsInterno,
+          aliqIcmsExterno,
+          cstPisEntrada,
+          cstPisSaida,
+          aliqPisPercent,
+          aliqCofinsPercent,
+          cstIpi,
+          aliqIpiPercent
+        )
+      `)
+      .eq('comanda_id', comandaId)
+      .eq('codigo_empresa', codigoEmpresa);
+    if (itensVendaError) throw new Error(`Erro ao buscar itens: ${itensVendaError.message}`);
+    itens = itensVenda || [];
+  }
 
   // 3. Buscar pagamentos com finalizadoras
   const { data: pagamentos, error: pagamentosError } = await supabase
@@ -90,7 +161,24 @@ export async function gerarXMLNFe({ comandaId, codigoEmpresa, modelo = '65', ove
       .eq('id', comanda.cliente_id)
       .eq('codigo_empresa', codigoEmpresa)
       .single();
-    cliente = clienteData;
+    if (clienteData) {
+      const doc = (clienteData.cpf_cnpj || clienteData.cnpj || clienteData.cpf || '').toString();
+      const tipoPessoa = clienteData.tipo_pessoa || (String(doc).replace(/\D/g, '').length === 14 ? 'PJ' : 'PF');
+      cliente = {
+        ...clienteData,
+        tipo_pessoa: tipoPessoa,
+        cpf_cnpj: doc,
+        nome: clienteData.nome || clienteData.razao_social || clienteData.apelido || clienteData.nome_fantasia || '',
+        logradouro: clienteData.logradouro || clienteData.endereco || clienteData.endereco_logradouro || '',
+        numero: clienteData.numero || '0',
+        bairro: clienteData.bairro || '',
+        municipio: clienteData.municipio || clienteData.cidade || '',
+        cidade: clienteData.cidade || clienteData.municipio || '',
+        uf: clienteData.uf || '',
+        cep: clienteData.cep || '',
+        codigo_municipio_ibge: clienteData.codigo_municipio_ibge || clienteData.cidade_ibge || clienteData.codigo_municipio || '',
+      };
+    }
   }
   // 6. Gerar XML
   return gerarXML({
@@ -152,7 +240,15 @@ function gerarXML({ comanda, itens, pagamentos, empresa, cliente, modelo = '65',
   
   // Totalizadores
   const vProd = itens.reduce((sum, item) => sum + (Number(item.preco_total) || 0), 0);
-  const vDesc = Number(comanda.desconto) || 0;
+  const vDesc = (() => {
+    const direct = Number(comanda?.desconto || 0);
+    if (direct) return direct;
+    const tipo = String(comanda?.desconto_tipo || '').toLowerCase();
+    const val = Number(comanda?.desconto_valor || 0);
+    if (tipo === 'percentual' && val > 0) return (vProd * (val / 100));
+    if (tipo === 'fixo' && val > 0) return val;
+    return 0;
+  })();
   const vNF = vProd - vDesc;
 
   // Overrides/derivações para IDE

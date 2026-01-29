@@ -1028,7 +1028,22 @@ export default function HistoricoComandasPage() {
                   onClick={() => openDetail(r.id)}
                 >
                   <td className="px-4 py-2 whitespace-nowrap">{r.mesa_id == null ? 'Balcão' : (r.mesaNumero != null ? `Mesa ${r.mesaNumero}` : '—')}</td>
-                  <td className="px-4 py-2 break-words" title={r.clientesStr || ''}>{r.clientesStr || '—'}</td>
+                  <td className="px-4 py-2 break-words" title={r.clientesStr || ''}>
+                    {(() => {
+                      const raw = String(r.clientesStr || '').trim();
+                      const parts = raw ? raw.split(',').map(s => s.trim()).filter(Boolean) : [];
+                      const first = parts[0] || '—';
+                      const extra = Math.max(0, parts.length - 1);
+                      return (
+                        <>
+                          <span>{first}</span>
+                          {extra > 0 && (
+                            <span className="ml-1 text-[11px] text-warning">+{extra}</span>
+                          )}
+                        </>
+                      );
+                    })()}
+                  </td>
                   <td className="px-4 py-2">
                     <span className={cn("inline-flex items-center text-[11px] font-medium px-2 py-0.5 rounded-full border", statusBadgeClass(r.statusDerived || r.status))}>
                       {statusPt(r.statusDerived || r.status)}
@@ -1074,7 +1089,20 @@ export default function HistoricoComandasPage() {
                 <div className="min-w-0">
                   <div className="text-xs text-text-secondary">{r.mesa_id == null ? 'Balcão' : (r.mesaNumero != null ? `Mesa ${r.mesaNumero}` : 'Comanda')}</div>
                   <div className="font-semibold truncate max-w-[220px]">
-                    {r.clientesStr || 'Sem cliente'}
+                    {(() => {
+                      const raw = String(r.clientesStr || '').trim();
+                      const parts = raw ? raw.split(',').map(s => s.trim()).filter(Boolean) : [];
+                      const first = parts[0] || 'Sem cliente';
+                      const extra = Math.max(0, parts.length - 1);
+                      return (
+                        <>
+                          <span>{first}</span>
+                          {extra > 0 && (
+                            <span className="ml-1 text-[11px] text-warning">+{extra}</span>
+                          )}
+                        </>
+                      );
+                    })()}
                   </div>
                 </div>
                 <div>

@@ -18,9 +18,9 @@ import { useAuth } from '@/contexts/AuthContext';
 import { generateNfcePayloadPreview, generateNfcePayloadFromManual, generateNfePayloadFromManual } from '@/lib/fiscal-mapper';
 import { listarTotaisPorComanda, listMesas, listarClientesPorComandas, listarFinalizadorasPorComandas, listarItensDaComanda, listarClientes, listarFinalizadoras } from '@/lib/store';
 import { enviarNfce, consultarEmissaoNfce, cancelarNfce, consultarPdfNfce, consultarXmlNfce, getTransmiteNotaConfigFromEmpresa, enviarNfe, consultarEmissaoNfe, cancelarNfe, consultarPdfNfe, consultarXmlNfe } from '@/lib/transmitenota';
-import { Settings, Search, Trash2, X, FileText, CheckCircle2, AlertTriangle, Copy, Download, Pencil, Loader2, Filter } from 'lucide-react';
+import { Settings, Search, Trash2, X, FileText, CheckCircle2, AlertTriangle, Copy, Download, Pencil, Loader2, Filter, Info } from 'lucide-react';
 import { gerarXMLNFe, gerarXMLNFeFromData } from '@/lib/nfe';
-import { listProducts } from '@/lib/products';
+import { listProducts, adjustProductStock } from '@/lib/products';
 import cfopList from '@/data/cfop.json';
 import { listSuppliers } from '@/lib/suppliers';
 import ComprasPage from '@/pages/ComprasPage';
@@ -29,62 +29,169 @@ function fmtMoney(v) { const n = Number(v||0); return n.toLocaleString('pt-BR',{
 function fmtDate(iso){ if(!iso) return '—'; try{ const d=new Date(iso); return d.toLocaleString('pt-BR'); }catch{return '—';} }
 function fmtDoc(doc){ const d=String(doc||'').replace(/\D/g,''); if(d.length===11){ return d.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/,'$1.$2.$3-$4'); } if(d.length===14){ return d.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/,'$1.$2.$3/$4-$5'); } return doc||''; }
 const isEmpty = (v) => v === undefined || v === null || String(v).trim() === '';
+const truncateLabel = (text, max) => {
+  const s = String(text || '');
+  if (!max || s.length <= max) return s;
+  return s.slice(0, Math.max(0, max - 1)) + '…';
+};
 
-// Date selector with black/yellow calendar styling (uses Portal to avoid clipping)
-function DateInput({ label, value, onChange }){
-  const [open, setOpen] = React.useState(false);
-  const wrapRef = React.useRef(null);
+let __infoTipSeq = 0;
+
+function InfoTip({ content }) {
+  const idRef = React.useRef(null);
+  if (!idRef.current) {
+    __infoTipSeq += 1;
+    idRef.current = `infotip-${__infoTipSeq}`;
+  }
+  const id = idRef.current;
+
   const btnRef = React.useRef(null);
-  const [pos, setPos] = React.useState({ top: 0, left: 0 });
-  const parseISO = (s) => { try { const [y,m,d] = String(s||'').split('-').map(Number); return y&&m&&d ? new Date(y,m-1,d) : null; } catch { return null; } };
-  const formatYMD = (d) => { const p=(n)=>String(n).padStart(2,'0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`; };
+  const [hovered, setHovered] = React.useState(false);
+  const [pinned, setPinned] = React.useState(false);
+  const open = pinned || hovered;
+  const [pos, setPos] = React.useState({ top: 0, left: 0, placement: 'top' });
+
+  const close = React.useCallback(() => {
+    setPinned(false);
+    setHovered(false);
+  }, []);
+
+  const notifyOpen = React.useCallback(() => {
+    try {
+      window.dispatchEvent(new CustomEvent('infotip-open', { detail: { id } }));
+    } catch {
+      // ignore
+    }
+  }, [id]);
+
   const updatePos = React.useCallback(() => {
     if (!btnRef.current) return;
     const r = btnRef.current.getBoundingClientRect();
-    const width = 280; // largura um pouco menor para caber melhor no mobile
-    const left = Math.min(Math.max(8, r.left), window.innerWidth - width - 8);
-    const top = Math.min(r.bottom + 6, window.innerHeight - 8 - 260); // altura um pouco menor
-    setPos({ top, left });
+    const width = 320; // w-80
+    const height = 120; // estimativa para posicionar (não precisa ser perfeito)
+    const pad = 8;
+
+    const left = Math.min(Math.max(pad, r.left + r.width / 2 - width / 2), window.innerWidth - width - pad);
+    const canTop = r.top >= height + pad;
+    const top = canTop ? (r.top - height - 8) : (r.bottom + 8);
+
+    setPos({
+      left,
+      top: Math.min(Math.max(pad, top), window.innerHeight - height - pad),
+      placement: canTop ? 'top' : 'bottom',
+    });
   }, []);
 
-  React.useEffect(()=>{
+  React.useEffect(() => {
+    const onOtherOpen = (e) => {
+      const otherId = e?.detail?.id;
+      if (otherId && otherId !== id) close();
+    };
+    window.addEventListener('infotip-open', onOtherOpen);
+    return () => window.removeEventListener('infotip-open', onOtherOpen);
+  }, [close, id]);
+
+  React.useEffect(() => {
     if (!open) return;
     updatePos();
-    const onScroll = () => updatePos();
-    const onResize = () => updatePos();
-    window.addEventListener('scroll', onScroll, true);
-    window.addEventListener('resize', onResize);
-    return () => { window.removeEventListener('scroll', onScroll, true); window.removeEventListener('resize', onResize); };
-  },[open, updatePos]);
-  const selected = parseISO(value);
+  }, [open, updatePos]);
+
   return (
     <>
-      <div className="relative" ref={wrapRef}>
-        <button ref={btnRef} type="button" className="h-7 px-2 rounded-md bg-surface border border-border text-xs"
-          onClick={()=>setOpen(v=>!v)}>
+      <button
+        ref={btnRef}
+        type="button"
+        aria-label="Informação"
+        className="inline-flex items-center justify-center w-5 h-5 rounded text-text-secondary hover:text-text-primary hover:bg-surface-2"
+        onMouseEnter={() => {
+          setHovered(true);
+          notifyOpen();
+        }}
+        onMouseLeave={() => {
+          setHovered(false);
+        }}
+        onFocus={() => {
+          setHovered(true);
+          notifyOpen();
+        }}
+        onBlur={() => {
+          setHovered(false);
+        }}
+        onClick={(e) => {
+          e.stopPropagation();
+          setPinned((prev) => {
+            const next = !prev;
+            if (next) notifyOpen();
+            return next;
+          });
+        }}
+      >
+        <Info className="w-4 h-4" strokeWidth={2.25} />
+      </button>
+
+      {open && ReactDOM.createPortal(
+        <div
+          className="fixed z-[9999] pointer-events-none"
+          style={{ left: pos.left, top: pos.top }}
+        >
+          <div className="w-80 p-3 text-xs rounded-md border bg-popover text-popover-foreground shadow-md">
+            <div className="text-text-secondary leading-relaxed">{content}</div>
+          </div>
+        </div>,
+        document.body
+      )}
+    </>
+  );
+}
+
+// Mostra apenas o primeiro cliente e a quantidade extra (para exibir como "Nome +N" com cor diferente)
+const formatClientesResumo = (clientesStr) => {
+  const raw = String(clientesStr || '').trim();
+  if (!raw) return { first: '—', extra: 0 };
+  const parts = raw.split(',').map(s => s.trim()).filter(Boolean);
+  if (parts.length === 0) return { first: '—', extra: 0 };
+  const first = parts[0];
+  const extra = Math.max(0, parts.length - 1);
+  return { first, extra };
+};
+
+// Date selector with black/yellow calendar styling (uses Portal to avoid clipping)
+function DateInput({ label, value, onChange }){
+  const parseISO = (s) => { try { const [y,m,d] = String(s||'').split('-').map(Number); return y&&m&&d ? new Date(y,m-1,d) : null; } catch { return null; } };
+  const formatYMD = (d) => { const p=(n)=>String(n).padStart(2,'0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`; };
+  const selected = parseISO(value);
+  return (
+    <Popover modal={true}>
+      <PopoverTrigger asChild>
+        <button type="button" className="h-7 px-2 rounded-md bg-surface border border-border text-xs">
           {value ? new Date(value+'T00:00:00').toLocaleDateString('pt-BR') : label}
         </button>
-      </div>
-      {open && ReactDOM.createPortal(
-        <div className="fixed z-[1000] p-2 bg-black text-white border border-warning/40 rounded-md shadow-xl" style={{ top: pos.top, left: pos.left, width: 280 }}>
-          <Calendar
-            mode="single"
-            selected={selected || undefined}
-            onSelect={(d)=>{ if (d) { onChange(formatYMD(d)); setOpen(false); } }}
-            showOutsideDays
-            classNames={{
-              caption_label: 'text-[11px] font-medium text-white',
-              head_cell: 'text-[10px] text-warning/80 w-7',
-              day: 'h-7 w-7 p-0 font-normal text-white hover:bg-warning/10 rounded-md',
-              day_selected: 'bg-warning text-black hover:bg-warning focus:bg-warning',
-              day_today: 'border border-warning text-white',
-              day_outside: 'text-white/30',
-              nav_button: 'h-7 w-7 p-0 text-white hover:bg-warning/10 rounded-md',
-              table: 'w-full',
-            }}
-          />
-        </div>, document.body)}
-    </>
+      </PopoverTrigger>
+      <PopoverContent
+        className="w-auto p-2 z-[9999] bg-black text-white border border-warning/40 rounded-md shadow-xl"
+        align="start"
+        side="bottom"
+        sideOffset={6}
+        collisionPadding={8}
+      >
+        <Calendar
+          mode="single"
+          selected={selected || undefined}
+          onSelect={(d)=>{ if (d) { onChange(formatYMD(d)); } }}
+          showOutsideDays
+          classNames={{
+            caption_label: 'text-[11px] font-medium text-white',
+            head_cell: 'text-[10px] text-warning/80 w-7',
+            day: 'h-7 w-7 p-0 font-normal text-white hover:bg-warning/10 rounded-md',
+            day_selected: 'bg-warning text-black hover:bg-warning focus:bg-warning',
+            day_today: 'border border-warning text-white',
+            day_outside: 'text-white/30',
+            nav_button: 'h-7 w-7 p-0 text-white hover:bg-warning/10 rounded-md',
+            table: 'w-full',
+          }}
+        />
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -126,6 +233,12 @@ export default function FiscalHubPage(){
     setSelectedIds(prev => (checked ? Array.from(new Set([...(prev||[]), id])) : (prev||[]).filter(x => x !== id)));
     setSelectedId(prevSel => (checked ? id : (prevSel === id ? null : prevSel)));
   };
+
+  useEffect(() => {
+    setSelectedIds([]);
+    setSelectedId(null);
+    setPage(1);
+  }, [tab]);
 
   const exportNfeCsv = (scope = 'filtered') => {
     const delimiter = ';';
@@ -477,13 +590,18 @@ export default function FiscalHubPage(){
       });
       const totalItens = itens.reduce((s,i)=> s + (Number(i.preco_total)||0), 0);
       const total = totalItens - (parseDec(manualForm.totais?.desconto_geral)||0) + (parseDec(manualForm.totais?.frete)||0) + (parseDec(manualForm.totais?.outras_despesas)||0);
+      const docDigits = String(manualForm?.cpf_cnpj || '').replace(/\D/g, '');
+      const indIe = String(manualForm?.indIEDest || '').trim();
+      const inscricaoEstadualForSave = (docDigits.length !== 14)
+        ? ''
+        : (indIe === '2' ? 'ISENTO' : (indIe === '9' ? '' : (manualForm.inscricao_estadual || '')));
       const dest = {
         tipo_pessoa: manualForm.tipo_pessoa,
         cpf_cnpj: manualForm.cpf_cnpj,
         nome: manualForm.nome,
         email: manualForm.email,
         telefone: manualForm.telefone,
-        inscricao_estadual: manualForm.ie_isento ? 'ISENTO' : manualForm.inscricao_estadual,
+        inscricao_estadual: inscricaoEstadualForSave,
         logradouro: manualForm.logradouro,
         numero: manualForm.numero,
         bairro: manualForm.bairro,
@@ -582,7 +700,7 @@ export default function FiscalHubPage(){
         party_codigo: '',
         tipo_pessoa: 'PJ', cpf_cnpj: '', nome: '', email: '', telefone: '',
         inscricao_estadual: '', ie_isento: false,
-        indIEDest: '9',
+        indIEDest: '',
         logradouro: '', numero: '', bairro: '', cidade: '', uf: '', cep: '', codigo_municipio_ibge: '',
         itens: [ {
           descricao: '', codigo: '', cod_barras: '', ncm: '', cest: '', cfop: '5102', unidade: 'UN',
@@ -618,6 +736,53 @@ export default function FiscalHubPage(){
   const [openDetails, setOpenDetails] = useState([]);
   const isOpenDetails = (id) => openDetails.includes(id);
   const toggleDetails = (id) => setOpenDetails(prev => prev.includes(id) ? prev.filter(x=>x!==id) : [...prev, id]);
+  const [nfceItemsByComanda, setNfceItemsByComanda] = useState({});
+  const [nfceItemsExpanded, setNfceItemsExpanded] = useState({});
+  const [nfceClientsExpanded, setNfceClientsExpanded] = useState({});
+
+  const ensureNfceItemsLoaded = async (comandaId) => {
+    if (!comandaId || !codigoEmpresa) return;
+    setNfceItemsByComanda(prev => {
+      const existing = prev[comandaId];
+      if (existing && (existing.loading || (Array.isArray(existing.itens) && existing.itens.length))) {
+        return prev;
+      }
+      return { ...prev, [comandaId]: { ...(existing || {}), loading: true } };
+    });
+    try {
+      const itens = await listarItensDaComanda({ comandaId, codigoEmpresa });
+      const produtoIds = Array.from(new Set((itens || []).map(it => it.produto_id).filter(Boolean)));
+      let produtosMap = new Map();
+      if (produtoIds.length) {
+        let q = supabase
+          .from('produtos')
+          .select('id, nome, codigo_produto')
+          .in('id', produtoIds);
+        if (codigoEmpresa) q = q.eq('codigo_empresa', codigoEmpresa);
+        const { data: prods } = await q;
+        (prods || []).forEach(p => produtosMap.set(p.id, p));
+      }
+      const enriched = (itens || []).map(it => {
+        const p = produtosMap.get(it.produto_id) || {};
+        const rawCode = p.codigo_produto || p.id;
+        return {
+          ...it,
+          produto_codigo: rawCode != null ? String(rawCode) : '',
+          produto_nome: p.nome || it.descricao || 'Item',
+        };
+      });
+      setNfceItemsByComanda(prev => ({
+        ...prev,
+        [comandaId]: { loading: false, itens: enriched },
+      }));
+    } catch (e) {
+      setNfceItemsByComanda(prev => ({
+        ...prev,
+        [comandaId]: { loading: false, itens: [] },
+      }));
+      toast({ title: 'Falha ao carregar itens da comanda', description: e?.message || String(e), variant: 'destructive' });
+    }
+  };
 
   useEffect(() => {
     const id = setTimeout(() => setDebouncedSearch(search), 300);
@@ -690,7 +855,7 @@ export default function FiscalHubPage(){
     party_codigo: '',
     tipo_pessoa: 'PJ', cpf_cnpj: '', nome: '', email: '', telefone: '',
     inscricao_estadual: '', ie_isento: false,
-    indIEDest: '9',
+    indIEDest: '',
     logradouro: '', numero: '', bairro: '', cidade: '', uf: '', cep: '', codigo_municipio_ibge: '',
     itens: [ {
       descricao: '', codigo: '', cod_barras: '', ncm: '', cest: '', cfop: '5102', unidade: 'UN',
@@ -715,6 +880,7 @@ export default function FiscalHubPage(){
     transporte: { tipo_frete: '9', transportadora: '', placa: '', volumes: '', peso_liquido: '', peso_bruto: '' },
     adicionais: { obs_gerais: '', info_fisco: '', info_cliente: '', referencia_doc: '' },
   });
+  const [manualNatOpTouched, setManualNatOpTouched] = useState(false);
   const [cfopOptions, setCfopOptions] = useState([]);
   const [cfopModalOpen, setCfopModalOpen] = useState(false);
   const [cfopForm, setCfopForm] = useState({ codigo: '', descricao: '' });
@@ -829,7 +995,7 @@ export default function FiscalHubPage(){
         } else {
           base = (nfeSorted||[]);
         }
-        items = base.map(r => ({ tipo: 'nfe', chave: r.xml_chave, numero: r.numero, serie: r.serie }));
+        items = base.map(r => ({ tipo: 'nfe', chave: r.xml_chave, numero: r.numero, serie: r.serie, searchkey: (r.searchkey || r.SearchKey || r.xml_protocolo || null) }));
       }
       items = items.filter(it => (it.chave || (it.numero && it.serie) || it.searchkey));
       if (!items.length) { toast({ title: 'Nada para exportar', description: 'Nenhum documento elegível encontrado.', variant: 'warning' }); return; }
@@ -837,23 +1003,19 @@ export default function FiscalHubPage(){
       const safe = (s) => String(s||'').replace(/[^0-9A-Za-z_-]/g,'');
       const zipName = `${tipo}-${scope}-${safe(from)}_a_${safe(to)}${includePdf?'-xml-pdf':'-xml'}.zip`;
 
-      const fnUrl = `${supabase.supabaseUrl}/functions/v1/emissor`;
-      const resp = await fetch(fnUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${supabase.supabaseKey}`,
-          'apikey': supabase.supabaseKey,
-          'Accept': 'application/zip',
-        },
-        body: JSON.stringify({ acao: 'export_zip', ambiente, cnpj, dados: { items, includePdf, zipName } }),
+      let extraHeaders = undefined;
+      try {
+        const t = localStorage.getItem('custom-auth-token');
+        if (t && t.trim()) extraHeaders = { Authorization: `Bearer ${t.trim()}` };
+      } catch {}
+
+      const { data, error } = await supabase.functions.invoke('emissor', {
+        body: { acao: 'export_zip', ambiente, cnpj, dados: { items, includePdf, zipName } },
+        responseType: 'arrayBuffer',
+        headers: extraHeaders,
       });
-      if (!resp.ok) {
-        const t = await resp.text();
-        throw new Error(t || 'Falha ao gerar ZIP');
-      }
-      const buf = await resp.arrayBuffer();
-      const blob = new Blob([buf], { type: 'application/zip' });
+      if (error) throw new Error(error.message || 'Falha ao gerar ZIP');
+      const blob = new Blob([data], { type: 'application/zip' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -936,15 +1098,41 @@ export default function FiscalHubPage(){
     } catch { return form; }
   };
 
-  // Ajusta baixar_estoque conforme tipo da nota (Saída:true, Entrada:false)
+  // Ajusta baixar_estoque conforme tipo da nota (Entrada sempre false; Saída deixa o usuário decidir)
   useEffect(() => {
-    setManualForm(f => ({ ...f, baixar_estoque: f.tipo_nota !== 'entrada' }));
+    setManualForm(f => {
+      const tipo = String(f?.tipo_nota || '').toLowerCase();
+      if (tipo === 'entrada') {
+        if (f.baixar_estoque) return { ...f, baixar_estoque: false };
+        return f;
+      }
+      if (f.baixar_estoque === undefined || f.baixar_estoque === null) {
+        return { ...f, baixar_estoque: true };
+      }
+      return f;
+    });
   }, [manualForm.tipo_nota]);
 
   // Ajusta o tipo de parte sugerido conforme operação (Saída: cliente, Entrada: fornecedor)
   useEffect(() => {
     setPartyModalTipo(manualForm.tipo_nota === 'entrada' ? 'fornecedor' : 'cliente');
   }, [manualForm.tipo_nota]);
+
+  useEffect(() => {
+    const doc = onlyDigits(manualForm?.cpf_cnpj);
+    if (doc && doc.length === 11) {
+      setManualForm(f => ({
+        ...f,
+        indIEDest: '9',
+        ie_isento: false,
+        inscricao_estadual: '',
+      }));
+    }
+  }, [manualForm.cpf_cnpj]);
+
+  useEffect(() => {
+    if (manualOpen) setManualNatOpTouched(false);
+  }, [manualOpen]);
 
   useEffect(() => {
     setManualForm(f => ({ ...f, cfop_padrao: autoChooseCfop(f.uf) }));
@@ -988,6 +1176,29 @@ export default function FiscalHubPage(){
     })();
     return () => { alive = false; };
   }, [manualOpen, codigoEmpresa]);
+
+  const applyNatOpFromCfop = React.useCallback((force = false) => {
+    const code = String(manualForm.cfop_padrao || '').trim();
+    if (!code) return;
+    const found = (cfopOptions || []).find(c => String(c.codigo) === code);
+    const descr = String(found?.descricao || '').trim();
+    if (!descr) return;
+
+    setManualForm(f => {
+      const currentNat = String(f.natOp || '').trim();
+      const isGeneric = !currentNat || currentNat.toUpperCase() === 'VENDA';
+      if (!force && manualNatOpTouched && !isGeneric) return f;
+      if (!force && !isGeneric) return f;
+      return { ...f, natOp: descr };
+    });
+
+    if (force) setManualNatOpTouched(false);
+  }, [manualForm.cfop_padrao, cfopOptions, manualNatOpTouched]);
+
+  useEffect(() => {
+    if (!manualOpen) return;
+    applyNatOpFromCfop(false);
+  }, [manualOpen, manualForm.cfop_padrao, cfopOptions, applyNatOpFromCfop]);
 
   // Quando CFOP padrão muda, aplica automaticamente aos itens que estavam com o CFOP anterior ou vazio
   const prevCfopRef = useRef(manualForm.cfop_padrao);
@@ -1128,13 +1339,13 @@ export default function FiscalHubPage(){
           Dados.Numero = numeroUsado;
           Dados.Serie = serieUsada;
         }
-        // Ajustar indicador_ie_destinatario conforme doc/IE
+        // Ajustar indicador_ie_destinatario conforme doc/indIEDest
         try {
           const doc = String(formAdj?.cpf_cnpj || '').replace(/\D/g, '');
-          const ieStr = String(formAdj?.inscricao_estadual || '').trim();
           if (doc.length === 14) {
-            if (formAdj?.ie_isento) Dados.indicador_ie_destinatario = 2;
-            else if (ieStr && ieStr.toUpperCase() !== 'ISENTO') Dados.indicador_ie_destinatario = 1;
+            const ind = String(formAdj?.indIEDest || '').trim();
+            if (ind === '1') Dados.indicador_ie_destinatario = 1;
+            else if (ind === '2') Dados.indicador_ie_destinatario = 2;
             else Dados.indicador_ie_destinatario = 9;
           } else {
             Dados.indicador_ie_destinatario = 9;
@@ -1155,8 +1366,11 @@ export default function FiscalHubPage(){
         if (!formAdj?.cep) errs.push('Informe o CEP do destinatário');
         if (!formAdj?.codigo_municipio_ibge) errs.push('Informe o código IBGE do município do destinatário');
         if (doc.length === 14) {
+          const ind = String(formAdj?.indIEDest || '').trim();
+          if (!ind) errs.push('Selecione o Indicador de IE do destinatário');
           const ieStr = String(formAdj?.inscricao_estadual || '').trim();
-          if (!formAdj?.ie_isento && (!ieStr || ieStr.toUpperCase()==='ISENTO')) errs.push('Informe a IE do destinatário ou marque ISENTO');
+          if (ind === '1' && (!ieStr || ieStr.toUpperCase() === 'ISENTO')) errs.push('Informe a IE do destinatário (Indicador=Contribuinte)');
+          if (ind === '2' && ieStr.toUpperCase() !== 'ISENTO') errs.push('Para Indicador=Isento, a IE deve ser ISENTO');
         }
         const itensChk = Array.isArray(formAdj?.itens) ? formAdj.itens : [];
         if (!itensChk.length) errs.push('Adicione ao menos 1 item');
@@ -1389,7 +1603,29 @@ export default function FiscalHubPage(){
       if (draftId && codigoEmpresa) {
         try {
           const newStatus = autorizada || (pdfUrl || xmlUrl) ? 'autorizada' : (/rejeit/i.test(msg) ? 'rejeitada' : (envioErro ? 'processando' : 'pendente'));
-          await supabase.from('notas_fiscais').update({
+
+          const shouldBaixarEstoque = !!(autorizada && formAdj?.baixar_estoque && String(formAdj?.tipo_nota || '').toLowerCase() !== 'entrada');
+          const alreadyBaixado = !!(formAdj?.estoque_baixado);
+
+          if (shouldBaixarEstoque && !alreadyBaixado) {
+            const byProd = new Map();
+            (Array.isArray(formAdj?.itens) ? formAdj.itens : []).forEach((it) => {
+              const pid = it?.produto_id || it?.product_id || '';
+              const qtd = Number(String(it?.quantidade || '0').replace(',', '.')) || 0;
+              if (!pid || !qtd) return;
+              byProd.set(String(pid), (byProd.get(String(pid)) || 0) + qtd);
+            });
+            const entries = Array.from(byProd.entries());
+            if (entries.length) {
+              for (const [pid, qtd] of entries) {
+                await adjustProductStock({ productId: pid, delta: -Number(qtd || 0), codigoEmpresa });
+              }
+            } else {
+              toast({ title: 'Estoque não baixado', description: 'Itens sem vínculo com produto do cadastro (produto_id ausente).', variant: 'warning' });
+            }
+          }
+
+          const patch = {
             status: newStatus,
             xml_chave: (chaveResp || chave || null),
             xml_url: xmlUrl || null,
@@ -1397,7 +1633,12 @@ export default function FiscalHubPage(){
             numero: numeroUsado != null ? Number(numeroUsado) : (form?.nNF ? Number(form.nNF) : null),
             serie: serieUsada != null ? Number(serieUsada) : (form?.serie ? Number(form.serie) : null),
             ambiente: (getTransmiteNotaConfigFromEmpresa(empresaInfo||{}).ambiente || null),
-          }).eq('id', draftId).eq('codigo_empresa', codigoEmpresa);
+          };
+          if (shouldBaixarEstoque && !alreadyBaixado) {
+            patch.draft_data = { ...(formAdj || {}), estoque_baixado: true };
+          }
+
+          await supabase.from('notas_fiscais').update(patch).eq('id', draftId).eq('codigo_empresa', codigoEmpresa);
           await loadNfeRows();
         } catch {}
       }
@@ -1462,6 +1703,7 @@ export default function FiscalHubPage(){
         const cofinsVal = calcValor(cofinsAliq);
         const ipiVal = calcValor(p?.aliquota_ipi_percent);
         return {
+          produto_id: it.produto_id || p?.id || '',
           descricao: it.descricao || p?.nome || 'Item',
           codigo: p?.codigo_produto || '',
           ncm: p?.ncm || '',
@@ -1531,7 +1773,7 @@ export default function FiscalHubPage(){
         party_codigo: '',
         tipo_pessoa: 'PJ', cpf_cnpj: '', nome: '', email: '', telefone: '',
         inscricao_estadual: '', ie_isento: false,
-        indIEDest: '9',
+        indIEDest: '',
         logradouro: '', numero: '', bairro: '', cidade: '', uf: '', cep: '', codigo_municipio_ibge: '',
         itens: [ {
           descricao: '', codigo: '', cod_barras: '', ncm: '', cest: '', cfop: '5102', unidade: 'UN',
@@ -1697,6 +1939,7 @@ export default function FiscalHubPage(){
       const ipiAliq = p?.aliqIpiPercent ?? null;
       a[idx] = {
         ...a[idx],
+        produto_id: p?.id || a[idx]?.produto_id || '',
         descricao: p?.name || a[idx].descricao,
         codigo: p?.code || a[idx].codigo,
         cod_barras: p?.barcode || p?.ean || p?.gtin || p?.bar_code || a[idx].cod_barras,
@@ -1789,7 +2032,16 @@ export default function FiscalHubPage(){
       cep: p.cep || '',
       codigo_municipio_ibge: p.cidade_ibge || p.codigo_municipio_ibge || '',
       inscricao_estadual: p.ie || p.inscricao_estadual || '',
-      ie_isento: p.ie === 'ISENTO' || false,
+      ie_isento: (String(p.ie || p.inscricao_estadual || '').trim().toUpperCase() === 'ISENTO') || false,
+      indIEDest: (() => {
+        const doc = String(p.cnpj || p.cpf || '').replace(/\D/g, '');
+        const ie = String(p.ie || p.inscricao_estadual || '').trim();
+        if (doc.length !== 14) return '9';
+        if (ie && ie.toUpperCase() === 'ISENTO') return '2';
+        if (ie) return '1';
+        // CNPJ sem IE: obrigar o usuário a escolher o indicador
+        return '';
+      })(),
     }));
     setPartyPickerOpen(false);
   };
@@ -2103,9 +2355,13 @@ export default function FiscalHubPage(){
     });
   };
   const onRowClick = (id) => {
-    // Clique na linha: apenas focar a linha e abrir/fechar detalhes
+    // Clique na linha da NFC-e: focar a linha, abrir/fechar detalhes e carregar itens da comanda quando abrir
     setSelectedId(id);
+    const wasOpen = isOpenDetails(id);
     setOpenDetails(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+    if (!wasOpen) {
+      ensureNfceItemsLoaded(id);
+    }
   };
   const selectedRows = useMemo(() => (rows||[]).filter(r => selectedIds.includes(r.id)), [rows, selectedIds]);
   const eligibleEmitIds = useMemo(
@@ -3259,7 +3515,17 @@ export default function FiscalHubPage(){
                       </div>
                       <div className="mt-1 text-xs text-text-secondary truncate" title={r.clientesStr || ''}>
                         <span className="text-text-muted">Cliente(s): </span>
-                        <span className="text-text-primary">{r.clientesStr || '—'}</span>
+                        {(() => {
+                          const { first, extra } = formatClientesResumo(r.clientesStr);
+                          return (
+                            <>
+                              <span className="text-text-primary">{first}</span>
+                              {extra > 0 && (
+                                <span className="ml-1 text-[11px] text-warning">+{extra}</span>
+                              )}
+                            </>
+                          );
+                        })()}
                       </div>
                       <div className="mt-0.5 text-xs text-text-secondary flex items-center justify-between gap-2">
                         <div className="truncate" title={r.finalizadorasStr || ''}>
@@ -3331,7 +3597,19 @@ export default function FiscalHubPage(){
                         <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] ${statusBadge(s)}`}>{s}</span>
                       </td>
                       <td className="hidden px-3 py-2 whitespace-nowrap">{r.mesaNumero ? `Mesa ${r.mesaNumero}` : 'Balcão'}</td>
-                      <td className="px-3 py-2 whitespace-nowrap max-w-[240px] truncate" title={r.clientesStr||''}>{r.clientesStr || '—'}</td>
+                      <td className="px-3 py-2 whitespace-nowrap max-w-[240px] truncate" title={r.clientesStr||''}>
+                        {(() => {
+                          const { first, extra } = formatClientesResumo(r.clientesStr);
+                          return (
+                            <>
+                              <span className="text-text-primary">{truncateLabel(first || '—', 40)}</span>
+                              {extra > 0 && (
+                                <span className="ml-1 text-[11px] text-warning">+{extra}</span>
+                              )}
+                            </>
+                          );
+                        })()}
+                      </td>
                       <td className="px-3 py-2 whitespace-nowrap max-w-[240px] truncate" title={r.finalizadorasStr||''}>{r.finalizadorasStr || '—'}</td>
                       <td className="px-3 py-2 whitespace-nowrap">{(r.nf_numero ?? '—')}/{(r.nf_serie ?? '—')}</td>
                       <td className="px-3 py-2 whitespace-nowrap max-w-[220px] truncate" title={r.xml_chave || ''}>
@@ -3341,33 +3619,133 @@ export default function FiscalHubPage(){
                       </td>
                       <td className="px-3 py-2 text-right whitespace-nowrap">R$ {fmtMoney(r.total || r.total_com_desconto)}</td>
                     </tr>
-                    {isOpenDetails(r.id) && (
-                      <tr>
-                        <td colSpan={10} className="px-3 py-3 bg-surface-2/40 border-t border-border">
-                          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
-                            <div className="space-y-1">
-                              <div><span className="text-text-secondary">Mesa: </span><span className="text-text-primary">{r.mesaNumero ? `Mesa ${r.mesaNumero}` : 'Balcão'}</span></div>
-                              <div><span className="text-text-secondary">Clientes: </span><span className="text-text-primary">{r.clientesStr || '—'}</span></div>
-                              <div><span className="text-text-secondary">Finalizadoras: </span><span className="text-text-primary">{r.finalizadorasStr || '—'}</span></div>
-                            </div>
-                            <div className="space-y-1">
-                              <div><span className="text-text-secondary">Número/Série: </span><span className="text-text-primary">{(r.nf_numero ?? '—')}/{(r.nf_serie ?? '—')}</span></div>
-                              <div className="flex items-center gap-2">
-                                <span className="text-text-secondary">Chave: </span>
-                                <span className="text-text-primary" title={r.xml_chave || ''}>{r.xml_chave || '—'}</span>
+                    {isOpenDetails(r.id) && (() => {
+                      const detail = nfceItemsByComanda[r.id] || { loading: false, itens: [] };
+                      const itens = Array.isArray(detail.itens) ? detail.itens : [];
+                      const expanded = !!nfceItemsExpanded[r.id];
+                      // Quando colapsado, mostra apenas o primeiro item; ao expandir, mostra todos
+                      const visibleItens = expanded ? itens : itens.slice(0, 1);
+                      const clientesRaw = String(r.clientesStr || '').trim();
+                      const { first: firstCliente, extra: extraClientes } = formatClientesResumo(clientesRaw);
+                      const clientesParts = clientesRaw ? clientesRaw.split(',').map(s => s.trim()).filter(Boolean) : [];
+                      const clientesExpanded = !!nfceClientsExpanded[r.id];
+                      const baseCliente = firstCliente || '—';
+                      const collapsedCliente = truncateLabel(baseCliente, 25);
+                      const clientesLabel = clientesExpanded ? (clientesRaw || baseCliente) : collapsedCliente;
+                      const showToggleClientes = clientesRaw && (extraClientes > 0 || baseCliente.length > 25);
+
+                      return (
+                        <tr>
+                          <td colSpan={10} className="px-3 py-3 bg-surface-2/40 border-t border-border">
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+                              <div className="space-y-1 md:col-span-2">
+                                <div className="flex flex-col md:flex-row md:gap-6">
+                                  <div className="space-y-1">
+                                    <div><span className="text-text-secondary">Mesa: </span><span className="text-text-primary">{r.mesaNumero ? `Mesa ${r.mesaNumero}` : 'Balcão'}</span></div>
+                                    <div title={r.finalizadorasStr || ''}>
+                                      <span className="text-text-secondary">Finalizadoras: </span>
+                                      <span className="text-text-primary break-words">{truncateLabel(r.finalizadorasStr || '—', 80)}</span>
+                                    </div>
+                                    <div className="space-y-0.5 w-full" title={clientesRaw || ''}>
+                                      <div className="flex items-start">
+                                        <span className="text-text-secondary min-w-[88px]">Clientes:</span>
+                                        <div className="flex-1 min-w-0">
+                                          {clientesExpanded ? (
+                                            <ul className="space-y-0.5">
+                                              {(clientesParts.length ? clientesParts : [baseCliente]).map((c, idx) => (
+                                                <li key={`${r.id}-cli-${idx}`} className="text-text-primary break-words">{c}</li>
+                                              ))}
+                                            </ul>
+                                          ) : (
+                                            <span className="text-text-primary break-words">{collapsedCliente}</span>
+                                          )}
+                                        </div>
+                                      </div>
+                                      {showToggleClientes && (
+                                        <div className="w-full pl-[88px]">
+                                          <button
+                                            type="button"
+                                            className="text-[11px] text-warning hover:underline"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              setNfceClientsExpanded(prev => ({ ...prev, [r.id]: !clientesExpanded }));
+                                            }}
+                                          >
+                                            {clientesExpanded ? 'Ver menos clientes' : 'Ver todos os clientes'}
+                                          </button>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                  <div className="space-y-1 mt-2 md:mt-0">
+                                    <div><span className="text-text-secondary">Número/Série: </span><span className="text-text-primary">{(r.nf_numero ?? '—')}/{(r.nf_serie ?? '—')}</span></div>
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-text-secondary">Chave: </span>
+                                      <span className="text-text-primary" title={r.xml_chave || ''}>{r.xml_chave || '—'}</span>
+                                    </div>
+                                    <div className="text-text-secondary"><span>Total: </span><span className="text-text-primary">R$ {fmtMoney(r.total || r.total_com_desconto)}</span></div>
+                                  </div>
+                                </div>
                               </div>
-                              <div className="text-text-secondary mt-1">Total: <span className="text-text-primary">R$ {fmtMoney(r.total || r.total_com_desconto)}</span></div>
-                            </div>
-                            <div className="space-y-2">
-                              <div className="flex gap-2">
-                                {r.nf_pdf_url && (<a className="inline-flex" href={r.nf_pdf_url} target="_blank" rel="noreferrer"><Button size="sm" variant="outline">Abrir DANFE</Button></a>)}
-                                {r.nf_xml_url && (<a className="inline-flex" href={r.nf_xml_url} target="_blank" rel="noreferrer"><Button size="sm" variant="outline">Baixar XML</Button></a>)}
+                              <div className="space-y-2">
+                                <div className="space-y-1">
+                                  <div className="text-text-secondary">Produtos</div>
+                                  {detail.loading && (
+                                    <div className="text-text-secondary text-[11px]">Carregando itens...</div>
+                                  )}
+                                  {!detail.loading && (itens.length === 0 ? (
+                                    <div className="text-text-secondary text-[11px]">Nenhum item encontrado para esta comanda.</div>
+                                  ) : (
+                                    <>
+                                      <ul className="space-y-0.5">
+                                        {visibleItens.map((it, idx) => {
+                                          const label = truncateLabel(`${it.produto_codigo ? `${it.produto_codigo} - ` : ''}${it.produto_nome || it.descricao || 'Item'}`, 60);
+                                          const qty = Number(it.quantidade || 0);
+                                          const unit = Number(it.preco_unitario || 0);
+                                          const desc = Number(it.desconto || 0);
+                                          const totalItem = (qty * unit) - desc;
+                                          return (
+                                            <li key={it.id || idx} className="flex items-start justify-between gap-2">
+                                              <div className="min-w-0">
+                                                <div className="text-text-primary text-[11px] truncate" title={label}>{label}</div>
+                                                <div className="text-[11px] text-text-secondary">
+                                                  Qtd: {qty} • Unit: R$ {fmtMoney(unit)}
+                                                </div>
+                                              </div>
+                                              <div className="text-right text-[11px] text-text-primary whitespace-nowrap">
+                                                R$ {fmtMoney(totalItem)}
+                                              </div>
+                                            </li>
+                                          );
+                                        })}
+                                      </ul>
+                                      {itens.length > 1 && (
+                                        <button
+                                          type="button"
+                                          className="text-[11px] text-warning hover:underline"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setNfceItemsExpanded(prev => ({ ...prev, [r.id]: !prev[r.id] }));
+                                          }}
+                                        >
+                                          {expanded ? 'Ver menos itens' : `Ver todos os itens (${itens.length})`}
+                                        </button>
+                                      )}
+                                    </>
+                                  ))}
+                                </div>
+                                {(r.nf_pdf_url || r.nf_xml_url) && (
+                                  <div className="flex gap-2 pt-1">
+                                    {r.nf_pdf_url && (<a className="inline-flex" href={r.nf_pdf_url} target="_blank" rel="noreferrer"><Button size="sm" variant="outline">Abrir DANFE</Button></a>)}
+                                    {r.nf_xml_url && (<a className="inline-flex" href={r.nf_xml_url} target="_blank" rel="noreferrer"><Button size="sm" variant="outline">Baixar XML</Button></a>)}
+                                  </div>
+                                )}
                               </div>
                             </div>
-                          </div>
-                        </td>
-                      </tr>
-                    )}
+                          </td>
+                        </tr>
+                      );
+                    })()}
                     </React.Fragment>
                   );
                 })}
@@ -3988,14 +4366,22 @@ export default function FiscalHubPage(){
           {(() => {
             const txt = (comandaPickerFilter || '').trim().toLowerCase();
             const base = Array.isArray(sorted) ? sorted : [];
-            const filteredComandas = base.filter(c => {
+            const eligibleBase = base.filter(c => {
+              const st = String(c?.nf_status || '').toLowerCase();
+              const hasDoc = !!(c?.xml_chave || c?.nf_xml_url || c?.nf_pdf_url);
+              return st === 'autorizada' || hasDoc;
+            });
+            const filteredComandas = eligibleBase.filter(c => {
               if (!txt) return true;
               const mesaLabel = c.mesaNumero ? `mesa ${c.mesaNumero}` : 'balcao';
               const s = `${mesaLabel} ${(c.clientesStr||'')}`.toLowerCase();
               return s.includes(txt);
             });
             const usedSet = new Set((nfeRows||[])
-              .filter(r => r.origem === 'comanda' && r.comanda_id)
+              .filter(r => r.origem === 'comanda' && r.comanda_id && String(r.status||'') !== 'rascunho')
+              .map(r => r.comanda_id));
+            const draftSet = new Set((nfeRows||[])
+              .filter(r => r.origem === 'comanda' && r.comanda_id && String(r.status||'') === 'rascunho')
               .map(r => r.comanda_id));
             return (
               <>
@@ -4015,6 +4401,7 @@ export default function FiscalHubPage(){
                 <div className="border border-border rounded-md divide-y divide-border">
                   {filteredComandas.slice(0, 100).map(c => {
                     const jaTemNfe = usedSet.has(c.id);
+                    const temRascunho = draftSet.has(c.id);
                     return (
                       <label key={c.id} className="grid grid-cols-12 items-center px-3 py-2 hover:bg-surface-2 cursor-pointer gap-2">
                         <div className="col-span-1 flex items-center justify-center">
@@ -4031,6 +4418,9 @@ export default function FiscalHubPage(){
                           <span>{c.mesaNumero ? `Mesa ${c.mesaNumero}` : 'Balcão'}</span>
                           {jaTemNfe && (
                             <span className="text-[10px] text-amber-500">Já possui NF-e vinculada</span>
+                          )}
+                          {!jaTemNfe && temRascunho && (
+                            <span className="text-[10px] text-text-secondary">Rascunho salvo</span>
                           )}
                         </div>
                         <div className="col-span-2 text-right text-sm">R$ {fmtMoney(c.total || c.total_com_desconto)}</div>
@@ -4257,6 +4647,10 @@ export default function FiscalHubPage(){
                 try {
                   await supabase.from('notas_fiscais').delete().eq('id', deleteDraftId).eq('codigo_empresa', codigoEmpresa);
                   await loadNfeRows();
+                  if (String(currentDraftId || '') === String(deleteDraftId || '')) {
+                    setCurrentDraftId(null);
+                    setManualOpen(false);
+                  }
                   toast({ title: 'Rascunho removido' });
                 } catch (e) {
                   toast({ title: 'Falha ao remover rascunho', description: e.message, variant: 'destructive' });
@@ -4344,11 +4738,35 @@ export default function FiscalHubPage(){
             <TabsContent value="ident">
               <div className="space-y-3">
                 <div className="border border-border rounded-md bg-surface p-3">
-                  <div className="text-sm font-medium mb-2">Identificação da Nota</div>
+                  <div className="flex items-center justify-between gap-3 mb-2">
+                    <div className="text-sm font-medium">Identificação da Nota</div>
+                    <div className="flex items-center gap-2">
+                      <Checkbox
+                        id="manual-baixar-estoque"
+                        checked={!!manualForm.baixar_estoque}
+                        disabled={String(manualForm.tipo_nota || '').toLowerCase() === 'entrada'}
+                        onCheckedChange={(v) => setManualForm(f => ({ ...f, baixar_estoque: !!v }))}
+                      />
+                      <Label
+                        htmlFor="manual-baixar-estoque"
+                        className={String(manualForm.tipo_nota || '').toLowerCase() === 'entrada' ? 'text-text-muted cursor-not-allowed' : 'cursor-pointer'}
+                      >
+                        Baixar estoque
+                      </Label>
+                    </div>
+                  </div>
                   {/* No mobile usamos 2 colunas para reduzir altura; em md+ mantemos 4 colunas como antes */}
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3 items-end">
                     <div className="md:col-span-1 max-w-[210px]">
-                      <Label className={isEmpty(manualForm.modelo) ? 'text-red-400' : ''}>Tipo de Documento</Label>
+                      <div className="flex items-center gap-1">
+                        <Label className={isEmpty(manualForm.modelo) ? 'text-red-400' : ''}>Tipo de Documento</Label>
+                        <InfoTip content={(
+                          <div>
+                            <div><strong>55 - NF-e</strong>: nota fiscal eletrônica (destinatário identificado).</div>
+                            <div className="mt-1"><strong>65 - NFC-e</strong>: nota fiscal do consumidor (venda ao consumidor final).</div>
+                          </div>
+                        )} />
+                      </div>
                       <Select value={manualForm.modelo} onValueChange={(v)=>setManualForm(f=>({...f, modelo: v}))}>
                         <SelectTrigger className={`h-8 text-xs ${isEmpty(manualForm.modelo) ? 'border-red-500 text-red-400' : ''}`}>
                           <SelectValue placeholder="Selecione" />
@@ -4360,7 +4778,10 @@ export default function FiscalHubPage(){
                       </Select>
                     </div>
                     <div className="md:col-span-1 max-w-[190px]">
-                      <Label className={isEmpty(manualForm.tipo_nota) ? 'text-red-400' : ''}>Tipo de Operação</Label>
+                      <div className="flex items-center gap-1">
+                        <Label className={isEmpty(manualForm.tipo_nota) ? 'text-red-400' : ''}>Tipo de Operação</Label>
+                        <InfoTip content="Saída: venda/fornecimento. Entrada: devolução/compra/retorno (quando a nota representa entrada)." />
+                      </div>
                       <Select value={manualForm.tipo_nota} onValueChange={(v)=>setManualForm(f=>({...f, tipo_nota: v}))}>
                         <SelectTrigger className={`h-8 text-xs ${isEmpty(manualForm.tipo_nota) ? 'border-red-500 text-red-400' : ''}`}>
                           <SelectValue placeholder="Selecione" />
@@ -4372,7 +4793,10 @@ export default function FiscalHubPage(){
                       </Select>
                     </div>
                     <div className="md:col-span-1 max-w-[210px]">
-                      <Label className={isEmpty(manualForm.finNFe) ? 'text-red-400' : ''}>Finalidade</Label>
+                      <div className="flex items-center gap-1">
+                        <Label className={isEmpty(manualForm.finNFe) ? 'text-red-400' : ''}>Finalidade</Label>
+                        <InfoTip content="Define o tipo da NF-e: 1-Normal, 2-Complementar, 3-Ajuste, 4-Devolução. Na maioria dos casos é 1." />
+                      </div>
                       <Select value={manualForm.finNFe} onValueChange={(v)=>setManualForm(f=>({...f, finNFe: v}))}>
                         <SelectTrigger className={`h-8 text-xs ${isEmpty(manualForm.finNFe) ? 'border-red-500 text-red-400' : ''}`}>
                           <SelectValue placeholder="Normal" />
@@ -4393,13 +4817,17 @@ export default function FiscalHubPage(){
                         value={manualForm.natOp}
                         onChange={(e)=>{
                           const val = e.target.value;
+                          setManualNatOpTouched(true);
                           setManualForm(f=>({...f, natOp: val}));
                         }}
                         placeholder="Ex.: Venda de mercadoria"
                       />
                     </div>
                     <div className="md:col-span-1 max-w-[200px]">
-                      <Label className={!manualForm.cfop_padrao ? 'text-red-400' : ''}>CFOP</Label>
+                      <div className="flex items-center gap-1">
+                        <Label className={!manualForm.cfop_padrao ? 'text-red-400' : ''}>CFOP</Label>
+                        <InfoTip content="Código Fiscal de Operações e Prestações. Define a natureza da operação (ex.: venda dentro do estado, interestadual, devolução) e impacta a tributação." />
+                      </div>
                       <Select
                         value={manualForm.cfop_padrao || ''}
                         onValueChange={(v)=>{
@@ -4408,6 +4836,7 @@ export default function FiscalHubPage(){
                             setCfopModalOpen(true);
                             return;
                           }
+                          setManualNatOpTouched(false);
                           setManualForm(f=>{
                             const found = (cfopOptions||[]).find(c => String(c.codigo) === String(v));
                             const descr = found?.descricao || '';
@@ -4419,7 +4848,10 @@ export default function FiscalHubPage(){
                           });
                         }}
                       >
-                        <SelectTrigger className={`h-8 text-xs ${!manualForm.cfop_padrao ? 'border-red-500 text-red-400' : ''}`}>
+                        <SelectTrigger
+                          className={`h-8 text-xs ${!manualForm.cfop_padrao ? 'border-red-500 text-red-400' : ''}`}
+                          onClick={() => applyNatOpFromCfop(true)}
+                        >
                           <span className="truncate">
                             {manualForm.cfop_padrao || 'Selecione'}
                           </span>
@@ -4451,7 +4883,10 @@ export default function FiscalHubPage(){
                       <Input className="h-8 text-xs" value={manualForm.nNF} onChange={(e)=>setManualForm(f=>({...f, nNF: e.target.value}))} placeholder="automático" />
                     </div>
                     <div className="md:col-span-1">
-                      <Label className={isEmpty(manualForm.idDest) ? 'text-red-400' : ''}>Destino da Operação</Label>
+                      <div className="flex items-center gap-1">
+                        <Label className={isEmpty(manualForm.idDest) ? 'text-red-400' : ''}>Destino da Operação</Label>
+                        <InfoTip content="Indica se a operação é interna (mesmo estado), interestadual ou exterior. 'Automático' tenta decidir pela UF do destinatário." />
+                      </div>
                       <Select value={manualForm.idDest || 'auto'} onValueChange={(v)=>setManualForm(f=>({...f, idDest: v==='auto' ? '' : v}))}>
                         <SelectTrigger className={`h-8 text-xs ${isEmpty(manualForm.idDest) ? 'border-red-500 text-red-400' : ''}`}><SelectValue placeholder="Automático" /></SelectTrigger>
                         <SelectContent>
@@ -4463,7 +4898,10 @@ export default function FiscalHubPage(){
                       </Select>
                     </div>
                     <div className="md:col-span-1">
-                      <Label className={isEmpty(manualForm.indFinal) ? 'text-red-400' : ''}>Consumidor Final</Label>
+                      <div className="flex items-center gap-1">
+                        <Label className={isEmpty(manualForm.indFinal) ? 'text-red-400' : ''}>Consumidor Final</Label>
+                        <InfoTip content="'Sim' quando o destinatário é o consumidor final (não irá revender)." />
+                      </div>
                       <Select value={manualForm.indFinal ?? ''} onValueChange={(v)=>setManualForm(f=>({...f, indFinal: v}))}>
                         <SelectTrigger className={`h-8 text-xs ${isEmpty(manualForm.indFinal) ? 'border-red-500 text-red-400' : ''}`}><SelectValue placeholder="Selecione" /></SelectTrigger>
                         <SelectContent>
@@ -4473,7 +4911,10 @@ export default function FiscalHubPage(){
                       </Select>
                     </div>
                     <div className="md:col-span-1">
-                      <Label className={isEmpty(manualForm.indPres) ? 'text-red-400' : ''}>Presença do Comprador</Label>
+                      <div className="flex items-center gap-1">
+                        <Label className={isEmpty(manualForm.indPres) ? 'text-red-400' : ''}>Presença do Comprador</Label>
+                        <InfoTip content="Indica se a venda foi presencial ou não. Ex.: 1-presencial, 2-internet, 4-entrega em domicílio, 9-não se aplica." />
+                      </div>
                       <Select value={manualForm.indPres ?? ''} onValueChange={(v)=>setManualForm(f=>({...f, indPres: v}))}>
                         <SelectTrigger className={`h-8 text-xs ${isEmpty(manualForm.indPres) ? 'border-red-500 text-red-400' : ''}`}><SelectValue placeholder="Selecione" /></SelectTrigger>
                         <SelectContent>
@@ -4547,7 +4988,7 @@ export default function FiscalHubPage(){
                       </Select>
                     </div>
                     <div className="col-span-2 md:col-span-1">
-                      <Label className={isEmpty(manualForm.cpf_cnpj) ? 'text-red-400' : ''}>{manualForm.tipo_pessoa==='PF' ? 'CPF' : 'CNPJ'}</Label>
+                      <Label className={isEmpty(manualForm.cpf_cnpj) ? 'text-red-400' : ''}>CPF/CNPJ</Label>
                       <Input className={isEmpty(manualForm.cpf_cnpj) ? 'border-red-500 text-red-400 placeholder:text-red-400' : ''} value={manualForm.cpf_cnpj} onChange={(e)=>setManualForm(f=>({...f, cpf_cnpj: e.target.value}))} />
                     </div>
                     <div>
@@ -4556,8 +4997,23 @@ export default function FiscalHubPage(){
                     </div>
                     <div>
                       <Label className={isEmpty(manualForm.indIEDest) ? 'text-red-400' : ''}>Indicador de IE</Label>
-                      <Select value={manualForm.indIEDest || '9'} onValueChange={(v)=>setManualForm(f=>({...f, indIEDest: v, ie_isento: v==='2', inscricao_estadual: v==='2' ? 'ISENTO' : f.inscricao_estadual}))}>
-                        <SelectTrigger className={isEmpty(manualForm.indIEDest) ? 'border-red-500 text-red-400' : ''}><SelectValue /></SelectTrigger>
+                      <Select
+                        value={manualForm.indIEDest || ''}
+                        disabled={onlyDigits(manualForm.cpf_cnpj).length === 11}
+                        onValueChange={(v)=>setManualForm(f=>{
+                          const prevIE = String(f.inscricao_estadual || '').trim();
+                          if (v === '2') return { ...f, indIEDest: v, ie_isento: true, inscricao_estadual: 'ISENTO' };
+                          if (v === '9') return { ...f, indIEDest: v, ie_isento: false, inscricao_estadual: '' };
+                          // contribuinte
+                          return {
+                            ...f,
+                            indIEDest: v,
+                            ie_isento: false,
+                            inscricao_estadual: (prevIE.toUpperCase() === 'ISENTO') ? '' : prevIE,
+                          };
+                        })}
+                      >
+                        <SelectTrigger className={isEmpty(manualForm.indIEDest) ? 'border-red-500 text-red-400' : ''}><SelectValue placeholder="Selecione" /></SelectTrigger>
                         <SelectContent>
                           <SelectItem value="1">Contribuinte</SelectItem>
                           <SelectItem value="2">Isento</SelectItem>
@@ -4566,11 +5022,23 @@ export default function FiscalHubPage(){
                       </Select>
                     </div>
                     <div className="col-span-2 md:col-span-1">
-                      <Label>Inscrição Estadual</Label>
-                      <div className="flex items-center gap-2">
-                        <Input value={manualForm.ie_isento ? 'ISENTO' : (manualForm.inscricao_estadual||'')} onChange={(e)=>setManualForm(f=>({...f, inscricao_estadual: e.target.value, ie_isento: String(e.target.value||'').toUpperCase()==='ISENTO'}))} />
-                        <Button type="button" size="sm" variant={manualForm.ie_isento ? 'default' : 'outline'} onClick={()=>setManualForm(f=>({...f, ie_isento: true, inscricao_estadual: 'ISENTO', indIEDest: '2'}))}>ISENTO</Button>
-                      </div>
+                      <Label className={(String(manualForm.indIEDest||'') === '1' && isEmpty(manualForm.inscricao_estadual)) ? 'text-red-400' : ''}>Inscrição Estadual</Label>
+                      <Input
+                        disabled={onlyDigits(manualForm.cpf_cnpj).length === 11 || String(manualForm.indIEDest||'') === '9' || String(manualForm.indIEDest||'') === '2'}
+                        className={(String(manualForm.indIEDest||'') === '1' && isEmpty(manualForm.inscricao_estadual)) ? 'border-red-500 text-red-400 placeholder:text-red-400' : ''}
+                        value={String(manualForm.indIEDest||'') === '2' ? 'ISENTO' : (manualForm.inscricao_estadual||'')}
+                        placeholder={String(manualForm.indIEDest||'') === '9' ? 'Não se aplica' : (String(manualForm.indIEDest||'') === '1' ? 'Obrigatório' : 'Selecione o indicador')}
+                        onChange={(e)=>{
+                          const raw = e.target.value;
+                          setManualForm(f=>{
+                            const v = String(raw || '').trim();
+                            if (v.toUpperCase() === 'ISENTO') {
+                              return { ...f, indIEDest: '2', ie_isento: true, inscricao_estadual: 'ISENTO' };
+                            }
+                            return { ...f, inscricao_estadual: raw, ie_isento: false };
+                          });
+                        }}
+                      />
                     </div>
                     <div>
                       <Label className={isEmpty(manualForm.cep) ? 'text-red-400' : ''}>CEP</Label>
@@ -5299,7 +5767,19 @@ export default function FiscalHubPage(){
                 // dest checks: required for NF-e; optional for NFC-e (if provided, must be complete)
                 const destHasAny = !!(manualForm?.nome || manualForm?.cpf_cnpj);
                 const destRequired = isNFe;
-                const destFilled = !!(manualForm?.cpf_cnpj && manualForm?.nome && manualForm?.indIEDest && manualForm?.logradouro && manualForm?.numero && manualForm?.bairro && manualForm?.cidade && manualForm?.uf && manualForm?.cep);
+                const docDigits = String(manualForm?.cpf_cnpj || '').replace(/\D/g, '');
+                const needsIEIndicator = docDigits.length === 14;
+                const destFilled = !!(
+                  manualForm?.cpf_cnpj &&
+                  manualForm?.nome &&
+                  (!needsIEIndicator || manualForm?.indIEDest) &&
+                  manualForm?.logradouro &&
+                  manualForm?.numero &&
+                  manualForm?.bairro &&
+                  manualForm?.cidade &&
+                  manualForm?.uf &&
+                  manualForm?.cep
+                );
                 const destOk = destRequired ? destFilled : (destHasAny ? destFilled : true);
 
                 // items + product fields
@@ -5444,6 +5924,11 @@ export default function FiscalHubPage(){
                         });
                         const totalItens = itens.reduce((s,i)=> s + (Number(i.preco_total)||0), 0);
                         const total = totalItens - (parseDec(manualForm.totais.desconto_geral)||0) + (parseDec(manualForm.totais.frete)||0) + (parseDec(manualForm.totais.outras_despesas)||0);
+                        const docDigits = String(manualForm?.cpf_cnpj || '').replace(/\D/g, '');
+                        const indIe = String(manualForm?.indIEDest || '').trim();
+                        const inscricaoEstadualForSave = (docDigits.length !== 14)
+                          ? ''
+                          : (indIe === '2' ? 'ISENTO' : (indIe === '9' ? '' : (manualForm.inscricao_estadual || '')));
                         await supabase.from('notas_fiscais').insert({
                           codigo_empresa: codigoEmpresa,
                           origem: 'manual',
@@ -5461,7 +5946,7 @@ export default function FiscalHubPage(){
                             nome: manualForm.nome,
                             email: manualForm.email,
                             telefone: manualForm.telefone,
-                            inscricao_estadual: manualForm.ie_isento ? 'ISENTO' : manualForm.inscricao_estadual,
+                            inscricao_estadual: inscricaoEstadualForSave,
                             logradouro: manualForm.logradouro,
                             numero: manualForm.numero,
                             bairro: manualForm.bairro,
