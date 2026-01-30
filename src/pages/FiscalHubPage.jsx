@@ -707,7 +707,7 @@ export default function FiscalHubPage(){
           quantidade: '1', preco_unitario: '0.00', desconto_valor: '0.00', desconto_percent: '', acrescimos_valor: '0.00', frete_valor: '0.00', seguro_valor: '0.00', obs: '',
           dest_icms: false, dest_icms_info: false, benef_fiscal: false,
           impostos: {
-            origem: '',
+            origem: '0',
             icms: { cst: '', csosn: '', base: '', aliquota: '', valor: '', desonerado_valor:'', desoneracao_motivo:'', operacao_valor:'', aliq_diferimento:'', valor_diferido:'', reducao_percent:'', reducao_motivo:'', ad_rem:'', ad_rem_retencao:'', monofasico_bc:'', monofasico_valor:'', mono_retencao_bc:'', mono_retencao_valor:'', mono_cobrado_ant_bc:'', mono_cobrado_ant_valor:'', proprio_devido_valor:'' },
             icmsst: { base: '', aliquota: '', valor: '' },
             fcp: { base:'', aliquota:'', valor:'' },
@@ -722,7 +722,7 @@ export default function FiscalHubPage(){
         } ],
         totais: { desconto_geral: '0.00', frete: '0.00', outras_despesas: '0.00' },
         pagamentos: [ { tipo: 'Dinheiro', bandeira: '', cnpj_credenciadora: '', autorizacao: '', valor: '', parcelas: '', troco: '' } ],
-        transporte: { tipo_frete: '9', transportadora: '', placa: '', volumes: '', peso_liquido: '', peso_bruto: '' },
+        transporte: { tipo_frete: '9', transportadora: '', placa: '', uf_placa: '', volumes: '', peso_liquido: '', peso_bruto: '' },
         adicionais: { obs_gerais: '', info_fisco: '', info_cliente: '', referencia_doc: '' },
       });
       setManualXml('');
@@ -862,7 +862,7 @@ export default function FiscalHubPage(){
       quantidade: '1', preco_unitario: '0.00', desconto_valor: '0.00', desconto_percent: '', acrescimos_valor: '0.00', frete_valor: '0.00', seguro_valor: '0.00', obs: '',
       dest_icms: false, dest_icms_info: false, benef_fiscal: false,
       impostos: {
-        origem: '',
+        origem: '0',
         icms: { cst: '', csosn: '', base: '', aliquota: '', valor: '', desonerado_valor:'', desoneracao_motivo:'', operacao_valor:'', aliq_diferimento:'', valor_diferido:'', reducao_percent:'', reducao_motivo:'', ad_rem:'', ad_rem_retencao:'', monofasico_bc:'', monofasico_valor:'', mono_retencao_bc:'', mono_retencao_valor:'', mono_cobrado_ant_bc:'', mono_cobrado_ant_valor:'', proprio_devido_valor:'' },
         icmsst: { base: '', aliquota: '', valor: '' },
         fcp: { base:'', aliquota:'', valor:'' },
@@ -877,7 +877,7 @@ export default function FiscalHubPage(){
     } ],
     totais: { desconto_geral: '0.00', frete: '0.00', outras_despesas: '0.00' },
     pagamentos: [ { tipo: 'Dinheiro', bandeira: '', cnpj_credenciadora: '', autorizacao: '', valor: '', parcelas: '', troco: '' } ],
-    transporte: { tipo_frete: '9', transportadora: '', placa: '', volumes: '', peso_liquido: '', peso_bruto: '' },
+    transporte: { tipo_frete: '9', transportadora: '', placa: '', uf_placa: '', volumes: '', peso_liquido: '', peso_bruto: '' },
     adicionais: { obs_gerais: '', info_fisco: '', info_cliente: '', referencia_doc: '' },
   });
   const [manualNatOpTouched, setManualNatOpTouched] = useState(false);
@@ -899,6 +899,11 @@ export default function FiscalHubPage(){
     const pagamentos = f.pagamentos || [];
     const isNFCe = String(f.modelo) === '65';
 
+    const isCardName = (nm) => {
+      const t = String(nm || '').toLowerCase();
+      return t.includes('cart') || t.includes('crédit') || t.includes('credit') || t.includes('déb') || t.includes('deb');
+    };
+
     const identOkBasic = !!(f.modelo && f.serie && f.natOp && f.data_emissao && f.tipo_nota && f.finNFe);
     const produtosTemItens = Array.isArray(itens) && itens.length > 0;
     const produtosImpostosOk = produtosTemItens && itens.every(it => {
@@ -909,21 +914,41 @@ export default function FiscalHubPage(){
       return okICMS && okPIS && okCOFINS;
     });
     const produtosOkBasic = produtosTemItens && produtosImpostosOk;
-    const transpOkBasic = !!(f.transporte && f.transporte.tipo_frete);
+    const tipoFrete = String(f?.transporte?.tipo_frete ?? '9');
+    const transpOkBasic = (() => {
+      if (tipoFrete === '9') return true;
+      const t = f?.transporte || {};
+      const hasSome = !!(String(t.transportadora || '').trim() || String(t.placa || '').trim());
+      if (!hasSome) return false;
+      if (String(t.placa || '').trim()) {
+        return !!String(t.uf_placa || '').trim();
+      }
+      return true;
+    })();
+
+    const totalProdutosForPay = itens.reduce((s,it)=>{
+      const pu = parseDec(it.preco_unitario)||0; const q = parseDec(it.quantidade)||1; const bruto = pu*q;
+      const descP = parseDec(it.desconto_percent)||0; const descV = parseDec(it.desconto_valor)||0; const desconto = descP ? (bruto*descP/100) : descV; const acres = parseDec(it.acrescimos_valor)||0;
+      const totalItem = Math.max(0, bruto - desconto + acres); return s + totalItem;
+    },0);
+    const descontoGeralForPay = parseDec(f.totais?.desconto_geral)||0;
+    const freteForPay = parseDec(f.totais?.frete)||0;
+    const outrasForPay = parseDec(f.totais?.outras_despesas)||0;
+    const totalNotaForPay = totalProdutosForPay - descontoGeralForPay + freteForPay + outrasForPay;
+    const totalPagoForPay = pagamentos.reduce((s,p)=> s + (parseDec(p.valor)||0), 0);
+    const formasOk = pagamentos.length > 0 && pagamentos.every(p => !!String(p.finalizadora_id || '').trim());
+    const bandeirasOk = pagamentos.every(p => {
+      const name = p.tipo || '';
+      const isCard = isCardName(name);
+      return !isCard || !!String(p.bandeira || '').trim();
+    });
+    const valoresOk = totalNotaForPay <= 0 ? true : pagamentos.every(p => (parseDec(p.valor) || 0) > 0);
 
     let pagamentosOkBasic = true;
     if (isNFCe) {
-      const totalProdutos = itens.reduce((s,it)=>{
-        const pu = parseDec(it.preco_unitario)||0; const q = parseDec(it.quantidade)||1; const bruto = pu*q;
-        const descP = parseDec(it.desconto_percent)||0; const descV = parseDec(it.desconto_valor)||0; const desconto = descP ? (bruto*descP/100) : descV; const acres = parseDec(it.acrescimos_valor)||0;
-        const totalItem = Math.max(0, bruto - desconto + acres); return s + totalItem;
-      },0);
-      const descontoGeral = parseDec(f.totais?.desconto_geral)||0;
-      const frete = parseDec(f.totais?.frete)||0;
-      const outras = parseDec(f.totais?.outras_despesas)||0;
-      const totalNota = totalProdutos - descontoGeral + frete + outras;
-      const totalPago = pagamentos.reduce((s,p)=> s + (parseDec(p.valor)||0), 0);
-      pagamentosOkBasic = pagamentos.length > 0 && (totalPago + 0.009) >= totalNota;
+      pagamentosOkBasic = pagamentos.length > 0 && (totalPagoForPay + 0.009) >= totalNotaForPay && formasOk && bandeirasOk && valoresOk;
+    } else {
+      pagamentosOkBasic = pagamentos.length > 0 && formasOk && bandeirasOk && valoresOk;
     }
 
     return {
@@ -1033,7 +1058,7 @@ export default function FiscalHubPage(){
   };
 
   const onlyDigits = (v) => String(v||'').replace(/\D/g, '');
-  const parseDec = (v) => {
+  function parseDec(v) {
     if (v == null) return 0;
     let s = String(v).trim();
     if (!s) return 0;
@@ -1051,7 +1076,7 @@ export default function FiscalHubPage(){
     }
     const n = Number(s);
     return Number.isFinite(n) ? n : 0;
-  };
+  }
 
   const spreadGlobalDiscountOnForm = (form) => {
     try {
@@ -1117,6 +1142,36 @@ export default function FiscalHubPage(){
   useEffect(() => {
     setPartyModalTipo(manualForm.tipo_nota === 'entrada' ? 'fornecedor' : 'cliente');
   }, [manualForm.tipo_nota]);
+
+  useEffect(() => {
+    const tipoFrete = String(manualForm?.transporte?.tipo_frete ?? '9');
+    if (tipoFrete !== '9') return;
+    setManualForm(f => {
+      const t = f?.transporte || {};
+      const hasAny = !!(
+        t.transportadora ||
+        t.placa ||
+        t.uf_placa ||
+        t.volumes ||
+        t.peso_bruto ||
+        t.peso_liquido
+      );
+      if (!hasAny) return f;
+      return {
+        ...f,
+        transporte: {
+          ...t,
+          tipo_frete: '9',
+          transportadora: '',
+          placa: '',
+          uf_placa: '',
+          volumes: '',
+          peso_bruto: '',
+          peso_liquido: '',
+        },
+      };
+    });
+  }, [manualForm?.transporte?.tipo_frete]);
 
   useEffect(() => {
     const doc = onlyDigits(manualForm?.cpf_cnpj);
@@ -1717,7 +1772,7 @@ export default function FiscalHubPage(){
           acrescimos_valor: '0.00',
           obs: '',
           impostos: {
-            origem: '',
+            origem: '0',
             icms: { cst: p?.cst_icms_interno || '', csosn: p?.csosn_interno || '', base: autoBaseStr, aliquota: p?.aliquota_icms_interno != null ? String(p.aliquota_icms_interno) : '', valor: icmsVal },
             icmsst: { base: '', aliquota: '', valor: '' },
             pis: { cst: pisCst, aliquota: pisAliq != null ? String(pisAliq) : '', valor: pisVal },
@@ -1780,7 +1835,7 @@ export default function FiscalHubPage(){
           quantidade: '1', preco_unitario: '0.00', desconto_valor: '0.00', desconto_percent: '', acrescimos_valor: '0.00', frete_valor: '0.00', seguro_valor: '0.00', obs: '',
           dest_icms: false, dest_icms_info: false, benef_fiscal: false,
           impostos: {
-            origem: '',
+            origem: '0',
             icms: { cst: '', csosn: '', base: '', aliquota: '', valor: '', desonerado_valor:'', desoneracao_motivo:'', operacao_valor:'', aliq_diferimento:'', valor_diferido:'', reducao_percent:'', reducao_motivo:'', ad_rem:'', ad_rem_retencao:'', monofasico_bc:'', monofasico_valor:'', mono_retencao_bc:'', mono_retencao_valor:'', mono_cobrado_ant_bc:'', mono_cobrado_ant_valor:'', proprio_devido_valor:'' },
             icmsst: { base: '', aliquota: '', valor: '' },
             fcp: { base:'', aliquota:'', valor:'' },
@@ -2049,7 +2104,7 @@ export default function FiscalHubPage(){
   useEffect(() => {
     let alive = true;
     async function loadFins(){
-      if (!manualOpen || manualStep !== 'pagamentos') return;
+      if (!manualOpen) return;
       try {
         const fins = await listarFinalizadoras({ somenteAtivas: true, codigoEmpresa });
         if (alive) setPayMethods(Array.isArray(fins) ? fins : []);
@@ -2058,6 +2113,24 @@ export default function FiscalHubPage(){
     loadFins();
     return () => { alive = false; };
   }, [manualOpen, manualStep, codigoEmpresa]);
+
+  useEffect(() => {
+    if (!manualOpen) return;
+    if (!Array.isArray(payMethods) || payMethods.length === 0) return;
+    setManualForm(f => {
+      const arr = Array.isArray(f.pagamentos) ? [...f.pagamentos] : [];
+      if (!arr.length) return f;
+      if (String(arr[0]?.finalizadora_id || '').trim()) return f;
+      const first = payMethods[0];
+      if (!first?.id) return f;
+      arr[0] = {
+        ...(arr[0] || {}),
+        finalizadora_id: String(first.id),
+        tipo: first.nome || (arr[0]?.tipo || ''),
+      };
+      return { ...f, pagamentos: arr };
+    });
+  }, [manualOpen, payMethods]);
   const isEmail = (s) => /.+@.+\..+/.test(String(s||''));
   const lookupCep = async (cepRaw) => {
     const cep = onlyDigits(cepRaw);
@@ -5085,7 +5158,7 @@ export default function FiscalHubPage(){
                       const newItem = {
                         descricao: '', codigo: '', cod_barras: '', ncm: '', cest: '', cfop: f.cfop_padrao || '5102', unidade: 'UN',
                         quantidade: '1', preco_unitario: '0,00', desconto_valor: '0,00', desconto_percent: '', acrescimos_valor: '0,00', frete_valor: '0,00', seguro_valor: '0,00', obs: '',
-                        impostos: { origem: '', icms: { cst:'', csosn:'', base:'', aliquota:'', valor:'' }, pis: { cst:'', aliquota:'', valor:'' }, cofins: { cst:'', aliquota:'', valor:'' }, ipi: { cst:'', aliquota:'', valor:'', tipo_calculo:'nenhum', valor_unit:'' } }
+                        impostos: { origem: '0', icms: { cst:'', csosn:'', base:'', aliquota:'', valor:'' }, pis: { cst:'', aliquota:'', valor:'' }, cofins: { cst:'', aliquota:'', valor:'' }, ipi: { cst:'', aliquota:'', valor:'', tipo_calculo:'nenhum', valor_unit:'' } }
                       };
                       return { ...f, itens: [...f.itens, newItem] };
                     });
@@ -5111,10 +5184,10 @@ export default function FiscalHubPage(){
                         const desconto = descP ? (bruto*descP/100) : descV; const totalItem = Math.max(0, bruto - desconto + (parseDec(it.acrescimos_valor)||0));
                         return (
                           <React.Fragment key={idx}>
-                            <tr className="border-t border-border/60">
-                              <td className="px-2 py-1">
+                            <tr className={`border-t border-border/60 ${expandedItem===idx ? 'bg-surface-2/30' : ''}`}>
+                              <td className={`px-2 py-1 ${expandedItem===idx ? 'border-l-4 border-warning/70' : ''}`}>
                                 <div className="flex items-center gap-1">
-                                  <Input className="h-7 text-xs flex-1" value={it.descricao} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx] = { ...a[idx], descricao: e.target.value }; return { ...f, itens: a }; })} placeholder="Descrição" />
+                                  <Input className={`h-7 text-xs flex-1 ${isEmpty(it.descricao) ? 'border-red-500 text-red-400 placeholder:text-red-400' : ''}`} value={it.descricao} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx] = { ...a[idx], descricao: e.target.value }; return { ...f, itens: a }; })} placeholder="Descrição" />
                                   <Button
                                     size="icon"
                                     variant="outline"
@@ -5129,13 +5202,34 @@ export default function FiscalHubPage(){
                               </td>
                               <td className="px-2 py-1 text-center">
                                 <div className="w-[80px] mx-auto">
-                                  <Input className="h-7 text-right text-xs" value={it.quantidade} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx] = { ...a[idx], quantidade: e.target.value }; return { ...f, itens: a }; })} />
+                                  <Input
+                                    className={`h-7 text-right text-xs ${!(parseDec(it.quantidade) > 0) ? 'border-red-500 text-red-400 placeholder:text-red-400' : ''}`}
+                                    value={it.quantidade}
+                                    onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx] = { ...a[idx], quantidade: e.target.value }; return { ...f, itens: a }; })}
+                                    onKeyDown={(e) => {
+                                      e.stopPropagation();
+                                      const allowed = ['Backspace','Delete','ArrowLeft','ArrowRight','Tab'];
+                                      if (allowed.includes(e.key)) return;
+                                      if (e.key === ',' || e.key === '.') return;
+                                      if (!/^[0-9]$/.test(e.key)) {
+                                        e.preventDefault();
+                                      }
+                                    }}
+                                    onBeforeInput={(e) => {
+                                      const data = e.data ?? '';
+                                      if (data && !/^[0-9.,]+$/.test(data)) e.preventDefault();
+                                    }}
+                                    onPaste={(e) => {
+                                      const txt = e.clipboardData?.getData('text') ?? '';
+                                      if (txt && !/^[0-9.,\s]+$/.test(txt)) e.preventDefault();
+                                    }}
+                                  />
                                 </div>
                               </td>
                               <td className="px-2 py-1 text-center">
                                 <div className="w-[110px] mx-auto">
                                   <Input
-                                    className="h-7 text-right text-xs"
+                                    className={`h-7 text-right text-xs ${!(parseDec(it.preco_unitario) > 0) ? 'border-red-500 text-red-400 placeholder:text-red-400' : ''}`}
                                     value={it.preco_unitario}
                                     onChange={(e)=>setManualForm(f=>{
                                       const a = [...f.itens];
@@ -5192,82 +5286,302 @@ export default function FiscalHubPage(){
                                     const ic = imp.icms || {};
                                     const pis = imp.pis || {};
                                     const cof = imp.cofins || {};
-                                    const ok = imp.origem && (ic.cst || ic.csosn) &&
-                                      (pis.aliquota !== undefined && String(pis.aliquota).trim() !== '') &&
-                                      (cof.aliquota !== undefined && String(cof.aliquota).trim() !== '');
-                                    return !ok ? <span className="w-1.5 h-1.5 rounded-full bg-red-500" /> : null;
+                                    const missing =
+                                      isEmpty(it.descricao) ||
+                                      !(parseDec(it.quantidade) > 0) ||
+                                      !(parseDec(it.preco_unitario) > 0) ||
+                                      isEmpty(it.ncm) ||
+                                      isEmpty(it.cfop) ||
+                                      isEmpty(imp.origem) ||
+                                      (isEmpty(ic.cst) && isEmpty(ic.csosn)) ||
+                                      isEmpty(pis.aliquota) ||
+                                      isEmpty(cof.aliquota);
+                                    return missing ? <span className="w-1.5 h-1.5 rounded-full bg-red-500" /> : null;
                                   })()}
                                   <Button size="sm" variant="outline" className="h-7" onClick={()=>setExpandedItem(expandedItem===idx?null:idx)}>{expandedItem===idx?'Ocultar':'Detalhes'}</Button>
-                                  <Button size="sm" variant="outline" className="h-7" onClick={()=>{
-                                    setManualForm(f=>{ const a=[...f.itens]; a.splice(idx,1); return { ...f, itens: a }; });
-                                  }}>Remover</Button>
+                                  <Button
+                                    size="icon"
+                                    variant="outline"
+                                    className="h-7 w-7 transition-colors hover:border-red-500/70 hover:bg-red-500/10 hover:text-red-500"
+                                    title="Remover item"
+                                    aria-label="Remover item"
+                                    onClick={()=>{
+                                      setManualForm(f=>{ const a=[...f.itens]; a.splice(idx,1); return { ...f, itens: a }; });
+                                    }}
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </Button>
                                 </div>
                               </td>
                             </tr>
                             {expandedItem===idx && (
-                              <tr className="border-t border-border/60 bg-surface-2/40">
+                              <tr className="border-t border-border/60 bg-surface-2/30">
                                 <td colSpan={6} className="px-2 py-2">
-                                  <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
-                                    <div>
-                                      <Label>NCM</Label>
-                                      <Input className="h-7 text-xs" value={it.ncm||''} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], ncm:e.target.value}; return {...f, itens:a}; })} />
+                                  <div className="rounded-md border border-border/70 bg-surface-2/20">
+                                    <div className="px-3 py-2 border-b border-border/60 flex items-center justify-between gap-3">
+                                      <div className="text-[11px] text-text-secondary truncate flex items-center gap-2 min-w-0">
+                                        <span className="shrink-0">Detalhes do item:</span>
+                                        <span className="shrink-0 px-1.5 py-0.5 rounded border border-warning/50 bg-warning/10 text-warning font-medium">
+                                          {it.codigo || '—'}
+                                        </span>
+                                        <span className="text-text-primary truncate">{it.descricao || '—'}</span>
+                                      </div>
                                     </div>
-                                    <div>
-                                      <Label>CFOP</Label>
-                                      <Input className="h-7 text-xs" value={it.cfop||''} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], cfop:e.target.value}; return {...f, itens:a}; })} />
-                                    </div>
-                                    <div>
-                                      <Label className={isEmpty(it.impostos?.icms?.cst) && isEmpty(it.impostos?.icms?.csosn) ? 'text-red-400' : ''}>CST/CSOSN</Label>
-                                      <Input
-                                        className={`h-7 text-xs ${isEmpty(it.impostos?.icms?.cst) && isEmpty(it.impostos?.icms?.csosn) ? 'border-red-500 text-red-400 placeholder:text-red-400' : ''}`}
-                                        value={it.impostos?.icms?.cst || it.impostos?.icms?.csosn || ''}
-                                        onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; const imp={...(a[idx].impostos||{}), icms:{...(a[idx].impostos?.icms||{}), cst:e.target.value, csosn:e.target.value}}; a[idx]={...a[idx], impostos: imp}; return {...f, itens:a}; })}
-                                      />
-                                    </div>
-                                    <div>
-                                      <Label className={isEmpty(it.impostos?.origem) ? 'text-red-400' : ''}>Origem</Label>
-                                      <Input
-                                        className={`h-7 text-xs ${isEmpty(it.impostos?.origem) ? 'border-red-500 text-red-400 placeholder:text-red-400' : ''}`}
-                                        value={it.impostos?.origem||''}
-                                        onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; const imp={...(a[idx].impostos||{}), origem:e.target.value}; a[idx]={...a[idx], impostos:imp}; return {...f, itens:a}; })}
-                                      />
-                                    </div>
-                                    <div>
-                                      <Label>ICMS %</Label>
-                                      <Input className="h-7 text-xs" value={it.impostos?.icms?.aliquota||''} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; const ic={...(a[idx].impostos?.icms||{}), aliquota:e.target.value}; a[idx]={...a[idx], impostos:{...(a[idx].impostos||{}), icms:ic}}; return {...f, itens:a}; })} />
-                                    </div>
-                                    <div>
-                                      <Label>ICMS Base</Label>
-                                      <Input className="h-7 text-xs" value={it.impostos?.icms?.base||''} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; const ic={...(a[idx].impostos?.icms||{}), base:e.target.value}; a[idx]={...a[idx], impostos:{...(a[idx].impostos||{}), icms:ic}}; return {...f, itens:a}; })} />
-                                    </div>
-                                    <div>
-                                      <Label className={isEmpty(it.impostos?.pis?.aliquota) ? 'text-red-400' : ''}>PIS %</Label>
-                                      <Input
-                                        className={`h-7 text-xs ${isEmpty(it.impostos?.pis?.aliquota) ? 'border-red-500 text-red-400 placeholder:text-red-400' : ''}`}
-                                        value={it.impostos?.pis?.aliquota||''}
-                                        onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; const ps={...(a[idx].impostos?.pis||{}), aliquota:e.target.value}; a[idx]={...a[idx], impostos:{...(a[idx].impostos||{}), pis:ps}}; return {...f, itens:a}; })}
-                                      />
-                                    </div>
-                                    <div>
-                                      <Label className={isEmpty(it.impostos?.cofins?.aliquota) ? 'text-red-400' : ''}>COFINS %</Label>
-                                      <Input
-                                        className={`h-7 text-xs ${isEmpty(it.impostos?.cofins?.aliquota) ? 'border-red-500 text-red-400 placeholder:text-red-400' : ''}`}
-                                        value={it.impostos?.cofins?.aliquota||''}
-                                        onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; const cf={...(a[idx].impostos?.cofins||{}), aliquota:e.target.value}; a[idx]={...a[idx], impostos:{...(a[idx].impostos||{}), cofins:cf}}; return {...f, itens:a}; })}
-                                      />
-                                    </div>
-                                    <div>
-                                      <Label>IPI %</Label>
-                                      <Input className="h-7 text-xs" value={it.impostos?.ipi?.aliquota||''} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; const ip={...(a[idx].impostos?.ipi||{}), aliquota:e.target.value}; a[idx]={...a[idx], impostos:{...(a[idx].impostos||{}), ipi:ip}}; return {...f, itens:a}; })} />
-                                    </div>
-                                    <div className="md:col-span-4">
-                                      <Label>Observação do item</Label>
-                                      <Input className="h-7 text-xs" value={it.obs || ''} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx] = { ...a[idx], obs: e.target.value }; return { ...f, itens: a }; })} />
+                                    <div className="px-3 py-3 border-l-4 border-warning/50">
+                                      <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
+                                        <div>
+                                          <div className="flex items-center gap-1">
+                                            <Label className={isEmpty(it.ncm) ? 'text-red-400' : ''}>NCM</Label>
+                                            <InfoTip content="NCM (Nomenclatura Comum do Mercosul): código de 8 dígitos do produto usado para tributação." />
+                                          </div>
+                                          <Input
+                                            className={`h-7 text-xs ${isEmpty(it.ncm) ? 'border-red-500 text-red-400 placeholder:text-red-400' : ''}`}
+                                            value={it.ncm||''}
+                                            onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], ncm:e.target.value}; return {...f, itens:a}; })}
+                                            onKeyDown={(e) => {
+                                              e.stopPropagation();
+                                              const allowed = ['Backspace','Delete','ArrowLeft','ArrowRight','Tab'];
+                                              if (allowed.includes(e.key)) return;
+                                              if (!/^[0-9]$/.test(e.key)) e.preventDefault();
+                                            }}
+                                            onBeforeInput={(e) => {
+                                              const data = e.data ?? '';
+                                              if (data && /\D/.test(data)) e.preventDefault();
+                                            }}
+                                            onPaste={(e) => {
+                                              const txt = e.clipboardData?.getData('text') ?? '';
+                                              if (txt && /\D/.test(txt)) e.preventDefault();
+                                            }}
+                                          />
+                                        </div>
+                                        <div>
+                                          <div className="flex items-center gap-1">
+                                            <Label className={isEmpty(it.cfop) ? 'text-red-400' : ''}>CFOP</Label>
+                                            <InfoTip content="CFOP do item: código fiscal da operação do produto. Normalmente vem do CFOP padrão da nota, mas pode variar por item em casos específicos." />
+                                          </div>
+                                          <Input
+                                            className={`h-7 text-xs ${isEmpty(it.cfop) ? 'border-red-500 text-red-400 placeholder:text-red-400' : ''}`}
+                                            value={it.cfop||''}
+                                            onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx]={...a[idx], cfop:e.target.value}; return {...f, itens:a}; })}
+                                            onKeyDown={(e) => {
+                                              e.stopPropagation();
+                                              const allowed = ['Backspace','Delete','ArrowLeft','ArrowRight','Tab'];
+                                              if (allowed.includes(e.key)) return;
+                                              if (!/^[0-9]$/.test(e.key)) e.preventDefault();
+                                            }}
+                                            onBeforeInput={(e) => {
+                                              const data = e.data ?? '';
+                                              if (data && /\D/.test(data)) e.preventDefault();
+                                            }}
+                                            onPaste={(e) => {
+                                              const txt = e.clipboardData?.getData('text') ?? '';
+                                              if (txt && /\D/.test(txt)) e.preventDefault();
+                                            }}
+                                          />
+                                        </div>
+                                        <div>
+                                          <div className="flex items-center gap-1">
+                                            <Label className={isEmpty(it.impostos?.icms?.cst) && isEmpty(it.impostos?.icms?.csosn) ? 'text-red-400' : ''}>CST/CSOSN</Label>
+                                            <InfoTip content="CST/CSOSN do ICMS: identifica o regime e a tributação do item. Informe o código conforme sua operação." />
+                                          </div>
+                                          <Input
+                                            className={`h-7 text-xs ${isEmpty(it.impostos?.icms?.cst) && isEmpty(it.impostos?.icms?.csosn) ? 'border-red-500 text-red-400 placeholder:text-red-400' : ''}`}
+                                            value={it.impostos?.icms?.cst || it.impostos?.icms?.csosn || ''}
+                                            onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; const imp={...(a[idx].impostos||{}), icms:{...(a[idx].impostos?.icms||{}), cst:e.target.value, csosn:e.target.value}}; a[idx]={...a[idx], impostos: imp}; return {...f, itens:a}; })}
+                                            onKeyDown={(e) => {
+                                              e.stopPropagation();
+                                              const allowed = ['Backspace','Delete','ArrowLeft','ArrowRight','Tab'];
+                                              if (allowed.includes(e.key)) return;
+                                              if (!/^[0-9]$/.test(e.key)) e.preventDefault();
+                                            }}
+                                            onBeforeInput={(e) => {
+                                              const data = e.data ?? '';
+                                              if (data && /\D/.test(data)) e.preventDefault();
+                                            }}
+                                            onPaste={(e) => {
+                                              const txt = e.clipboardData?.getData('text') ?? '';
+                                              if (txt && /\D/.test(txt)) e.preventDefault();
+                                            }}
+                                          />
+                                        </div>
+                                        <div>
+                                          <div className="flex items-center gap-1">
+                                            <Label className={isEmpty(it.impostos?.origem) ? 'text-red-400' : ''}>Origem</Label>
+                                            <InfoTip content="Origem da mercadoria (ICMS): 0 nacional, 1 estrangeira (importação direta) e outras situações conforme tabela." />
+                                          </div>
+                                          <Select
+                                            value={String(it.impostos?.origem ?? '')}
+                                            onValueChange={(v)=>setManualForm(f=>{
+                                              const a=[...f.itens];
+                                              const imp={...(a[idx].impostos||{}), origem: v};
+                                              a[idx]={...a[idx], impostos: imp};
+                                              return {...f, itens:a};
+                                            })}
+                                          >
+                                            <SelectTrigger className={`h-7 text-xs ${isEmpty(it.impostos?.origem) ? 'border-red-500 text-red-400' : ''}`}>
+                                              <SelectValue placeholder="Selecione" />
+                                            </SelectTrigger>
+                                            <SelectContent className="max-h-72 text-xs">
+                                              <SelectItem value="0">0 - Nacional</SelectItem>
+                                              <SelectItem value="1">1 - Estrangeira (importação direta)</SelectItem>
+                                              <SelectItem value="2">2 - Estrangeira (mercado interno)</SelectItem>
+                                              <SelectItem value="3">3 - Nacional (conteúdo import. &gt; 40%)</SelectItem>
+                                              <SelectItem value="4">4 - Nacional (processos produtivos)</SelectItem>
+                                              <SelectItem value="5">5 - Nacional (conteúdo import. &le; 40%)</SelectItem>
+                                              <SelectItem value="6">6 - Estrangeira (import. direta, sem similar)</SelectItem>
+                                              <SelectItem value="7">7 - Estrangeira (mercado interno, sem similar)</SelectItem>
+                                              <SelectItem value="8">8 - Nacional (conteúdo import. &le; 70%)</SelectItem>
+                                            </SelectContent>
+                                          </Select>
+                                        </div>
+                                        <div>
+                                          <div className="flex items-center gap-1">
+                                            <Label>ICMS %</Label>
+                                            <InfoTip content="Alíquota de ICMS do item. Em muitos casos pode ser 0 dependendo do CST/CSOSN e do seu regime." />
+                                          </div>
+                                          <Input
+                                            className="h-7 text-xs"
+                                            value={it.impostos?.icms?.aliquota||''}
+                                            onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; const ic={...(a[idx].impostos?.icms||{}), aliquota:e.target.value}; a[idx]={...a[idx], impostos:{...(a[idx].impostos||{}), icms:ic}}; return {...f, itens:a}; })}
+                                            onKeyDown={(e) => {
+                                              e.stopPropagation();
+                                              const allowed = ['Backspace','Delete','ArrowLeft','ArrowRight','Tab'];
+                                              if (allowed.includes(e.key)) return;
+                                              if (e.key === ',' || e.key === '.') return;
+                                              if (!/^[0-9]$/.test(e.key)) e.preventDefault();
+                                            }}
+                                            onBeforeInput={(e) => {
+                                              const data = e.data ?? '';
+                                              if (data && !/^[0-9.,]+$/.test(data)) e.preventDefault();
+                                            }}
+                                            onPaste={(e) => {
+                                              const txt = e.clipboardData?.getData('text') ?? '';
+                                              if (txt && !/^[0-9.,\s]+$/.test(txt)) e.preventDefault();
+                                            }}
+                                          />
+                                        </div>
+                                        <div>
+                                          <div className="flex items-center gap-1">
+                                            <Label>ICMS Base</Label>
+                                            <InfoTip content="Base de cálculo do ICMS do item. Se não usa base específica, pode ficar em branco conforme o CST/CSOSN e cálculo automático." />
+                                          </div>
+                                          <Input
+                                            className="h-7 text-xs"
+                                            value={it.impostos?.icms?.base||''}
+                                            onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; const ic={...(a[idx].impostos?.icms||{}), base:e.target.value}; a[idx]={...a[idx], impostos:{...(a[idx].impostos||{}), icms:ic}}; return {...f, itens:a}; })}
+                                            onKeyDown={(e) => {
+                                              e.stopPropagation();
+                                              const allowed = ['Backspace','Delete','ArrowLeft','ArrowRight','Tab'];
+                                              if (allowed.includes(e.key)) return;
+                                              if (e.key === ',' || e.key === '.') return;
+                                              if (!/^[0-9]$/.test(e.key)) e.preventDefault();
+                                            }}
+                                            onBeforeInput={(e) => {
+                                              const data = e.data ?? '';
+                                              if (data && !/^[0-9.,]+$/.test(data)) e.preventDefault();
+                                            }}
+                                            onPaste={(e) => {
+                                              const txt = e.clipboardData?.getData('text') ?? '';
+                                              if (txt && !/^[0-9.,\s]+$/.test(txt)) e.preventDefault();
+                                            }}
+                                          />
+                                        </div>
+                                        <div>
+                                          <div className="flex items-center gap-1">
+                                            <Label className={isEmpty(it.impostos?.pis?.aliquota) ? 'text-red-400' : ''}>PIS %</Label>
+                                            <InfoTip content="Alíquota de PIS do item (em %). Mesmo quando for 0, informe explicitamente." />
+                                          </div>
+                                          <Input
+                                            className={`h-7 text-xs ${isEmpty(it.impostos?.pis?.aliquota) ? 'border-red-500 text-red-400 placeholder:text-red-400' : ''}`}
+                                            value={it.impostos?.pis?.aliquota||''}
+                                            onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; const ps={...(a[idx].impostos?.pis||{}), aliquota:e.target.value}; a[idx]={...a[idx], impostos:{...(a[idx].impostos||{}), pis:ps}}; return {...f, itens:a}; })}
+                                            onKeyDown={(e) => {
+                                              e.stopPropagation();
+                                              const allowed = ['Backspace','Delete','ArrowLeft','ArrowRight','Tab'];
+                                              if (allowed.includes(e.key)) return;
+                                              if (e.key === ',' || e.key === '.') return;
+                                              if (!/^[0-9]$/.test(e.key)) e.preventDefault();
+                                            }}
+                                            onBeforeInput={(e) => {
+                                              const data = e.data ?? '';
+                                              if (data && !/^[0-9.,]+$/.test(data)) e.preventDefault();
+                                            }}
+                                            onPaste={(e) => {
+                                              const txt = e.clipboardData?.getData('text') ?? '';
+                                              if (txt && !/^[0-9.,\s]+$/.test(txt)) e.preventDefault();
+                                            }}
+                                          />
+                                        </div>
+                                        <div>
+                                          <div className="flex items-center gap-1">
+                                            <Label className={isEmpty(it.impostos?.cofins?.aliquota) ? 'text-red-400' : ''}>COFINS %</Label>
+                                            <InfoTip content="Alíquota de COFINS do item (em %). Mesmo quando for 0, informe explicitamente." />
+                                          </div>
+                                          <Input
+                                            className={`h-7 text-xs ${isEmpty(it.impostos?.cofins?.aliquota) ? 'border-red-500 text-red-400 placeholder:text-red-400' : ''}`}
+                                            value={it.impostos?.cofins?.aliquota||''}
+                                            onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; const cf={...(a[idx].impostos?.cofins||{}), aliquota:e.target.value}; a[idx]={...a[idx], impostos:{...(a[idx].impostos||{}), cofins:cf}}; return {...f, itens:a}; })}
+                                            onKeyDown={(e) => {
+                                              e.stopPropagation();
+                                              const allowed = ['Backspace','Delete','ArrowLeft','ArrowRight','Tab'];
+                                              if (allowed.includes(e.key)) return;
+                                              if (e.key === ',' || e.key === '.') return;
+                                              if (!/^[0-9]$/.test(e.key)) e.preventDefault();
+                                            }}
+                                            onBeforeInput={(e) => {
+                                              const data = e.data ?? '';
+                                              if (data && !/^[0-9.,]+$/.test(data)) e.preventDefault();
+                                            }}
+                                            onPaste={(e) => {
+                                              const txt = e.clipboardData?.getData('text') ?? '';
+                                              if (txt && !/^[0-9.,\s]+$/.test(txt)) e.preventDefault();
+                                            }}
+                                          />
+                                        </div>
+                                        <div>
+                                          <div className="flex items-center gap-1">
+                                            <Label>IPI %</Label>
+                                            <InfoTip content="Alíquota de IPI do item (em %). Em muitos casos é 0 ou não se aplica." />
+                                          </div>
+                                          <Input
+                                            className="h-7 text-xs"
+                                            value={it.impostos?.ipi?.aliquota||''}
+                                            onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; const ip={...(a[idx].impostos?.ipi||{}), aliquota:e.target.value}; a[idx]={...a[idx], impostos:{...(a[idx].impostos||{}), ipi:ip}}; return {...f, itens:a}; })}
+                                            onKeyDown={(e) => {
+                                              e.stopPropagation();
+                                              const allowed = ['Backspace','Delete','ArrowLeft','ArrowRight','Tab'];
+                                              if (allowed.includes(e.key)) return;
+                                              if (e.key === ',' || e.key === '.') return;
+                                              if (!/^[0-9]$/.test(e.key)) e.preventDefault();
+                                            }}
+                                            onBeforeInput={(e) => {
+                                              const data = e.data ?? '';
+                                              if (data && !/^[0-9.,]+$/.test(data)) e.preventDefault();
+                                            }}
+                                            onPaste={(e) => {
+                                              const txt = e.clipboardData?.getData('text') ?? '';
+                                              if (txt && !/^[0-9.,\s]+$/.test(txt)) e.preventDefault();
+                                            }}
+                                          />
+                                        </div>
+                                        <div className="md:col-span-4">
+                                          <div className="flex items-center gap-1">
+                                            <Label>Observação do item</Label>
+                                            <InfoTip content="Observação livre do item. Vai para os dados adicionais do item na NF-e (quando aplicável)." />
+                                          </div>
+                                          <Input className="h-7 text-xs" value={it.obs || ''} onChange={(e)=>setManualForm(f=>{ const a=[...f.itens]; a[idx] = { ...a[idx], obs: e.target.value }; return { ...f, itens: a }; })} />
+                                        </div>
+                                      </div>
                                     </div>
                                   </div>
                                 </td>
                               </tr>
                             )}
+                            <tr className="border-t border-border/0">
+                              <td colSpan={6} className="p-0">
+                                <div className="h-2 bg-transparent" />
+                              </td>
+                            </tr>
                           </React.Fragment>
                         );
                       })}
@@ -5372,6 +5686,7 @@ export default function FiscalHubPage(){
 
             <TabsContent value="pagamentos">
               {(() => {
+                const isNFCe = String(manualForm.modelo) === '65';
                 const itens = manualForm.itens || [];
                 let totalProdutos = 0;
                 itens.forEach((it, idx) => {
@@ -5394,14 +5709,20 @@ export default function FiscalHubPage(){
                 const totalPago = pagamentos.reduce((s,p) => s + (parseDec(p.valor)||0), 0);
                 const diff = (totalPago || 0) - (totalNota || 0);
 
+                const isCardName = (nm) => {
+                  const t = String(nm || '').toLowerCase();
+                  return t.includes('cart') || t.includes('crédit') || t.includes('credit') || t.includes('déb') || t.includes('deb');
+                };
+
                 const addPagamento = () => {
                   setManualForm(f => {
                     const arr = Array.isArray(f.pagamentos) ? [...f.pagamentos] : [];
-                    const baseTotal = totalNota || 0;
+                    const remaining = Math.max(0, (totalNota || 0) - (totalPago || 0));
+                    const firstFin = (payMethods || [])[0];
                     arr.push({
-                      finalizadora_id: '',
-                      tipo: 'Dinheiro',
-                      valor: moneyMaskBR(baseTotal.toFixed(2)),
+                      finalizadora_id: firstFin?.id ? String(firstFin.id) : '',
+                      tipo: firstFin?.nome || 'Dinheiro',
+                      valor: moneyMaskBR(Number(remaining || 0).toFixed(2)),
                       bandeira: '',
                       autorizacao: '',
                       parcelas: '',
@@ -5422,7 +5743,7 @@ export default function FiscalHubPage(){
                 const handleChangeValor = (idx, raw) => {
                   setManualForm(f => {
                     const arr = Array.isArray(f.pagamentos) ? [...f.pagamentos] : [];
-                    const formatted = moneyMaskBR(raw || '');
+                    const formatted = (raw === '' || raw === null || raw === undefined) ? '' : moneyMaskBR(raw || '');
                     arr[idx] = { ...(arr[idx] || {}), valor: formatted };
                     return { ...f, pagamentos: arr };
                   });
@@ -5434,6 +5755,12 @@ export default function FiscalHubPage(){
                       <div className="text-sm font-medium">Formas de pagamento</div>
                       <Button size="sm" onClick={addPagamento}>Adicionar pagamento</Button>
                     </div>
+
+                    {isNFCe && pagamentos.length > 1 && (
+                      <div className="text-xs border border-warning/40 bg-warning/10 text-warning rounded-md px-3 py-2">
+                        Atenção: no envio atual da NFC-e, o meio de pagamento do JSON é baseado no primeiro pagamento da lista.
+                      </div>
+                    )}
 
                     <div className="border border-border rounded-md overflow-x-auto">
                       <table className="min-w-full text-xs">
@@ -5448,62 +5775,78 @@ export default function FiscalHubPage(){
                         <tbody>
                           {pagamentos.map((pg, idx) => {
                             const fin = (payMethods || []).find(m => String(m.id) === String(pg.finalizadora_id));
+                            const finName = pg.tipo || fin?.nome || '';
+                            const isCard = isCardName(finName);
+                            const missingForma = !String(pg.finalizadora_id || '').trim();
+                            const missingBandeira = isCard && !String(pg.bandeira || '').trim();
+                            const missingValor = (totalNota || 0) > 0 && ((parseDec(pg.valor) || 0) <= 0);
                             return (
                               <tr key={idx} className="border-t border-border/60">
                                 <td className="px-2 py-1">
-                                  <select
-                                    className="h-7 text-xs bg-surface border border-border rounded-md px-1 w-full"
-                                    value={pg.finalizadora_id || ''}
-                                    onChange={(e)=>setManualForm(f=>{
+                                  <Select
+                                    value={String(pg.finalizadora_id || '')}
+                                    onValueChange={(id)=>setManualForm(f=>{
                                       const arr = Array.isArray(f.pagamentos) ? [...f.pagamentos] : [];
-                                      const id = e.target.value || '';
                                       const fm = (payMethods || []).find(m => String(m.id) === String(id));
+                                      const nm = fm?.nome || (arr[idx]?.tipo || '');
+                                      const nextIsCard = isCardName(nm);
                                       arr[idx] = {
                                         ...(arr[idx] || {}),
                                         finalizadora_id: id,
-                                        tipo: fm?.nome || (arr[idx]?.tipo || ''),
+                                        tipo: nm,
+                                        bandeira: nextIsCard ? (arr[idx]?.bandeira || '') : '',
+                                        autorizacao: nextIsCard ? (arr[idx]?.autorizacao || '') : '',
                                       };
                                       return { ...f, pagamentos: arr };
                                     })}
                                   >
-                                    <option value="">Selecione</option>
-                                    {(payMethods || []).map(m => (
-                                      <option key={m.id} value={m.id}>
-                                        {m.codigo_interno ? `[${m.codigo_interno}] ` : ''}{m.nome}
-                                      </option>
-                                    ))}
-                                  </select>
+                                    <SelectTrigger className={`h-7 text-xs ${missingForma ? 'border-red-500 text-red-400' : ''}`}>
+                                      <SelectValue placeholder="Selecione" />
+                                    </SelectTrigger>
+                                    <SelectContent className="max-h-72 text-xs">
+                                      {(payMethods || []).map(m => (
+                                        <SelectItem key={m.id} value={m.id}>
+                                          {m.codigo_interno ? `[${m.codigo_interno}] ` : ''}{m.nome}
+                                        </SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
                                   <div className="text-[10px] text-text-secondary truncate">{pg.tipo || fin?.nome || '—'}</div>
                                 </td>
                                 <td className="px-2 py-1">
-                                  <div className="flex flex-col gap-1">
-                                    <Input
-                                      className="h-7 text-xs"
-                                      placeholder="Bandeira (Visa, Master...)"
-                                      value={pg.bandeira || ''}
-                                      onChange={(e)=>setManualForm(f=>{
-                                        const arr = Array.isArray(f.pagamentos) ? [...f.pagamentos] : [];
-                                        arr[idx] = { ...(arr[idx] || {}), bandeira: e.target.value };
-                                        return { ...f, pagamentos: arr };
-                                      })}
-                                    />
-                                    <Input
-                                      className="h-7 text-xs"
-                                      placeholder="Nº autorização (opcional)"
-                                      value={pg.autorizacao || ''}
-                                      onChange={(e)=>setManualForm(f=>{
-                                        const arr = Array.isArray(f.pagamentos) ? [...f.pagamentos] : [];
-                                        arr[idx] = { ...(arr[idx] || {}), autorizacao: e.target.value };
-                                        return { ...f, pagamentos: arr };
-                                      })}
-                                    />
-                                  </div>
+                                  {isCard ? (
+                                    <div className="flex flex-col gap-1">
+                                      <Input
+                                        className={`h-7 text-xs ${missingBandeira ? 'border-red-500 text-red-400 placeholder:text-red-400' : ''}`}
+                                        placeholder="Bandeira (Visa, Master...)"
+                                        value={pg.bandeira || ''}
+                                        onChange={(e)=>setManualForm(f=>{
+                                          const arr = Array.isArray(f.pagamentos) ? [...f.pagamentos] : [];
+                                          arr[idx] = { ...(arr[idx] || {}), bandeira: e.target.value };
+                                          return { ...f, pagamentos: arr };
+                                        })}
+                                      />
+                                      <Input
+                                        className="h-7 text-xs"
+                                        placeholder="Nº autorização (opcional)"
+                                        value={pg.autorizacao || ''}
+                                        onChange={(e)=>setManualForm(f=>{
+                                          const arr = Array.isArray(f.pagamentos) ? [...f.pagamentos] : [];
+                                          arr[idx] = { ...(arr[idx] || {}), autorizacao: e.target.value };
+                                          return { ...f, pagamentos: arr };
+                                        })}
+                                      />
+                                    </div>
+                                  ) : (
+                                    <div className="text-[11px] text-text-secondary">—</div>
+                                  )}
                                 </td>
                                 <td className="px-2 py-1 text-right">
                                   <Input
-                                    className="h-7 text-right text-xs"
-                                    value={pg.valor || '0,00'}
+                                    className={`h-7 text-right text-xs ${missingValor ? 'border-red-500 text-red-400 placeholder:text-red-400' : ''}`}
+                                    value={(pg.valor ?? '')}
                                     onChange={(e)=>handleChangeValor(idx, e.target.value)}
+                                    placeholder="0,00"
                                     onKeyDown={(e) => {
                                       e.stopPropagation();
                                       const allowed = ['Backspace','Delete','ArrowLeft','ArrowRight','Tab'];
@@ -5558,9 +5901,12 @@ export default function FiscalHubPage(){
                   <div className="text-sm font-medium mb-2">Transporte</div>
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
                     <div>
-                      <Label className={isEmpty(manualForm.transporte?.tipo_frete) ? 'text-red-400' : ''}>Modalidade do Frete</Label>
-                      <Select value={manualForm.transporte?.tipo_frete || '9'} onValueChange={(v)=>setManualForm(f=>({ ...f, transporte: { ...(f.transporte||{}), tipo_frete: v } }))}>
-                        <SelectTrigger className={`h-8 text-xs ${isEmpty(manualForm.transporte?.tipo_frete) ? 'border-red-500 text-red-400' : ''}`}><SelectValue placeholder="Selecione" /></SelectTrigger>
+                      <div className="flex items-center gap-1">
+                        <Label>Modalidade do Frete</Label>
+                        <InfoTip content="Define quem paga/contrata o frete. Na maioria dos casos (retirada no local), use 'Sem Frete'." />
+                      </div>
+                      <Select value={String(manualForm.transporte?.tipo_frete ?? '9')} onValueChange={(v)=>setManualForm(f=>({ ...f, transporte: { ...(f.transporte||{}), tipo_frete: v } }))}>
+                        <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Sem Frete" /></SelectTrigger>
                         <SelectContent>
                           <SelectItem value="0">Por conta do Emitente</SelectItem>
                           <SelectItem value="1">Por conta do Destinatário</SelectItem>
@@ -5568,30 +5914,131 @@ export default function FiscalHubPage(){
                         </SelectContent>
                       </Select>
                     </div>
-                    <div className="md:col-span-3">
-                      <Label>Transportadora (se houver)</Label>
-                      <Input className="h-8 text-xs" value={manualForm.transporte?.transportadora || ''} onChange={(e)=>setManualForm(f=>({ ...f, transporte: { ...(f.transporte||{}), transportadora: e.target.value } }))} />
-                    </div>
-                    <div>
-                      <Label>Placa do Veículo</Label>
-                      <Input className="h-8 text-xs" value={manualForm.transporte?.placa || ''} onChange={(e)=>setManualForm(f=>({ ...f, transporte: { ...(f.transporte||{}), placa: (e.target.value||'').toUpperCase() } }))} placeholder="ABC1D23" />
-                    </div>
-                    <div>
-                      <Label>UF da Placa</Label>
-                      <Input className="h-8 text-xs" value={manualForm.transporte?.uf_placa || ''} onChange={(e)=>setManualForm(f=>({ ...f, transporte: { ...(f.transporte||{}), uf_placa: (e.target.value||'').toUpperCase().slice(0,2) } }))} placeholder="UF" />
-                    </div>
-                    <div>
-                      <Label>Qtd. de Volumes</Label>
-                      <Input className="h-8 text-xs" value={manualForm.transporte?.volumes || ''} onChange={(e)=>setManualForm(f=>({ ...f, transporte: { ...(f.transporte||{}), volumes: e.target.value } }))} />
-                    </div>
-                    <div>
-                      <Label>Peso Bruto (kg)</Label>
-                      <Input className="h-8 text-xs" value={manualForm.transporte?.peso_bruto || ''} onChange={(e)=>setManualForm(f=>({ ...f, transporte: { ...(f.transporte||{}), peso_bruto: e.target.value } }))} />
-                    </div>
-                    <div>
-                      <Label>Peso Líquido (kg)</Label>
-                      <Input className="h-8 text-xs" value={manualForm.transporte?.peso_liquido || ''} onChange={(e)=>setManualForm(f=>({ ...f, transporte: { ...(f.transporte||{}), peso_liquido: e.target.value } }))} />
-                    </div>
+                    {String(manualForm.transporte?.tipo_frete ?? '9') === '9' ? (
+                      <div className="md:col-span-3">
+                        <div className="h-8 px-2 rounded-md border border-border bg-surface-2/40 text-xs text-text-secondary flex items-center">
+                          Sem frete. Se houver transportadora/entrega, altere a modalidade ao lado.
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="md:col-span-3">
+                          <div className="flex items-center gap-1">
+                            <Label className={(() => {
+                              const t = manualForm.transporte || {};
+                              const missingBase = !(String(t.transportadora || '').trim() || String(t.placa || '').trim());
+                              return missingBase ? 'text-red-400' : '';
+                            })()}>Transportadora</Label>
+                            <InfoTip content="Nome/razão social da transportadora (se aplicável)." />
+                          </div>
+                          <Input
+                            className={`h-8 text-xs ${(() => {
+                              const t = manualForm.transporte || {};
+                              const missingBase = !(String(t.transportadora || '').trim() || String(t.placa || '').trim());
+                              return missingBase ? 'border-red-500 text-red-400 placeholder:text-red-400' : '';
+                            })()}`}
+                            value={manualForm.transporte?.transportadora || ''}
+                            onChange={(e)=>setManualForm(f=>({ ...f, transporte: { ...(f.transporte||{}), transportadora: e.target.value } }))}
+                          />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-1">
+                            <Label className={(() => {
+                              const t = manualForm.transporte || {};
+                              const missingBase = !(String(t.transportadora || '').trim() || String(t.placa || '').trim());
+                              return missingBase ? 'text-red-400' : '';
+                            })()}>Placa</Label>
+                            <InfoTip content="Placa do veículo (se aplicável)." />
+                          </div>
+                          <Input
+                            className={`h-8 text-xs ${(() => {
+                              const t = manualForm.transporte || {};
+                              const missingBase = !(String(t.transportadora || '').trim() || String(t.placa || '').trim());
+                              return missingBase ? 'border-red-500 text-red-400 placeholder:text-red-400' : '';
+                            })()}`}
+                            value={manualForm.transporte?.placa || ''}
+                            onChange={(e)=>setManualForm(f=>({ ...f, transporte: { ...(f.transporte||{}), placa: (e.target.value||'').toUpperCase() } }))}
+                            placeholder="ABC1D23"
+                          />
+                        </div>
+                        <div>
+                          <Label className={(() => {
+                            const t = manualForm.transporte || {};
+                            const needsUf = !!String(t.placa || '').trim();
+                            const missingUf = needsUf && !String(t.uf_placa || '').trim();
+                            return missingUf ? 'text-red-400' : '';
+                          })()}>UF</Label>
+                          <Select value={String(manualForm.transporte?.uf_placa || '')} onValueChange={(v)=>setManualForm(f=>({ ...f, transporte: { ...(f.transporte||{}), uf_placa: (v||'').toUpperCase().slice(0,2) } }))}>
+                            <SelectTrigger className={`h-8 text-xs ${(() => {
+                              const t = manualForm.transporte || {};
+                              const needsUf = !!String(t.placa || '').trim();
+                              const missingUf = needsUf && !String(t.uf_placa || '').trim();
+                              return missingUf ? 'border-red-500 text-red-400' : '';
+                            })()}`}>
+                              <SelectValue placeholder="Selecione" />
+                            </SelectTrigger>
+                            <SelectContent className="max-h-72">
+                              <SelectItem value="AC">AC</SelectItem>
+                              <SelectItem value="AL">AL</SelectItem>
+                              <SelectItem value="AP">AP</SelectItem>
+                              <SelectItem value="AM">AM</SelectItem>
+                              <SelectItem value="BA">BA</SelectItem>
+                              <SelectItem value="CE">CE</SelectItem>
+                              <SelectItem value="DF">DF</SelectItem>
+                              <SelectItem value="ES">ES</SelectItem>
+                              <SelectItem value="GO">GO</SelectItem>
+                              <SelectItem value="MA">MA</SelectItem>
+                              <SelectItem value="MT">MT</SelectItem>
+                              <SelectItem value="MS">MS</SelectItem>
+                              <SelectItem value="MG">MG</SelectItem>
+                              <SelectItem value="PA">PA</SelectItem>
+                              <SelectItem value="PB">PB</SelectItem>
+                              <SelectItem value="PR">PR</SelectItem>
+                              <SelectItem value="PE">PE</SelectItem>
+                              <SelectItem value="PI">PI</SelectItem>
+                              <SelectItem value="RJ">RJ</SelectItem>
+                              <SelectItem value="RN">RN</SelectItem>
+                              <SelectItem value="RS">RS</SelectItem>
+                              <SelectItem value="RO">RO</SelectItem>
+                              <SelectItem value="RR">RR</SelectItem>
+                              <SelectItem value="SC">SC</SelectItem>
+                              <SelectItem value="SP">SP</SelectItem>
+                              <SelectItem value="SE">SE</SelectItem>
+                              <SelectItem value="TO">TO</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        {(() => {
+                          const t = manualForm.transporte || {};
+                          const missingBase = !(String(t.transportadora || '').trim() || String(t.placa || '').trim());
+                          const needsUf = !!String(t.placa || '').trim();
+                          const missingUf = needsUf && !String(t.uf_placa || '').trim();
+                          if (!missingBase && !missingUf) return null;
+                          const parts = [];
+                          if (missingBase) parts.push('Informe Transportadora ou Placa');
+                          if (missingUf) parts.push('Informe a UF da placa');
+                          return (
+                            <div className="md:col-span-4">
+                              <div className="text-xs text-red-400 border border-red-500/40 bg-red-500/5 rounded-md px-2 py-2">
+                                {parts.join(' • ')}
+                              </div>
+                            </div>
+                          );
+                        })()}
+                        <div>
+                          <Label>Volumes</Label>
+                          <Input className="h-8 text-xs" value={manualForm.transporte?.volumes || ''} onChange={(e)=>setManualForm(f=>({ ...f, transporte: { ...(f.transporte||{}), volumes: e.target.value } }))} />
+                        </div>
+                        <div>
+                          <Label>Peso Bruto (kg)</Label>
+                          <Input className="h-8 text-xs" value={manualForm.transporte?.peso_bruto || ''} onChange={(e)=>setManualForm(f=>({ ...f, transporte: { ...(f.transporte||{}), peso_bruto: e.target.value } }))} />
+                        </div>
+                        <div>
+                          <Label>Peso Líquido (kg)</Label>
+                          <Input className="h-8 text-xs" value={manualForm.transporte?.peso_liquido || ''} onChange={(e)=>setManualForm(f=>({ ...f, transporte: { ...(f.transporte||{}), peso_liquido: e.target.value } }))} />
+                        </div>
+                      </>
+                    )}
                   </div>
                 </div>
 
@@ -5806,7 +6253,7 @@ export default function FiscalHubPage(){
                 const totaisOk = [totalNota, baseICMS, valorICMS, valorPIS, valorCOFINS, valorIPI, frete, descontoGeral, outras, vTotTrib].every(v => v !== null && v !== undefined && !Number.isNaN(v));
 
                 // transporte
-                const transpOk = !!(manualForm.transporte && manualForm.transporte.tipo_frete);
+                const transpOk = !!manualTabFlags.transpOk;
 
                 // pagamento (apenas NFC-e obrigatório)
                 // Para NFC-e, aceitar troco: totalPago >= totalNota
@@ -5869,7 +6316,7 @@ export default function FiscalHubPage(){
                           if (!produtosCompletos) errs.push('Revise os campos obrigatórios dos itens (produto, NCM, CFOP, unidade, quantidade, preço)');
                           if (!impostosOk) errs.push('Preencha os impostos de todos os itens (origem, ICMS, PIS e COFINS)');
                           if (!totaisOk) errs.push('Verifique os totais da nota');
-                          if (!transpOk) errs.push('Informe a modalidade do frete em Transporte');
+                          if (!transpOk) errs.push('Revise Transporte (transportadora/placa e UF quando aplicável)');
                           if (!pagOk) errs.push('Revise a forma de pagamento e o valor pago');
                           if (errs.length) toast({ title: 'Ainda faltam dados para emitir', description: errs.join(' • '), variant: 'warning' });
                           else toast({ title: 'Tudo certo', description: 'A nota está pronta para emitir', variant: 'success' });
