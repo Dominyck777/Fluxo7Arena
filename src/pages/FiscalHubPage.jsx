@@ -6231,7 +6231,14 @@ export default function FiscalHubPage(){
 
                 // items + product fields
                 const itensOk = Array.isArray(itens) && itens.length > 0;
-                const produtosCompletos = itensOk && itens.every(it => (it.codigo || it.descricao) && it.ncm && it.cfop && it.unidade && parseDec(it.quantidade) > 0 && (it.preco_unitario || it.preco_unitario === '0,00'));
+                const produtosCompletos = itensOk && itens.every(it => (
+                  !!String(it.descricao || '').trim() &&
+                  !!String(it.ncm || '').trim() &&
+                  !!String(it.cfop || '').trim() &&
+                  !!String(it.unidade || '').trim() &&
+                  (parseDec(it.quantidade) > 0) &&
+                  (parseDec(it.preco_unitario) > 0)
+                ));
 
                 // impostos: exigir ao menos origem, ICMS (CST/CSOSN) e alíquotas de PIS/COFINS
                 const impostosOk = itensOk && itens.every(it => {
@@ -6269,9 +6276,13 @@ export default function FiscalHubPage(){
                   const isCard = t.includes('cart') || t.includes('crédit') || t.includes('credit') || t.includes('déb') || t.includes('deb');
                   return !isCard || !!(pg.bandeira && pg.bandeira.trim());
                 });
-                const pagOk = isNFCe ? ((manualForm.pagamentos||[]).length > 0 && pagamentosAdequados && cardDetailsOk) : true;
-
-                const allOk = ideOk && emitOk && itensOk && produtosCompletos && impostosOk && totaisOk && transpOk && destOk && pagOk;
+                const pagOk = (() => {
+                  // manualTabFlags já valida forma selecionada + valor > 0 (e bandeira quando cartão)
+                  if (!manualTabFlags.pagamentosOk) return false;
+                  // Para NFC-e, além disso, exigir total pago >= total
+                  if (isNFCe) return (manualForm.pagamentos||[]).length > 0 && pagamentosAdequados && cardDetailsOk;
+                  return true;
+                })();
 
                 const Row = ({ ok, label, extra }) => (
                   <div className="flex items-center justify-between px-3 py-2 border-b border-border/60 last:border-b-0">
@@ -6321,15 +6332,6 @@ export default function FiscalHubPage(){
                           if (errs.length) toast({ title: 'Ainda faltam dados para emitir', description: errs.join(' • '), variant: 'warning' });
                           else toast({ title: 'Tudo certo', description: 'A nota está pronta para emitir', variant: 'success' });
                         }}>Validar Nota</Button>
-                        <Button
-                          size="sm"
-                          disabled={!allOk || manualEmitting}
-                          onClick={async()=>{ setManualEmitting(true); try { await emitirNota(); } finally { setManualEmitting(false); } }}
-                        >
-                          {manualEmitting ? (
-                            <span className="inline-flex items-center"><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Emitindo…</span>
-                          ) : 'Emitir Nota'}
-                        </Button>
                         <Button size="sm" variant="outline" onClick={saveDraft}>Salvar Rascunho</Button>
                         <Button size="sm" variant="outline" onClick={()=>setManualOpen(false)}>Cancelar Emissão</Button>
                       </div>

@@ -24,6 +24,98 @@ export default function XMLImportModal({ open, onOpenChange, products, codigoEmp
   const [expandedProducts, setExpandedProducts] = useState({});
   const [productSelectionModal, setProductSelectionModal] = useState({ isOpen: false, productIndex: null, currentProduct: null });
   const [confirmationModal, setConfirmationModal] = useState({ isOpen: false });
+  const marginDigitsMapRef = React.useRef({});
+
+  const percentToNumber = (value) => {
+    if (value == null || value === '') return 0;
+    let s = String(value);
+    s = s.replace(/%/g, '').replace(/\s+/g, '');
+    s = s.replace(/[^\d.,-]/g, '');
+    const hasComma = s.includes(',');
+    const hasDot = s.includes('.');
+    if (hasComma && hasDot) {
+      s = s.replace(/\./g, '').replace(',', '.');
+    } else if (hasComma) {
+      s = s.replace(',', '.');
+    }
+    const n = Number(s);
+    return Number.isFinite(n) ? n : 0;
+  };
+
+  const percentDigitsToMasked = (digits) => {
+    const raw = String(digits ?? '').replace(/\D/g, '');
+    const int = raw ? parseInt(raw, 10) : 0;
+    const val = Number.isFinite(int) ? int / 100 : 0;
+    return val.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  };
+
+  const percentValueToDigits = (value) => {
+    const d = String(Math.round((percentToNumber(value) || 0) * 100));
+    return d && d !== 'NaN' ? d : '0';
+  };
+
+  const getPercentMaskProps = ({
+    baseValue,
+    setBaseValue,
+    digitsRef,
+    onUserTouch,
+  }) => {
+    const base = String(baseValue || '').trim() ? String(baseValue) : '0,00';
+    return {
+      inputMode: 'decimal',
+      value: `${base}%`,
+      onFocus: (e) => {
+        if (onUserTouch) onUserTouch(base);
+        const len = String(base).length;
+        requestAnimationFrame(() => {
+          try { e.target.setSelectionRange(len, len); } catch { /* ignore */ }
+        });
+      },
+      onClick: (e) => {
+        const len = String(base).length;
+        requestAnimationFrame(() => {
+          try { e.target.setSelectionRange(len, len); } catch { /* ignore */ }
+        });
+      },
+      onPaste: (e) => {
+        const raw = e.clipboardData?.getData('text') ?? '';
+        const digits = String(raw).replace(/\D/g, '');
+        if (!digits) {
+          e.preventDefault();
+          return;
+        }
+        e.preventDefault();
+        digitsRef.current = digits;
+        const masked = percentDigitsToMasked(digits);
+        setBaseValue(masked);
+        requestAnimationFrame(() => {
+          try { e.target.setSelectionRange(String(masked).length, String(masked).length); } catch { /* ignore */ }
+        });
+      },
+      onKeyDown: (e) => {
+        if (e.key === 'Backspace' || e.key === 'Delete') {
+          e.preventDefault();
+          const cur = String(digitsRef.current || '0').replace(/\D/g, '') || '0';
+          const nextDigits = cur.length > 1 ? cur.slice(0, -1) : '0';
+          digitsRef.current = nextDigits;
+          const masked = percentDigitsToMasked(nextDigits);
+          setBaseValue(masked);
+          requestAnimationFrame(() => {
+            try { e.target.setSelectionRange(String(masked).length, String(masked).length); } catch { /* ignore */ }
+          });
+        }
+      },
+      onChange: (e) => {
+        const digits = String(e.target.value || '').replace(/\D/g, '') || '0';
+        digitsRef.current = digits;
+        const masked = percentDigitsToMasked(digits);
+        setBaseValue(masked);
+        requestAnimationFrame(() => {
+          try { e.target.setSelectionRange(String(masked).length, String(masked).length); } catch { /* ignore */ }
+        });
+      },
+    };
+  };
 
   const getNFeModelLabel = () => {
     const modelo = parsedData?.nfe?.modelo;
@@ -902,54 +994,68 @@ export default function XMLImportModal({ open, onOpenChange, products, codigoEmp
                                 <div className="relative">
                                   <input 
                                     type="text"
-                                    value={(() => {
-                                      const margin = getEditedValue(idx, 'margin', null);
-                                      if (margin != null) {
-                                        return String(margin);
-                                      }
-                                      // Se não há margem editada, calcular baseada no preço existente
-                                      if (!item.isNew && item.existing && costPrice > 0) {
+                                    {...(() => {
+                                      const touched = !!editedProducts?.[idx]?.marginTouched;
+
+                                      let derivedBase = '0,00';
+                                      if (editedProducts?.[idx]?.marginMasked != null) {
+                                        derivedBase = editedProducts[idx].marginMasked || '0,00';
+                                      } else if (editedProducts?.[idx]?.margin != null) {
+                                        derivedBase = Number(editedProducts[idx].margin || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                                      } else if (!item.isNew && item.existing && costPrice > 0) {
                                         const existingSalePrice = Number(item.existing.preco_venda || item.existing.salePrice || item.existing.price || 0);
                                         if (existingSalePrice > 0) {
                                           const calculatedMargin = ((existingSalePrice - costPrice) / costPrice) * 100;
-                                          return calculatedMargin.toFixed(1);
+                                          derivedBase = Math.max(-999, Math.min(9999, calculatedMargin)).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
                                         }
+                                      } else if (editedMargin != null) {
+                                        derivedBase = Number(editedMargin || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
                                       }
-                                      return '';
-                                    })()}
-                                    onChange={(e) => {
-                                      const rawValue = e.target.value;
-                                      
-                                      // Limpar campos quando vazio
-                                      if (rawValue === '') {
-                                        handleEditProduct(idx, 'margin', null);
-                                        // Não limpar salePrice, manter o preço existente do produto
-                                        return;
+
+                                      if (marginDigitsMapRef.current[idx] == null) {
+                                        marginDigitsMapRef.current[idx] = percentValueToDigits(derivedBase);
                                       }
-                                      
-                                      // Permitir apenas números, vírgula, ponto e sinal negativo
-                                      const cleanValue = rawValue.replace(/[^0-9.,\-]/g, '').replace(',', '.');
-                                      
-                                      // Se está digitando, não validar ainda
-                                      if (cleanValue === '.' || cleanValue === '-' || cleanValue === '-.') {
-                                        return;
-                                      }
-                                      
-                                      const marginVal = parseFloat(cleanValue);
-                                      if (!isNaN(marginVal)) {
+
+                                      const digitsRef = {
+                                        get current() {
+                                          return marginDigitsMapRef.current[idx];
+                                        },
+                                        set current(v) {
+                                          marginDigitsMapRef.current[idx] = v;
+                                        }
+                                      };
+
+                                      const setBaseValue = (masked) => {
+                                        handleEditProduct(idx, 'marginTouched', true);
+                                        handleEditProduct(idx, 'marginMasked', masked);
+                                        const marginVal = percentToNumber(masked);
                                         handleEditProduct(idx, 'margin', marginVal);
-                                        // Calcular preço baseado na margem
                                         if (costPrice > 0) {
                                           const newSalePrice = calculateSalePrice(costPrice, marginVal);
                                           handleEditProduct(idx, 'salePrice', newSalePrice);
                                         }
-                                      }
-                                    }}
+                                      };
+
+                                      const onUserTouch = (baseFromFocus) => {
+                                        if (touched) return;
+                                        handleEditProduct(idx, 'marginTouched', true);
+                                        if (editedProducts?.[idx]?.marginMasked == null) {
+                                          handleEditProduct(idx, 'marginMasked', baseFromFocus);
+                                        }
+                                        marginDigitsMapRef.current[idx] = percentValueToDigits(baseFromFocus);
+                                      };
+
+                                      return getPercentMaskProps({
+                                        baseValue: touched ? (editedProducts?.[idx]?.marginMasked ?? derivedBase) : derivedBase,
+                                        setBaseValue,
+                                        digitsRef,
+                                        onUserTouch,
+                                      });
+                                    })()}
                                     disabled={!item.selected}
-                                    placeholder="0"
-                                    className="w-24 pl-3 pr-6 py-2 text-sm bg-surface border border-border rounded-md focus:border-brand focus:ring-1 focus:ring-brand outline-none disabled:opacity-50 text-right"
+                                    placeholder="0,00"
+                                    className="w-28 px-3 py-2 text-sm bg-surface border border-border rounded-md focus:border-brand focus:ring-1 focus:ring-brand outline-none disabled:opacity-50 text-right"
                                   />
-                                  <span className="absolute right-1.5 top-1/2 -translate-y-1/2 text-sm text-text-muted pointer-events-none">%</span>
                                 </div>
                               </div>
                               <div>

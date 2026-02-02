@@ -1,11 +1,12 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
+import ReactDOM from 'react-dom';
 import { useLocation } from 'react-router-dom';
 
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useToast } from "@/components/ui/use-toast";
-import { Plus, Search, List, LayoutGrid, Download, Edit, Trash2, Trophy, AlertTriangle, CalendarX, Tag, Filter, Eye, EyeOff, FileText, CheckCircle, Settings } from 'lucide-react';
+import { Plus, Search, List, LayoutGrid, Download, Edit, Trash2, Trophy, AlertTriangle, CalendarX, Tag, Filter, Eye, EyeOff, FileText, CheckCircle, Settings, Info } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -30,6 +31,115 @@ const itemVariants = { hidden: { opacity: 0, y: 20 }, visible: { opacity: 1, y: 
 const PRODUTOS_SETTINGS_KEY = 'produtosPage:settings';
 
 const CSOSN_OPTIONS = ['101','102','103','201','202','203','300','400','500','900'];
+
+let __infoTipSeq = 0;
+
+function InfoTip({ content }) {
+  const idRef = React.useRef(null);
+  if (!idRef.current) {
+    __infoTipSeq += 1;
+    idRef.current = `infotip-${__infoTipSeq}`;
+  }
+  const id = idRef.current;
+
+  const btnRef = React.useRef(null);
+  const [hovered, setHovered] = React.useState(false);
+  const [pinned, setPinned] = React.useState(false);
+  const open = pinned || hovered;
+  const [pos, setPos] = React.useState({ top: 0, left: 0, placement: 'top' });
+
+  const close = React.useCallback(() => {
+    setPinned(false);
+    setHovered(false);
+  }, []);
+
+  const notifyOpen = React.useCallback(() => {
+    try {
+      window.dispatchEvent(new CustomEvent('infotip-open', { detail: { id } }));
+    } catch {
+      // ignore
+    }
+  }, [id]);
+
+  const updatePos = React.useCallback(() => {
+    if (!btnRef.current) return;
+    const r = btnRef.current.getBoundingClientRect();
+    const width = 320; // w-80
+    const height = 120; // estimativa
+    const pad = 8;
+
+    const left = Math.min(Math.max(pad, r.left + r.width / 2 - width / 2), window.innerWidth - width - pad);
+    const canTop = r.top >= height + pad;
+    const top = canTop ? (r.top - height - 8) : (r.bottom + 8);
+
+    setPos({
+      left,
+      top: Math.min(Math.max(pad, top), window.innerHeight - height - pad),
+      placement: canTop ? 'top' : 'bottom',
+    });
+  }, []);
+
+  React.useEffect(() => {
+    const onOtherOpen = (e) => {
+      const otherId = e?.detail?.id;
+      if (otherId && otherId !== id) close();
+    };
+    window.addEventListener('infotip-open', onOtherOpen);
+    return () => window.removeEventListener('infotip-open', onOtherOpen);
+  }, [close, id]);
+
+  React.useEffect(() => {
+    if (!open) return;
+    updatePos();
+  }, [open, updatePos]);
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        type="button"
+        aria-label="Informação"
+        className="inline-flex items-center justify-center w-5 h-5 rounded text-text-secondary hover:text-text-primary hover:bg-surface-2"
+        onMouseEnter={() => {
+          setHovered(true);
+          notifyOpen();
+        }}
+        onMouseLeave={() => {
+          setHovered(false);
+        }}
+        onFocus={() => {
+          setHovered(true);
+          notifyOpen();
+        }}
+        onBlur={() => {
+          setHovered(false);
+        }}
+        onClick={(e) => {
+          e.stopPropagation();
+          setPinned((prev) => {
+            const next = !prev;
+            if (next) notifyOpen();
+            return next;
+          });
+        }}
+      >
+        <Info className="w-4 h-4" strokeWidth={2.25} />
+      </button>
+
+      {open && ReactDOM.createPortal(
+        <div
+          className="fixed z-[9999] pointer-events-none"
+          style={{ left: pos.left, top: pos.top }}
+        >
+          <div className="w-80 p-3 text-xs rounded-md border bg-popover text-popover-foreground shadow-md">
+            <div className="text-text-secondary leading-relaxed">{content}</div>
+          </div>
+        </div>,
+        document.body
+      )}
+    </>
+  );
+}
 
 // ===== Export Helpers =====
 
@@ -231,11 +341,11 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
   const { toast } = useToast();
   const { userProfile } = useAuth();
   const [activeTab, setActiveTab] = useState('dados');
-  const [code, setCode] = useState(product?.code || '');
+  const [code, setCode] = useState(String(product?.code || '').replace(/\D/g, ''));
   const [name, setName] = useState(product?.name || '');
   const [category, setCategory] = useState(product?.category || '');
   const [type, setType] = useState(product?.type || 'Venda');
-  const [unit, setUnit] = useState(product?.unit || 'UN');
+  const [unit, setUnit] = useState(String(product?.unit || 'UN').trim().toUpperCase() || 'UN');
   const [active, setActive] = useState(product?.active ?? true);
   const [barcode, setBarcode] = useState(product?.barcode || '');
   // Outras Info
@@ -322,17 +432,101 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
   };
 
   const formatPercent = (value) => {
-    // Permite digitação livre, apenas remove caracteres inválidos
-    const cleaned = String(value || '').replace(/[^\d,]/g, '');
-    // Formata com % na frente
-    return cleaned ? `% ${cleaned}` : '';
+    let s = String(value ?? '');
+    s = s.replace(/%/g, '');
+    s = s.replace(/\s+/g, '');
+    s = s.replace(/\./g, ',');
+    s = s.replace(/[^\d,]/g, '');
+    const parts = s.split(',');
+    const intPart = (parts[0] || '').slice(0, 5);
+    const decPart = (parts[1] || '').slice(0, 4);
+    if (parts.length > 1) return `${intPart},${decPart}`;
+    return intPart;
   };
 
   const percentToNumber = (value) => {
     if (value == null || value === '') return 0;
-    const normalized = String(value).replace(/\./g, '').replace(',', '.');
-    const n = Number(normalized);
+    let s = String(value);
+    s = s.replace(/%/g, '').replace(/\s+/g, '');
+    s = s.replace(/[^\d.,-]/g, '');
+    const hasComma = s.includes(',');
+    const hasDot = s.includes('.');
+    if (hasComma && hasDot) {
+      s = s.replace(/\./g, '').replace(',', '.');
+    } else if (hasComma) {
+      s = s.replace(',', '.');
+    }
+    const n = Number(s);
     return Number.isFinite(n) ? n : 0;
+  };
+
+  const percentDigitsToMasked = (digits) => {
+    const raw = String(digits ?? '').replace(/\D/g, '');
+    const int = raw ? parseInt(raw, 10) : 0;
+    const val = Number.isFinite(int) ? int / 100 : 0;
+    return val.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  };
+
+  const percentValueToDigits = (value) => {
+    const d = String(Math.round((percentToNumber(value) || 0) * 100));
+    return d && d !== 'NaN' ? d : '0';
+  };
+
+  const getPercentMaskProps = (value, setValue, digitsRef) => {
+    const base = String(value || '').trim() ? String(value) : '0,00';
+    return {
+      inputMode: 'decimal',
+      value: `${base}%`,
+      onFocus: (e) => {
+        const len = String(base).length;
+        requestAnimationFrame(() => {
+          try { e.target.setSelectionRange(len, len); } catch { /* ignore */ }
+        });
+      },
+      onClick: (e) => {
+        const len = String(base).length;
+        requestAnimationFrame(() => {
+          try { e.target.setSelectionRange(len, len); } catch { /* ignore */ }
+        });
+      },
+      onPaste: (e) => {
+        const raw = e.clipboardData?.getData('text') ?? '';
+        const digits = String(raw).replace(/\D/g, '');
+        if (!digits) {
+          e.preventDefault();
+          return;
+        }
+        e.preventDefault();
+        digitsRef.current = digits;
+        const masked = percentDigitsToMasked(digits);
+        setValue(masked);
+        requestAnimationFrame(() => {
+          try { e.target.setSelectionRange(String(masked).length, String(masked).length); } catch { /* ignore */ }
+        });
+      },
+      onKeyDown: (e) => {
+        if (e.key === 'Backspace' || e.key === 'Delete') {
+          e.preventDefault();
+          const cur = String(digitsRef.current || '0').replace(/\D/g, '') || '0';
+          const nextDigits = cur.length > 1 ? cur.slice(0, -1) : '0';
+          digitsRef.current = nextDigits;
+          const masked = percentDigitsToMasked(nextDigits);
+          setValue(masked);
+          requestAnimationFrame(() => {
+            try { e.target.setSelectionRange(String(masked).length, String(masked).length); } catch { /* ignore */ }
+          });
+        }
+      },
+      onChange: (e) => {
+        const digits = String(e.target.value || '').replace(/\D/g, '') || '0';
+        digitsRef.current = digits;
+        const masked = percentDigitsToMasked(digits);
+        setValue(masked);
+        requestAnimationFrame(() => {
+          try { e.target.setSelectionRange(String(masked).length, String(masked).length); } catch { /* ignore */ }
+        });
+      },
+    };
   };
 
   const formatEAN13 = (value) => {
@@ -351,12 +545,54 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
     return String(value || '').replace(/\D/g, '').slice(0,7);
   };
 
+  const normalizeUnit = (value) => {
+    const t = String(value ?? '').trim().toUpperCase();
+    if (!t) return '';
+    const map = {
+      'UND': 'UN',
+      'UNID': 'UN',
+      'UNIDADE': 'UN',
+      'UN.': 'UN',
+      'UN ': 'UN',
+      'PCS': 'PC',
+      'PÇ': 'PC',
+      'PÇS': 'PC',
+      'LT': 'L',
+    };
+    return map[t] || t;
+  };
+
+  const UNIT_OPTIONS = [
+    { value: 'UN', label: 'UN - Unidade' },
+    { value: 'CX', label: 'CX - Caixa' },
+    { value: 'PC', label: 'PC - Peça' },
+    { value: 'KG', label: 'KG - Quilograma' },
+    { value: 'G', label: 'G - Grama' },
+    { value: 'L', label: 'L - Litro' },
+    { value: 'ML', label: 'ML - Mililitro' },
+    { value: 'M', label: 'M - Metro' },
+    { value: 'M2', label: 'M² - Metro Quadrado' },
+    { value: 'M3', label: 'M³ - Metro Cúbico' },
+    { value: 'PAR', label: 'PAR - Par' },
+    { value: 'DZ', label: 'DZ - Dúzia' },
+    { value: 'FD', label: 'FD - Fardo' },
+    { value: 'SC', label: 'SC - Saco' },
+    { value: 'PT', label: 'PT - Pacote' },
+    { value: 'SERV', label: 'SERV - Serviço' },
+  ];
+
+  const unitValueNormalized = normalizeUnit(unit) || 'UN';
+  const unitValuesSet = useMemo(() => new Set(UNIT_OPTIONS.map((o) => o.value)), []);
+  const customUnitOption = unitValueNormalized && !unitValuesSet.has(unitValueNormalized)
+    ? { value: unitValueNormalized, label: `${unitValueNormalized} - (Personalizado)` }
+    : null;
+
   useEffect(() => {
-    setCode(product?.code || '');
+    setCode(String(product?.code || '').replace(/\D/g, ''));
     setName(product?.name || '');
     setCategory(product?.category || '');
     setType(product?.type || 'Venda');
-    setUnit(product?.unit || 'UN');
+    setUnit(normalizeUnit(product?.unit || 'UN') || 'UN');
     setActive(product?.active ?? true);
     setBarcode(product?.barcode || '');
     setBarcodeBox(product?.barcodeBox || '');
@@ -396,19 +632,27 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
     setCstIcmsInterno(product?.cstIcmsInterno || '');
     setCsosnInterno(product?.csosnInterno || '');
     setAliqIcmsInterno(product?.aliqIcmsInterno != null ? String(product.aliqIcmsInterno).replace('.', ',') : '');
+    aliqIcmsInternoDigitsRef.current = percentValueToDigits(product?.aliqIcmsInterno != null ? String(product.aliqIcmsInterno).replace('.', ',') : '');
     setCfopExterno(product?.cfopExterno || '');
     setCstIcmsExterno(product?.cstIcmsExterno || '');
     setCsosnExterno(product?.csosnExterno || '');
     setAliqIcmsExterno(product?.aliqIcmsExterno != null ? String(product.aliqIcmsExterno).replace('.', ',') : '');
+    aliqIcmsExternoDigitsRef.current = percentValueToDigits(product?.aliqIcmsExterno != null ? String(product.aliqIcmsExterno).replace('.', ',') : '');
     setCstPisEntrada(product?.cstPisEntrada || '');
     setCstPisSaida(product?.cstPisSaida || '');
     setAliqPisPercent(product?.aliqPisPercent != null ? String(product.aliqPisPercent).replace('.', ',') : '');
+    aliqPisDigitsRef.current = percentValueToDigits(product?.aliqPisPercent != null ? String(product.aliqPisPercent).replace('.', ',') : '');
     setAliqCofinsPercent(product?.aliqCofinsPercent != null ? String(product.aliqCofinsPercent).replace('.', ',') : '');
+    aliqCofinsDigitsRef.current = percentValueToDigits(product?.aliqCofinsPercent != null ? String(product.aliqCofinsPercent).replace('.', ',') : '');
     setCstIpi(product?.cstIpi || '');
     setAliqIpiPercent(product?.aliqIpiPercent != null ? String(product.aliqIpiPercent).replace('.', ',') : '');
+    aliqIpiDigitsRef.current = percentValueToDigits(product?.aliqIpiPercent != null ? String(product.aliqIpiPercent).replace('.', ',') : '');
     setFcpPercent(product?.fcpPercent != null ? String(product.fcpPercent).replace('.', ',') : '');
+    fcpDigitsRef.current = percentValueToDigits(product?.fcpPercent != null ? String(product.fcpPercent).replace('.', ',') : '');
     setMvaPercent(product?.mvaPercent != null ? String(product.mvaPercent).replace('.', ',') : '');
+    mvaDigitsRef.current = percentValueToDigits(product?.mvaPercent != null ? String(product.mvaPercent).replace('.', ',') : '');
     setBaseReduzidaPercent(product?.baseReduzidaPercent != null ? String(product.baseReduzidaPercent).replace('.', ',') : '');
+    baseReduzidaDigitsRef.current = percentValueToDigits(product?.baseReduzidaPercent != null ? String(product.baseReduzidaPercent).replace('.', ',') : '');
     setNcm(product?.ncm || '');
     setNcmDescription(product?.ncmDescription || '');
     setCest(product?.cest || '');
@@ -426,6 +670,16 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
   // Auto-cálculos: custo e margem
   // Cálculo bidirecional: editar margem atualiza preço de venda, editar preço atualiza margem
   const lastEditedFieldRef = useRef('salePrice'); // 'salePrice' ou 'marginPercent'
+  const marginPercentInputRef = useRef(null);
+  const marginPercentDigitsRef = useRef('0');
+  const aliqIcmsInternoDigitsRef = useRef('0');
+  const aliqIcmsExternoDigitsRef = useRef('0');
+  const aliqPisDigitsRef = useRef('0');
+  const aliqCofinsDigitsRef = useRef('0');
+  const aliqIpiDigitsRef = useRef('0');
+  const fcpDigitsRef = useRef('0');
+  const mvaDigitsRef = useRef('0');
+  const baseReduzidaDigitsRef = useRef('0');
 
   // Quando custo ou preço de venda mudam, recalcula margem (se último campo editado foi preço)
   useEffect(() => {
@@ -434,9 +688,13 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
       const sp = currencyToNumber(salePrice);
       if (sp > 0) {
         const m = ((sp - cp) / sp) * 100;
-        setMarginPercent(m.toFixed(2).replace('.', ','));
+        const next = m.toFixed(2).replace('.', ',');
+        setMarginPercent(next);
+        const d = String(Math.round(percentToNumber(next) * 100));
+        marginPercentDigitsRef.current = d && d !== 'NaN' ? d : '0';
       } else {
-        setMarginPercent('');
+        setMarginPercent('0,00');
+        marginPercentDigitsRef.current = '0';
       }
     }
   }, [costPrice, salePrice]);
@@ -469,6 +727,16 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
     }
   }, [marginPercent, costPrice]);
 
+  useEffect(() => {
+    if (useCsosn) {
+      setCstIcmsInterno('');
+      setCstIcmsExterno('');
+    } else {
+      setCsosnInterno('');
+      setCsosnExterno('');
+    }
+  }, [useCsosn]);
+
   const handleSave = async (e) => {
     e.preventDefault();
     if (saving) return; // guard against double click / duplicate submissions
@@ -479,7 +747,13 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
     if (!unit?.trim()) errors.push('Unidade');
     if (!type) errors.push('Tipo de Produto');
     if (currencyToNumber(salePrice) <= 0) errors.push('Preço de Venda');
+    if (!formatNCM(ncm)?.trim()) errors.push('NCM');
+    if (!formatCFOP(cfopInterno)?.trim()) errors.push('CFOP Interno');
+    if (!formatCFOP(cfopExterno)?.trim()) errors.push('CFOP Externo');
     if (useCsosn && !csosnInterno?.trim()) errors.push('CSOSN Interno (Simples Nacional)');
+    if (useCsosn && !csosnExterno?.trim()) errors.push('CSOSN Externo (Simples Nacional)');
+    if (!useCsosn && !cstIcmsInterno?.trim()) errors.push('CST ICMS Interno');
+    if (!useCsosn && !cstIcmsExterno?.trim()) errors.push('CST ICMS Externo');
     if (errors.length) {
       toast({ title: 'Preencha os campos obrigatórios', description: errors.join(', '), variant: 'destructive' });
       return;
@@ -509,7 +783,7 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
       status: finalStatus,
       validade,
       // Dados
-      unit,
+      unit: unitValueNormalized,
       active,
       barcode: formatEAN13(barcode),
       barcodeBox: formatEAN13(barcodeBox),
@@ -632,7 +906,22 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
             <TabsContent value="dados" className="space-y-3 mt-2">
               <div className="grid grid-cols-1 sm:grid-cols-4 items-start sm:items-center gap-2 sm:gap-4">
                 <Label htmlFor="code" className="text-left sm:text-right text-xs sm:text-sm">Código <span className="text-text-muted text-[10px] sm:text-xs">(auto)</span></Label>
-                <Input id="code" value={code} onChange={(e)=>setCode(e.target.value.replace(/\D/g, ''))} className="col-span-1 sm:col-span-3 text-sm" placeholder={suggestedCode || 'Ex.: 0001'} disabled={!editEnabled} />
+                <Input
+                  id="code"
+                  value={code}
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  onPaste={(e) => {
+                    const raw = e.clipboardData?.getData('text') ?? '';
+                    const digits = String(raw).replace(/\D/g, '');
+                    if (digits !== raw) e.preventDefault();
+                    setCode((prev) => `${String(prev || '')}${digits}`.replace(/\D/g, ''));
+                  }}
+                  onChange={(e)=>setCode(e.target.value.replace(/\D/g, ''))}
+                  className="col-span-1 sm:col-span-3 text-sm"
+                  placeholder={suggestedCode || 'Ex.: 0001'}
+                  disabled={!editEnabled}
+                />
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-4 items-start sm:items-center gap-2 sm:gap-4">
                 <Label htmlFor="name" className="text-left sm:text-right text-xs sm:text-sm">Descrição {(!name?.trim()) && (<span className="text-danger">*</span>)}</Label>
@@ -696,27 +985,17 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
               )}
               <div className="grid grid-cols-1 sm:grid-cols-4 items-start sm:items-center gap-2 sm:gap-4">
                 <Label htmlFor="unit" className="text-left sm:text-right text-xs sm:text-sm">Unidade {(!unit?.trim()) && (<span className="text-danger">*</span>)}</Label>
-                <Select value={unit} onValueChange={(v)=> editEnabled && setUnit(v)}>
+                <Select value={unitValueNormalized} onValueChange={(v)=> editEnabled && setUnit(normalizeUnit(v))}>
                   <SelectTrigger className="col-span-1 sm:col-span-3 text-sm" disabled={!editEnabled}>
                     <SelectValue placeholder="Selecione a unidade" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="UN">UN - Unidade</SelectItem>
-                    <SelectItem value="CX">CX - Caixa</SelectItem>
-                    <SelectItem value="PC">PC - Peça</SelectItem>
-                    <SelectItem value="KG">KG - Quilograma</SelectItem>
-                    <SelectItem value="G">G - Grama</SelectItem>
-                    <SelectItem value="L">L - Litro</SelectItem>
-                    <SelectItem value="ML">ML - Mililitro</SelectItem>
-                    <SelectItem value="M">M - Metro</SelectItem>
-                    <SelectItem value="M2">M² - Metro Quadrado</SelectItem>
-                    <SelectItem value="M3">M³ - Metro Cúbico</SelectItem>
-                    <SelectItem value="PAR">PAR - Par</SelectItem>
-                    <SelectItem value="DZ">DZ - Dúzia</SelectItem>
-                    <SelectItem value="FD">FD - Fardo</SelectItem>
-                    <SelectItem value="SC">SC - Saco</SelectItem>
-                    <SelectItem value="PT">PT - Pacote</SelectItem>
-                    <SelectItem value="SERV">SERV - Serviço</SelectItem>
+                    {customUnitOption && (
+                      <SelectItem value={customUnitOption.value}>{customUnitOption.label}</SelectItem>
+                    )}
+                    {UNIT_OPTIONS.map((o) => (
+                      <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -785,14 +1064,16 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
             
 
             <TabsContent value="estoque" className="space-y-3 mt-2">
+              <div className="text-xs text-text-muted">
+                Estoque atual é controlado pelo sistema e não pode ser editado aqui.
+              </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="grid grid-cols-2 items-center gap-2">
                   <Label htmlFor="stock" className="text-right">Estoque</Label>
                   <Input
                     id="stock"
                     value={stock}
-                    onChange={(e)=> setStock(e.target.value.replace(/[^0-9]/g, ''))}
-                    disabled={!editEnabled}
+                    readOnly
                     className="col-span-1"
                     inputMode="numeric"
                   />
@@ -838,27 +1119,91 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
               <div className="grid grid-cols-1 sm:grid-cols-4 items-start sm:items-center gap-2 sm:gap-4">
                 <Label htmlFor="marginPercent" className="text-xs sm:text-right">% de Lucro (Margem)</Label>
                 <Input 
+                  ref={marginPercentInputRef}
                   id="marginPercent" 
                   type="text"
+                  inputMode="decimal"
                   placeholder="Ex.: 40" 
-                  value={marginPercent ? `% ${marginPercent}` : ''} 
+                  value={`${(String(marginPercent || '').trim() ? marginPercent : '0,00')}%`}
+                  onFocus={() => {
+                    const el = marginPercentInputRef.current;
+                    if (!el) return;
+                    const base = (String(marginPercent || '').trim() ? marginPercent : '0,00');
+                    const len = String(base).length;
+                    requestAnimationFrame(() => {
+                      try { el.setSelectionRange(len, len); } catch { /* ignore */ }
+                    });
+                  }}
+                  onClick={() => {
+                    const el = marginPercentInputRef.current;
+                    if (!el) return;
+                    const base = (String(marginPercent || '').trim() ? marginPercent : '0,00');
+                    const len = String(base).length;
+                    requestAnimationFrame(() => {
+                      try { el.setSelectionRange(len, len); } catch { /* ignore */ }
+                    });
+                  }}
+                  onPaste={(e) => {
+                    const raw = e.clipboardData?.getData('text') ?? '';
+                    const digits = String(raw).replace(/\D/g, '');
+                    if (!digits) {
+                      e.preventDefault();
+                      return;
+                    }
+                    e.preventDefault();
+                    marginPercentDigitsRef.current = digits;
+                    const masked = percentDigitsToMasked(digits);
+                    setMarginPercent(masked);
+                    const el = marginPercentInputRef.current;
+                    if (el) {
+                      const len = String(masked).length;
+                      requestAnimationFrame(() => {
+                        try { el.setSelectionRange(len, len); } catch { /* ignore */ }
+                      });
+                    }
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Backspace') {
+                      e.preventDefault();
+                      lastEditedFieldRef.current = 'marginPercent';
+                      const cur = String(marginPercentDigitsRef.current || '0').replace(/\D/g, '') || '0';
+                      const nextDigits = cur.length > 1 ? cur.slice(0, -1) : '0';
+                      marginPercentDigitsRef.current = nextDigits;
+                      const masked = percentDigitsToMasked(nextDigits);
+                      setMarginPercent(masked);
+                      const el = marginPercentInputRef.current;
+                      if (el) {
+                        const len = String(masked).length;
+                        requestAnimationFrame(() => {
+                          try { el.setSelectionRange(len, len); } catch { /* ignore */ }
+                        });
+                      }
+                      return;
+                    }
+                  }}
                   onChange={(e)=> {
                     lastEditedFieldRef.current = 'marginPercent';
-                    const cleaned = e.target.value.replace(/[^\d,]/g, '');
-                    setMarginPercent(cleaned);
+                    const digits = String(e.target.value || '').replace(/\D/g, '') || '0';
+                    marginPercentDigitsRef.current = digits;
+                    const masked = percentDigitsToMasked(digits);
+                    setMarginPercent(masked);
+                    const el = marginPercentInputRef.current;
+                    if (el && document.activeElement === el) {
+                      const len = String(masked).length;
+                      requestAnimationFrame(() => {
+                        try { el.setSelectionRange(len, len); } catch { /* ignore */ }
+                      });
+                    }
                   }}
                   onBlur={() => {
-                    // Ao sair do campo, força recalculo imediato
                     if (lastEditedFieldRef.current === 'marginPercent') {
                       const cp = currencyToNumber(costPrice);
                       const m = percentToNumber(marginPercent);
                       if (cp > 0 && m > 0) {
                         if (m >= 100) {
-                          // Markup para margem >= 100%
                           const sp = cp * (1 + m / 100);
                           setSalePrice(sp.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
                         } else {
-                          // Margem normal
                           const sp = cp / (1 - m / 100);
                           setSalePrice(sp.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
                         }
@@ -872,16 +1217,135 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
             </TabsContent>
 
             <TabsContent value="impostos" className="space-y-4 mt-2">
-              <div className="flex items-center gap-3">
-                <Checkbox id="useCsosn" checked={useCsosn} onCheckedChange={(v)=>setUseCsosn(!!v)} disabled={!editEnabled} />
-                <Label htmlFor="useCsosn" className="cursor-pointer text-xs sm:text-sm">Usar CSOSN (Simples Nacional)</Label>
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <Checkbox id="useCsosn" checked={useCsosn} onCheckedChange={(v)=>setUseCsosn(!!v)} disabled={!editEnabled} />
+                  <Label htmlFor="useCsosn" className="cursor-pointer text-xs sm:text-sm">Usar CSOSN (Simples Nacional)</Label>
+                </div>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <button
+                      type="button"
+                      className="mt-0.5 inline-flex items-center justify-center rounded-md p-1 text-text-muted hover:text-text-primary hover:bg-muted"
+                      aria-label="Ajuda sobre Impostos"
+                      title="Ajuda"
+                    >
+                      <Info className="h-4 w-4" />
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-[320px] sm:w-[360px] text-xs sm:text-sm max-h-[60vh] overflow-y-auto">
+                    <div className="space-y-3">
+                      <div>
+                        <div className="font-semibold">ICMS</div>
+                        <div>Imposto estadual sobre circulação de mercadorias e serviços.</div>
+                      </div>
+                      <div>
+                        <div className="font-semibold">Operação Interna</div>
+                        <div>Venda ou movimentação dentro do mesmo estado.</div>
+                      </div>
+                      <div>
+                        <div className="font-semibold">Operação Externa</div>
+                        <div>Venda ou movimentação para outro estado.</div>
+                      </div>
+                      <div>
+                        <div className="font-semibold">CFOP</div>
+                        <div>Código que identifica o tipo de operação (venda, devolução, remessa etc.).</div>
+                      </div>
+                      <div>
+                        <div className="font-semibold">CST</div>
+                        <div>Código que define como o imposto é tributado (regime normal).</div>
+                      </div>
+                      <div>
+                        <div className="font-semibold">CSOSN</div>
+                        <div>Código de tributação usado por empresas do Simples Nacional.</div>
+                      </div>
+                      <div>
+                        <div className="font-semibold">Alíquota ICMS</div>
+                        <div>Percentual do ICMS aplicado na operação.</div>
+                      </div>
+                      <div>
+                        <div className="font-semibold">PIS</div>
+                        <div>Contribuição federal sobre o faturamento da empresa.</div>
+                      </div>
+                      <div>
+                        <div className="font-semibold">COFINS</div>
+                        <div>Contribuição federal destinada à seguridade social.</div>
+                      </div>
+                      <div>
+                        <div className="font-semibold">CST PIS Entrada</div>
+                        <div>Define a tributação do PIS nas compras.</div>
+                      </div>
+                      <div>
+                        <div className="font-semibold">CST PIS Saída</div>
+                        <div>Define a tributação do PIS nas vendas.</div>
+                      </div>
+                      <div>
+                        <div className="font-semibold">Alíquota PIS</div>
+                        <div>Percentual do PIS aplicado na operação.</div>
+                      </div>
+                      <div>
+                        <div className="font-semibold">Alíquota COFINS</div>
+                        <div>Percentual da COFINS aplicado na operação.</div>
+                      </div>
+                      <div>
+                        <div className="font-semibold">IPI</div>
+                        <div>Imposto federal sobre produtos industrializados.</div>
+                      </div>
+                      <div>
+                        <div className="font-semibold">CST IPI</div>
+                        <div>Define a forma de tributação do IPI.</div>
+                      </div>
+                      <div>
+                        <div className="font-semibold">Alíquota IPI</div>
+                        <div>Percentual do IPI aplicado ao produto.</div>
+                      </div>
+                      <div>
+                        <div className="font-semibold">FCP</div>
+                        <div>Fundo estadual adicional ao ICMS para programas sociais.</div>
+                      </div>
+                      <div>
+                        <div className="font-semibold">MVA</div>
+                        <div>Margem usada para calcular ICMS Substituição Tributária.</div>
+                      </div>
+                      <div>
+                        <div className="font-semibold">Base Reduzida</div>
+                        <div>Redução da base de cálculo do imposto.</div>
+                      </div>
+                      <div>
+                        <div className="font-semibold">NCM</div>
+                        <div>Código que identifica o produto na legislação fiscal.</div>
+                      </div>
+                      <div>
+                        <div className="font-semibold">CEST</div>
+                        <div>Código que identifica produtos sujeitos à substituição tributária.</div>
+                      </div>
+                      <div>
+                        <div className="font-semibold">Descrição NCM</div>
+                        <div>Descrição oficial do produto conforme o NCM.</div>
+                      </div>
+                    </div>
+                  </PopoverContent>
+                </Popover>
               </div>
               {/* ICMS - Interno/Externo */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
-                <div className="space-y-3">
-                  <p className="text-xs sm:text-sm font-semibold">ICMS - Operação Interna</p>
+                <div className="space-y-3 border border-border rounded-lg p-3 sm:p-4">
+                  <div className="flex items-center gap-1">
+                    <p className="text-xs sm:text-sm font-semibold">ICMS - Operação Interna</p>
+                    <InfoTip content={(
+                      <div>
+                        <div><strong>ICMS</strong></div>
+                        <div>Imposto estadual sobre circulação de mercadorias e serviços.</div>
+                        <div className="mt-2"><strong>Operação Interna</strong></div>
+                        <div>Venda ou movimentação dentro do mesmo estado.</div>
+                      </div>
+                    )} />
+                  </div>
                   <div className="grid grid-cols-1 sm:grid-cols-4 items-start sm:items-center gap-2 sm:gap-4">
-                    <Label className="text-xs sm:text-right">CFOP {(!cfopInterno?.trim()) && (<span className="text-danger">*</span>)}</Label>
+                    <div className="flex items-center justify-end gap-1">
+                      <Label className="text-xs sm:text-right">CFOP {(!cfopInterno?.trim()) && (<span className="text-danger">*</span>)}</Label>
+                      <InfoTip content="Código que identifica o tipo de operação (venda, devolução, remessa etc.)." />
+                    </div>
                     <Input
                       value={cfopInterno}
                       onChange={(e)=>setCfopInterno(formatCFOP(e.target.value))}
@@ -894,17 +1358,26 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
                     />
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-4 items-start sm:items-center gap-2 sm:gap-4">
-                    <Label className="text-xs sm:text-right">CST</Label>
+                    <div className="flex items-center justify-end gap-1">
+                      <Label className="text-xs sm:text-right">CST</Label>
+                      <InfoTip content="Código que define como o imposto é tributado (regime normal)." />
+                    </div>
                     <Input
                       value={cstIcmsInterno}
-                      onChange={(e)=>setCstIcmsInterno(e.target.value.toUpperCase())}
-                      className="sm:col-span-3 text-xs sm:text-sm"
+                      onChange={(e)=>setCstIcmsInterno(String(e.target.value || '').replace(/\D/g, '').slice(0, 2))}
+                      className={cn(
+                        "sm:col-span-3 text-xs sm:text-sm",
+                        !useCsosn && !cstIcmsInterno?.trim() && "border-danger focus-visible:ring-danger/60"
+                      )}
                       placeholder="00, 20, 40..."
                       disabled={!editEnabled || useCsosn}
                     />
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-4 items-start sm:items-center gap-2 sm:gap-4">
-                    <Label className="text-xs sm:text-right">CSOSN {useCsosn && !csosnInterno?.trim() && (<span className="text-danger">*</span>)}</Label>
+                    <div className="flex items-center justify-end gap-1">
+                      <Label className="text-xs sm:text-right">CSOSN {useCsosn && !csosnInterno?.trim() && (<span className="text-danger">*</span>)}</Label>
+                      <InfoTip content="Código de tributação usado por empresas do Simples Nacional." />
+                    </div>
                     <Select
                       value={csosnInterno}
                       onValueChange={(v)=> editEnabled && setCsosnInterno(v)}
@@ -926,14 +1399,35 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
                     </Select>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-4 items-start sm:items-center gap-2 sm:gap-4">
-                    <Label className="text-xs sm:text-right">Alíquota ICMS (%)</Label>
-                    <Input value={`${aliqIcmsInterno || ''}`} onChange={(e)=>setAliqIcmsInterno(formatPercent(e.target.value))} className="sm:col-span-3 text-xs sm:text-sm" placeholder="0,00" disabled={!editEnabled} />
+                    <div className="flex items-center justify-end gap-1">
+                      <Label className="text-xs sm:text-right">Alíquota ICMS</Label>
+                      <InfoTip content="Percentual do ICMS aplicado na operação." />
+                    </div>
+                    <Input
+                      {...getPercentMaskProps(aliqIcmsInterno, setAliqIcmsInterno, aliqIcmsInternoDigitsRef)}
+                      className="sm:col-span-3 text-xs sm:text-sm"
+                      placeholder="0,00"
+                      disabled={!editEnabled}
+                    />
                   </div>
                 </div>
-                <div className="space-y-3">
-                  <p className="text-xs sm:text-sm font-semibold">ICMS - Operação Externa</p>
+                <div className="space-y-3 border border-border rounded-lg p-3 sm:p-4">
+                  <div className="flex items-center gap-1">
+                    <p className="text-xs sm:text-sm font-semibold">ICMS - Operação Externa</p>
+                    <InfoTip content={(
+                      <div>
+                        <div><strong>ICMS</strong></div>
+                        <div>Imposto estadual sobre circulação de mercadorias e serviços.</div>
+                        <div className="mt-2"><strong>Operação Externa</strong></div>
+                        <div>Venda ou movimentação para outro estado.</div>
+                      </div>
+                    )} />
+                  </div>
                   <div className="grid grid-cols-1 sm:grid-cols-4 items-start sm:items-center gap-2 sm:gap-4">
-                    <Label className="text-xs sm:text-right">CFOP {(!cfopExterno?.trim()) && (<span className="text-danger">*</span>)}</Label>
+                    <div className="flex items-center justify-end gap-1">
+                      <Label className="text-xs sm:text-right">CFOP {(!cfopExterno?.trim()) && (<span className="text-danger">*</span>)}</Label>
+                      <InfoTip content="Código que identifica o tipo de operação (venda, devolução, remessa etc.)." />
+                    </div>
                     <Input
                       value={cfopExterno}
                       onChange={(e)=>setCfopExterno(formatCFOP(e.target.value))}
@@ -946,23 +1440,37 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
                     />
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-4 items-start sm:items-center gap-2 sm:gap-4">
-                    <Label className="text-xs sm:text-right">CST</Label>
+                    <div className="flex items-center justify-end gap-1">
+                      <Label className="text-xs sm:text-right">CST</Label>
+                      <InfoTip content="Código que define como o imposto é tributado (regime normal)." />
+                    </div>
                     <Input
                       value={cstIcmsExterno}
-                      onChange={(e)=>setCstIcmsExterno(e.target.value.toUpperCase())}
-                      className="sm:col-span-3 text-xs sm:text-sm"
+                      onChange={(e)=>setCstIcmsExterno(String(e.target.value || '').replace(/\D/g, '').slice(0, 2))}
+                      className={cn(
+                        "sm:col-span-3 text-xs sm:text-sm",
+                        !useCsosn && !cstIcmsExterno?.trim() && "border-danger focus-visible:ring-danger/60"
+                      )}
                       placeholder="00, 20, 40..."
                       disabled={!editEnabled || useCsosn}
                     />
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-4 items-start sm:items-center gap-2 sm:gap-4">
-                    <Label className="text-xs sm:text-right">CSOSN</Label>
+                    <div className="flex items-center justify-end gap-1">
+                      <Label className="text-xs sm:text-right">CSOSN {useCsosn && !csosnExterno?.trim() && (<span className="text-danger">*</span>)}</Label>
+                      <InfoTip content="Código de tributação usado por empresas do Simples Nacional." />
+                    </div>
                     <Select
                       value={csosnExterno}
                       onValueChange={(v)=> editEnabled && setCsosnExterno(v)}
                       disabled={!editEnabled || !useCsosn}
                     >
-                      <SelectTrigger className="sm:col-span-3 text-xs sm:text-sm">
+                      <SelectTrigger
+                        className={cn(
+                          "sm:col-span-3 text-xs sm:text-sm",
+                          useCsosn && !csosnExterno?.trim() && "border-danger focus-visible:ring-danger/60"
+                        )}
+                      >
                         <SelectValue placeholder="Selecione..." />
                       </SelectTrigger>
                       <SelectContent>
@@ -973,67 +1481,171 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
                     </Select>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-4 items-start sm:items-center gap-2 sm:gap-4">
-                    <Label className="text-xs sm:text-right">Alíquota ICMS (%)</Label>
-                    <Input value={`${aliqIcmsExterno || ''}`} onChange={(e)=>setAliqIcmsExterno(formatPercent(e.target.value))} className="sm:col-span-3 text-xs sm:text-sm" placeholder="0,00" disabled={!editEnabled} />
+                    <div className="flex items-center justify-end gap-1">
+                      <Label className="text-xs sm:text-right">Alíquota ICMS</Label>
+                      <InfoTip content="Percentual do ICMS aplicado na operação." />
+                    </div>
+                    <Input
+                      {...getPercentMaskProps(aliqIcmsExterno, setAliqIcmsExterno, aliqIcmsExternoDigitsRef)}
+                      className="sm:col-span-3 text-xs sm:text-sm"
+                      placeholder="0,00"
+                      disabled={!editEnabled}
+                    />
                   </div>
                 </div>
               </div>
 
               {/* PIS/COFINS */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
-                <div className="space-y-3">
-                  <p className="text-xs sm:text-sm font-semibold">PIS/COFINS</p>
-                  <div className="grid grid-cols-1 sm:grid-cols-4 items-start sm:items-center gap-2 sm:gap-4">
-                    <Label className="text-xs sm:text-right">CST PIS Entrada</Label>
-                    <Input value={cstPisEntrada} onChange={(e)=>setCstPisEntrada(e.target.value.toUpperCase())} className="sm:col-span-3 text-xs sm:text-sm" placeholder="50, 70..." disabled={!editEnabled} />
+                <div className="space-y-3 border border-border rounded-lg p-3 sm:p-4">
+                  <div className="flex items-center gap-1">
+                    <p className="text-xs sm:text-sm font-semibold">PIS/COFINS</p>
+                    <InfoTip content={(
+                      <div>
+                        <div><strong>PIS</strong></div>
+                        <div>Contribuição federal sobre o faturamento da empresa.</div>
+                        <div className="mt-2"><strong>COFINS</strong></div>
+                        <div>Contribuição federal destinada à seguridade social.</div>
+                      </div>
+                    )} />
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-4 items-start sm:items-center gap-2 sm:gap-4">
-                    <Label className="text-xs sm:text-right">CST PIS Saída</Label>
-                    <Input value={cstPisSaida} onChange={(e)=>setCstPisSaida(e.target.value.toUpperCase())} className="sm:col-span-3 text-xs sm:text-sm" placeholder="01, 04..." disabled={!editEnabled} />
+                    <div className="flex items-center justify-end gap-1">
+                      <Label className="text-xs sm:text-right">CST PIS Entrada</Label>
+                      <InfoTip content="Define a tributação do PIS nas compras." />
+                    </div>
+                    <Input
+                      value={cstPisEntrada}
+                      onChange={(e)=>setCstPisEntrada(String(e.target.value || '').replace(/\D/g, '').slice(0, 2))}
+                      className="sm:col-span-3 text-xs sm:text-sm"
+                      placeholder="50, 70..."
+                      disabled={!editEnabled}
+                    />
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-4 items-start sm:items-center gap-2 sm:gap-4">
-                    <Label className="text-xs sm:text-right">Alíquota PIS (%)</Label>
-                    <Input value={`${aliqPisPercent || ''}`} onChange={(e)=>setAliqPisPercent(formatPercent(e.target.value))} className="sm:col-span-3 text-xs sm:text-sm" placeholder="0,65" disabled={!editEnabled} />
+                    <div className="flex items-center justify-end gap-1">
+                      <Label className="text-xs sm:text-right">CST PIS Saída</Label>
+                      <InfoTip content="Define a tributação do PIS nas vendas." />
+                    </div>
+                    <Input
+                      value={cstPisSaida}
+                      onChange={(e)=>setCstPisSaida(String(e.target.value || '').replace(/\D/g, '').slice(0, 2))}
+                      className="sm:col-span-3 text-xs sm:text-sm"
+                      placeholder="01, 04..."
+                      disabled={!editEnabled}
+                    />
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-4 items-start sm:items-center gap-2 sm:gap-4">
-                    <Label className="text-xs sm:text-right">Alíquota COFINS (%)</Label>
-                    <Input value={`${aliqCofinsPercent || ''}`} onChange={(e)=>setAliqCofinsPercent(formatPercent(e.target.value))} className="sm:col-span-3 text-xs sm:text-sm" placeholder="3,00" disabled={!editEnabled} />
+                    <div className="flex items-center justify-end gap-1">
+                      <Label className="text-xs sm:text-right">Alíquota PIS</Label>
+                      <InfoTip content="Percentual do PIS aplicado na operação." />
+                    </div>
+                    <Input
+                      {...getPercentMaskProps(aliqPisPercent, setAliqPisPercent, aliqPisDigitsRef)}
+                      className="sm:col-span-3 text-xs sm:text-sm"
+                      placeholder="0,65"
+                      disabled={!editEnabled}
+                    />
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-4 items-start sm:items-center gap-2 sm:gap-4">
+                    <div className="flex items-center justify-end gap-1">
+                      <Label className="text-xs sm:text-right">Alíquota COFINS</Label>
+                      <InfoTip content="Percentual da COFINS aplicado na operação." />
+                    </div>
+                    <Input
+                      {...getPercentMaskProps(aliqCofinsPercent, setAliqCofinsPercent, aliqCofinsDigitsRef)}
+                      className="sm:col-span-3 text-xs sm:text-sm"
+                      placeholder="3,00"
+                      disabled={!editEnabled}
+                    />
                   </div>
                 </div>
                 {/* IPI */}
-                <div className="space-y-3">
-                  <p className="text-xs sm:text-sm font-semibold">IPI</p>
-                  <div className="grid grid-cols-1 sm:grid-cols-4 items-start sm:items-center gap-2 sm:gap-4">
-                    <Label className="text-xs sm:text-right">CST IPI</Label>
-                    <Input value={cstIpi} onChange={(e)=>setCstIpi(e.target.value.toUpperCase())} className="sm:col-span-3 text-xs sm:text-sm" placeholder="50, 99..." disabled={!editEnabled} />
+                <div className="space-y-3 border border-border rounded-lg p-3 sm:p-4">
+                  <div className="flex items-center gap-1">
+                    <p className="text-xs sm:text-sm font-semibold">IPI</p>
+                    <InfoTip content={(
+                      <div>
+                        <div><strong>IPI</strong></div>
+                        <div>Imposto federal sobre produtos industrializados.</div>
+                      </div>
+                    )} />
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-4 items-start sm:items-center gap-2 sm:gap-4">
-                    <Label className="text-xs sm:text-right">Alíquota IPI (%)</Label>
-                    <Input value={`${aliqIpiPercent || ''}`} onChange={(e)=>setAliqIpiPercent(formatPercent(e.target.value))} className="sm:col-span-3 text-xs sm:text-sm" placeholder="0,00" disabled={!editEnabled} />
+                    <div className="flex items-center justify-end gap-1">
+                      <Label className="text-xs sm:text-right">CST IPI</Label>
+                      <InfoTip content="Define a forma de tributação do IPI." />
+                    </div>
+                    <Input
+                      value={cstIpi}
+                      onChange={(e)=>setCstIpi(String(e.target.value || '').replace(/\D/g, '').slice(0, 2))}
+                      className="sm:col-span-3 text-xs sm:text-sm"
+                      placeholder="50, 99..."
+                      disabled={!editEnabled}
+                    />
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-4 items-start sm:items-center gap-2 sm:gap-4">
+                    <div className="flex items-center justify-end gap-1">
+                      <Label className="text-xs sm:text-right">Alíquota IPI</Label>
+                      <InfoTip content="Percentual do IPI aplicado ao produto." />
+                    </div>
+                    <Input
+                      {...getPercentMaskProps(aliqIpiPercent, setAliqIpiPercent, aliqIpiDigitsRef)}
+                      className="sm:col-span-3 text-xs sm:text-sm"
+                      placeholder="0,00"
+                      disabled={!editEnabled}
+                    />
                   </div>
                 </div>
               </div>
 
               {/* FCP/MVA/Base Reduzida */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-6">
-                <div className="grid grid-cols-1 sm:grid-cols-2 items-start sm:items-center gap-2 sm:gap-4">
-                  <Label className="text-xs sm:text-right">FCP (%)</Label>
-                  <Input value={`${fcpPercent || ''}`} onChange={(e)=>setFcpPercent(formatPercent(e.target.value))} placeholder="2,00" disabled={!editEnabled} className="text-xs sm:text-sm" />
+                <div className="grid grid-cols-1 sm:grid-cols-4 items-start sm:items-center gap-2 sm:gap-4 border border-border rounded-lg p-3 sm:p-4">
+                  <div className="flex flex-wrap items-center justify-end gap-1 min-w-0">
+                    <Label className="text-xs sm:text-right whitespace-normal leading-tight">FCP</Label>
+                    <InfoTip content="Fundo estadual adicional ao ICMS para programas sociais." />
+                  </div>
+                  <Input
+                    {...getPercentMaskProps(fcpPercent, setFcpPercent, fcpDigitsRef)}
+                    placeholder="2,00"
+                    disabled={!editEnabled}
+                    className="sm:col-span-3 text-xs sm:text-sm"
+                  />
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 items-start sm:items-center gap-2 sm:gap-4">
-                  <Label className="text-xs sm:text-right">MVA (%)</Label>
-                  <Input value={`${mvaPercent || ''}`} onChange={(e)=>setMvaPercent(formatPercent(e.target.value))} placeholder="40,00" disabled={!editEnabled} className="text-xs sm:text-sm" />
+                <div className="grid grid-cols-1 sm:grid-cols-4 items-start sm:items-center gap-2 sm:gap-4 border border-border rounded-lg p-3 sm:p-4">
+                  <div className="flex flex-wrap items-center justify-end gap-1 min-w-0">
+                    <Label className="text-xs sm:text-right whitespace-normal leading-tight">MVA</Label>
+                    <InfoTip content="Margem usada para calcular ICMS Substituição Tributária." />
+                  </div>
+                  <Input
+                    {...getPercentMaskProps(mvaPercent, setMvaPercent, mvaDigitsRef)}
+                    placeholder="40,00"
+                    disabled={!editEnabled}
+                    className="sm:col-span-3 text-xs sm:text-sm"
+                  />
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 items-start sm:items-center gap-2 sm:gap-4">
-                  <Label className="text-xs sm:text-right">Base Reduzida (%)</Label>
-                  <Input value={`${baseReduzidaPercent || ''}`} onChange={(e)=>setBaseReduzidaPercent(formatPercent(e.target.value))} placeholder="0,00" disabled={!editEnabled} className="text-xs sm:text-sm" />
+                <div className="grid grid-cols-1 sm:grid-cols-4 items-start sm:items-center gap-2 sm:gap-4 border border-border rounded-lg p-3 sm:p-4">
+                  <div className="flex flex-wrap items-center justify-end gap-1 min-w-0">
+                    <Label className="text-xs sm:text-right whitespace-normal leading-tight">Base Reduzida</Label>
+                    <InfoTip content="Redução da base de cálculo do imposto." />
+                  </div>
+                  <Input
+                    {...getPercentMaskProps(baseReduzidaPercent, setBaseReduzidaPercent, baseReduzidaDigitsRef)}
+                    placeholder="0,00"
+                    disabled={!editEnabled}
+                    className="sm:col-span-3 text-xs sm:text-sm"
+                  />
                 </div>
               </div>
 
               {/* NCM/CEST */}
-              <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 sm:gap-6">
-                <div className="grid grid-cols-1 sm:grid-cols-2 items-start sm:items-center gap-2 sm:gap-4">
-                  <Label className="text-xs sm:text-right">NCM {(!ncm?.trim()) && (<span className="text-danger">*</span>)}</Label>
+              <div className="grid grid-cols-1 sm:grid-cols-6 gap-4 sm:gap-6">
+                <div className="space-y-1 sm:col-span-3">
+                  <div className="flex items-center gap-1 min-w-0">
+                    <Label className="text-xs sm:text-sm whitespace-normal leading-tight">NCM {(!ncm?.trim()) && (<span className="text-danger">*</span>)}</Label>
+                    <InfoTip content="Código que identifica o produto na legislação fiscal." />
+                  </div>
                   <Input
                     value={ncm}
                     onChange={(e)=>setNcm(formatNCM(e.target.value))}
@@ -1045,12 +1657,20 @@ function ProductFormModal({ open, onOpenChange, product, onSave, categories, onC
                     )}
                   />
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 items-start sm:items-center gap-2 sm:gap-4">
-                  <Label className="text-xs sm:text-right">CEST</Label>
+
+                <div className="space-y-1 sm:col-span-3">
+                  <div className="flex items-center gap-1 min-w-0">
+                    <Label className="text-xs sm:text-sm whitespace-normal leading-tight">CEST</Label>
+                    <InfoTip content="Código que identifica produtos sujeitos à substituição tributária." />
+                  </div>
                   <Input value={cest} onChange={(e)=>setCest(formatCEST(e.target.value))} placeholder="0000000" disabled={!editEnabled} className="text-xs sm:text-sm" />
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 items-start sm:items-center gap-2 sm:gap-4 sm:col-span-2">
-                  <Label className="text-xs sm:text-right">Descrição NCM</Label>
+
+                <div className="space-y-1 sm:col-span-6">
+                  <div className="flex items-center gap-1 min-w-0">
+                    <Label className="text-xs sm:text-sm whitespace-normal leading-tight">Descrição NCM</Label>
+                    <InfoTip content="Descrição oficial do produto conforme o NCM." />
+                  </div>
                   <Input value={ncmDescription} onChange={(e)=>setNcmDescription(e.target.value)} placeholder="Descrição do NCM" disabled={!editEnabled} className="text-sm" />
                 </div>
               </div>
@@ -2047,6 +2667,8 @@ function ProdutosPage() {
           console.warn('[Produtos] handleSaveProduct chamado sem payload válido. Ignorando.');
           return;
         }
+        // Garantir consistência antes de decidir auto-gerar código
+        payload.code = String(payload.code || '').replace(/\D/g, '');
         const codigoEmpresa = userProfile?.codigo_empresa || null;
         // Geração automática de código se vazio: usa backend para encontrar o menor código livre
         if (!payload.code && codigoEmpresa) {

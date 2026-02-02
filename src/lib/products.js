@@ -1,10 +1,31 @@
 import { supabase } from './supabase'
 
+function normalizeUnit(value) {
+  const t = String(value ?? '').trim().toUpperCase()
+  if (!t) return ''
+  const map = {
+    UND: 'UN',
+    UNID: 'UN',
+    UNIDADE: 'UN',
+    'UN.': 'UN',
+    PCS: 'PC',
+    'PÇ': 'PC',
+    'PÇS': 'PC',
+    LT: 'L',
+  }
+  return map[t] || t
+}
+
+function normalizeProductCode(value) {
+  const digits = String(value ?? '').replace(/\D/g, '')
+  return digits
+}
+
 // Helper to map DB -> UI
 function mapDbToUi(row) {
   return {
     id: row.id,
-    code: row.codigo_produto ?? '',
+    code: normalizeProductCode(row.codigo_produto ?? ''),
     name: row.nome,
     category: row.categoria ?? '',
     type: row.tipo_produto === 'uso_interno' ? 'Uso Interno' : 'Venda',
@@ -30,7 +51,7 @@ function mapDbToUi(row) {
     reference: row.referencia ?? '',
     brand: row.marca ?? '',
     group: row.grupo ?? '',
-    unit: row.unidade ?? 'UN',
+    unit: normalizeUnit(row.unidade ?? 'UN') || 'UN',
 
     // --- Estoque
     initialStock: Number(row.estoque_inicial ?? 0),
@@ -40,9 +61,14 @@ function mapDbToUi(row) {
     // --- Preço e Lucro
     buyPrice: row.preco_compra != null ? Number(row.preco_compra) : null,
     costsPercent: row.custos_percent != null ? Number(row.custos_percent) : null,
-    costPrice: row.preco_custo != null ? Number(row.preco_custo) : null,
+    // Fallback: algumas bases usam valor_custo/valor_venda em vez de preco_custo/preco_venda
+    costPrice: (row.preco_custo != null)
+      ? Number(row.preco_custo)
+      : (row.valor_custo != null ? Number(row.valor_custo) : null),
     marginPercent: row.lucro_percent != null ? Number(row.lucro_percent) : null,
-    salePrice: row.preco_venda != null ? Number(row.preco_venda) : null,
+    salePrice: (row.preco_venda != null)
+      ? Number(row.preco_venda)
+      : (row.valor_venda != null ? Number(row.valor_venda) : null),
     wholesaleQty: row.qtd_atacado != null ? Number(row.qtd_atacado) : null,
     wholesalePrice: row.preco_atacado != null ? Number(row.preco_atacado) : null,
     commissionPercent: row.comissao_percent != null ? Number(row.comissao_percent) : null,
@@ -270,13 +296,16 @@ export async function getNextProductCode({ codigoEmpresa } = {}) {
 
 // Helper to map UI -> DB
 function mapUiToDb(data) {
+  const normalizedCode = normalizeProductCode(data?.code)
+  const normalizedUnit = normalizeUnit(data?.unit)
   return {
-    codigo_produto: data.code || null,
+    codigo_produto: (normalizedCode && String(normalizedCode).trim() !== '') ? String(normalizedCode).trim() : null,
     nome: data.name,
     categoria: data.category || null,
     tipo_produto: (data.type === 'Uso Interno') ? 'uso_interno' : 'venda',
-    valor_custo: data.cost != null ? Number(data.cost) : 0,
-    valor_venda: data.price != null ? Number(data.price) : 0,
+    // Preço/custo: manter compatibilidade com colunas antigas (valor_*) e novas (preco_*)
+    valor_custo: (data.cost != null ? Number(data.cost) : (data.costPrice != null ? Number(data.costPrice) : 0)),
+    valor_venda: (data.price != null ? Number(data.price) : (data.salePrice != null ? Number(data.salePrice) : 0)),
     estoque: data.stock != null ? Number(data.stock) : 0,
     estoque_minimo: data.minStock != null ? Number(data.minStock) : 0,
     status: data.status || null,
@@ -288,7 +317,7 @@ function mapUiToDb(data) {
     referencia: data.reference || null,
     marca: data.brand || null,
     grupo: data.group || null,
-    unidade: data.unit || null,
+    unidade: normalizedUnit || null,
 
     // --- Estoque
     estoque_inicial: data.initialStock != null ? Number(data.initialStock) : null,
@@ -298,9 +327,9 @@ function mapUiToDb(data) {
     // --- Preço e Lucro
     preco_compra: data.buyPrice != null ? Number(data.buyPrice) : null,
     custos_percent: data.costsPercent != null ? Number(data.costsPercent) : null,
-    preco_custo: data.costPrice != null ? Number(data.costPrice) : null,
+    preco_custo: (data.costPrice != null ? Number(data.costPrice) : (data.cost != null ? Number(data.cost) : null)),
     lucro_percent: data.marginPercent != null ? Number(data.marginPercent) : null,
-    preco_venda: data.salePrice != null ? Number(data.salePrice) : null,
+    preco_venda: (data.salePrice != null ? Number(data.salePrice) : (data.price != null ? Number(data.price) : null)),
     qtd_atacado: data.wholesaleQty != null ? Number(data.wholesaleQty) : null,
     preco_atacado: data.wholesalePrice != null ? Number(data.wholesalePrice) : null,
     comissao_percent: data.commissionPercent != null ? Number(data.commissionPercent) : null,
