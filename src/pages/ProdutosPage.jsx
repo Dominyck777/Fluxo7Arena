@@ -2095,7 +2095,7 @@ function CategoryManagerModal({ open, onOpenChange, categories, onAddCategory, o
 
 function ProdutosPage() {
     const { toast } = useToast();
-    const { userProfile, authReady } = useAuth();
+    const { userProfile, authReady, company } = useAuth();
     const location = useLocation();
     const [products, setProducts] = useState(initialProducts);
     const [categories, setCategories] = useState(initialCategories);
@@ -3479,6 +3479,7 @@ function ProdutosPage() {
             onOpenChange={setIsXmlImportOpen}
             products={products}
             codigoEmpresa={userProfile?.codigo_empresa}
+            companyCnpj={company?.cnpj}
             onSuccess={() => {
               refetchProducts();
               setIsXmlImportOpen(false);

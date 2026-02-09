@@ -21,6 +21,9 @@ export function parseNFeXML(xmlText) {
     
     // Extrair informações do fornecedor/emitente
     const fornecedor = extractFornecedor(xmlDoc);
+
+    // Extrair informações do destinatário
+    const destinatario = extractDestinatario(xmlDoc);
     
     // Extrair produtos
     const produtos = extractProdutos(xmlDoc);
@@ -34,6 +37,7 @@ export function parseNFeXML(xmlText) {
     const result = {
       produtos,
       fornecedor,
+      destinatario,
       pagamentos,
       nfe: { ...nfeInfo, totalNota },
       success: true
@@ -89,6 +93,17 @@ function extractNFeInfo(xmlDoc) {
     tipo: getTextContent(ide, 'tpNF') === '0' ? 'Entrada' : 'Saída',
     naturezaOperacao: getTextContent(ide, 'natOp'),
     modelo: getTextContent(ide, 'mod') || null // 55 = NF-e, 65 = NFC-e
+  };
+}
+
+function extractDestinatario(xmlDoc) {
+  const dest = xmlDoc.querySelector('dest');
+  if (!dest) return null;
+
+  return {
+    cnpj: getTextContent(dest, 'CNPJ'),
+    cpf: getTextContent(dest, 'CPF'),
+    razaoSocial: getTextContent(dest, 'xNome')
   };
 }
 

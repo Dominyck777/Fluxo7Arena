@@ -12,7 +12,7 @@ import { cn } from '@/lib/utils';
 import ProductSelectionModal from './ProductSelectionModal';
 import ImportConfirmationModal from './ImportConfirmationModal';
 
-export default function XMLImportModal({ open, onOpenChange, products, codigoEmpresa, onSuccess }) {
+export default function XMLImportModal({ open, onOpenChange, products, codigoEmpresa, companyCnpj, onSuccess }) {
   const { toast } = useToast();
   const [step, setStep] = useState('upload'); // upload | preview | processing | done
   const [xmlFile, setXmlFile] = useState(null);
@@ -25,6 +25,8 @@ export default function XMLImportModal({ open, onOpenChange, products, codigoEmp
   const [productSelectionModal, setProductSelectionModal] = useState({ isOpen: false, productIndex: null, currentProduct: null });
   const [confirmationModal, setConfirmationModal] = useState({ isOpen: false });
   const marginDigitsMapRef = React.useRef({});
+
+  const normalizeDoc = (v) => String(v || '').replace(/\D/g, '');
 
   const percentToNumber = (value) => {
     if (value == null || value === '') return 0;
@@ -138,8 +140,6 @@ export default function XMLImportModal({ open, onOpenChange, products, codigoEmp
       return;
     }
 
-    setXmlFile(file);
-    
     try {
       console.log('[XMLImport] Lendo conteúdo do arquivo...');
       const xmlContent = await file.text();
@@ -151,6 +151,30 @@ export default function XMLImportModal({ open, onOpenChange, products, codigoEmp
         toast({ title: 'Erro ao ler XML', description: parsed.error || 'XML inválido', variant: 'destructive' });
         return;
       }
+
+      const myCnpj = normalizeDoc(companyCnpj);
+      if (!myCnpj) {
+        toast({
+          title: 'CNPJ da empresa não configurado',
+          description: 'Configure o CNPJ na aba Empresa para poder importar XML de entrada.',
+          variant: 'destructive'
+        });
+        return;
+      }
+
+      const destCnpj = normalizeDoc(parsed.data?.destinatario?.cnpj);
+      const destCpf = normalizeDoc(parsed.data?.destinatario?.cpf);
+      if (!destCnpj || destCnpj !== myCnpj) {
+        const docFound = destCnpj || destCpf || '(não informado)';
+        toast({
+          title: 'XML não pertence ao seu CNPJ',
+          description: `Destinatário no XML: ${docFound}. Empresa logada: ${myCnpj}.`,
+          variant: 'destructive'
+        });
+        return;
+      }
+
+      setXmlFile(file);
 
       if (!parsed.data?.produtos || parsed.data.produtos.length === 0) {
         toast({ title: 'Nenhum produto encontrado', description: 'O XML não contém produtos.', variant: 'warning' });

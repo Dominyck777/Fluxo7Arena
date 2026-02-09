@@ -1,5 +1,37 @@
 import { supabase } from '@/lib/supabase';
 
+function normalizeMeioPagamentoCode(raw) {
+  const s = String(raw ?? '').trim();
+  if (!s) return '';
+  const digits = s.replace(/\D/g, '');
+  if (!digits) return '';
+  return digits.padStart(2, '0');
+}
+
+function inferMeioPagamentoFromName(name) {
+  const t = String(name || '').toLowerCase();
+  if (!t) return '';
+  if (t.includes('pix')) return '17';
+  if (t.includes('dinheiro') || t.includes('cash') || t.includes('espécie') || t.includes('especie')) return '01';
+  if (t.includes('cheque')) return '02';
+  if (t.includes('crédito') || t.includes('credito') || t.includes('cartão de crédito') || t.includes('cartao de credito')) return '03';
+  if (t.includes('débito') || t.includes('debito') || t.includes('cartão de débito') || t.includes('cartao de debito')) return '04';
+  if (t.includes('boleto')) return '15';
+  if (t.includes('vale alimentação') || t.includes('vale alimentacao')) return '10';
+  if (t.includes('vale refeição') || t.includes('vale refeicao')) return '11';
+  if (t.includes('vale presente')) return '12';
+  if (t.includes('vale combustível') || t.includes('vale combustivel')) return '13';
+  if (t.includes('sem pagamento')) return '90';
+  return '';
+}
+
+function pickTPag(pag) {
+  const fromCfg = normalizeMeioPagamentoCode(pag?.finalizadoras?.codigo_sefaz);
+  if (fromCfg) return fromCfg;
+  const inferred = inferMeioPagamentoFromName(pag?.finalizadoras?.nome);
+  return inferred || '99';
+}
+
 /**
  * Gera XML de NF-e/NFC-e a partir de uma comanda
  * @param {string} comandaId - ID da comanda
@@ -352,7 +384,7 @@ function gerarXML({ comanda, itens, pagamentos, empresa, cliente, modelo = '65',
 
   // Pagamentos
   const pagXML = pagamentos.map(pag => {
-    const codigoSefaz = pag.finalizadoras?.codigo_sefaz || '99'; // 99 = Outros
+    const codigoSefaz = pickTPag(pag);
     const vPag = Number(pag.valor) || 0;
 
     return `

@@ -2,6 +2,41 @@ import { supabase } from '@/lib/supabase';
 
 function onlyDigits(v) { return String(v || '').replace(/\D/g, ''); }
 
+function normalizeMeioPagamentoCode(raw) {
+  const s = String(raw ?? '').trim();
+  if (!s) return '';
+  const digits = s.replace(/\D/g, '');
+  if (!digits) return '';
+  return digits.padStart(2, '0');
+}
+
+function inferMeioPagamentoFromName(name) {
+  const t = String(name || '').toLowerCase();
+  if (!t) return '';
+  if (t.includes('pix')) return '17';
+  if (t.includes('dinheiro') || t.includes('cash') || t.includes('espécie') || t.includes('especie')) return '01';
+  if (t.includes('cheque')) return '02';
+  if (t.includes('crédito') || t.includes('credito') || t.includes('cartão de crédito') || t.includes('cartao de credito')) return '03';
+  if (t.includes('débito') || t.includes('debito') || t.includes('cartão de débito') || t.includes('cartao de debito')) return '04';
+  if (t.includes('boleto')) return '15';
+  if (t.includes('vale alimentação') || t.includes('vale alimentacao')) return '10';
+  if (t.includes('vale refeição') || t.includes('vale refeicao')) return '11';
+  if (t.includes('vale presente')) return '12';
+  if (t.includes('vale combustível') || t.includes('vale combustivel')) return '13';
+  if (t.includes('sem pagamento')) return '90';
+  return '';
+}
+
+function pickMeioPagamentoCode(pagamentos, finalizadoras) {
+  if (!pagamentos?.length) return '90';
+  const p = pagamentos[0];
+  const fin = (finalizadoras || []).find(f => String(f.id) === String(p.finalizadora_id));
+  const fromCfg = normalizeMeioPagamentoCode(fin?.codigo_sefaz);
+  if (fromCfg) return fromCfg;
+  const inferred = inferMeioPagamentoFromName(p?.tipo || fin?.nome);
+  return inferred || '99';
+}
+
 // Helpers for manual forms
 function parseDecBR(v){
   if (v == null) return 0;
@@ -111,13 +146,7 @@ export function generateNfcePayloadFromManual({ form, finalizadoras = [] }){
   const totalPago = pagamentos.reduce((s,p)=> s + parseDecBR(p.valor), 0);
   const valor_troco = Math.max(0, totalPago - valor_total);
 
-  // Meio de pagamento: usar primeira finalizadora (ou 90 sem pagamento)
-  const meio_pagamento = (()=>{
-    if (!pagamentos.length) return '90';
-    const p = pagamentos[0];
-    const fin = finalizadoras.find(f => String(f.id) === String(p.finalizadora_id));
-    return fin?.codigo_sefaz || '99';
-  })();
+  const meio_pagamento = pickMeioPagamentoCode(pagamentos, finalizadoras);
 
   return {
     tipo_operacao: form?.tipo_nota === 'entrada' ? 0 : 1,
@@ -267,10 +296,7 @@ function computeFormaPagamento(pagamentos) {
 }
 
 function pickMeioPagamento(pagamentos, finalizadoras) {
-  if (!pagamentos?.length) return '90'; // Sem pagamento
-  const p = pagamentos[0];
-  const fin = finalizadoras.find(f => f.id === p.finalizadora_id);
-  return fin?.codigo_sefaz || '99';
+  return pickMeioPagamentoCode(pagamentos, finalizadoras);
 }
 
 function pickDestinatarioFromComanda(comanda, cliente) {
