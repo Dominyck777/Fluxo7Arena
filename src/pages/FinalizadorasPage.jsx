@@ -513,7 +513,7 @@ export default function FinalizadorasPage() {
               icon={TrendingUp}
               title="Mais Usada"
               value={stats.maisUsada}
-              subtitle="MÈtodo mais popular"
+              subtitle="Método mais popular"
               color="warning"
               onClick={handleOpenRanking}
             />
