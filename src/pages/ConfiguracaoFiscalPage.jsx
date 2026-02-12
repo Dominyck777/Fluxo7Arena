@@ -319,7 +319,7 @@ export default function ConfiguracaoFiscalPage() {
     return (
       <div className="max-w-5xl mx-auto px-4 py-6">
         <Helmet>
-          <title>Configuração Fiscal</title>
+          <title>Configuracao Fiscal</title>
         </Helmet>
 
         <div className="flex items-center justify-between mb-4">
@@ -327,7 +327,7 @@ export default function ConfiguracaoFiscalPage() {
             Voltar
           </Button>
           <div className="text-right">
-            <h1 className="text-2xl font-semibold leading-tight">Configuração Fiscal</h1>
+            <h1 className="text-2xl font-semibold leading-tight">Configuracao Fiscal</h1>
             <p className="text-xs text-muted-foreground">Acesso restrito.</p>
           </div>
         </div>
@@ -362,7 +362,7 @@ export default function ConfiguracaoFiscalPage() {
   return (
     <div className="max-w-5xl mx-auto px-4 py-6">
       <Helmet>
-        <title>Configuração Fiscal</title>
+        <title>Configuracao Fiscal</title>
       </Helmet>
 
       <div className="flex items-center justify-between mb-4">
@@ -370,7 +370,7 @@ export default function ConfiguracaoFiscalPage() {
           Voltar
         </Button>
         <div className="text-right">
-          <h1 className="text-2xl font-semibold leading-tight">Configuração Fiscal</h1>
+          <h1 className="text-2xl font-semibold leading-tight">Configuracao Fiscal</h1>
           <p className="text-xs text-muted-foreground">Dados que serão usados na emissão de NFC-e/NF-e.</p>
         </div>
       </div>
